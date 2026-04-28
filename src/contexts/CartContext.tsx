@@ -23,6 +23,16 @@ interface CartContextType {
 
 const STORAGE_KEY = "b2b_cart";
 
+const loadCart = (): CartItem[] => {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return [];
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
 const CartContext = createContext<CartContextType>({
   items: [],
   addItem: () => {},
@@ -35,14 +45,7 @@ const CartContext = createContext<CartContextType>({
 export const useCart = () => useContext(CartContext);
 
 export const CartProvider = ({ children }: { children: ReactNode }) => {
-  const [items, setItems] = useState<CartItem[]>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [items, setItems] = useState<CartItem[]>(loadCart);
 
   // Persist to localStorage whenever cart changes
   useEffect(() => {
