@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 export type CartItem = {
   produto_id: string;
@@ -21,12 +22,13 @@ interface CartContextType {
   total: number;
 }
 
-const STORAGE_KEY = "b2b_cart";
+const storageKey = (userId: string) => `b2b_cart_${userId}`;
+const ANON_KEY = "b2b_cart_anon";
 
-const loadCart = (): CartItem[] => {
+const loadCart = (key: string): CartItem[] => {
   try {
     if (typeof window === "undefined" || !window.localStorage) return [];
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(key);
     return stored ? JSON.parse(stored) : [];
   } catch {
     return [];
@@ -45,14 +47,40 @@ const CartContext = createContext<CartContextType>({
 export const useCart = () => useContext(CartContext);
 
 export const CartProvider = ({ children }: { children: ReactNode }) => {
-  const [items, setItems] = useState<CartItem[]>(loadCart);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [items, setItems] = useState<CartItem[]>([]);
+
+  // On auth state change: switch cart to the logged-in user's cart, clear on logout
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const uid = session?.user?.id ?? null;
+      setUserId(uid);
+      setItems(loadCart(uid ? storageKey(uid) : ANON_KEY));
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const uid = session?.user?.id ?? null;
+      setUserId(uid);
+      if (!uid) {
+        // User logged out — clear cart completely
+        setItems([]);
+        try { localStorage.removeItem(ANON_KEY); } catch {}
+      } else {
+        // New user logged in — load their own cart
+        setItems(loadCart(storageKey(uid)));
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Persist to localStorage whenever cart changes
   useEffect(() => {
+    const key = userId ? storageKey(userId) : ANON_KEY;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      localStorage.setItem(key, JSON.stringify(items));
     } catch {}
-  }, [items]);
+  }, [items, userId]);
 
   const addItem = (item: CartItem) => {
     setItems((prev) => {
@@ -74,13 +102,18 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
 
   const updateQuantity = (produto_id: string, quantidade: number) => {
     setItems((prev) =>
-      prev.map((i) => (i.produto_id === produto_id ? { ...i, quantidade: Math.max(i.quantidade_minima, Math.min(quantidade, i.estoque_disponivel)) } : i))
+      prev.map((i) =>
+        i.produto_id === produto_id
+          ? { ...i, quantidade: Math.max(i.quantidade_minima, Math.min(quantidade, i.estoque_disponivel)) }
+          : i
+      )
     );
   };
 
   const clearCart = () => {
     setItems([]);
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    const key = userId ? storageKey(userId) : ANON_KEY;
+    try { localStorage.removeItem(key); } catch {}
   };
 
   const total = items.reduce((sum, i) => sum + i.preco * i.quantidade, 0);
