@@ -16,7 +16,7 @@ const SAVE_FOR_LATER_KEY = "cart_saved_for_later";
 
 const Carrinho = () => {
   const { items, removeItem, updateQuantity, clearCart, total, addItem } = useCart();
-  const { user, contactRole } = useAuth();
+  const { user, contactRole, impersonatedCustomer } = useAuth();
   const navigate = useNavigate();
   const [salesTax, setSalesTax] = useState(0);
   const [unavailableItems, setUnavailableItems] = useState<Set<string>>(new Set());

@@ -95,7 +95,7 @@ const Pedidos = () => {
 
       if (applied.fromDate) q = q.gte("created_at", applied.fromDate);
       if (applied.toDate) q = q.lte("created_at", applied.toDate + "T23:59:59");
-      if (applied.status) q = q.eq("status", applied.status);
+      if (applied.status && applied.status !== "_all") q = q.eq("status", applied.status);
       if (applied.reference) q = q.ilike("po_number", `%${applied.reference}%`);
 
       const { data, count } = await q;

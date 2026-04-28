@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, X } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Check } from "lucide-react";
 
 const RULE_TYPES = ["Per Order flat rate", "Per Order Net Value", "Per Item flat rate", "Per Item flat value"];
 
@@ -353,8 +353,8 @@ const ShippingOptions = () => {
                 <TableCell>{r.tipo_regra ?? "Per Order Net Value"}</TableCell>
                 <TableCell>
                   {r.privado
-                    ? <X className="h-4 w-4 text-destructive" />
-                    : <X className="h-4 w-4 text-destructive" />}
+                    ? <Check className="h-4 w-4 text-green-500" />
+                    : <X className="h-4 w-4 text-muted-foreground opacity-30" />}
                 </TableCell>
                 <TableCell className="text-right space-x-1">
                   <Button variant="ghost" size="icon" onClick={() => openEdit(r)}>
