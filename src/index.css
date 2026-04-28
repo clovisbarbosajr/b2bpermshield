@@ -1,0 +1,252 @@
+#lovable-badge {
+  display: none !important;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* PermShield B2B — Deep Navy + Orange Accent */
+    --background: 220 20% 97%;
+    --foreground: 220 30% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 30% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 30% 12%;
+
+    --primary: 220 65% 28%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 15% 92%;
+    --secondary-foreground: 220 30% 18%;
+
+    --muted: 220 15% 94%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 28 90% 52%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 15% 88%;
+    --input: 220 15% 88%;
+    --ring: 220 65% 28%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 220 35% 16%;
+    --sidebar-foreground: 220 15% 85%;
+    --sidebar-primary: 28 90% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 30% 22%;
+    --sidebar-accent-foreground: 220 15% 90%;
+    --sidebar-border: 220 25% 22%;
+    --sidebar-ring: 28 90% 52%;
+
+    /* Custom tokens */
+    --success: 152 60% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 210 80% 52%;
+    --info-foreground: 0 0% 100%;
+  }
+
+  .dark {
+    --background: 220 30% 8%;
+    --foreground: 220 15% 92%;
+
+    --card: 220 30% 12%;
+    --card-foreground: 220 15% 92%;
+
+    --popover: 220 30% 12%;
+    --popover-foreground: 220 15% 92%;
+
+    --primary: 28 90% 52%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 25% 18%;
+    --secondary-foreground: 220 15% 90%;
+
+    --muted: 220 25% 16%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 28 80% 48%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 25% 20%;
+    --input: 220 25% 20%;
+    --ring: 28 90% 52%;
+
+    --sidebar-background: 220 35% 8%;
+    --sidebar-foreground: 220 15% 80%;
+    --sidebar-primary: 28 90% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 30% 14%;
+    --sidebar-accent-foreground: 220 15% 85%;
+    --sidebar-border: 220 25% 14%;
+    --sidebar-ring: 28 90% 52%;
+
+    --success: 152 50% 35%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 80% 45%;
+    --warning-foreground: 0 0% 100%;
+    --info: 210 70% 45%;
+    --info-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+  }
+}
+
+/* ===== Sidebar Nav Hover Effects ===== */
+
+/* Main nav items — underline from left on hover */
+.sidebar-nav-main {
+  position: relative;
+  overflow: hidden;
+}
+.sidebar-nav-main::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: 12px;
+  width: 0%;
+  height: 2px;
+  background: hsl(var(--sidebar-primary));
+  display: block;
+  transition: width 0.4s ease;
+}
+.sidebar-nav-main:hover::after {
+  width: calc(100% - 24px);
+}
+
+/* Sub nav items — line slides in from left before text */
+.sidebar-nav-sub {
+  position: relative;
+}
+.sidebar-nav-sub::before {
+  content: '';
+  display: inline-block;
+  height: 1px;
+  width: 0;
+  background-color: hsl(var(--sidebar-foreground));
+  margin-right: 0px;
+  transition: all 0.42s cubic-bezier(.25,.8,.25,1);
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.sidebar-nav-sub:hover::before {
+  width: 1.5rem;
+  margin-right: 10px;
+  background-color: hsl(var(--sidebar-primary));
+}
+.sidebar-nav-sub:hover {
+  color: hsl(var(--sidebar-primary));
+}
+
+/* ===== Fancy 3D Button ===== */
+.fancy-btn-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  grid-template-areas: "bt-1 bt-2 bt-3" "bt-4 bt-5 bt-6";
+  position: relative;
+  perspective: 800px;
+  padding: 0;
+  width: 100%;
+  height: 50px;
+  transition: all 0.3s ease-in-out;
+}
+.fancy-btn-container:active {
+  transform: scale(0.95);
+}
+.fancy-btn-hover {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  z-index: 200;
+}
+.fancy-bt-1 { grid-area: bt-1; }
+.fancy-bt-2 { grid-area: bt-2; }
+.fancy-bt-3 { grid-area: bt-3; }
+.fancy-bt-4 { grid-area: bt-4; }
+.fancy-bt-5 { grid-area: bt-5; }
+.fancy-bt-6 { grid-area: bt-6; }
+
+.fancy-btn-main {
+  position: absolute;
+  padding: 0;
+  width: 100%;
+  height: 50px;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  border: 2px solid hsl(var(--sidebar-primary));
+  border-radius: 12px;
+  transition: all 0.3s ease-in-out;
+  color: hsl(var(--sidebar-primary-foreground));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+.fancy-btn-main::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 50px;
+  background-color: hsl(var(--sidebar-primary));
+  border-radius: 12px;
+  transition: all 0.3s ease-in-out;
+  z-index: -1;
+}
+.fancy-btn-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+}
+
+.fancy-btn-hover:hover ~ .fancy-btn-main {
+  animation: fancy-btn-wobble 320ms ease;
+  box-shadow: 0 10px 20px -14px hsl(var(--foreground) / 0.45);
+}
+.fancy-btn-hover:hover ~ .fancy-btn-main::before {
+  background: hsl(var(--sidebar-primary) / 0.85);
+}
+
+@keyframes fancy-btn-wobble {
+  0% { transform: translateY(0) rotate(0deg); }
+  35% { transform: translateY(-1px) rotate(-0.35deg); }
+  70% { transform: translateY(-1px) rotate(0.35deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}

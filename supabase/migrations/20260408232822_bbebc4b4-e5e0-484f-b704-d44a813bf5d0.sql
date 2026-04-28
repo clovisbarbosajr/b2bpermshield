@@ -1,0 +1,5 @@
+ALTER TABLE public.configuracoes
+  ADD COLUMN IF NOT EXISTS smtp_host text DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS smtp_port text DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS smtp_username text DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS smtp_password text DEFAULT NULL;

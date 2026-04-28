@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c:*)",
+      "Bash(dir /s /b \"C:\\\\Users\\\\clovi\\\\OneDrive\\\\Desktop\\\\b2bpermshield-main\\\\src\\\\*.tsx\" \"C:\\\\Users\\\\clovi\\\\OneDrive\\\\Desktop\\\\b2bpermshield-main\\\\src\\\\*.ts\")",
+      "Bash(dir /b \"C:\\\\Users\\\\clovi\\\\OneDrive\\\\Desktop\\\\b2bpermshield-main\\\\supabase\\\\functions\")",
+      "Bash(dir /b \"C:\\\\Users\\\\clovi\\\\OneDrive\\\\Desktop\\\\b2bpermshield-main\\\\supabase\\\\migrations\")"
+    ]
+  }
+}

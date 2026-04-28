@@ -1,0 +1,7 @@
+project_id = "bnicfvxvyblzzatvursw"
+
+[functions.generate-pdf]
+verify_jwt = false
+
+[functions.b2bwave-sync]
+verify_jwt = false

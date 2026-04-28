@@ -1,0 +1,1 @@
+ALTER TABLE public.produtos ADD CONSTRAINT produtos_sku_unique UNIQUE (sku);
