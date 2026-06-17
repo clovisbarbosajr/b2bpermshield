@@ -1143,6 +1143,129 @@ export type Database = {
         }
         Relationships: []
       }
+      notification_channels: {
+        Row: {
+          config: Json
+          enabled: boolean
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          enabled?: boolean
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          enabled?: boolean
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      notification_events: {
+        Row: {
+          channels: string[]
+          enabled: boolean
+          extra: Json
+          id: string
+          notify_admin: boolean
+          notify_customer: boolean
+          template_email: string
+          template_sms: string
+          template_whatsapp: string
+          updated_at: string
+        }
+        Insert: {
+          channels?: string[]
+          enabled?: boolean
+          extra?: Json
+          id: string
+          notify_admin?: boolean
+          notify_customer?: boolean
+          template_email?: string
+          template_sms?: string
+          template_whatsapp?: string
+          updated_at?: string
+        }
+        Update: {
+          channels?: string[]
+          enabled?: boolean
+          extra?: Json
+          id?: string
+          notify_admin?: boolean
+          notify_customer?: boolean
+          template_email?: string
+          template_sms?: string
+          template_whatsapp?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      notification_log: {
+        Row: {
+          channel: string
+          created_at: string
+          error: string | null
+          event: string
+          id: string
+          payload: Json
+          recipient: string
+          status: string
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          error?: string | null
+          event: string
+          id?: string
+          payload?: Json
+          recipient: string
+          status?: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          error?: string | null
+          event?: string
+          id?: string
+          payload?: Json
+          recipient?: string
+          status?: string
+        }
+        Relationships: []
+      }
+      notification_recipients: {
+        Row: {
+          active: boolean
+          created_at: string
+          email: string | null
+          id: string
+          label: string
+          phone: string | null
+          whatsapp: string | null
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          email?: string | null
+          id?: string
+          label?: string
+          phone?: string | null
+          whatsapp?: string | null
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          email?: string | null
+          id?: string
+          label?: string
+          phone?: string | null
+          whatsapp?: string | null
+        }
+        Relationships: []
+      }
       oauth_applications: {
         Row: {
           ativo: boolean
