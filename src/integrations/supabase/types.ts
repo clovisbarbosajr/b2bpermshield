@@ -510,6 +510,7 @@ export type Database = {
           cases_order: string | null
           catalog_header_url: string | null
           catalog_logo_url: string | null
+          catalog_pdf_url: string | null
           contact_form_bcc: string | null
           contact_form_cc: string | null
           contact_form_email: string | null
@@ -544,6 +545,7 @@ export type Database = {
           email_on_order_status: boolean | null
           email_on_rejection: boolean | null
           email_order_messages: string | null
+          email_order_template: string | null
           email_provider: string | null
           email_reply_to: string | null
           email_signature: string | null
@@ -613,6 +615,7 @@ export type Database = {
           cases_order?: string | null
           catalog_header_url?: string | null
           catalog_logo_url?: string | null
+          catalog_pdf_url?: string | null
           contact_form_bcc?: string | null
           contact_form_cc?: string | null
           contact_form_email?: string | null
@@ -647,6 +650,7 @@ export type Database = {
           email_on_order_status?: boolean | null
           email_on_rejection?: boolean | null
           email_order_messages?: string | null
+          email_order_template?: string | null
           email_provider?: string | null
           email_reply_to?: string | null
           email_signature?: string | null
@@ -716,6 +720,7 @@ export type Database = {
           cases_order?: string | null
           catalog_header_url?: string | null
           catalog_logo_url?: string | null
+          catalog_pdf_url?: string | null
           contact_form_bcc?: string | null
           contact_form_cc?: string | null
           contact_form_email?: string | null
@@ -750,6 +755,7 @@ export type Database = {
           email_on_order_status?: boolean | null
           email_on_rejection?: boolean | null
           email_order_messages?: string | null
+          email_order_template?: string | null
           email_provider?: string | null
           email_reply_to?: string | null
           email_signature?: string | null
@@ -1137,6 +1143,129 @@ export type Database = {
         }
         Relationships: []
       }
+      notification_channels: {
+        Row: {
+          config: Json
+          enabled: boolean
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          enabled?: boolean
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          enabled?: boolean
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      notification_events: {
+        Row: {
+          channels: string[]
+          enabled: boolean
+          extra: Json
+          id: string
+          notify_admin: boolean
+          notify_customer: boolean
+          template_email: string
+          template_sms: string
+          template_whatsapp: string
+          updated_at: string
+        }
+        Insert: {
+          channels?: string[]
+          enabled?: boolean
+          extra?: Json
+          id: string
+          notify_admin?: boolean
+          notify_customer?: boolean
+          template_email?: string
+          template_sms?: string
+          template_whatsapp?: string
+          updated_at?: string
+        }
+        Update: {
+          channels?: string[]
+          enabled?: boolean
+          extra?: Json
+          id?: string
+          notify_admin?: boolean
+          notify_customer?: boolean
+          template_email?: string
+          template_sms?: string
+          template_whatsapp?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      notification_log: {
+        Row: {
+          channel: string
+          created_at: string
+          error: string | null
+          event: string
+          id: string
+          payload: Json
+          recipient: string
+          status: string
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          error?: string | null
+          event: string
+          id?: string
+          payload?: Json
+          recipient: string
+          status?: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          error?: string | null
+          event?: string
+          id?: string
+          payload?: Json
+          recipient?: string
+          status?: string
+        }
+        Relationships: []
+      }
+      notification_recipients: {
+        Row: {
+          active: boolean
+          created_at: string
+          email: string | null
+          id: string
+          label: string
+          phone: string | null
+          whatsapp: string | null
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          email?: string | null
+          id?: string
+          label?: string
+          phone?: string | null
+          whatsapp?: string | null
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          email?: string | null
+          id?: string
+          label?: string
+          phone?: string | null
+          whatsapp?: string | null
+        }
+        Relationships: []
+      }
       oauth_applications: {
         Row: {
           ativo: boolean
@@ -1379,6 +1508,7 @@ export type Database = {
           payment_option_id: string | null
           po_number: string | null
           quantidade_total: number | null
+          sales_tax: number | null
           shipping_costs: number | null
           shipping_option_id: string | null
           status: Database["public"]["Enums"]["pedido_status"]
@@ -1401,6 +1531,7 @@ export type Database = {
           payment_option_id?: string | null
           po_number?: string | null
           quantidade_total?: number | null
+          sales_tax?: number | null
           shipping_costs?: number | null
           shipping_option_id?: string | null
           status?: Database["public"]["Enums"]["pedido_status"]
@@ -1423,6 +1554,7 @@ export type Database = {
           payment_option_id?: string | null
           po_number?: string | null
           quantidade_total?: number | null
+          sales_tax?: number | null
           shipping_costs?: number | null
           shipping_option_id?: string | null
           status?: Database["public"]["Enums"]["pedido_status"]
@@ -2142,6 +2274,7 @@ export type Database = {
       shipping_options: {
         Row: {
           ativo: boolean | null
+          auto_apply: boolean | null
           condicoes: Json | null
           created_at: string | null
           descricao: string | null
@@ -2152,11 +2285,14 @@ export type Database = {
           padrao: boolean | null
           preco: number | null
           privado: boolean | null
+          show_to_customers: boolean | null
           tax_class_id: string | null
           tipo_regra: string | null
+          tracking_url: string | null
         }
         Insert: {
           ativo?: boolean | null
+          auto_apply?: boolean | null
           condicoes?: Json | null
           created_at?: string | null
           descricao?: string | null
@@ -2167,11 +2303,14 @@ export type Database = {
           padrao?: boolean | null
           preco?: number | null
           privado?: boolean | null
+          show_to_customers?: boolean | null
           tax_class_id?: string | null
           tipo_regra?: string | null
+          tracking_url?: string | null
         }
         Update: {
           ativo?: boolean | null
+          auto_apply?: boolean | null
           condicoes?: Json | null
           created_at?: string | null
           descricao?: string | null
@@ -2182,8 +2321,10 @@ export type Database = {
           padrao?: boolean | null
           preco?: number | null
           privado?: boolean | null
+          show_to_customers?: boolean | null
           tax_class_id?: string | null
           tipo_regra?: string | null
+          tracking_url?: string | null
         }
         Relationships: [
           {
