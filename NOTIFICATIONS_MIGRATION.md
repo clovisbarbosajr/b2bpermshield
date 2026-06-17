@@ -14,10 +14,17 @@ com o que ele já tem (templates, admin), e **adicionando SMS + WhatsApp (Twilio
 
 ## Fases
 - [x] **F1 — Migração** das tabelas `notification_channels/events/recipients/log` (+ seed).
-- [ ] **F2 — Edge Functions**: `_shared` (senders/dispatch/cors/auth) + `notify-dispatch`.
-- [ ] **F3 — UI admin**: `Notificacoes.tsx` (3 abas) + `NotificacoesLog.tsx` (Histórico) + rota + menu.
-- [ ] **F4 — Ligação nos eventos** do permshield (novo pedido, status, cliente).
-- [ ] **F5 — Email→Resend**, remover `b2bwave-sync`, fix Vercel (`@import` no CSS), testes.
+- [x] **F2 — Edge Functions**: `_shared` (senders/dispatch/cors) + `notify-dispatch`.
+- [x] **F3 — UI admin**: `Notificacoes.tsx` (3 abas) + `NotificacoesLog.tsx` (Histórico).
+      Rotas `/admin/settings/notifications` e `/notifications-log` (admin) + menu em Settings.
+- [x] **Fix Vercel**: `@import` da fonte movido pro topo do `index.css` (erro do build).
+- [ ] **F4 — Ligação nos eventos** do permshield (novo pedido, status, cliente aprovado).
+- [ ] **F5 — Email→Resend** (validar/trocar), remover `b2bwave-sync`, testes ponta a ponta.
+
+## Como ficou (build validado: ✓ 2450 módulos)
+- Menu: **Admin → Settings → Notifications / Notifications Log**.
+- Funciona após: aplicar a migração + deploy da `notify-dispatch` + definir os secrets
+  (`RESEND_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`) + criar 1 destinatário.
 
 ## Secrets necessários (Edge Functions)
 `RESEND_API_KEY`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` (reaproveitados do explorer).

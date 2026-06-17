@@ -8,7 +8,7 @@ import {
   FileUp, ListOrdered, UserCog, CreditCard, Truck, Lock, Link2, Layers,
   Percent, Receipt, Ruler, Building2, UserPlus, Mail, KeyRound, Database,
   Activity, ShoppingCart, TrendingUp, PieChart, PackageSearch, CalendarRange,
-  LayoutGrid, ScrollText, ClipboardCheck, RefreshCw, ClipboardSignature
+  LayoutGrid, ScrollText, ClipboardCheck, RefreshCw, ClipboardSignature, Bell, History
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -108,6 +108,8 @@ const adminNavEntries: NavEntry[] = [
       { to: "/admin/settings/activity-logs", icon: ClipboardSignature, label: "Activity Logs" },
       { to: "/admin/settings/email", icon: Mail, label: "Email" },
       { to: "/admin/settings/email-templates", icon: Mail, label: "Email Templates" },
+      { to: "/admin/settings/notifications", icon: Bell, label: "Notifications" },
+      { to: "/admin/settings/notifications-log", icon: History, label: "Notifications Log" },
       { to: "/admin/settings/oauth-applications", icon: KeyRound, label: "Oauth Applications" },
       { to: "/admin/settings/extra-fields", icon: Database, label: "Extra Fields" },
       { to: "/admin/settings/api-keys", icon: KeyRound, label: "API Keys" },

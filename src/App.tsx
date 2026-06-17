@@ -97,6 +97,8 @@ import ActivityLogs from "./pages/admin/settings/ActivityLogs";
 import WarehouseSettings from "./pages/admin/settings/WarehouseSettings";
 import EmailTemplates from "./pages/admin/settings/EmailTemplates";
 import EmailSettings from "./pages/admin/settings/EmailSettings";
+import Notificacoes from "./pages/admin/settings/Notificacoes";
+import NotificacoesLog from "./pages/admin/settings/NotificacoesLog";
 import ExtraFields from "./pages/admin/settings/ExtraFields";
 import ApiKeys from "./pages/admin/settings/ApiKeys";
 import B2BWaveSync from "./pages/admin/settings/B2BWaveSync";
@@ -216,6 +218,8 @@ const App = () => (
               <Route path="/admin/settings/profile" element={<S><SettingsProfile /></S>} />
               <Route path="/admin/settings/email" element={<S><EmailSettings /></S>} />
               <Route path="/admin/settings/email-templates" element={<S><EmailTemplates /></S>} />
+              <Route path="/admin/settings/notifications" element={<A><Notificacoes /></A>} />
+              <Route path="/admin/settings/notifications-log" element={<A><NotificacoesLog /></A>} />
               <Route path="/admin/settings/users" element={<S><UsersManagement /></S>} />
               <Route path="/admin/settings/warehouse" element={<S><WarehouseSettings /></S>} />
               <Route path="/admin/settings/activity-logs" element={<S><ActivityLogs /></S>} />
