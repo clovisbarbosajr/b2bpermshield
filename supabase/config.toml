@@ -5,3 +5,8 @@ verify_jwt = false
 
 [functions.b2bwave-sync]
 verify_jwt = false
+
+# Notificações: gateway off; a função valida (usuário logado p/ evento, admin ou
+# X-Cron-Secret p/ teste). Permite forçar um teste sem login admin.
+[functions.notify-dispatch]
+verify_jwt = false
