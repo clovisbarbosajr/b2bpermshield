@@ -129,7 +129,7 @@ const App = () => (
           <CartProvider>
             <Routes>
               <Route path="/" element={<LoginLanding />} />
-              <Route path="/login" element={<LoginLanding />} />
+              <Route path="/login" element={<CustomerLogin />} />
               <Route path="/admin-login" element={<AdminLogin />} />
               <Route path="/customers-login" element={<CustomerLogin />} />
               <Route path="/view-as" element={<ViewAsRedirect />} />
