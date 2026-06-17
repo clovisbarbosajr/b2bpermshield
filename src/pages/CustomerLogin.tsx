@@ -52,7 +52,7 @@ const CustomerLogin = () => {
       <div className="relative z-10 flex min-h-screen min-h-[100dvh] items-center justify-center px-4">
         <form
           onSubmit={handleLogin}
-          className="mx-auto flex w-full max-w-[360px] flex-col items-center gap-2.5 rounded-xl border border-white/10 bg-[#0b1628]/70 p-5 shadow-xl shadow-black/30 backdrop-blur-sm sm:translate-y-[14vh] md:translate-y-[12vh] lg:translate-y-[10vh]"
+          className="mx-auto flex w-full max-w-[360px] flex-col items-center gap-2.5 rounded-xl border border-white/15 bg-[#0b1628]/95 p-5 shadow-xl shadow-black/40 sm:translate-y-[14vh] md:translate-y-[12vh] lg:translate-y-[10vh]"
         >
           <div className="relative w-full">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#4fc3f7] opacity-70">
@@ -65,7 +65,7 @@ const CustomerLogin = () => {
               placeholder="USERNAME"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-8 pr-3 text-xs font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/50 backdrop-blur-sm transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
+              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-8 pr-3 text-xs font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/80 transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
             />
           </div>
 
@@ -80,14 +80,14 @@ const CustomerLogin = () => {
               placeholder="PASSWORD"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-8 pr-3 text-xs font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/50 backdrop-blur-sm transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
+              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-8 pr-3 text-xs font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/80 transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
             />
           </div>
 
           <button
             type="button"
             onClick={() => setShowForgotPassword(true)}
-            className="mb-0 -mt-1 self-end text-[9px] uppercase tracking-wider text-white/40 transition-colors hover:text-white/70"
+            className="mb-0 -mt-1 self-end text-[9px] uppercase tracking-wider text-white/80 transition-colors hover:text-white"
           >
             Forgot Password?
           </button>
@@ -95,7 +95,7 @@ const CustomerLogin = () => {
           <button
             type="button"
             onClick={() => setShowMagicLink(true)}
-            className="text-[10px] font-semibold uppercase tracking-wider text-white/50 transition-colors hover:text-[#4fc3f7]"
+            className="text-[10px] font-semibold uppercase tracking-wider text-white/90 transition-colors hover:text-[#4fc3f7]"
           >
             One-Time Login Link ✨
           </button>
@@ -117,7 +117,7 @@ const CustomerLogin = () => {
 
           <Link
             to="/"
-            className="py-2 text-[10px] tracking-wide text-white/30 transition-colors hover:text-white/60"
+            className="py-2 text-[10px] tracking-wide text-white/80 transition-colors hover:text-white"
           >
             ← Back to login selection
           </Link>

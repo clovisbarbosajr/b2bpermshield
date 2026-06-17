@@ -59,7 +59,7 @@ const AdminLogin = () => {
       <div className="relative z-10 flex min-h-screen min-h-[100dvh] items-center justify-center px-4">
         <form
           onSubmit={handleLogin}
-          className="mx-auto flex w-full max-w-[360px] flex-col items-center gap-3 rounded-xl border border-white/10 bg-[#0b1628]/70 p-5 shadow-xl shadow-black/30 backdrop-blur-sm sm:translate-y-[10vh] md:translate-y-[8vh] lg:translate-y-[7vh]"
+          className="mx-auto flex w-full max-w-[360px] flex-col items-center gap-3 rounded-xl border border-white/15 bg-[#0b1628]/95 p-5 shadow-xl shadow-black/40 sm:translate-y-[10vh] md:translate-y-[8vh] lg:translate-y-[7vh]"
         >
           <div className="relative w-full">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#4fc3f7] opacity-70">
@@ -72,7 +72,7 @@ const AdminLogin = () => {
               placeholder="USERNAME"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-9 pr-4 text-sm font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/50 backdrop-blur-sm transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
+              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-9 pr-4 text-sm font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/80 transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
             />
           </div>
 
@@ -87,7 +87,7 @@ const AdminLogin = () => {
               placeholder="PASSWORD"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-9 pr-4 text-sm font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/50 backdrop-blur-sm transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
+              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-9 pr-4 text-sm font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/80 transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
             />
           </div>
 
@@ -101,7 +101,7 @@ const AdminLogin = () => {
 
           <Link
             to="/"
-            className="mt-1 py-2 text-xs tracking-wide text-white/40 transition-colors hover:text-white/70"
+            className="mt-1 py-2 text-xs tracking-wide text-white/80 transition-colors hover:text-white"
           >
             ← Back
           </Link>
