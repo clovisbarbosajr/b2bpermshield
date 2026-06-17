@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import adminBg from "@/assets/adminportal.jpg";
+import adminBg from "@/assets/admin-bg.svg";
 import BackgroundGradient from "@/components/ui/background-gradient-snippet";
 
 const AdminLogin = () => {

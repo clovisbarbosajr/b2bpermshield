@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="abg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0f1e"/>
+      <stop offset="0.55" stop-color="#141033"/>
+      <stop offset="1" stop-color="#1c0f3a"/>
+    </linearGradient>
+    <radialGradient id="aglow1" cx="78%" cy="22%" r="55%">
+      <stop offset="0" stop-color="#5f29c7" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#5f29c7" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="aglow2" cx="18%" cy="88%" r="50%">
+      <stop offset="0" stop-color="#0ed2da" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#0ed2da" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="agrid" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M56 0H0V56" fill="none" stroke="#7c5cff" stroke-opacity="0.07" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="avig" cx="50%" cy="42%" r="75%">
+      <stop offset="0.55" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.45"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#abg)"/>
+  <rect width="1600" height="1000" fill="url(#agrid)"/>
+  <rect width="1600" height="1000" fill="url(#aglow1)"/>
+  <rect width="1600" height="1000" fill="url(#aglow2)"/>
+  <!-- shield motif -->
+  <g transform="translate(1140 300)" opacity="0.16" fill="none" stroke="#9d7bff" stroke-width="3">
+    <path d="M0 -150 L150 -95 V40 C150 150 70 215 0 250 C-70 215 -150 150 -150 40 V-95 Z"/>
+    <path d="M0 -100 L100 -62 V28 C100 100 48 145 0 168 C-48 145 -100 100 -100 28 V-62 Z" opacity="0.6"/>
+    <path d="M-44 30 L-12 64 L52 -16" stroke="#0ed2da" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
+  </g>
+  <!-- accent diagonals -->
+  <g stroke="#0ed2da" stroke-opacity="0.10" stroke-width="2">
+    <line x1="-100" y1="760" x2="700" y2="1080"/>
+    <line x1="-100" y1="840" x2="900" y2="1240"/>
+  </g>
+  <rect width="1600" height="1000" fill="url(#avig)"/>
+</svg>

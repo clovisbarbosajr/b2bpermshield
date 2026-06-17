@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import loginBg from "@/assets/login-bg.jpg";
+import loginBg from "@/assets/login-bg.svg";
 
 const LogoWordmark = ({ className = "" }: { className?: string }) => (
   <div className={`font-display text-foreground font-extrabold tracking-[0.18em] uppercase ${className}`}>

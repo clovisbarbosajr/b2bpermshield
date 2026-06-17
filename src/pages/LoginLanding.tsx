@@ -1,7 +1,7 @@
 import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import adminBg from "@/assets/adminportal.jpg";
-import customerBg from "@/assets/customers.jpg";
+import adminBg from "@/assets/admin-bg.svg";
+import customerBg from "@/assets/customer-bg.svg";
 
 const LoginLanding = () => {
   const { user, role, loading } = useAuth();

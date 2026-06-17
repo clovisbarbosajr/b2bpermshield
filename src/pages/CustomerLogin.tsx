@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import customerBg from "@/assets/customers.jpg";
+import customerBg from "@/assets/customer-bg.svg";
 import BackgroundGradient from "@/components/ui/background-gradient-snippet";
 import ForgotPasswordModal from "@/components/login/ForgotPasswordModal";
 import MagicLinkModal from "@/components/login/MagicLinkModal";

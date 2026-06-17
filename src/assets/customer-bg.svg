@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="cbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08111e"/>
+      <stop offset="0.55" stop-color="#0a2a33"/>
+      <stop offset="1" stop-color="#0c2440"/>
+    </linearGradient>
+    <radialGradient id="cglow1" cx="80%" cy="78%" r="58%">
+      <stop offset="0" stop-color="#0ed2da" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#0ed2da" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="cglow2" cx="16%" cy="14%" r="50%">
+      <stop offset="0" stop-color="#5f29c7" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#5f29c7" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="cgrid" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M56 0H0V56" fill="none" stroke="#2ee6ef" stroke-opacity="0.07" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="cvig" cx="50%" cy="46%" r="75%">
+      <stop offset="0.55" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.45"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#cbg)"/>
+  <rect width="1600" height="1000" fill="url(#cgrid)"/>
+  <rect width="1600" height="1000" fill="url(#cglow1)"/>
+  <rect width="1600" height="1000" fill="url(#cglow2)"/>
+  <!-- flowing waves (welcoming) -->
+  <g fill="none" stroke="#0ed2da" stroke-opacity="0.16" stroke-width="2.5">
+    <path d="M-50 720 C 280 640, 520 820, 860 720 S 1400 640, 1700 740"/>
+    <path d="M-50 800 C 320 720, 560 900, 900 800 S 1420 720, 1700 820" stroke-opacity="0.10"/>
+    <path d="M-50 640 C 240 580, 480 740, 820 640 S 1380 560, 1700 660" stroke-opacity="0.08"/>
+  </g>
+  <!-- soft nodes -->
+  <g fill="#0ed2da" fill-opacity="0.5">
+    <circle cx="860" cy="720" r="4"/><circle cx="520" cy="784" r="3"/><circle cx="1180" cy="690" r="3.5"/>
+  </g>
+  <rect width="1600" height="1000" fill="url(#cvig)"/>
+</svg>
