@@ -273,7 +273,7 @@ const EmailTemplates = () => {
       customerAddress: [cliente?.endereco, cliente?.cidade, cliente?.estado].filter(Boolean).join(", "),
       itemsTable,
       subtotal: `$${Number(pedido.subtotal ?? 0).toFixed(2)}`,
-      discount: pedido.desconto ? `-$${Number(pedido.desconto).toFixed(2)}` : "$0.00",
+      discount: (pedido as any).desconto ? `-$${Number((pedido as any).desconto).toFixed(2)}` : "$0.00",
       shippingCosts: pedido.shipping_costs ? `$${Number(pedido.shipping_costs).toFixed(2)}` : "$0.00",
       salesTax: pedido.sales_tax ? `$${Number(pedido.sales_tax).toFixed(2)}` : "$0.00",
       grossTotal: `$${Number(pedido.total ?? 0).toFixed(2)}`,
@@ -281,7 +281,7 @@ const EmailTemplates = () => {
     };
 
     const rendered = Object.entries(vars).reduce(
-      (html, [key, val]) => html.replaceAll(`{{${key}}}`, val),
+      (html, [key, val]) => html.split(`{{${key}}}`).join(val),
       tpl
     );
     setEmailOrderPreviewHtml(rendered);
