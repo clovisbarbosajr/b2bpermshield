@@ -46,6 +46,9 @@ const Cadastro = () => {
         supabase.functions.invoke("send-email", {
           body: { type: "new_registration_admin", customerEmail: email, customerName: nome, empresa },
         }).catch(() => {});
+        supabase.functions.invoke("notify-dispatch", { body: { event: "new_customer", vars: {
+          customer_name: nome, customer_company: empresa, customer_email: email, customer_phone: "",
+        }, customer: { email } } }).catch(() => {});
       });
     }
   };

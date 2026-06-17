@@ -18,8 +18,16 @@ com o que ele já tem (templates, admin), e **adicionando SMS + WhatsApp (Twilio
 - [x] **F3 — UI admin**: `Notificacoes.tsx` (3 abas) + `NotificacoesLog.tsx` (Histórico).
       Rotas `/admin/settings/notifications` e `/notifications-log` (admin) + menu em Settings.
 - [x] **Fix Vercel**: `@import` da fonte movido pro topo do `index.css` (erro do build).
-- [ ] **F4 — Ligação nos eventos** do permshield (novo pedido, status, cliente aprovado).
+- [x] **F4 — Ligação nos eventos** (ao lado do `send-email`, fire-and-forget):
+      - `new_order` → Checkout.tsx (card + non-card)
+      - `order_status` → OrderDetail.tsx (handleStatusChange)
+      - `new_customer` → Cadastro.tsx
+      - `account_approved` → CustomerEdit.tsx (Approve)
 - [ ] **F5 — Email→Resend** (validar/trocar), remover `b2bwave-sync`, testes ponta a ponta.
+
+## Validado
+- Teste forçado (email Resend + WhatsApp Twilio) → **chegou** ✅. Migração funcionando.
+- Build com `tsc --noEmit` limpo (0 erros) — inclui correção de 3 bugs de tipo pré-existentes.
 
 ## Como ficou (build validado: ✓ 2450 módulos)
 - Menu: **Admin → Settings → Notifications / Notifications Log**.

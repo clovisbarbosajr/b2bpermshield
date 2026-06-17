@@ -462,6 +462,12 @@ const Checkout = () => {
         const emailItems = recalculated.map(i => ({ sku: i.sku, nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
         supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
         supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
+        supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
+          order_id: (pedido as any).numero ?? pedido.id, total: (pedido as any).total ?? "",
+          date: new Date().toLocaleString("pt-BR"),
+          items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
+          customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: "",
+        }, customer: { email: customerEmail } } }).catch(() => {});
         clearCart();
         toast.success(`Order #${pedido.numero} placed and payment confirmed!`);
         navigate("/portal/pedidos");

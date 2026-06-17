@@ -122,6 +122,11 @@ const OrderDetail = () => {
         body: { type: "order_status_change", order: { ...order, status: newStatus }, customer: cliente, newStatus },
       }).catch(() => {});
     }
+    supabase.functions.invoke("notify-dispatch", { body: { event: "order_status", vars: {
+      order_id: (order as any).numero ?? order.id, status: newStatus, total: (order as any).total ?? "",
+      customer_name: cliente?.nome ?? "", customer_company: cliente?.empresa ?? "",
+      customer_email: cliente?.email ?? "", customer_phone: (cliente as any)?.telefone ?? "",
+    }, customer: { email: cliente?.email, phone: (cliente as any)?.telefone, whatsapp: (cliente as any)?.telefone } } }).catch(() => {});
   };
 
   const handleSave = async () => {

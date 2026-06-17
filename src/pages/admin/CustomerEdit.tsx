@@ -866,6 +866,10 @@ const CustomerEdit = () => {
                       loginUrl: `${window.location.origin}/customers-login`,
                     },
                   }).catch(() => {});
+                  supabase.functions.invoke("notify-dispatch", { body: { event: "account_approved", vars: {
+                    customer_name: cliente.nome || cliente.empresa || "", customer_company: cliente.empresa ?? "",
+                    customer_email: cliente.email ?? "", customer_phone: (cliente as any).telefone ?? "",
+                  }, customer: { email: cliente.email, phone: (cliente as any).telefone, whatsapp: (cliente as any).telefone } } }).catch(() => {});
                 }}>
                   ✓ Approve Customer
                 </Button>
