@@ -55,7 +55,7 @@ const LoginLanding = () => {
               </h1>
               <div className="h-px w-10 sm:w-16 bg-gradient-to-l from-transparent to-[#0ed2da]/30" />
             </div>
-            <p className="text-[#1a1a2e]/50 text-xs sm:text-sm tracking-widest uppercase">
+            <p className="text-[#1a1a2e]/70 text-xs sm:text-sm tracking-widest uppercase">
               Select your login portal
             </p>
           </div>
@@ -84,7 +84,7 @@ const LoginLanding = () => {
                 <h2 className="text-lg sm:text-xl font-bold text-white uppercase tracking-wider mb-1">
                   Administrator
                 </h2>
-                <p className="text-white/40 text-xs">Access the admin dashboard</p>
+                <p className="text-white/80 text-xs">Access the admin dashboard</p>
                 <div className="mt-3 flex items-center gap-1.5 text-[#0ed2da]/0 group-hover:text-[#0ed2da]/80 transition-all duration-300 translate-y-2 group-hover:translate-y-0">
                   <span className="text-[10px] font-semibold tracking-widest uppercase">Enter</span>
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -116,7 +116,7 @@ const LoginLanding = () => {
                 <h2 className="text-lg sm:text-xl font-bold text-white uppercase tracking-wider mb-1">
                   Customers
                 </h2>
-                <p className="text-white/40 text-xs">Access the customer portal</p>
+                <p className="text-white/80 text-xs">Access the customer portal</p>
                 <div className="mt-3 flex items-center gap-1.5 text-[#0ed2da]/0 group-hover:text-[#0ed2da]/80 transition-all duration-300 translate-y-2 group-hover:translate-y-0">
                   <span className="text-[10px] font-semibold tracking-widest uppercase">Enter</span>
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
