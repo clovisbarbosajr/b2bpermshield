@@ -7,6 +7,36 @@
 
 ---
 
+## 0. ⚠️ PROBLEMA CONCRETO (ler primeiro — é o sintoma a resolver)
+
+Reportado pelo dono, com a aba do **nosso sistema** aberta (admin):
+
+1. **Pedidos pararam em 28/abril/2026.** Os últimos no nosso sistema são `id 2351, 2352, 2353`
+   (28/04). No B2BWave (`zapsupplies.b2bwave.com`) existem pedidos de **maio e junho** que
+   **não aparecem** aqui. Hoje é junho — ou seja, ~1,5 mês de pedidos faltando.
+   - Causa provável: não há sync automático (depende de clique manual com aba aberta — ver §1B
+     e §3.1) **e/ou** o loop de páginas travou silenciosamente no meio. Investigar paginação,
+     filtro de data (a função pula pré-2025 — confirmar que não está cortando 2026 errado) e
+     erros silenciosos (`orderErrors++; continue`).
+
+2. **Total $0.00 em pedidos importados.** Vários pedidos entram com **Total $0.00** e quantidade
+   zerada mesmo tendo valor real no B2BWave. Exemplos confirmados no B2BWave:
+   - `2348` = **$2.881,30** (110 un) — aqui aparece $0.00
+   - `2347` = **$2.299,13** (51 un)
+   - `2353` = **$4.852,10** (264 un) — este veio certo
+   - Causa provável: mapeamento de total/itens (`gross_total` / `total_after_vat` / `total` e os
+     preços dentro de `order_products`) não está casando os campos certos do B2BWave →
+     cair em 0. Ver `sync_orders_page` linhas ~513–563.
+
+**Objetivo final do dono:** tudo que existe no **B2BWave** tem que existir, idêntico e
+atualizado, no **nosso sistema** — produtos, preços, clientes e **todos os pedidos**. Inclui
+pedido novo, **cancelado/editado** (status muda), **preço editado**, **cliente novo** e
+**cliente deletado**. Não importa o intervalo (5 / 15 / 30 min); importa **não parar** e
+**não depender de aba aberta**. O sync é temporário: um dia o B2BWave sai do ar e fica só o
+nosso sistema — até lá, os dados têm que se manter espelhados sozinhos.
+
+---
+
 ## 1. Conceito: são DOIS sistemas diferentes (não confundir)
 
 ### A) Notificações (WhatsApp / SMS / Email)
@@ -74,11 +104,22 @@ Status de pedido: mapeado de `status_order_name` do B2BWave via `statusMap` → 
   sem depender de login admin. **Não** colocar chaves no Git — usar Supabase Edge Function
   Secrets / Lovable Cloud Secrets.
 
-### 4.2 Adicionar UPDATE de pedidos (crítico)
+### 4.2 Adicionar UPDATE de pedidos + destravar maio/junho (crítico)
 - Em vez de "pula se já existe", fazer **upsert por `numero`**:
   atualizar `status`, `subtotal`, `total`, `quantidade_total`, datas, notas.
 - Cancelamento no B2BWave → refletir como status cancelado local (mapear no `statusMap`).
 - **Não** apagar pedido fisicamente (preserva histórico e `pedido_itens`). Cancelado = status.
+- **Destravar a importação parada em 28/abril (§0.1):** garantir que o loop pagina até o fim
+  (todas as páginas de `orders.json`), que erros de um pedido não abortem o lote (logar e
+  seguir), e que o filtro "pula pré-2025" não esteja cortando 2026. Rodar um sync completo de
+  recuperação para trazer maio+junho.
+
+### 4.2.1 Corrigir Total $0.00 dos pedidos (§0.2)
+- Revisar o mapeamento em `sync_orders_page`/`sync_orders_all` (linhas ~513–563):
+  `total`/`subtotal` do pedido e `preco_unitario`/`subtotal` dos itens (`order_products`).
+- Confirmar quais campos do B2BWave têm o valor real (`gross_total`, `total_after_vat`,
+  `total_before_vat`, e nos itens `price`/`final_price`/`total_price`). Hoje muitos caem em 0.
+- Validar com casos reais: `2348` deve dar **$2.881,30**, `2347` **$2.299,13**.
 
 ### 4.3 Tratar remoção de clientes
 - Recomendado: **soft-delete** → marcar `status = 'inativo'` quem sumiu do B2BWave
@@ -95,12 +136,16 @@ Status de pedido: mapeado de `status_order_name` do B2BWave via `statusMap` → 
 
 ---
 
-## 5. Decisões que o dono precisa confirmar antes do build
-1. **Intervalo do cron**: 5 min? 15 min?
-2. **Escopo por ciclo**: tudo (clientes+produtos+pedidos+preços) todo ciclo, ou
-   incremental leve (pedidos+clientes a cada 5 min) + pesado (produtos/preços a cada 30–60 min)?
-3. **Cancelamento de pedido**: refletir como status "cancelado" (recomendado) e nunca apagar?
-4. **Cliente removido**: inativar (soft-delete, recomendado) ou apagar de verdade?
+## 5. Decisões do dono (JÁ DEFINIDAS)
+1. **Intervalo do cron**: ~15 min para incremental leve (pedidos+clientes); ~30–60 min para o
+   pesado (produtos+preços). O intervalo exato não importa — importa **não parar** e **não
+   depender de aba aberta**.
+2. **Escopo por ciclo**: incremental leve frequente (pedidos+clientes) + pesado mais espaçado
+   (produtos+preços). Pode rodar tudo junto se for mais simples; só não pode travar.
+3. **Cancelamento de pedido**: refletir como status **"cancelado"** — **nunca apagar** o registro.
+4. **Cliente removido**: **inativar** (soft-delete, `status = 'inativo'`) — **nunca apagar**.
+5. **Prioridade imediata**: destravar maio/junho (§0.1) e corrigir Total $0.00 (§0.2) — são o
+   sintoma que o dono está vendo agora.
 
 ## 6. Regras de segurança (manter)
 - **Nunca** commitar chaves reais nem colá-las no chat. Usar Cloud Secrets / Edge Function Secrets.
