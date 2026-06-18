@@ -34,12 +34,6 @@ CREATE POLICY "Admins manage sync_state" ON public.sync_state
 CREATE INDEX IF NOT EXISTS pedidos_numero_idx ON public.pedidos (numero);
 
 -- ---------------------------------------------------------------------------
--- Extensões (idempotente; se já habilitadas no painel, não faz nada)
--- ---------------------------------------------------------------------------
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
-
--- ---------------------------------------------------------------------------
 -- Helper: agenda um job que chama a Edge Function b2bwave-sync com uma action.
 -- Lê CRON_SECRET e PROJECT_ANON_KEY do Vault (nada hardcoded).
 -- ---------------------------------------------------------------------------
@@ -78,10 +72,23 @@ $$;
 -- então não trava e cobre o histórico em ciclos. A tela manual continua existindo
 -- para "forçar agora".
 -- ---------------------------------------------------------------------------
-SELECT public._schedule_b2bwave_job('b2bwave-cron-orders',     '*/15 * * * *', 'cron_orders');
-SELECT public._schedule_b2bwave_job('b2bwave-cron-customers',  '5-59/15 * * * *', 'sync_customers');
-SELECT public._schedule_b2bwave_job('b2bwave-cron-products',   '10 * * * *',  'sync_products');
-SELECT public._schedule_b2bwave_job('b2bwave-cron-pricelists', '20 * * * *',  'sync_price_lists');
+-- Setup DEFENSIVO: habilita extensões e agenda os jobs. Se pg_cron/pg_net/Vault
+-- ainda não estiverem prontos, a migration NÃO falha (só registra um aviso) —
+-- assim as migrations de segurança nunca são bloqueadas por isto. Para ativar o
+-- cron depois: habilite pg_cron + pg_net no painel, adicione os secrets no Vault
+-- e re-aplique esta migration (ou rode o bloco abaixo manualmente).
+DO $outer$
+BEGIN
+  CREATE EXTENSION IF NOT EXISTS pg_cron;
+  CREATE EXTENSION IF NOT EXISTS pg_net;
+  PERFORM public._schedule_b2bwave_job('b2bwave-cron-orders',     '*/15 * * * *', 'cron_orders');
+  PERFORM public._schedule_b2bwave_job('b2bwave-cron-customers',  '5-59/15 * * * *', 'sync_customers');
+  PERFORM public._schedule_b2bwave_job('b2bwave-cron-products',   '10 * * * *',  'sync_products');
+  PERFORM public._schedule_b2bwave_job('b2bwave-cron-pricelists', '20 * * * *',  'sync_price_lists');
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'b2bwave cron setup pulado (habilite pg_cron/pg_net + Vault e re-aplique): %', SQLERRM;
+END
+$outer$;
 
 -- Para PAUSAR tudo depois (quando o B2BWave sair do ar):
 --   select cron.unschedule('b2bwave-cron-orders');
