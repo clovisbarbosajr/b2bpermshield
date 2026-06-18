@@ -166,6 +166,7 @@ export default function Notificacoes() {
         <TabsList className="mb-4">
           <TabsTrigger value="channels">Canais</TabsTrigger>
           <TabsTrigger value="events">Eventos</TabsTrigger>
+          <TabsTrigger value="templates">Templates</TabsTrigger>
           <TabsTrigger value="recipients">Destinatários</TabsTrigger>
           <TabsTrigger value="tests">Testes</TabsTrigger>
         </TabsList>
@@ -249,6 +250,26 @@ export default function Notificacoes() {
               <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => sendEventTest(ev)}>
                 <Send className="w-3.5 h-3.5" /> Testar
               </Button>
+            </Card>
+          ))}
+        </TabsContent>
+
+        {/* TEMPLATES — edita o corpo do e-mail de cada evento num lugar só */}
+        <TabsContent value="templates" className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Corpo do e-mail de cada evento. Variáveis disponíveis:&nbsp;
+            <code className="text-xs">{'{order_id} {status} {total} {date} {items} {customer_name} {customer_company} {customer_email} {customer_phone}'}</code>
+          </p>
+          {events.map((ev) => (
+            <Card key={ev.id} className="p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="font-medium">{EVENT_LABELS[ev.id] ?? ev.id}</p>
+                <Button size="sm" disabled={saving} className="gap-1.5 shrink-0" onClick={() => saveEvent(ev)}>
+                  <Save className="w-3.5 h-3.5" /> Salvar
+                </Button>
+              </div>
+              <Textarea rows={5} value={ev.template_email ?? ''} placeholder="Corpo do e-mail deste evento..."
+                onChange={(e) => setEvents(events.map((x) => (x.id === ev.id ? { ...x, template_email: e.target.value } : x)))} />
             </Card>
           ))}
         </TabsContent>
