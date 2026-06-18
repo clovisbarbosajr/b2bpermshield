@@ -70,6 +70,24 @@ async function fetchAllPages(endpoint: string, username: string, apiKey: string)
   return allData;
 }
 
+// Para endpoints que EXIGEM paginação explícita (ex.: product_prices). Usa
+// paginated=1&per_page=500 e itera page=N até vir página incompleta. Guard contra
+// loop infinito (máx. 200 páginas = 100k registros). Aceita resposta como array
+// puro OU como { data: [...] }.
+async function fetchAllPaginated(endpoint: string, username: string, apiKey: string, perPage = 500) {
+  const all: any[] = [];
+  const sep = endpoint.includes("?") ? "&" : "?";
+  const base = `${endpoint}${sep}paginated=1&per_page=${perPage}`;
+  for (let page = 1; page <= 200; page++) {
+    const data = await fetchPage(base, username, apiKey, page);
+    const rows = Array.isArray(data) ? data : (data?.data ?? []);
+    if (!Array.isArray(rows) || rows.length === 0) break;
+    all.push(...rows);
+    if (rows.length < perPage) break;
+  }
+  return all;
+}
+
 const statusMap: Record<string, string> = {
   "complete": "concluido", "completed": "concluido", "submitted": "recebido",
   "received": "recebido", "processing": "em_processamento", "in progress": "em_processamento",
@@ -441,8 +459,34 @@ Deno.serve(async (req) => {
         if (c.ativo) activeCatNameToId.set(c.nome.toLowerCase(), c.id);
       }
 
+      // ----- Preços por tabela (product_prices) -----
+      // B2BWave devolve UM registro por (produto, pricelist). É a fonte REAL dos
+      // preços; products.json muitas vezes NÃO traz 'price' (= produtos $0,00 no
+      // clone). Montamos: pricelist b2b id -> {nome, is_default} e
+      // produto b2b id -> Map(pricelist b2b id -> preço).
+      const b2bPriceLists = await fetchAllPages("price_lists.json", username, apiKey).catch(() => []);
+      const plB2bById = new Map<number, { name: string; isDefault: boolean }>();
+      let defaultPlId: number | null = null;
+      for (const pl of b2bPriceLists) {
+        plB2bById.set(pl.id, { name: pl.name, isDefault: pl.is_default === true });
+        if (pl.is_default === true) defaultPlId = pl.id;
+      }
+      const { data: localPLs } = await adminClient.from("tabelas_preco").select("id, nome");
+      const plNameToLocalId = new Map<string, string>();
+      for (const pl of localPLs || []) plNameToLocalId.set((pl.nome || "").toLowerCase(), pl.id);
+
+      const productPrices = await fetchAllPaginated("product_prices.json", username, apiKey).catch(() => []);
+      const pricesByProduct = new Map<number, Map<number, number>>();
+      for (const pp of productPrices) {
+        const pid = Number(pp.product_id), plid = Number(pp.pricelist_id);
+        const val = parseFloat(pp.price ?? "0") || 0;
+        if (!pid || !plid) continue;
+        if (!pricesByProduct.has(pid)) pricesByProduct.set(pid, new Map());
+        pricesByProduct.get(pid)!.set(plid, val);
+      }
+
       // Load existing products for comparison
-      const { data: existingProds } = await adminClient.from("produtos").select("id, sku, nome, preco, ativo, imagem_url, estoque_total");
+      const { data: existingProds } = await adminClient.from("produtos").select("id, sku, nome, preco, ativo, imagem_url, estoque_total, created_at");
       const existingMap = new Map<string, any>();
       for (const p of existingProds || []) existingMap.set(p.sku.toLowerCase(), p);
 
@@ -458,8 +502,15 @@ Deno.serve(async (req) => {
         while (seenSkus.has(finalSku)) finalSku = `${sku}-${counter++}`;
         seenSkus.add(finalSku);
 
-        // B2BWave: 'price' = wholesale price, 'price_msrp' = retail/MSRP
-        const wholesalePrice = parseFloat(p.price || p.wholesale_price || p.base_price || "0") || 0;
+        // Preço base: usa o preço da tabela DEFAULT do B2BWave (fonte real).
+        // Fallbacks: qualquer tabela com preço > 0 -> p.price -> MSRP. Resolve $0,00.
+        const prodPriceMap = pricesByProduct.get(Number(p.id));
+        let basePrice = 0;
+        if (prodPriceMap) {
+          if (defaultPlId != null && prodPriceMap.has(defaultPlId)) basePrice = prodPriceMap.get(defaultPlId)!;
+          else { const first = [...prodPriceMap.values()].find(v => v > 0); if (first) basePrice = first; }
+        }
+        const wholesalePrice = basePrice || parseFloat(p.price || p.wholesale_price || p.base_price || "0") || 0;
         const msrpPrice = parseFloat(p.price_msrp || p.retail_price || p.price_retail || "0") || 0;
         const row: Record<string, any> = {
           sku: finalSku, nome: p.name || "Unnamed", descricao: p.description || null,
@@ -473,8 +524,24 @@ Deno.serve(async (req) => {
           quantidade_minima: Math.max(parseInt(p.minimum_quantity || p.min_quantity || "0") || 0, 1),
           unidade_venda: p.unit || p.unit_of_measure || 'un',
           peso: parseFloat(p.weight || "0") || null,
-          b2bwave_id: p.id || null,
+          b2bwave_id: String(p.id),
+          // Campos extras do clone (todas as colunas já existem no schema):
+          barcode: p.barcode || null,
+          codigo_upc: p.code_upc || null,
+          codigo_referencia: p.reference_code || null,
+          descricao_pdf: p.pdf_description || null,
+          meta_descricao: p.meta_description || null,
+          altura: parseFloat(p.height || "0") || null,
+          largura: parseFloat(p.width || "0") || null,
+          comprimento: parseFloat(p.length || "0") || null,
+          quantidade_pacote: parseInt(p.package_quantity || "0") || null,
+          permitir_backorder: p.can_backorder === true,
+          promover_categoria: p.promote_category === true,
+          promover_destaque: p.promote_front === true,
         };
+        // created_at / disponibilidade REAIS do B2BWave (clone): só grava se vier.
+        if (p.created_at) row.created_at = p.created_at;
+        if (p.scheduled_at) row.data_disponibilidade = p.scheduled_at;
         if (p.category_id) {
           const localIdByApi = catB2bIdToId.get(p.category_id);
           const fallbackName = categoryNameByB2bId.get(p.category_id);
@@ -486,10 +553,13 @@ Deno.serve(async (req) => {
         // Check if changed
         const existing = existingMap.get(finalSku.toLowerCase());
         if (existing) {
+          // Backfill one-shot: se a data local difere da real do B2BWave, atualiza.
+          const dateFixNeeded = !!row.created_at && existing.created_at &&
+            Math.abs(Date.parse(existing.created_at) - Date.parse(row.created_at)) > 1000;
           const changed = existing.nome !== row.nome || Number(existing.preco) !== row.preco ||
             existing.ativo !== row.ativo || existing.imagem_url !== row.imagem_url ||
             existing.estoque_total !== row.estoque_total || existing.categoria_id !== row.categoria_id ||
-            Number(existing.preco_msrp) !== (row.preco_msrp ?? 0);
+            Number(existing.preco_msrp) !== (row.preco_msrp ?? 0) || dateFixNeeded;
           if (!changed) { skipped++; continue; }
         }
         toUpsert.push(row);
@@ -514,8 +584,56 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Mapa produto b2b id -> local id (reaproveitado p/ preços, variantes e stale).
+      const { data: allProds } = await adminClient.from("produtos").select("id, sku, b2bwave_id");
+      const b2bIdToProdId = new Map<string, string>();
+      for (const p of allProds || []) {
+        if (p.b2bwave_id) b2bIdToProdId.set(String(p.b2bwave_id), p.id);
+      }
+
+      // ----- Grava preços por tabela em tabela_preco_itens (upsert idempotente) -----
+      let priceRows = 0;
+      const tpItens: any[] = [];
+      for (const [prodB2bId, plMap2] of pricesByProduct) {
+        const localProdId = b2bIdToProdId.get(String(prodB2bId));
+        if (!localProdId) continue;
+        for (const [plB2bId, preco] of plMap2) {
+          const plInfo = plB2bById.get(plB2bId);
+          if (!plInfo) continue;
+          const localTabelaId = plNameToLocalId.get((plInfo.name || "").toLowerCase());
+          if (!localTabelaId) continue;
+          tpItens.push({ produto_id: localProdId, tabela_preco_id: localTabelaId, preco });
+        }
+      }
+      for (let i = 0; i < tpItens.length; i += 100) {
+        const chunk = tpItens.slice(i, i + 100);
+        const { error } = await adminClient.from("tabela_preco_itens").upsert(chunk, { onConflict: "tabela_preco_id,produto_id" });
+        if (!error) priceRows += chunk.length;
+      }
+
+      // ----- Variantes / opções de produto (Size/Color etc.) -----
+      // B2BWave: product.product_variants[] = { code, option_values }. A sync é dona
+      // total das variantes -> apaga e reinsere por produto que as possui (idempotente).
+      let variantRows = 0;
+      for (const p of allProducts) {
+        const variants = Array.isArray(p.product_variants) ? p.product_variants : [];
+        if (variants.length === 0) continue;
+        const localProdId = b2bIdToProdId.get(String(p.id));
+        if (!localProdId) continue;
+        await adminClient.from("produto_variantes").delete().eq("produto_id", localProdId);
+        const vrows = variants.map((v: any) => ({
+          produto_id: localProdId,
+          codigo: v.code || v.sku || `${p.id}-var`,
+          valores_opcao: v.option_values ?? [],
+          ativo: v.is_active !== false,
+          quantidade: parseInt(v.quantity || "0") || 0,
+          imagem_url: v.image_url || null,
+        }));
+        const { error } = await adminClient.from("produto_variantes").insert(vrows);
+        if (!error) variantRows += vrows.length;
+      }
+
       // Delete stale products
-      const { data: allProds } = await adminClient.from("produtos").select("id, sku");
       let deleted = 0;
       for (const p of allProds || []) {
         if (!seenSkus.has(p.sku)) {
@@ -530,23 +648,23 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         success: true,
         samples: errorSamples,
-        message: `${synced} updated/created, ${skipped} unchanged, ${errors} errors, ${deleted} stale deleted${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
+        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${variantRows} variants, ${errors} errors, ${deleted} stale deleted${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
       }), { headers: jsonHeaders });
     }
 
     // ========== SYNC PRICE LISTS (incremental) ==========
     if (action === "sync_price_lists") {
       const data = await fetchAllPages("price_lists.json", username, apiKey);
-      const { data: existingPLs } = await adminClient.from("tabelas_preco").select("id, nome, descricao, ativo");
+      const { data: existingPLs } = await adminClient.from("tabelas_preco").select("id, nome, descricao, ativo, is_default");
       const existingMap = new Map<string, any>();
       for (const pl of existingPLs || []) existingMap.set(pl.nome.toLowerCase(), pl);
 
       let synced = 0, skipped = 0;
       for (const pl of data) {
-        const row = { nome: pl.name || "Unnamed", descricao: pl.description || null, ativo: pl.is_active !== false };
+        const row = { nome: pl.name || "Unnamed", descricao: pl.description || null, ativo: pl.is_active !== false, is_default: pl.is_default === true };
         const existing = existingMap.get(row.nome.toLowerCase());
         if (existing) {
-          const changed = existing.descricao !== row.descricao || existing.ativo !== row.ativo;
+          const changed = existing.descricao !== row.descricao || existing.ativo !== row.ativo || existing.is_default !== row.is_default;
           if (changed) { await adminClient.from("tabelas_preco").update(row).eq("id", existing.id); synced++; }
           else skipped++;
         } else { await adminClient.from("tabelas_preco").insert(row); synced++; }
@@ -597,7 +715,7 @@ Deno.serve(async (req) => {
       for (const r of localReps || []) repEmailToId.set(r.email.toLowerCase(), r.id);
 
       // Load existing customers for comparison
-      const { data: existingCustomers } = await adminClient.from("clientes").select("id, email, nome, empresa, telefone, status, tabela_preco_id, representante_id");
+      const { data: existingCustomers } = await adminClient.from("clientes").select("id, email, nome, empresa, telefone, status, tabela_preco_id, representante_id, endereco, cidade, cep, created_at, discount");
       const existingMap = new Map<string, any>();
       for (const c of existingCustomers || []) existingMap.set(c.email.toLowerCase(), c);
 
@@ -622,7 +740,7 @@ Deno.serve(async (req) => {
         }
 
         const status = c.approved === false ? "pendente" : (c.is_active === false ? "inativo" : "ativo");
-        const row = {
+        const row: Record<string, any> = {
           nome: c.name || c.company_name || "Unnamed",
           empresa: c.company_name || "",
           email,
@@ -630,13 +748,37 @@ Deno.serve(async (req) => {
           status,
           tabela_preco_id: tabelaPrecoId,
           representante_id: repId,
+          // Endereço de entrega (clone):
+          endereco: c.address || null,
+          endereco2: c.address2 || null,
+          cidade: c.city || null,
+          estado: c.province || null,
+          cep: c.postal_code || null,
+          pais: c.country || null,
+          // Campos extras (clone) — colunas já existem em `clientes`:
+          website: c.website || null,
+          company_number: c.company_number || null,
+          discount: parseFloat(c.discount_percentage ?? "0") || null,
+          minimum_order_value: parseFloat(c.minimum_order_value ?? "0") || null,
+          customer_reference_code: c.reference_code || null,
+          admin_comments: c.comments_admin || null,
+          disable_ordering: c.disable_ordering === true,
+          billing_same_as_contact: c.invoice_same !== false,
+          is_active: c.is_active !== false,
         };
+        // created_at REAL do B2BWave (clone): só grava se a API trouxe a data.
+        if (c.created_at) row.created_at = c.created_at;
 
         const existing = existingMap.get(email.toLowerCase());
         if (existing) {
+          // Backfill one-shot da data real + dados de endereço.
+          const dateFixNeeded = !!row.created_at && existing.created_at &&
+            Math.abs(Date.parse(existing.created_at) - Date.parse(row.created_at)) > 1000;
           const changed = existing.nome !== row.nome || existing.empresa !== row.empresa ||
             existing.telefone !== row.telefone || existing.status !== row.status ||
-            existing.tabela_preco_id !== row.tabela_preco_id || existing.representante_id !== row.representante_id;
+            existing.tabela_preco_id !== row.tabela_preco_id || existing.representante_id !== row.representante_id ||
+            existing.endereco !== row.endereco || existing.cidade !== row.cidade || existing.cep !== row.cep ||
+            Number(existing.discount ?? 0) !== Number(row.discount ?? 0) || dateFixNeeded;
           if (changed) {
             const r = await adminClient.from("clientes").update(row).eq("id", existing.id);
             if (r.error) errors++; else synced++;

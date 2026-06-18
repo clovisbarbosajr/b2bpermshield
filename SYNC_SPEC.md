@@ -178,3 +178,34 @@ Status de pedido: mapeado de `status_order_name` do B2BWave via `statusMap` → 
 3. **Recuperação maio/junho + $0.00:** rodar UMA vez **Settings → B2B Wave Sync → "Sync All Orders"** (agora com upsert, traz maio/junho e corrige os $0.00). Opcional: clicar "Fix Order Prices ($0.00)" pros que ficarem.
 4. Conferir 2348 = $2.881,30 e 2347 = $2.299,13.
 > Não rodei nada em produção (sem credenciais e sem sua autorização) — está tudo no código, pronto.
+
+---
+
+## 8. ✅ CLONE COMPLETO — expansão do sync (2026-06-18) — pronto pra deploy
+
+Objetivo: o app virar um **clone fiel** do B2BWave (sem "dado fake": as datas/preços/endereços que faltavam eram **sincronização incompleta**, não invenção). Campos confirmados na **API oficial** do B2BWave (docs.b2bwave.com), **não chutados**.
+
+**Importante: NENHUMA migration nova.** Todas as colunas de destino **já existiam** no schema (`produtos`, `clientes`, `tabela_preco_itens`, `produto_variantes`) — o sync é que não preenchia. `tabela_preco_itens` já tem `UNIQUE(tabela_preco_id, produto_id)` → upsert idempotente.
+
+**`supabase/functions/b2bwave-sync/index.ts`:**
+- **Helper novo `fetchAllPaginated`** — para endpoints que exigem `paginated=1&per_page=500` (ex.: `product_prices`). Guard contra loop infinito (máx. 200 páginas).
+- **`sync_products`:**
+  - **Preço $0,00 RESOLVIDO** — busca `product_prices.json` (1 registro por produto×tabela, fonte real do preço). `produtos.preco` = preço da **tabela default** do B2BWave (fallback: qualquer tabela > 0 → `p.price` → MSRP).
+  - **Preços por tabela** gravados em `tabela_preco_itens` (mapeando pricelist→tabela local por nome, produto por `b2bwave_id`). Upsert idempotente.
+  - **`created_at` REAL** do B2BWave (corrige "criado hoje"). Backfill one-shot: detecta data divergente e atualiza.
+  - **Variantes/opções** (Size/Color etc.) → `produto_variantes` (de `product.product_variants[]` = `{code, option_values}`). Sync é dona total: apaga e reinsere por produto.
+  - **Campos extras do clone:** barcode, código UPC, código de referência, descrição PDF, meta descrição, dimensões (altura/largura/comprimento), qtd. pacote, backorder, promover categoria/destaque, data de disponibilidade.
+- **`sync_customers`:**
+  - **`created_at` REAL** (corrige ordem da lista) + backfill one-shot.
+  - **Endereço de entrega:** endereco, endereco2, cidade, estado, cep, pais.
+  - **Extras:** website, company_number, discount (%), minimum_order_value, customer_reference_code, admin_comments, disable_ordering, billing_same_as_contact, is_active.
+- **`sync_price_lists`:** agora também sincroniza `is_default` (necessário pra escolher o preço base correto).
+
+**Frontend (ordem das listas = espelho do B2BWave):**
+- `src/pages/admin/Clientes.tsx` e `src/pages/admin/Produtos.tsx`: ordenação default mudou de alfabética (`empresa`/`nome`) para **`created_at` desc** (mais recente primeiro), agora que a data real é sincronizada.
+
+### PASSOS DE DEPLOY (você / Lovable) — só a função, sem migration
+1. **Deploy** da função `b2bwave-sync` (Lovable aplica ao dar push no `main`). **Não há migration nova.**
+2. **Aplicar o clone:** rodar UMA vez **Settings → B2B Wave Sync → "Sync All"** (na ordem: price lists → products → customers). Isso traz preços, datas reais, endereços e variantes. O cron mantém atualizado a partir daí.
+3. **Conferir:** produtos com preço correto (não $0,00), "Created" com a data real, Customers/Products na mesma ordem do B2BWave, aba de Options/variantes preenchida, endereço do cliente preenchido.
+> Continua **mão única** (B2BWave → app) e **sem rodar em produção** sem sua autorização. Código pronto.

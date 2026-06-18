@@ -54,7 +54,8 @@ const AdminProdutos = () => {
   useEffect(() => {
     const fetchAll = async () => {
       const [p, c, b, pg, pl, pa] = await Promise.all([
-        supabase.from("produtos").select("*").order("nome"),
+        // Ordena por data de cadastro (mais recente primeiro) para espelhar o B2BWave (clone).
+        supabase.from("produtos").select("*").order("created_at", { ascending: false }),
         supabase.from("categorias").select("id, nome").order("nome"),
         supabase.from("brands").select("id, nome").order("nome"),
         supabase.from("privacy_groups").select("id, nome").eq("ativo", true),
