@@ -29,8 +29,8 @@ const syncItems: SyncItem[] = [
   { key: "customers", label: "Customers", action: "sync_customers", icon: Users, description: "Sync customers with price list & rep mapping" },
   { key: "privacy_groups", label: "Privacy Groups", action: "sync_privacy_groups", icon: Users, description: "Sync privacy groups" },
   { key: "company_activities", label: "Company Activities", action: "sync_company_activities", icon: Tag, description: "Sync company activity types" },
-  { key: "extra_fields", label: "Extra Fields", action: "sync_extra_fields", icon: Tag, description: "Sync custom extra fields" },
-  { key: "fix_order_prices", label: "Fix Order Prices ($0.00)", action: "fix_order_prices", icon: DollarSign, description: "Fix orders with $0.00 total — re-fetches prices from B2BWave API (up to 100 at a time)" },
+  // Removidos: "Extra Fields" (não existe na API do B2BWave) e "Fix Order Prices"
+  // (redundante — o sync normal de pedidos já recalcula os $0.00 somando os itens).
 ];
 
 const B2BWaveSync = () => {
@@ -100,52 +100,49 @@ const B2BWaveSync = () => {
     setOrderTotalItems(0);
     setOrderTotalErrors(0);
 
-    let page = 1;
-    let offset = 0;
+    // Usa o cursor do servidor (action cron_orders): RETOMA de onde parou. Se você
+    // sair da página e voltar, NÃO recomeça do zero — o progresso fica salvo em
+    // sync_state. É o mesmo motor do cron automático, só disparado manualmente.
     let totalSynced = 0;
     let totalUpdated = 0;
     let totalSkipped = 0;
-    let totalItems = 0;
     let totalErrors = 0;
+    let tick = 0;
 
     while (!stopRef.current) {
-      setOrderProgress(`Syncing page ${page}, offset ${offset}...`);
+      tick++;
+      setOrderProgress(`Sincronizando… (lote ${tick}) — retoma automaticamente de onde parou`);
       try {
         const { data, error } = await supabase.functions.invoke("b2bwave-sync", {
-          body: { action: "sync_orders_page", page, offset },
+          body: { action: "cron_orders", pages: 4 },
         });
         if (error) throw error;
 
-        totalSynced += data.synced || 0;
+        totalSynced += data.created || 0;
         totalUpdated += data.updated || 0;
         totalSkipped += data.skipped || 0;
-        totalItems += data.items || 0;
         totalErrors += data.errors || 0;
         setOrderTotalSynced(totalSynced);
         setOrderTotalUpdated(totalUpdated);
         setOrderTotalSkipped(totalSkipped);
-        setOrderTotalItems(totalItems);
         setOrderTotalErrors(totalErrors);
-        setOrderProgress(`Page ${page} offset ${offset}: ${data.synced} new, ${data.updated || 0} updated, ${data.skipped || 0} unchanged — Total: ${totalSynced} new, ${totalUpdated} updated`);
+        setOrderProgress(`Lote ${tick}: +${data.created || 0} novos, ${data.updated || 0} atualizados — Total: ${totalSynced} novos, ${totalUpdated} atualizados (cursor ${data.nextCursor})`);
 
-        if (!data.hasMore) {
-          setOrderProgress(`✅ Complete! ${totalSynced} new, ${totalUpdated} updated, ${totalSkipped} unchanged, ${totalErrors} errors`);
-          toast.success(`Orders sync: ${totalSynced} new, ${totalUpdated} updated`);
+        if (data.wrapped) {
+          setOrderProgress(`✅ Ciclo completo! ${totalSynced} novos, ${totalUpdated} atualizados, ${totalErrors} erros. O cron mantém tudo atualizado sozinho a partir daqui.`);
+          toast.success(`Sync: ${totalSynced} novos, ${totalUpdated} atualizados`);
           break;
         }
-
-        page = data.nextPage;
-        offset = data.nextOffset;
       } catch (err: any) {
         totalErrors++;
         setOrderTotalErrors(totalErrors);
-        setOrderProgress(`⚠️ Error on page ${page}: ${err.message}. Retrying...`);
+        setOrderProgress(`⚠️ Erro no lote ${tick}: ${err.message}. Tentando de novo…`);
         await new Promise(r => setTimeout(r, 2000));
       }
     }
 
     if (stopRef.current) {
-      setOrderProgress(`⏹ Stopped. ${totalSynced} new, ${totalSkipped} skipped.`);
+      setOrderProgress(`⏹ Pausado — progresso salvo (cursor). Pode continuar depois, NÃO recomeça do zero.`);
     }
     setOrderSyncing(false);
   };
