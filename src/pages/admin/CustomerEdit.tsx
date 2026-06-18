@@ -483,6 +483,9 @@ const CustomerEdit = () => {
         {/* Addresses Tab */}
         <TabsContent value="addresses">
           <Card className="p-6">
+            <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+              ⚠ Editar os campos de um endereço existente abaixo não salva (só leitura). Use <strong>Add Address</strong> / a lixeira para adicionar/remover; o cliente edita os próprios endereços no portal (My Account).
+            </div>
             <div className="mb-4">
               <Label className="text-sm">Allow ordering from countries</Label>
               <div className="border rounded p-2 h-24 overflow-y-auto text-sm text-muted-foreground mt-1">

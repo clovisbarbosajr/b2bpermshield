@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Pencil, Trash2, Plus, Save, Printer, FileText, Search, X as XIcon } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
+import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
@@ -28,6 +29,7 @@ const OrderDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { log } = useActivityLog();
+  const { role } = useAuth();
   const [order, setOrder] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [cliente, setCliente] = useState<any>(null);
@@ -596,9 +598,11 @@ const OrderDetail = () => {
 
         {/* Delete order */}
         <div className="border-t border-border p-5 flex items-center justify-between">
-          <Button variant="destructive" size="sm" className="gap-1" onClick={handleDeleteOrder}>
-            <Trash2 className="h-4 w-4" /> Delete order
-          </Button>
+          {role === "admin" ? (
+            <Button variant="destructive" size="sm" className="gap-1" onClick={handleDeleteOrder}>
+              <Trash2 className="h-4 w-4" /> Delete order
+            </Button>
+          ) : <span />}
         </div>
       </Card>
 

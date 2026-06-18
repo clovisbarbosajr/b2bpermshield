@@ -46,10 +46,18 @@ Detalhe técnico de cada item nos `REVIEW_PARTE_*.md`. Ordem = severidade.
 | B2 | Hash de `api_keys`/`oauth client_secret` | follow-up (admin-only, baixo risco) |
 | B4 | Privacy groups de produto server-side (RLS/RPC) | follow-up (decisão de arquitetura) |
 | B5 | Teste de webhook faz `fetch` arbitrário | follow-up (admin-only) |
-| B6 | Policies p/ `manager`/`warehouse` (escrita) | follow-up (decisão por papel) |
-| C12 | `PdfCatalog`: filtro "Customer"/"Select products" sem efeito | minor (tool interno; catálogo gera ok) |
-| C3* | Edição inline de endereço no CustomerEdit não persiste | minor (Add/Delete funcionam) |
+| B6 | Permissões configuráveis por papel (escrita) | deferido pelo dono (warehouse+admin; warehouse NÃO deleta pedido ✅ já escondido) |
 | D5* | `saveSubData` (ProductEdit) não-transacional | robustez (precisa RPC/transação) |
+
+## ✅ FEITOS — rodada 4 (sync + ajustes)
+| ID | Item |
+|----|------|
+| SYNC | b2bwave-sync: upsert de pedidos, fix Total $0.00 (mapeamento + soma dos itens), soft-delete clientes, update price lists, notify new_order inline, action `cron_orders` + auth X-Cron-Secret |
+| SYNC | migration `20260618000002`: `sync_state` + pg_cron (4 jobs via Vault) |
+| C12 | PdfCatalog: controles órfãos removidos |
+| C3* | CustomerEdit: nota honesta no endereço inline (não salva) |
+| UX | B2BWaveSync: contador "Updated" no progresso |
+| B6a | OrderDetail: "Delete order" escondido p/ warehouse |
 
 ---
 

@@ -43,6 +43,7 @@ const B2BWaveSync = () => {
   const [orderSyncing, setOrderSyncing] = useState(false);
   const [orderProgress, setOrderProgress] = useState("");
   const [orderTotalSynced, setOrderTotalSynced] = useState(0);
+  const [orderTotalUpdated, setOrderTotalUpdated] = useState(0);
   const [orderTotalSkipped, setOrderTotalSkipped] = useState(0);
   const [orderTotalItems, setOrderTotalItems] = useState(0);
   const [orderTotalErrors, setOrderTotalErrors] = useState(0);
@@ -102,6 +103,7 @@ const B2BWaveSync = () => {
     let page = 1;
     let offset = 0;
     let totalSynced = 0;
+    let totalUpdated = 0;
     let totalSkipped = 0;
     let totalItems = 0;
     let totalErrors = 0;
@@ -115,18 +117,20 @@ const B2BWaveSync = () => {
         if (error) throw error;
 
         totalSynced += data.synced || 0;
+        totalUpdated += data.updated || 0;
         totalSkipped += data.skipped || 0;
         totalItems += data.items || 0;
         totalErrors += data.errors || 0;
         setOrderTotalSynced(totalSynced);
+        setOrderTotalUpdated(totalUpdated);
         setOrderTotalSkipped(totalSkipped);
         setOrderTotalItems(totalItems);
         setOrderTotalErrors(totalErrors);
-        setOrderProgress(`Page ${page} offset ${offset}: ${data.synced} new, ${data.skipped || 0} skipped — Total: ${totalSynced} new, ${totalSkipped} skipped`);
+        setOrderProgress(`Page ${page} offset ${offset}: ${data.synced} new, ${data.updated || 0} updated, ${data.skipped || 0} unchanged — Total: ${totalSynced} new, ${totalUpdated} updated`);
 
         if (!data.hasMore) {
-          setOrderProgress(`✅ Complete! ${totalSynced} new orders, ${totalSkipped} already existed, ${totalItems} items, ${totalErrors} errors`);
-          toast.success(`Orders sync: ${totalSynced} new, ${totalSkipped} skipped`);
+          setOrderProgress(`✅ Complete! ${totalSynced} new, ${totalUpdated} updated, ${totalSkipped} unchanged, ${totalErrors} errors`);
+          toast.success(`Orders sync: ${totalSynced} new, ${totalUpdated} updated`);
           break;
         }
 
@@ -253,9 +257,10 @@ const B2BWaveSync = () => {
               <div className="mb-3 rounded-md bg-muted/50 p-3 text-sm">
                 <p>{orderProgress}</p>
                 {orderSyncing && (
-                  <div className="mt-2 grid grid-cols-4 gap-4 text-xs text-muted-foreground">
+                  <div className="mt-2 grid grid-cols-5 gap-4 text-xs text-muted-foreground">
                     <span>New: <strong className="text-foreground">{orderTotalSynced}</strong></span>
-                    <span>Skipped: <strong className="text-foreground">{orderTotalSkipped}</strong></span>
+                    <span>Updated: <strong className="text-foreground">{orderTotalUpdated}</strong></span>
+                    <span>Unchanged: <strong className="text-foreground">{orderTotalSkipped}</strong></span>
                     <span>Items: <strong className="text-foreground">{orderTotalItems}</strong></span>
                     <span>Errors: <strong className="text-foreground">{orderTotalErrors}</strong></span>
                   </div>
