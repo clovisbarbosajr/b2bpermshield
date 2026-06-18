@@ -101,6 +101,24 @@ const PedidoDetalhe = () => {
     toast.success(`${item.nome_produto} added to cart`);
   };
 
+  const handleExport = () => {
+    if (!pedido) return;
+    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const rows = [
+      ["Order", "SKU", "Product", "Quantity", "Unit Price", "Subtotal"],
+      ...itens.map((it) => [
+        pedido.numero, it.sku, it.nome_produto, it.quantidade,
+        Number(it.preco_unitario).toFixed(2), Number(it.subtotal).toFixed(2),
+      ]),
+      [], ["", "", "", "", "Total", Number(pedido.total ?? 0).toFixed(2)],
+    ];
+    const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+    a.download = `order-${pedido.numero}.csv`;
+    a.click();
+  };
+
   const Field = ({ label, value }: { label: string; value?: string | null }) => (
     <div>
       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">{label}</p>
@@ -129,7 +147,7 @@ const PedidoDetalhe = () => {
 
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold">Order #{pedido.numero}</h2>
-        <Button variant="outline" size="sm" className="gap-1">
+        <Button variant="outline" size="sm" className="gap-1" onClick={handleExport}>
           <Download className="h-4 w-4" /> EXPORT
         </Button>
       </div>

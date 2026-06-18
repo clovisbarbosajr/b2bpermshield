@@ -136,10 +136,9 @@ const Checkout = () => {
         }
       }
 
-      // Check if Stripe is enabled
-      const { data: cfg } = await (supabase.from("configuracoes") as any)
-        .select("stripe_enabled, stripe_publishable_key")
-        .limit(1).maybeSingle();
+      // Check if Stripe is enabled (via secure RPC — não expõe segredos de `configuracoes`)
+      const { data: cfgRows } = await (supabase as any).rpc("get_public_config");
+      const cfg = Array.isArray(cfgRows) ? cfgRows[0] : cfgRows;
       if (cfg?.stripe_enabled && cfg?.stripe_publishable_key) {
         setStripeEnabled(true);
         setStripePublishableKey(cfg.stripe_publishable_key);

@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, ShoppingCart, LayoutGrid, List, FileText, ChevronRight } from "lucide-react";
+import { Search, ShoppingCart, LayoutGrid, List, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCart } from "@/contexts/CartContext";
@@ -284,15 +284,6 @@ const Catalogo = () => {
           </div>
         </div>
       </div>
-
-      {/* PDF Catalog button */}
-      {categoryParam && (
-        <div className="mb-4">
-          <Button variant="outline" className="gap-2" size="sm">
-            <FileText className="h-4 w-4" /> PDF CATALOG
-          </Button>
-        </div>
-      )}
 
       {loading ? (
         <div className="flex justify-center py-20">

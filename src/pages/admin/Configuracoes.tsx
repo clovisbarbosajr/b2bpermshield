@@ -42,6 +42,7 @@ const AdminConfiguracoes = () => {
     try {
       const { data, error } = await supabase.functions.invoke("send-email", {
         body: {
+          type: "raw",
           to: config?.email_contato || "",
           subject: "Test Email — PermShield",
           html: "<h1>Email service is working!</h1><p>This is a test message from your PermShield B2B portal.</p>",

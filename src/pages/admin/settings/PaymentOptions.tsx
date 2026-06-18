@@ -168,15 +168,14 @@ const PaymentOptions = () => {
                 <SecretInput field="secret_key" label="Secret Key" required />
               </>
             ) : (
-              <div>
-                {form.gateway_config.connected ? (
-                  <div className="space-y-2">
-                    <p className="text-sm text-green-500 flex items-center gap-1"><Check className="h-4 w-4" /> You have successfully connected your Stripe account</p>
-                    <Button variant="destructive" size="sm" onClick={() => updateConfig("connected", false)}>Disconnect Stripe</Button>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Use the Stripe Connect flow to link your Stripe account. Save the payment option first, then connect.</p>
-                )}
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+                <p className="text-sm text-amber-200">
+                  Stripe Connect (OAuth) is not enabled yet. Use the{" "}
+                  <button type="button" className="underline font-medium" onClick={() => updateConfig("use_keys", true)}>
+                    Advanced (Stripe keys)
+                  </button>{" "}
+                  tab and paste your Publishable + Secret keys to enable card payments.
+                </p>
               </div>
             )}
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.gateway_config.save_cards ?? false} onChange={e => updateConfig("save_cards", e.target.checked)} /> Allow saving of card details for reuse</label>

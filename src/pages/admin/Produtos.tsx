@@ -48,22 +48,30 @@ const AdminProdutos = () => {
   const [page, setPage] = useState(1);
   // Price lists for columns
   const [priceLists, setPriceLists] = useState<any[]>([]);
-  const [priceData, setPriceData] = useState<Record<string, Record<string, number>>>({});
+  // Map produto_id -> Set de privacy_group_id (para o filtro de privacy group)
+  const [acessoMap, setAcessoMap] = useState<Record<string, Set<string>>>({});
 
   useEffect(() => {
     const fetchAll = async () => {
-      const [p, c, b, pg, pl] = await Promise.all([
+      const [p, c, b, pg, pl, pa] = await Promise.all([
         supabase.from("produtos").select("*").order("nome"),
         supabase.from("categorias").select("id, nome").order("nome"),
         supabase.from("brands").select("id, nome").order("nome"),
         supabase.from("privacy_groups").select("id, nome").eq("ativo", true),
         supabase.from("tabelas_preco").select("id, nome").eq("ativo", true).order("nome"),
+        supabase.from("produto_acesso").select("produto_id, grupo_nome"),
       ]);
       setProdutos((p.data as Produto[]) ?? []);
       setCategorias(c.data ?? []);
       setBrands(b.data ?? []);
       setPrivacyGroups(pg.data ?? []);
       setPriceLists(pl.data ?? []);
+      const map: Record<string, Set<string>> = {};
+      for (const row of (pa.data ?? []) as any[]) {
+        if (!row.grupo_nome) continue;
+        (map[row.produto_id] ??= new Set()).add(row.grupo_nome);
+      }
+      setAcessoMap(map);
       setLoading(false);
     };
     fetchAll();
@@ -88,6 +96,10 @@ const AdminProdutos = () => {
     if (filters.isActive === "Active" && !p.ativo) return false;
     if (filters.isActive === "Inactive" && p.ativo) return false;
     if (filters.status && p.status_produto !== filters.status) return false;
+    if (filters.brand && (p as any).brand_id !== filters.brand) return false;
+    if (filters.privacyGroup && !acessoMap[p.id]?.has(filters.privacyGroup)) return false;
+    if (filters.allowBackorder === "yes" && !(p as any).permitir_backorder) return false;
+    if (filters.allowBackorder === "no" && (p as any).permitir_backorder) return false;
     return true;
   });
 
