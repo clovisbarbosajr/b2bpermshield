@@ -2001,6 +2001,7 @@ export type Database = {
         Row: {
           altura: number | null
           ativo: boolean
+          b2bwave_id: string | null
           barcode: string | null
           brand_id: string | null
           categoria_id: string | null
@@ -2041,6 +2042,7 @@ export type Database = {
         Insert: {
           altura?: number | null
           ativo?: boolean
+          b2bwave_id?: string | null
           barcode?: string | null
           brand_id?: string | null
           categoria_id?: string | null
@@ -2081,6 +2083,7 @@ export type Database = {
         Update: {
           altura?: number | null
           ativo?: boolean
+          b2bwave_id?: string | null
           barcode?: string | null
           brand_id?: string | null
           categoria_id?: string | null
