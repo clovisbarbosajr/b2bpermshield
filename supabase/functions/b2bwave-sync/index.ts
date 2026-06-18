@@ -8,6 +8,11 @@ const corsHeaders = {
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
+const SB_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? "";
+
 async function b2bwaveFetch(endpoint: string, username: string, apiKey: string, maxRetries = 3) {
   let cleanEndpoint = endpoint.replace(/\.json/g, '');
   cleanEndpoint = cleanEndpoint.replace(/price_lists/g, 'pricelists');
@@ -71,9 +76,207 @@ const statusMap: Record<string, string> = {
   "shipped": "enviado", "cancelled": "cancelado", "canceled": "cancelado",
 };
 
+// Escolhe o primeiro campo numérico > 0 dentre várias chaves possíveis da API B2BWave.
+function pickNum(obj: any, keys: string[]): number {
+  for (const k of keys) {
+    const n = parseFloat(obj?.[k]);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return 0;
+}
+
+// Monta os itens do pedido + soma (qtd e valor) — robusto a variações de campo.
+function buildOrderItems(orderProducts: any[], productSkuToId: Map<string, string>, productNameToId: Map<string, string>) {
+  const rows: any[] = [];
+  let qty = 0, sum = 0;
+  for (const opItem of orderProducts || []) {
+    const op = opItem.order_product || opItem;
+    const q = Math.max(parseInt(op.quantity || op.qty || "1") || 1, 1);
+    const unitPrice = pickNum(op, ["price", "unit_price", "price_per_unit", "wholesale_price", "product_price", "final_unit_price"]);
+    let lineTotal = pickNum(op, ["final_price", "total_price", "total_before_vat", "line_total", "subtotal", "total"]);
+    if (lineTotal <= 0) lineTotal = unitPrice * q;
+    // Soma SEMPRE (mesmo se o produto não casar localmente) → total do pedido correto.
+    qty += q;
+    sum += lineTotal;
+
+    const productCode = (op.product_code || op.sku || "").toLowerCase();
+    const productName = (op.product_name || op.name || "").toLowerCase();
+    let produtoId = productSkuToId.get(productCode) || productNameToId.get(productName);
+    if (!produtoId && productCode) {
+      for (const [sku, id] of productSkuToId) {
+        if (sku.startsWith(productCode) || productCode.startsWith(sku)) { produtoId = id; break; }
+      }
+    }
+    if (!produtoId) continue; // sem produto local → não cria a linha, mas já somou
+    rows.push({
+      produto_id: produtoId,
+      nome_produto: op.product_name || op.name || "Unknown",
+      sku: op.product_code || op.sku || "N/A",
+      quantidade: q,
+      preco_unitario: unitPrice || (q > 0 ? lineTotal / q : 0),
+      subtotal: lineTotal,
+    });
+  }
+  return { rows, qty, sum };
+}
+
+type ExistingOrder = { id: string; status: string; total: number; subtotal: number; quantidade_total: number };
+
+// Insere OU atualiza um pedido (espelha status/cancelamento/edição/total). Nunca apaga.
+// Retorna "created" | "updated" | "skipped" | "error".
+async function upsertOrder(
+  db: any, o: any,
+  clienteEmailToId: Map<string, string>,
+  productSkuToId: Map<string, string>, productNameToId: Map<string, string>,
+  existing: Map<number, ExistingOrder>,
+  opts: { skipPre2025: boolean; notify: boolean },
+): Promise<"created" | "updated" | "skipped" | "error"> {
+  const numero = parseInt(o.id) || 0;
+  if (!numero) return "error";
+
+  const submittedRaw = o.submitted_at || o.created_at || "";
+  if (opts.skipPre2025 && submittedRaw && new Date(submittedRaw).getFullYear() < 2025) return "skipped";
+
+  const clienteId = clienteEmailToId.get((o.customer_email || "").toLowerCase());
+  if (!clienteId) return "error";
+
+  const b2bStatus = (o.status_order_name || o.status || "submitted").toLowerCase();
+  const status = statusMap[b2bStatus] || "recebido";
+  const submittedAt = submittedRaw ? new Date(submittedRaw).toISOString() : new Date().toISOString();
+  const deliveryDate = o.request_delivery_at ? new Date(o.request_delivery_at).toISOString() : null;
+
+  const { rows: itemRows, qty: itemsQty, sum: itemsSum } = buildOrderItems(o.order_products || [], productSkuToId, productNameToId);
+
+  let subtotal = pickNum(o, ["total_before_vat", "subtotal", "net_total", "total"]);
+  let total = pickNum(o, ["gross_total", "total_after_vat", "total", "total_before_vat", "grand_total", "order_total", "amount"]);
+  if (subtotal <= 0) subtotal = itemsSum;
+  if (total <= 0) total = itemsSum || subtotal;
+  let quantidade = parseInt(o.total_quantity || "0") || 0;
+  if (quantidade <= 0) quantidade = itemsQty;
+
+  const ex = existing.get(numero);
+  if (ex) {
+    // Só escreve se algo mudou (evita writes inúteis a cada ciclo do cron).
+    const changed = ex.status !== status || Number(ex.total) !== total ||
+      Number(ex.subtotal) !== subtotal || (ex.quantidade_total ?? 0) !== quantidade;
+    if (!changed) return "skipped";
+    const upd = await db.from("pedidos").update({
+      status, subtotal, total, quantidade_total: quantidade,
+      observacoes: o.comments_customer || o.customer_comments || null,
+      admin_notes: o.admin_notes || o.internal_notes || null,
+      po_number: o.customer_order_reference || o.purchase_order || o.po_number || null,
+      delivery_date: deliveryDate,
+    }).eq("id", ex.id);
+    if (upd.error) return "error";
+    if (itemRows.length > 0) {
+      await db.from("pedido_itens").delete().eq("pedido_id", ex.id);
+      await db.from("pedido_itens").insert(itemRows.map((r) => ({ ...r, pedido_id: ex.id })));
+    }
+    return "updated";
+  }
+
+  const ins = await db.from("pedidos").insert({
+    numero, cliente_id: clienteId, status, subtotal, total,
+    observacoes: o.comments_customer || o.customer_comments || null,
+    admin_notes: o.admin_notes || o.internal_notes || null,
+    po_number: o.customer_order_reference || o.purchase_order || o.po_number || null,
+    delivery_date: deliveryDate,
+    quantidade_total: quantidade,
+    shipping_option_id: null, payment_option_id: null,
+    created_at: submittedAt,
+  }).select("id").single();
+  if (ins.error || !ins.data) return "error";
+  const orderId = ins.data.id;
+  existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: quantidade });
+  if (itemRows.length > 0) {
+    await db.from("pedido_itens").insert(itemRows.map((r) => ({ ...r, pedido_id: orderId })));
+  }
+  // Notifica só pedidos NOVOS e RECENTES (evita spam de milhares na recuperação).
+  if (opts.notify && CRON_SECRET) {
+    const ageMs = Date.now() - new Date(submittedAt).getTime();
+    if (ageMs < 2 * 24 * 60 * 60 * 1000) {
+      await fireNewOrderNotification(db, numero, total, clienteId).catch(() => {});
+    }
+  }
+  return "created";
+}
+
+async function fireNewOrderNotification(db: any, numero: number, total: number, clienteId: string) {
+  const { data: cli } = await db.from("clientes").select("nome, empresa, email, telefone").eq("id", clienteId).maybeSingle();
+  await fetch(`${SB_URL}/functions/v1/notify-dispatch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-cron-secret": CRON_SECRET, "apikey": ANON_KEY, "Authorization": `Bearer ${ANON_KEY}` },
+    body: JSON.stringify({
+      event: "new_order",
+      vars: {
+        order_id: numero, total, date: new Date().toISOString(),
+        customer_name: cli?.nome ?? "", customer_company: cli?.empresa ?? "",
+        customer_email: cli?.email ?? "", customer_phone: cli?.telefone ?? "",
+      },
+      customer: { email: cli?.email, phone: cli?.telefone, whatsapp: cli?.telefone },
+    }),
+  });
+}
+
+async function getOrdersCursor(db: any): Promise<number> {
+  const { data } = await db.from("sync_state").select("value").eq("key", "orders_cursor").maybeSingle();
+  return Number(data?.value?.page) || 1;
+}
+async function setOrdersCursor(db: any, page: number) {
+  await db.from("sync_state").upsert({ key: "orders_cursor", value: { page } }, { onConflict: "key" });
+}
+
+// Processa um conjunto de pedidos (carrega lookups + existentes, faz upsert de cada um).
+async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, notify: boolean) {
+  const orderNums = slice.map((it: any) => parseInt((it.order || it).id) || 0).filter((n: number) => n > 0);
+  const { data: existingOrders } = await db.from("pedidos").select("id, numero, status, total, subtotal, quantidade_total").in("numero", orderNums);
+  const existing = new Map<number, ExistingOrder>();
+  for (const e of existingOrders || []) {
+    existing.set(e.numero, { id: e.id, status: e.status, total: Number(e.total), subtotal: Number(e.subtotal), quantidade_total: e.quantidade_total ?? 0 });
+  }
+  const [clientesRes, productsRes] = await Promise.all([
+    db.from("clientes").select("id, email"),
+    db.from("produtos").select("id, sku, nome"),
+  ]);
+  const clienteEmailToId = new Map<string, string>();
+  for (const c of clientesRes.data || []) clienteEmailToId.set((c.email || "").toLowerCase(), c.id);
+  const productSkuToId = new Map<string, string>();
+  const productNameToId = new Map<string, string>();
+  for (const p of productsRes.data || []) {
+    productSkuToId.set((p.sku || "").toLowerCase(), p.id);
+    productNameToId.set((p.nome || "").toLowerCase(), p.id);
+  }
+  let created = 0, updated = 0, skipped = 0, errors = 0;
+  for (const item of slice) {
+    const o = item.order || item;
+    const r = await upsertOrder(db, o, clienteEmailToId, productSkuToId, productNameToId, existing, { skipPre2025, notify });
+    if (r === "created") created++;
+    else if (r === "updated") updated++;
+    else if (r === "skipped") skipped++;
+    else errors++;
+  }
+  return { created, updated, skipped, errors };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // ── Autorização: X-Cron-Secret (pg_cron, sem login) OU admin logado ──────────
+  const viaCron = !!CRON_SECRET && req.headers.get("x-cron-secret") === CRON_SECRET;
+  if (!viaCron) {
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const userClient = createClient(SB_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
+    const { data: { user } } = await userClient.auth.getUser();
+    if (!user) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), { status: 401, headers: jsonHeaders });
+    }
+    const authDb = createClient(SB_URL, SERVICE_KEY);
+    const { data: adminRow } = await authDb.from("user_roles").select("role").eq("user_id", user.id).eq("role", "admin").maybeSingle();
+    if (!adminRow) {
+      return new Response(JSON.stringify({ error: "Only admins can run the sync" }), { status: 403, headers: jsonHeaders });
+    }
   }
 
   try {
@@ -311,7 +514,7 @@ Deno.serve(async (req) => {
     // ========== SYNC PRICE LISTS (incremental) ==========
     if (action === "sync_price_lists") {
       const data = await fetchAllPages("price_lists.json", username, apiKey);
-      const { data: existingPLs } = await adminClient.from("tabelas_preco").select("id, nome");
+      const { data: existingPLs } = await adminClient.from("tabelas_preco").select("id, nome, descricao, ativo");
       const existingMap = new Map<string, any>();
       for (const pl of existingPLs || []) existingMap.set(pl.nome.toLowerCase(), pl);
 
@@ -319,10 +522,13 @@ Deno.serve(async (req) => {
       for (const pl of data) {
         const row = { nome: pl.name || "Unnamed", descricao: pl.description || null, ativo: pl.is_active !== false };
         const existing = existingMap.get(row.nome.toLowerCase());
-        if (existing) { skipped++; }
-        else { await adminClient.from("tabelas_preco").insert(row); synced++; }
+        if (existing) {
+          const changed = existing.descricao !== row.descricao || existing.ativo !== row.ativo;
+          if (changed) { await adminClient.from("tabelas_preco").update(row).eq("id", existing.id); synced++; }
+          else skipped++;
+        } else { await adminClient.from("tabelas_preco").insert(row); synced++; }
       }
-      return new Response(JSON.stringify({ success: true, message: `${synced} created, ${skipped} already exist` }), { headers: jsonHeaders });
+      return new Response(JSON.stringify({ success: true, message: `${synced} updated/created, ${skipped} unchanged` }), { headers: jsonHeaders });
     }
 
     // ========== SYNC SALES REPS (incremental) ==========
@@ -372,11 +578,13 @@ Deno.serve(async (req) => {
       const existingMap = new Map<string, any>();
       for (const c of existingCustomers || []) existingMap.set(c.email.toLowerCase(), c);
 
-      let synced = 0, skipped = 0, errors = 0;
+      let synced = 0, skipped = 0, errors = 0, deactivated = 0;
+      const seenEmails = new Set<string>();
       for (const item of data) {
         const c = item.customer || item;
         const email = c.email || "";
         if (!email) { errors++; continue; }
+        seenEmails.add(email.toLowerCase());
 
         let tabelaPrecoId: string | null = null;
         if (c.pricelist_id && plMap.has(c.pricelist_id)) {
@@ -419,7 +627,15 @@ Deno.serve(async (req) => {
         }
       }
 
-      return new Response(JSON.stringify({ success: true, message: `${synced} updated/created, ${skipped} unchanged, ${errors} errors` }), { headers: jsonHeaders });
+      // Soft-delete: inativa clientes que não vieram mais na lista do B2BWave (nunca apaga).
+      for (const c of existingCustomers || []) {
+        if (!seenEmails.has((c.email || "").toLowerCase()) && c.status !== "inativo") {
+          const r = await adminClient.from("clientes").update({ status: "inativo" }).eq("id", c.id);
+          if (!r.error) deactivated++;
+        }
+      }
+
+      return new Response(JSON.stringify({ success: true, message: `${synced} updated/created, ${skipped} unchanged, ${deactivated} deactivated, ${errors} errors` }), { headers: jsonHeaders });
     }
 
     // ========== SYNC ORDERS - INCREMENTAL (only new orders, skip pre-2025) ==========
@@ -462,126 +678,24 @@ Deno.serve(async (req) => {
         }), { headers: jsonHeaders });
       }
 
-      // Get existing order numbers to skip them
-      const orderNums = slice.map((item: any) => parseInt((item.order || item).id) || 0).filter((n: number) => n > 0);
-      const { data: existingOrders } = await adminClient.from("pedidos").select("numero").in("numero", orderNums);
-      const existingNumeros = new Set((existingOrders || []).map((o: any) => o.numero));
-
-      // Pre-load lookups
-      const [clientesRes, productsRes] = await Promise.all([
-        adminClient.from("clientes").select("id, email"),
-        adminClient.from("produtos").select("id, sku, nome"),
-      ]);
-      const clienteEmailToId = new Map<string, string>();
-      for (const c of clientesRes.data || []) clienteEmailToId.set(c.email.toLowerCase(), c.id);
-      const productSkuToId = new Map<string, string>();
-      const productNameToId = new Map<string, string>();
-      for (const p of productsRes.data || []) {
-        productSkuToId.set(p.sku.toLowerCase(), p.id);
-        productNameToId.set(p.nome.toLowerCase(), p.id);
-      }
-
-      console.log(`[Sync] Page ${pageNum}, offset ${offset}: processing ${slice.length} orders (${existingNumeros.size} already exist)`);
-      let syncedOrders = 0, syncedItems = 0, orderErrors = 0, skippedOrders = 0;
-
-      for (const item of slice) {
-        const o = item.order || item;
-        const numero = parseInt(o.id) || 0;
-
-        // Skip pre-2025 orders
-        const submittedDate = o.submitted_at || o.created_at || "";
-        if (submittedDate && new Date(submittedDate).getFullYear() < 2025) {
-          skippedOrders++;
-          continue;
-        }
-
-        // Skip if already exists
-        if (existingNumeros.has(numero)) {
-          skippedOrders++;
-          continue;
-        }
-
-        const customerEmail = (o.customer_email || "").toLowerCase();
-        const clienteId = clienteEmailToId.get(customerEmail);
-        if (!clienteId) { orderErrors++; continue; }
-
-        const b2bStatus = (o.status_order_name || "submitted").toLowerCase();
-        const status = statusMap[b2bStatus] || "recebido";
-        const submittedAt = o.submitted_at ? new Date(o.submitted_at).toISOString() : new Date().toISOString();
-        const deliveryDate = o.request_delivery_at ? new Date(o.request_delivery_at).toISOString() : null;
-
-        const subtotal = parseFloat(o.total_before_vat || o.subtotal || o.total || "0") || 0;
-        const total = parseFloat(o.gross_total || o.total_after_vat || o.total || o.total_before_vat || "0") || subtotal;
-        const orderRow: any = {
-          numero, cliente_id: clienteId, status,
-          subtotal,
-          total,
-          observacoes: o.comments_customer || o.customer_comments || null,
-          admin_notes: o.admin_notes || o.internal_notes || null,
-          po_number: o.customer_order_reference || o.purchase_order || o.po_number || null,
-          delivery_date: deliveryDate,
-          quantidade_total: parseInt(o.total_quantity || "0") || 0,
-          shipping_option_id: null,
-          payment_option_id: null,
-          created_at: submittedAt,
-        };
-
-        const r = await adminClient.from("pedidos").insert(orderRow).select("id").single();
-        if (r.error) { orderErrors++; continue; }
-        const orderId = r.data.id;
-        syncedOrders++;
-
-        // Items
-        const orderProducts = o.order_products || [];
-        const itemRows: any[] = [];
-        for (const opItem of orderProducts) {
-          const op = opItem.order_product || opItem;
-          const productCode = (op.product_code || "").toLowerCase();
-          const productName = (op.product_name || "").toLowerCase();
-          let produtoId = productSkuToId.get(productCode) || productNameToId.get(productName);
-          if (!produtoId) {
-            for (const [sku, id] of productSkuToId) {
-              if (sku.startsWith(productCode) || productCode.startsWith(sku)) { produtoId = id; break; }
-            }
-          }
-          if (!produtoId) continue;
-          const qty = Math.max(parseInt(op.quantity || op.qty || "1") || 1, 1);
-          // B2BWave order item price fields (try multiple)
-          const unitPrice = parseFloat(
-            op.price || op.unit_price || op.price_per_unit || op.wholesale_price || "0"
-          ) || 0;
-          const itemSubtotal = parseFloat(
-            op.final_price || op.total_price || op.total_before_vat || op.line_total || "0"
-          ) || (unitPrice * qty);
-          itemRows.push({
-            pedido_id: orderId, produto_id: produtoId,
-            nome_produto: op.product_name || op.name || "Unknown",
-            sku: op.product_code || op.sku || "N/A",
-            quantidade: qty,
-            preco_unitario: unitPrice,
-            subtotal: itemSubtotal,
-          });
-        }
-        if (itemRows.length > 0) {
-          await adminClient.from("pedido_itens").insert(itemRows);
-          syncedItems += itemRows.length;
-        }
-      }
+      // Upsert (cria novos, ATUALIZA status/total/qtd dos existentes). skipPre2025=true.
+      const { created, updated, skipped, errors } = await processOrderSlice(adminClient, slice, true, false);
 
       const moreInThisPage = offset + limit < data.length;
       const morePages = data.length >= 500;
-      
+
       return new Response(JSON.stringify({
         success: true,
         hasMore: moreInThisPage || morePages,
         nextPage: moreInThisPage ? pageNum : pageNum + 1,
         nextOffset: moreInThisPage ? offset + limit : 0,
         pageSize: data.length,
-        synced: syncedOrders,
-        skipped: skippedOrders,
-        items: syncedItems,
-        errors: orderErrors,
-        message: `Page ${pageNum} offset ${offset}: ${syncedOrders} new, ${skippedOrders} skipped, ${orderErrors} errors`
+        synced: created,
+        updated,
+        skipped,
+        items: 0,
+        errors,
+        message: `Page ${pageNum} offset ${offset}: ${created} new, ${updated} updated, ${skipped} skipped, ${errors} errors`
       }), { headers: jsonHeaders });
     }
 
@@ -605,118 +719,61 @@ Deno.serve(async (req) => {
         }), { headers: jsonHeaders });
       }
 
-      // Get existing order numbers to skip them
-      const orderNums = slice.map((item: any) => parseInt((item.order || item).id) || 0).filter((n: number) => n > 0);
-      const { data: existingOrders } = await adminClient.from("pedidos").select("numero").in("numero", orderNums);
-      const existingNumeros = new Set((existingOrders || []).map((o: any) => o.numero));
-
-      // Pre-load lookups
-      const [clientesRes, productsRes] = await Promise.all([
-        adminClient.from("clientes").select("id, email"),
-        adminClient.from("produtos").select("id, sku, nome"),
-      ]);
-      const clienteEmailToId = new Map<string, string>();
-      for (const c of clientesRes.data || []) clienteEmailToId.set(c.email.toLowerCase(), c.id);
-      const productSkuToId = new Map<string, string>();
-      const productNameToId = new Map<string, string>();
-      for (const p of productsRes.data || []) {
-        productSkuToId.set(p.sku.toLowerCase(), p.id);
-        productNameToId.set(p.nome.toLowerCase(), p.id);
-      }
-
-      console.log(`[Sync ALL] Page ${pageNum}, offset ${offset}: processing ${slice.length} orders (${existingNumeros.size} already exist)`);
-      let syncedOrders = 0, syncedItems = 0, orderErrors = 0, skippedOrders = 0;
-
-      for (const item of slice) {
-        const o = item.order || item;
-        const numero = parseInt(o.id) || 0;
-
-        // Skip if already exists
-        if (existingNumeros.has(numero)) {
-          skippedOrders++;
-          continue;
-        }
-
-        const customerEmail = (o.customer_email || "").toLowerCase();
-        const clienteId = clienteEmailToId.get(customerEmail);
-        if (!clienteId) { orderErrors++; continue; }
-
-        const b2bStatus = (o.status_order_name || "submitted").toLowerCase();
-        const status = statusMap[b2bStatus] || "recebido";
-        const submittedAt = o.submitted_at ? new Date(o.submitted_at).toISOString() : (o.created_at ? new Date(o.created_at).toISOString() : new Date().toISOString());
-        const deliveryDate = o.request_delivery_at ? new Date(o.request_delivery_at).toISOString() : null;
-
-        const subtotal = parseFloat(o.total_before_vat || o.subtotal || o.total || "0") || 0;
-        const total = parseFloat(o.gross_total || o.total_after_vat || o.total || o.total_before_vat || "0") || subtotal;
-        const orderRow: any = {
-          numero, cliente_id: clienteId, status,
-          subtotal,
-          total,
-          observacoes: o.comments_customer || o.customer_comments || null,
-          admin_notes: o.admin_notes || o.internal_notes || null,
-          po_number: o.customer_order_reference || o.purchase_order || o.po_number || null,
-          delivery_date: deliveryDate,
-          quantidade_total: parseInt(o.total_quantity || "0") || 0,
-          shipping_option_id: null,
-          payment_option_id: null,
-          created_at: submittedAt,
-        };
-
-        const r = await adminClient.from("pedidos").insert(orderRow).select("id").single();
-        if (r.error) { console.error(`[Sync ALL] Order ${numero} insert error:`, r.error.message); orderErrors++; continue; }
-        const orderId = r.data.id;
-        syncedOrders++;
-
-        // Items
-        const orderProducts = o.order_products || [];
-        const itemRows: any[] = [];
-        for (const opItem of orderProducts) {
-          const op = opItem.order_product || opItem;
-          const productCode = (op.product_code || "").toLowerCase();
-          const productName = (op.product_name || "").toLowerCase();
-          let produtoId = productSkuToId.get(productCode) || productNameToId.get(productName);
-          if (!produtoId) {
-            for (const [sku, id] of productSkuToId) {
-              if (sku.startsWith(productCode) || productCode.startsWith(sku)) { produtoId = id; break; }
-            }
-          }
-          if (!produtoId) continue;
-          const qty = Math.max(parseInt(op.quantity || op.qty || "1") || 1, 1);
-          const unitPrice = parseFloat(
-            op.price || op.unit_price || op.price_per_unit || op.wholesale_price || "0"
-          ) || 0;
-          const itemSubtotal = parseFloat(
-            op.final_price || op.total_price || op.total_before_vat || op.line_total || "0"
-          ) || (unitPrice * qty);
-          itemRows.push({
-            pedido_id: orderId, produto_id: produtoId,
-            nome_produto: op.product_name || op.name || "Unknown",
-            sku: op.product_code || op.sku || "N/A",
-            quantidade: qty,
-            preco_unitario: unitPrice,
-            subtotal: itemSubtotal,
-          });
-        }
-        if (itemRows.length > 0) {
-          await adminClient.from("pedido_itens").insert(itemRows);
-          syncedItems += itemRows.length;
-        }
-      }
+      // Upsert (cria novos, ATUALIZA existentes). Histórico completo (sem filtro de data).
+      const { created, updated, skipped, errors } = await processOrderSlice(adminClient, slice, false, false);
 
       const moreInThisPage = offset + limit < data.length;
       const morePages = data.length >= 500;
-      
+
       return new Response(JSON.stringify({
         success: true,
         hasMore: moreInThisPage || morePages,
         nextPage: moreInThisPage ? pageNum : pageNum + 1,
         nextOffset: moreInThisPage ? offset + limit : 0,
         pageSize: data.length,
-        synced: syncedOrders,
-        skipped: skippedOrders,
-        items: syncedItems,
-        errors: orderErrors,
-        message: `Page ${pageNum} offset ${offset}: ${syncedOrders} new, ${skippedOrders} skipped, ${orderErrors} errors`
+        synced: created,
+        updated,
+        skipped,
+        items: 0,
+        errors,
+        message: `Page ${pageNum} offset ${offset}: ${created} new, ${updated} updated, ${skipped} skipped, ${errors} errors`
+      }), { headers: jsonHeaders });
+    }
+
+    // ========== CRON TICK: incremental automático (sem aba aberta) ==========
+    // Chamado pelo pg_cron com header X-Cron-Secret. Caminha pelas páginas de
+    // orders.json usando um cursor persistido em sync_state, fazendo upsert.
+    if (action === "cron_orders") {
+      const PAGES_PER_TICK = body.pages || 6;
+      let page = await getOrdersCursor(adminClient);
+      let created = 0, updated = 0, skipped = 0, errors = 0, reachedEnd = false;
+
+      for (let i = 0; i < PAGES_PER_TICK; i++) {
+        let data: any;
+        try {
+          data = await fetchPage("orders.json", username, apiKey, page);
+        } catch (e) {
+          errors++;
+          break; // erro de rede não aborta o cron; retoma do mesmo cursor no próximo tick
+        }
+        if (!Array.isArray(data) || data.length === 0) { reachedEnd = true; break; }
+
+        const r = await processOrderSlice(adminClient, data, true, true);
+        created += r.created; updated += r.updated; skipped += r.skipped; errors += r.errors;
+
+        if (data.length < 500) { reachedEnd = true; break; } // última página → reinicia ciclo
+        page++;
+      }
+
+      // `page` já aponta para a próxima página não processada (foi incrementado após
+      // cada página concluída); se chegou ao fim, reinicia o ciclo no 1.
+      const nextCursor = reachedEnd ? 1 : page;
+      await setOrdersCursor(adminClient, nextCursor);
+
+      return new Response(JSON.stringify({
+        success: true, created, updated, skipped, errors,
+        nextCursor, wrapped: reachedEnd,
+        message: `cron_orders: ${created} new, ${updated} updated, ${skipped} unchanged, ${errors} errors (next cursor ${nextCursor})`
       }), { headers: jsonHeaders });
     }
 
@@ -738,22 +795,29 @@ Deno.serve(async (req) => {
         try {
           const b2bData = await b2bwaveFetch(`orders/${pedido.numero}.json`, username, apiKey);
           const o = b2bData.order || b2bData;
-          const subtotal = parseFloat(o.total_before_vat || o.subtotal || o.total || "0") || 0;
-          const total = parseFloat(o.gross_total || o.total_after_vat || o.total || "0") || subtotal;
+          // Mapeamento robusto + fallback pela soma dos itens (mesmo do upsertOrder).
+          const { qty: itemsQty, sum: itemsSum } = buildOrderItems(o.order_products || [], new Map(), new Map());
+          let subtotal = pickNum(o, ["total_before_vat", "subtotal", "net_total", "total"]);
+          let total = pickNum(o, ["gross_total", "total_after_vat", "total", "total_before_vat", "grand_total", "order_total", "amount"]);
+          if (subtotal <= 0) subtotal = itemsSum;
+          if (total <= 0) total = itemsSum || subtotal;
+          let quantidade = parseInt(o.total_quantity || "0") || 0;
+          if (quantidade <= 0) quantidade = itemsQty;
 
           if (total > 0 || subtotal > 0) {
-            await adminClient.from("pedidos").update({ subtotal, total }).eq("id", pedido.id);
+            await adminClient.from("pedidos").update({ subtotal, total, quantidade_total: quantidade }).eq("id", pedido.id);
 
             // Also fix items prices
             const orderProducts = o.order_products || [];
             for (const opItem of orderProducts) {
               const op = opItem.order_product || opItem;
-              const unitPrice = parseFloat(op.price || op.unit_price || op.price_per_unit || "0") || 0;
-              const qty = Math.max(parseInt(op.quantity || "1") || 1, 1);
-              const itemSubtotal = parseFloat(op.final_price || op.total_price || "0") || (unitPrice * qty);
-              if (unitPrice > 0) {
+              const qty = Math.max(parseInt(op.quantity || op.qty || "1") || 1, 1);
+              const unitPrice = pickNum(op, ["price", "unit_price", "price_per_unit", "wholesale_price", "product_price", "final_unit_price"]);
+              let itemSubtotal = pickNum(op, ["final_price", "total_price", "total_before_vat", "line_total", "subtotal", "total"]);
+              if (itemSubtotal <= 0) itemSubtotal = unitPrice * qty;
+              if (unitPrice > 0 || itemSubtotal > 0) {
                 await adminClient.from("pedido_itens")
-                  .update({ preco_unitario: unitPrice, subtotal: itemSubtotal })
+                  .update({ preco_unitario: unitPrice || (qty > 0 ? itemSubtotal / qty : 0), subtotal: itemSubtotal })
                   .eq("pedido_id", pedido.id)
                   .eq("sku", op.product_code || "");
               }

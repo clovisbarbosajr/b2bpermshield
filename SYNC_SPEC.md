@@ -151,3 +151,30 @@ Status de pedido: mapeado de `status_order_name` do B2BWave via `statusMap` → 
 - **Nunca** commitar chaves reais nem colá-las no chat. Usar Cloud Secrets / Edge Function Secrets.
 - Sync é **mão única** B2BWave → app. Não escrever de volta no B2BWave.
 - Não rodar nada em produção sem o dono mandar.
+
+---
+
+## 7. ✅ IMPLEMENTADO (2026-06-18) — pronto pra deploy
+
+**`supabase/functions/b2bwave-sync/index.ts`:**
+- **Auth:** agora exige `X-Cron-Secret` (pg_cron) OU admin logado (antes não tinha auth).
+- **Pedidos = UPSERT** (não "pula se existe"): cria novos e **atualiza** status/total/subtotal/quantidade/datas dos existentes → reflete **cancelamento, edição e mudança de status**. Nunca apaga (cancelado = status). Só escreve se mudou.
+- **Total $0.00 corrigido:** mapeamento robusto (`pickNum` tenta vários campos) **+ fallback pela soma dos itens** (`buildOrderItems` soma todos os order_products, mesmo sem produto local). Vale pra `sync_orders_page`, `sync_orders_all` e `fix_order_prices`. Validar 2348/2347 após rodar.
+- **Itens re-sincronizados** quando um pedido muda (delete+insert).
+- **Clientes:** soft-delete — quem some do B2BWave vira `status='inativo'` (nunca apaga).
+- **Tabelas de preço:** agora atualizam nome/descrição/ativo (antes só criavam).
+- **Notificação inline:** pedido NOVO e RECENTE (<2 dias) dispara `notify-dispatch` (`new_order`) — assim pedidos vindos do B2BWave também notificam por WhatsApp/email. Recuperação histórica NÃO notifica (guarda de 2 dias evita spam).
+- **`cron_orders` (nova action):** caminha pelas páginas via cursor em `sync_state`, faz upsert, erro de rede não aborta (retoma do cursor), reinicia o ciclo no fim.
+
+**`supabase/migrations/20260618000002_b2bwave_sync_cron.sql`:**
+- Tabela `sync_state` (cursor) + índice em `pedidos.numero`.
+- `pg_cron` + `pg_net`; 4 jobs lendo segredos do **Vault** (nada no Git):
+  `cron_orders` (15 min), `sync_customers` (15 min), `sync_products` (1h), `sync_price_lists` (1h).
+- Tela manual continua como "forçar agora".
+
+### PASSOS DE DEPLOY (você / Lovable)
+1. **Deploy** da função `b2bwave-sync` + **aplicar** a migration `20260618000002`.
+2. No Supabase: habilitar extensões **pg_cron** e **pg_net**; adicionar ao **Vault** os secrets `CRON_SECRET` (mesmo do Edge Function) e `PROJECT_ANON_KEY`.
+3. **Recuperação maio/junho + $0.00:** rodar UMA vez **Settings → B2B Wave Sync → "Sync All Orders"** (agora com upsert, traz maio/junho e corrige os $0.00). Opcional: clicar "Fix Order Prices ($0.00)" pros que ficarem.
+4. Conferir 2348 = $2.881,30 e 2347 = $2.299,13.
+> Não rodei nada em produção (sem credenciais e sem sua autorização) — está tudo no código, pronto.
