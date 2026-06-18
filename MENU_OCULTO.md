@@ -24,11 +24,12 @@
 | Tools → **Bulk Update Orders** | `/admin/tools/bulk-update-orders` | `tools/BulkUpdateOrders.tsx` |
 | Tools → **Imports Log** | `/admin/tools/imports-log` | `tools/ImportsLog.tsx` |
 | Tools → **Exports Log** | `/admin/tools/exports-log` | `tools/ExportsLog.tsx` |
+| Products → **Import** | `/admin/products/import` | `admin/ProductImport.tsx` |
+| Products → **Export** | `/admin/products/export` | `admin/ProductExport.tsx` |
 
 ## MANTIDOS visíveis (não estavam na sua lista — confirme se quer ocultar também)
 - Tools → **PDF Catalog** (`/admin/tools/pdf-catalog`)
 - Tools → **Import Product Discounts** (`/admin/tools/import-product-discounts`)
-- Products → **Import** (`/admin/products/import`) e **Export** (`/admin/products/export`)
 
 ## Como reativar
 1. Abra `src/components/layouts/AdminLayout.tsx`.

@@ -52,7 +52,9 @@ const isGroup = (entry: NavEntry): entry is NavGroup => "children" in entry;
 //   Tools → Bulk Update Orders      (/admin/tools/bulk-update-orders)
 //   Tools → Imports Log             (/admin/tools/imports-log)
 //   Tools → Exports Log             (/admin/tools/exports-log)
-// MANTIDOS visíveis (não estavam na lista): Tools → PDF Catalog, Import Product Discounts.
+//   Products → Import               (/admin/products/import)
+//   Products → Export               (/admin/products/export)
+// MANTIDOS visíveis: Tools → PDF Catalog, Import Product Discounts.
 // ============================================================================
 const adminNavEntries: NavEntry[] = [
   { to: "/admin", icon: Home, label: "Dashboard" },
@@ -65,8 +67,9 @@ const adminNavEntries: NavEntry[] = [
       { to: "/admin/price-lists", icon: DollarSign, label: "Price Lists" },
       { to: "/admin/options", icon: SlidersHorizontal, label: "Options" },
       { to: "/admin/brands", icon: Tag, label: "Brands" },
-      { to: "/admin/products/import", icon: Upload, label: "Import" },
-      { to: "/admin/products/export", icon: Download, label: "Export" },
+      // OCULTOS (rotas/telas intactas — ver MENU_OCULTO.md):
+      // { to: "/admin/products/import", icon: Upload, label: "Import" },
+      // { to: "/admin/products/export", icon: Download, label: "Export" },
     ],
   },
   { to: "/admin/product-categories", icon: FolderTree, label: "Product Categories" },
@@ -158,8 +161,9 @@ function buildStaffNav(hasPermission: (key: string) => boolean): NavEntry[] {
       label: "Products", icon: Package,
       children: [
         { to: "/admin/products", icon: Package, label: "Products" },
-        { to: "/admin/products/import", icon: Upload, label: "Import" },
-        { to: "/admin/products/export", icon: Download, label: "Export" },
+        // OCULTOS (rotas/telas intactas — ver MENU_OCULTO.md):
+        // { to: "/admin/products/import", icon: Upload, label: "Import" },
+        // { to: "/admin/products/export", icon: Download, label: "Export" },
       ],
     });
     entries.push({ to: "/admin/product-categories", icon: FolderTree, label: "Product Categories" });
