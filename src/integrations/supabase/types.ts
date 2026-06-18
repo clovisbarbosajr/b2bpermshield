@@ -2345,6 +2345,39 @@ export type Database = {
           },
         ]
       }
+      sync_log: {
+        Row: {
+          action: string
+          created_at: string
+          created_count: number
+          errors_count: number
+          id: string
+          samples: Json
+          skipped_count: number
+          updated_count: number
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          created_count?: number
+          errors_count?: number
+          id?: string
+          samples?: Json
+          skipped_count?: number
+          updated_count?: number
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          created_count?: number
+          errors_count?: number
+          id?: string
+          samples?: Json
+          skipped_count?: number
+          updated_count?: number
+        }
+        Relationships: []
+      }
       sync_state: {
         Row: {
           key: string
