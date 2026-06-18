@@ -125,7 +125,7 @@ const B2BWaveSync = () => {
       setOrderProgress(`Sincronizando… (lote ${tick}) — retoma automaticamente de onde parou`);
       try {
         const { data, error } = await supabase.functions.invoke("b2bwave-sync", {
-          body: { action: "cron_orders", pages: 4 },
+          body: { action: "cron_orders", pages: 2 },
         });
         if (error) throw error;
 
@@ -137,7 +137,9 @@ const B2BWaveSync = () => {
         setOrderTotalUpdated(totalUpdated);
         setOrderTotalSkipped(totalSkipped);
         setOrderTotalErrors(totalErrors);
-        setOrderProgress(`Lote ${tick}: +${data.created || 0} novos, ${data.updated || 0} atualizados — Total: ${totalSynced} novos, ${totalUpdated} atualizados (cursor ${data.nextCursor})`);
+        // ~65 páginas no histórico (≈32k pedidos / 500). Cursor = página atual (mais antigos→novos).
+        const estPct = Math.min(99, Math.round(((data.nextCursor || 1) / 65) * 100));
+        setOrderProgress(`Página ${data.nextCursor} de ~65 (~${estPct}%) — ${totalSynced} novos · ${totalUpdated} atualizados · ${totalErrors} erros · (maio/junho estão nas últimas páginas)`);
 
         if (data.wrapped) {
           setOrderProgress(`✅ Ciclo completo! ${totalSynced} novos, ${totalUpdated} atualizados, ${totalErrors} erros. O cron mantém tudo atualizado sozinho a partir daqui.`);
