@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+﻿import { useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const TEMPLATE_HEADERS = ["name", "parent_name", "description", "ordem"];
-const TEMPLATE_ROW = ["Impermeabilizantes", "Produtos Químicos", "Linha completa de impermeabilizantes", "1"];
+const TEMPLATE_ROW = ["Impermeabilizantes", "Produtos QuÃ­micos", "Linha completa de impermeabilizantes", "1"];
 
 function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split(/\r?\n/);
@@ -58,7 +58,7 @@ const ImportCategories = () => {
       const name = r["name"]?.trim();
 
       if (!name) {
-        res.push({ row: i + 2, name: "—", status: "error", message: "Missing name" });
+        res.push({ row: i + 2, name: "â€”", status: "error", message: "Missing name" });
         continue;
       }
 
@@ -99,7 +99,7 @@ const ImportCategories = () => {
     const okCat = res.filter((r) => r.status === "ok").length;
     const errCat = res.filter((r) => r.status === "error").length;
     toast.success(`Imported ${okCat} of ${rows.length} categories`);
-    supabase.from("import_logs").insert({ tipo: "categories", arquivo: file.name, registros: rows.length, erros: errCat, status: errCat === 0 ? "success" : "partial" } as any).then(() => {});
+    supabase.from("import_logs").insert({ tipo: "categories", arquivo_nome: file.name, registros_total: rows.length, registros_erro: errCat, registros_sucesso: rows.length - errCat, status: errCat === 0 ? "success" : "partial" } as any).then(() => {});
   };
 
   return (

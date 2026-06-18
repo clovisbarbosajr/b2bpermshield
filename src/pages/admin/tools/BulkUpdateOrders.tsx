@@ -76,7 +76,7 @@ const BulkUpdateOrders = () => {
         continue;
       }
 
-      const { error, count } = await supabase
+      const { data: updated, error } = await supabase
         .from("pedidos")
         .update(updatePayload as any)
         .eq("numero", orderNumber)
@@ -84,7 +84,7 @@ const BulkUpdateOrders = () => {
 
       if (error) {
         res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: error.message });
-      } else if (count === 0) {
+      } else if (!updated || updated.length === 0) {
         res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: `Order #${orderNumber} not found` });
       } else {
         res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "ok", message: "Updated" });

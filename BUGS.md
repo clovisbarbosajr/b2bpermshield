@@ -2,6 +2,54 @@
 
 Documento vivo. Status: ⬜ a fazer · 🔧 em andamento · ✅ feito · ⏭️ manual (fora do código).
 Detalhe técnico de cada item nos `REVIEW_PARTE_*.md`. Ordem = severidade.
+Última atualização: **2026-06-18**.
+
+---
+
+## ✅ FEITOS (corrigidos no código + `npm run build` ✅)
+
+| ID | Item | Onde |
+|----|------|------|
+| A1 | Remove leitura `anon` de clientes/pedidos/itens/preços | migration `20260618000000` |
+| A2 | `configuracoes` restrito a staff + RPC `get_public_config()` | migration + Checkout/PortalLayout |
+| A3 | Remove backdoor `admin-reprovision-user` | função deletada |
+| A4 | Stripe cobra `pedidos.total` (não confia no cliente) | `stripe-checkout` |
+| A5 | API token deixa de vazar (via A2) | — |
+| B1 | XSS confirmado latente (sem injeção no DOM) | — |
+| B3 | RLS de sub-login (contatos veem/criam pedidos da empresa) | migration `20260618000001` |
+| C1 | `ProductImport` mockup → ponteiro honesto | ProductImport.tsx |
+| C2 | `ProductStatusRules` falso → tela honesta | ProductStatusRules.tsx |
+| C3 | Abas falsas do CustomerEdit marcadas "display-only" | CustomerEdit.tsx |
+| C4 | Filtros Brand/Privacy/Backorder de Produtos funcionam | Produtos.tsx |
+| C5 | Export do admin Pedidos ligado | Pedidos.tsx |
+| C6 | Export do pedido (portal) ligado | PedidoDetalhe.tsx |
+| C7 | Botão PDF Catalog morto removido | Catalogo.tsx |
+| C8 | "Stripe Connect" fake → aviso honesto | PaymentOptions.tsx |
+| C9 | "Send Test Email" consertado (`type: raw`) | Configuracoes.tsx |
+| C10 | Links mortos `href="#"` removidos | Profile.tsx |
+| C11 | Botão Download duplicado removido | ExportsLog.tsx |
+| D1 | `import_logs` colunas alinhadas (histórico volta) | 7 ferramentas tools/ |
+| D2 | Confirmação no delete (Coupons + SalesTax) | Coupons/SalesTax |
+| D3 | `BulkUpdateOrders` detecta pedido inexistente | BulkUpdateOrders.tsx |
+| D4 | Dashboard "Total Orders" correto | portal/Dashboard.tsx |
+| D5 | ProductEdit timestamps reais | ProductEdit.tsx |
+| D6 | Categorias mostra inativas | Categorias.tsx |
+| D7 | Remove `Login.tsx` (backdoor demo) | App.tsx |
+| D8 | Senha mínima 6 → 8 | Cadastro/ResetPassword |
+
+## ⏳ PENDENTES
+
+| ID | Item | Tipo / por quê |
+|----|------|----------------|
+| A6 | **Rotacionar chaves expostas** (Stripe/SMTP/api_token) | ⏭️ MANUAL (dashboards) — **fazer já** |
+| — | Aplicar 2 migrations + redeploy edge functions | ⏭️ DEPLOY (Lovable/Supabase) |
+| B2 | Hash de `api_keys`/`oauth client_secret` | follow-up (admin-only, baixo risco) |
+| B4 | Privacy groups de produto server-side (RLS/RPC) | follow-up (decisão de arquitetura) |
+| B5 | Teste de webhook faz `fetch` arbitrário | follow-up (admin-only) |
+| B6 | Policies p/ `manager`/`warehouse` (escrita) | follow-up (decisão por papel) |
+| C12 | `PdfCatalog`: filtro "Customer"/"Select products" sem efeito | minor (tool interno; catálogo gera ok) |
+| C3* | Edição inline de endereço no CustomerEdit não persiste | minor (Add/Delete funcionam) |
+| D5* | `saveSubData` (ProductEdit) não-transacional | robustez (precisa RPC/transação) |
 
 ---
 
@@ -37,11 +85,11 @@ Detalhe técnico de cada item nos `REVIEW_PARTE_*.md`. Ordem = severidade.
 - [ ] **C12** ⬜ — `PdfCatalog.tsx`: "Select products"/"Customer" órfãos (pendente — minor).
 
 ## BLOCO D — Bugs funcionais menores
-- [ ] **D1 / 5-1** ⬜ — `import_logs`/`export_logs` colunas (pendente — precisa olhar schema).
-- [~] **D2** parcial — `Coupons` ✅ (confirmação add); `SalesTax` (4 deletes) ⬜ pendente.
-- [ ] **D3** ⬜ — `BulkUpdateOrders` count nulo (pendente).
+- [x] **D1 / 5-1** ✅ — 7 ferramentas de import agora gravam `arquivo_nome`/`registros_total`/`registros_sucesso`/`registros_erro` (schema correto) → histórico aparece.
+- [x] **D2** ✅ — confirmação no delete: `Coupons` + `SalesTax` (4 deletes).
+- [x] **D3** ✅ — `BulkUpdateOrders`: usa `data.length` em vez de `count` nulo p/ detectar pedido inexistente.
 - [x] **D4** ✅ — `portal/Dashboard.tsx`: "Total Orders" usa `all.length`.
-- [ ] **D5** ⬜ — `ProductEdit` timestamps/saveSubData (pendente).
+- [x] **D5** ✅ (parcial) — `ProductEdit`: timestamps "Created/Updated" reais. (`saveSubData` não-transacional: nota pendente — robustez.)
 - [x] **D6** ✅ — `Categorias.tsx`: lista agora mostra inativas.
 - [x] **D7 / 1-1** ✅ — `Login.tsx` órfão (com backdoor demo) removido + import no App.tsx. (`RecuperarSenha` órfã: deixada, sem link.)
 - [x] **D8** ✅ — senha mínima 6 → 8 (`Cadastro`, `ResetPassword`).

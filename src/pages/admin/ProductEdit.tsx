@@ -46,6 +46,7 @@ const ProductEdit = () => {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState("product");
+  const [meta, setMeta] = useState<{ created_at?: string; updated_at?: string }>({});
 
   // Lookup data
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -124,6 +125,8 @@ const ProductEdit = () => {
       promover_destaque: (data as any).promover_destaque ?? false,
       mostrar_ofertas: (data as any).mostrar_ofertas ?? "nunca",
     });
+
+    setMeta({ created_at: (data as any).created_at, updated_at: (data as any).updated_at });
 
     // Fetch sub-data in parallel
     const [imgs, fls, disc, cp, rel, opts, vars, sr, acc, pl] = await Promise.all([
@@ -313,7 +316,7 @@ const ProductEdit = () => {
             </h2>
             {!isNew && (
               <p className="text-xs text-muted-foreground">
-                Created: {new Date().toLocaleDateString()} · Last update: {new Date().toLocaleDateString()}
+                Created: {meta.created_at ? new Date(meta.created_at).toLocaleDateString() : "—"} · Last update: {meta.updated_at ? new Date(meta.updated_at).toLocaleDateString() : "—"}
               </p>
             )}
           </div>

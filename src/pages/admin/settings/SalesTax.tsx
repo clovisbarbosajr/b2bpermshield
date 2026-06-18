@@ -141,6 +141,7 @@ const SalesTax = () => {
                       setRuleDialog(true);
                     }}><Pencil className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
+                      if (!confirm("Delete this tax rule?")) return;
                       await supabase.from("tax_rules").delete().eq("id", r.id); fetchAll();
                     }}><Trash2 className="h-4 w-4" /></Button>
                   </TableCell>
@@ -174,6 +175,7 @@ const SalesTax = () => {
                         setEditingClass(c); setClassForm({ nome: c.nome, is_default: c.is_default ?? false }); setClassDialog(true);
                       }}><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
+                        if (!confirm("Delete this tax class?")) return;
                         await supabase.from("tax_classes").delete().eq("id", c.id); fetchAll();
                       }}><Trash2 className="h-4 w-4" /></Button>
                     </TableCell>
@@ -203,6 +205,7 @@ const SalesTax = () => {
                         setEditingGroup(g); setGroupForm({ nome: g.nome, is_default: g.is_default ?? false }); setGroupDialog(true);
                       }}><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
+                        if (!confirm("Delete this customer group?")) return;
                         await supabase.from("tax_customer_groups").delete().eq("id", g.id); fetchAll();
                       }}><Trash2 className="h-4 w-4" /></Button>
                     </TableCell>
@@ -233,6 +236,7 @@ const SalesTax = () => {
                         setEditingRate(r); setRateForm({ nome: r.nome || "", estado: r.estado || r.regiao, percentual: Number(r.percentual), ordem: r.ordem ?? 0 }); setRateDialog(true);
                       }}><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
+                        if (!confirm("Delete this tax rate?")) return;
                         await supabase.from("tax_rates").delete().eq("id", r.id); fetchAll();
                       }}><Trash2 className="h-4 w-4" /></Button>
                     </TableCell>

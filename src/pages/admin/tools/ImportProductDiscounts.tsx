@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+﻿import { useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -48,12 +48,12 @@ const ImportProductDiscounts = () => {
     setImporting(true);
     const res: Result[] = [];
 
-    // Fetch produtos sku→id map
+    // Fetch produtos skuâ†’id map
     const { data: produtos } = await supabase.from("produtos").select("id, sku");
     const skuMap: Record<string, string> = {};
     (produtos ?? []).forEach((p: any) => { if (p.sku) skuMap[p.sku] = p.id; });
 
-    // Fetch tabelas_preco nome→id map
+    // Fetch tabelas_preco nomeâ†’id map
     const { data: tabelas } = await supabase.from("tabelas_preco").select("id, nome");
     const tabelaMap: Record<string, string> = {};
     (tabelas ?? []).forEach((t: any) => { if (t.nome) tabelaMap[t.nome.toLowerCase()] = t.id; });
@@ -63,7 +63,7 @@ const ImportProductDiscounts = () => {
       const sku = r["product_sku"]?.trim();
 
       if (!sku) {
-        res.push({ row: i + 2, sku: "—", status: "error", message: "Missing product_sku" });
+        res.push({ row: i + 2, sku: "â€”", status: "error", message: "Missing product_sku" });
         continue;
       }
 
@@ -115,7 +115,7 @@ const ImportProductDiscounts = () => {
     const okDis = res.filter((r) => r.status === "ok").length;
     const errDis = res.filter((r) => r.status === "error").length;
     toast.success(`Imported ${okDis} of ${rows.length} discounts`);
-    supabase.from("import_logs").insert({ tipo: "product_discounts", arquivo: file.name, registros: rows.length, erros: errDis, status: errDis === 0 ? "success" : "partial" } as any).then(() => {});
+    supabase.from("import_logs").insert({ tipo: "product_discounts", arquivo_nome: file.name, registros_total: rows.length, registros_erro: errDis, registros_sucesso: rows.length - errDis, status: errDis === 0 ? "success" : "partial" } as any).then(() => {});
   };
 
   return (
@@ -152,7 +152,7 @@ const ImportProductDiscounts = () => {
           </Button>
           <div className="mt-4 rounded border p-3 text-xs text-muted-foreground space-y-1">
             <p><strong>Required:</strong> product_sku, discount_percent</p>
-            <p><strong>Optional:</strong> price_list_name — if provided, applies to that price list; otherwise updates base product discount.</p>
+            <p><strong>Optional:</strong> price_list_name â€” if provided, applies to that price list; otherwise updates base product discount.</p>
           </div>
         </Card>
       </div>
