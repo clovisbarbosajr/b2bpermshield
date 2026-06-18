@@ -54,10 +54,13 @@ Base: menu real (`AdminLayout.tsx`) + portal (`PortalLayout.tsx`).
 
 ---
 
-## PENDENTE DE REVISÃO PROFUNDA (próximos)
-1. 🔎 `OrderDetail.tsx` (admin) — ler completo, validar status/notificação/itens/totais.
-2. 🔎 `Profile.tsx` — confirmar que cada sub-aba persiste (General/SEO/Advanced/Integrations).
-3. 🔎 Decisão de **SYNC** (B2B Wave) — ver `BUGS.md` / resposta no chat.
+## REVISÃO PROFUNDA — CONCLUÍDA ✅
+1. ✅ `OrderDetail.tsx` (admin) — verificado: status/notificação/itens/totais OK; botões falsos ("show history", "Packed", Files, Messages) tornados honestos; "Delete order" escondido p/ warehouse.
+2. ✅ `Profile.tsx` — verificado: as 12 abas + sub-abas Advanced gravam via `config` → `handleSave` (spread de todo o config em `payload`). Só os controles desativados de propósito (Quickbooks) não salvam.
+3. ✅ **SYNC** (B2B Wave) — implementado (automático via pg_cron + upsert + fix $0.00 + soft-delete). Ver `SYNC_SPEC.md §7`.
+
+## FOLLOW-UPS restantes (baixo risco / pós-deploy)
+- B2 (hash de api_keys/oauth — admin-only, não vaza p/ cliente) · B4 (privacy groups server-side) · B5 (webhook test fetch — admin-only) · D5* (saveSubData transacional).
 
 ## SEGURANÇA DO CLIENTE (resposta à pergunta: dá pra acessar outro cliente / virar admin?)
 - **Ver dados de outro cliente:** ❌ bloqueado. RLS owner-scoped (`auth.uid()`) em clientes/pedidos/itens/enderecos; o vazamento `anon` (0-1) foi corrigido (A1). View-as/impersonação é só front, limitada pelo JWT real.
