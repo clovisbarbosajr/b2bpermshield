@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,6 +48,17 @@ const B2BWaveSync = () => {
   const [orderTotalItems, setOrderTotalItems] = useState(0);
   const [orderTotalErrors, setOrderTotalErrors] = useState(0);
   const stopRef = useRef(false);
+
+  // Status PERSISTENTE — lido de sync_log no banco (não some ao recarregar a página).
+  const [lastRuns, setLastRuns] = useState<any[]>([]);
+  const fetchLastRuns = async () => {
+    const { data } = await (supabase as any).from("sync_log").select("*").order("created_at", { ascending: false }).limit(50);
+    const seen = new Set<string>();
+    const latest: any[] = [];
+    for (const r of data ?? []) if (!seen.has(r.action)) { seen.add(r.action); latest.push(r); }
+    setLastRuns(latest);
+  };
+  useEffect(() => { fetchLastRuns(); }, [orderSyncing]);
 
   const testConnection = async () => {
     setTesting(true);
@@ -185,6 +196,33 @@ const B2BWaveSync = () => {
           </Button>
         </div>
       </div>
+
+      {/* Status persistente — sobrevive a recarregar/trocar de aba (vem do banco) */}
+      {lastRuns.length > 0 && (
+        <Card className="mb-4 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold">Última sincronização (salvo no servidor)</h3>
+            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={fetchLastRuns}>
+              <RefreshCw className="h-3 w-3" /> Atualizar
+            </Button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {lastRuns.map((r) => (
+              <div key={r.id} className="rounded-md border p-2 text-xs">
+                <div className="font-medium capitalize">{r.action}</div>
+                <div className="text-muted-foreground">{new Date(r.created_at).toLocaleString()}</div>
+                <div className="mt-1">
+                  +{r.created_count} novos · {r.updated_count} atualizados · {r.skipped_count} iguais ·{" "}
+                  <span className={r.errors_count > 0 ? "text-destructive font-medium" : ""}>{r.errors_count} erros</span>
+                </div>
+                {r.errors_count > 0 && Array.isArray(r.samples) && r.samples.length > 0 && (
+                  <div className="mt-1 break-words text-destructive">{r.samples[0]}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {connectionOk !== null && (
         <Card className={`mb-4 border ${connectionOk ? "border-green-500/30 bg-green-500/5" : "border-destructive/30 bg-destructive/5"}`}>

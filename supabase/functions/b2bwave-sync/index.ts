@@ -258,6 +258,20 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
   return { created, updated, skipped, errors };
 }
 
+// Grava o status de uma execução em sync_log (persiste; a tela lê daqui).
+async function logRun(db: any, action: string, s: { created?: number; updated?: number; skipped?: number; errors?: number; samples?: string[] }) {
+  try {
+    await db.from("sync_log").insert({
+      action,
+      created_count: s.created ?? 0,
+      updated_count: s.updated ?? 0,
+      skipped_count: s.skipped ?? 0,
+      errors_count: s.errors ?? 0,
+      samples: s.samples ?? [],
+    });
+  } catch (_) { /* o log nunca pode quebrar o sync */ }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -512,6 +526,7 @@ Deno.serve(async (req) => {
           }
         }
       }
+      await logRun(adminClient, "products", { created: synced, errors, samples: errorSamples });
       return new Response(JSON.stringify({
         success: true,
         samples: errorSamples,
@@ -643,6 +658,7 @@ Deno.serve(async (req) => {
         }
       }
 
+      await logRun(adminClient, "customers", { created: synced, skipped, errors });
       return new Response(JSON.stringify({ success: true, message: `${synced} updated/created, ${skipped} unchanged, ${deactivated} deactivated, ${errors} errors` }), { headers: jsonHeaders });
     }
 
@@ -787,6 +803,7 @@ Deno.serve(async (req) => {
       // cada página concluída); se chegou ao fim, reinicia o ciclo no 1.
       const nextCursor = reachedEnd ? 1 : page;
       await setOrdersCursor(adminClient, nextCursor);
+      await logRun(adminClient, "orders", { created, updated, skipped, errors });
 
       return new Response(JSON.stringify({
         success: true, created, updated, skipped, errors,
