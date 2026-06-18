@@ -586,6 +586,8 @@ export type Database = {
           smtp_password: string | null
           smtp_port: string | null
           smtp_username: string | null
+          stripe_enabled: boolean
+          stripe_publishable_key: string | null
           telefone_contato: string | null
           termos_condicoes: string | null
           theme: string | null
@@ -691,6 +693,8 @@ export type Database = {
           smtp_password?: string | null
           smtp_port?: string | null
           smtp_username?: string | null
+          stripe_enabled?: boolean
+          stripe_publishable_key?: string | null
           telefone_contato?: string | null
           termos_condicoes?: string | null
           theme?: string | null
@@ -796,6 +800,8 @@ export type Database = {
           smtp_password?: string | null
           smtp_port?: string | null
           smtp_username?: string | null
+          stripe_enabled?: boolean
+          stripe_publishable_key?: string | null
           telefone_contato?: string | null
           termos_condicoes?: string | null
           theme?: string | null
