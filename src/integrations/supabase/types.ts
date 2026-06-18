@@ -2680,6 +2680,11 @@ export type Database = {
         Args: { _action: string; _cron: string; _jobname: string }
         Returns: undefined
       }
+      _vault_secret_exists: { Args: { _name: string }; Returns: boolean }
+      _vault_upsert_secret: {
+        Args: { _desc: string; _name: string; _value: string }
+        Returns: undefined
+      }
       consume_view_as_token: {
         Args: { _token: string }
         Returns: {
