@@ -482,6 +482,7 @@ Deno.serve(async (req) => {
       }
 
       let synced = 0, errors = 0;
+      const errorSamples: string[] = [];
       const chunkSize = 50;
       for (let i = 0; i < toUpsert.length; i += chunkSize) {
         const chunk = toUpsert.slice(i, i + chunkSize);
@@ -489,7 +490,10 @@ Deno.serve(async (req) => {
         if (error) {
           for (const row of chunk) {
             const r = await adminClient.from("produtos").upsert(row, { onConflict: "sku" });
-            if (r.error) errors++; else synced++;
+            if (r.error) {
+              errors++;
+              if (errorSamples.length < 5) errorSamples.push(`${row.sku}: ${r.error.message}`);
+            } else synced++;
           }
         } else {
           synced += chunk.length;
@@ -508,7 +512,11 @@ Deno.serve(async (req) => {
           }
         }
       }
-      return new Response(JSON.stringify({ success: true, message: `${synced} updated/created, ${skipped} unchanged, ${errors} errors, ${deleted} stale deleted` }), { headers: jsonHeaders });
+      return new Response(JSON.stringify({
+        success: true,
+        samples: errorSamples,
+        message: `${synced} updated/created, ${skipped} unchanged, ${errors} errors, ${deleted} stale deleted${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
+      }), { headers: jsonHeaders });
     }
 
     // ========== SYNC PRICE LISTS (incremental) ==========
