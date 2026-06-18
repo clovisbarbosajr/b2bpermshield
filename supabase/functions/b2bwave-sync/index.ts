@@ -758,8 +758,18 @@ Deno.serve(async (req) => {
         }
         if (!Array.isArray(data) || data.length === 0) { reachedEnd = true; break; }
 
-        const r = await processOrderSlice(adminClient, data, true, true);
-        created += r.created; updated += r.updated; skipped += r.skipped; errors += r.errors;
+        // Fast-skip: página inteira pré-2025 → não toca o banco (histórico antigo).
+        const allPre2025 = data.every((it: any) => {
+          const o = it.order || it;
+          const s = o.submitted_at || o.created_at || "";
+          return s && new Date(s).getFullYear() < 2025;
+        });
+        if (!allPre2025) {
+          const r = await processOrderSlice(adminClient, data, true, true);
+          created += r.created; updated += r.updated; skipped += r.skipped; errors += r.errors;
+        } else {
+          skipped += data.length;
+        }
 
         if (data.length < 500) { reachedEnd = true; break; } // última página → reinicia ciclo
         page++;
