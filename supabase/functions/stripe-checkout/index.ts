@@ -110,17 +110,40 @@ Deno.serve(async (req) => {
     const { action } = body;
 
     if (action === "create_payment_intent") {
-      const { amount, currency = "usd", pedido_id, metadata = {} } = body;
+      const { currency = "usd", pedido_id, metadata = {} } = body;
 
-      if (!amount || amount <= 0) {
+      // SEGURANÇA (7-4 / 2-A): NUNCA confiar no `amount` enviado pelo cliente.
+      // O valor a cobrar é lido do próprio pedido no banco (service role).
+      if (!pedido_id) {
         return new Response(
-          JSON.stringify({ error: "Invalid amount" }),
+          JSON.stringify({ error: "pedido_id is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { data: pedido, error: pedidoError } = await adminClient
+        .from("pedidos")
+        .select("total")
+        .eq("id", pedido_id)
+        .maybeSingle();
+
+      if (pedidoError || !pedido) {
+        return new Response(
+          JSON.stringify({ error: "Order not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const serverAmount = Number((pedido as any).total) || 0;
+      if (serverAmount <= 0) {
+        return new Response(
+          JSON.stringify({ error: "Invalid order total" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
       const paymentIntent = await (stripe as any).paymentIntents.create({
-        amount: Math.round(amount * 100),
+        amount: Math.round(serverAmount * 100),
         currency,
         metadata: { pedido_id: pedido_id || "", ...metadata },
         automatic_payment_methods: { enabled: true },

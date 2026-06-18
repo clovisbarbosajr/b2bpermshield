@@ -483,6 +483,9 @@ const CustomerEdit = () => {
         {/* Addresses Tab */}
         <TabsContent value="addresses">
           <Card className="p-6">
+            <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+              ⚠ Editar os campos de um endereço existente abaixo não salva (só leitura). Use <strong>Add Address</strong> / a lixeira para adicionar/remover; o cliente edita os próprios endereços no portal (My Account).
+            </div>
             <div className="mb-4">
               <Label className="text-sm">Allow ordering from countries</Label>
               <div className="border rounded p-2 h-24 overflow-y-auto text-sm text-muted-foreground mt-1">
@@ -584,6 +587,9 @@ const CustomerEdit = () => {
         {/* Email Settings Tab */}
         <TabsContent value="email-settings">
           <Card className="p-6 space-y-5">
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+              ⚠ Display only — these per-customer email fields are not saved yet. Global email settings apply (Settings → Email).
+            </div>
             <p className="text-sm text-muted-foreground">Email notification settings for this customer. Configurations are inherited from the global settings.</p>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <div><Label>Attach new order cc .xls file</Label><Input placeholder="" className="mt-1" /></div>
@@ -610,6 +616,9 @@ const CustomerEdit = () => {
         {/* Customer homepage products */}
         <TabsContent value="homepage-products">
           <Card className="p-6">
+            <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+              ⚠ Not available yet — this section is display only and does not save.
+            </div>
             <p className="text-sm text-muted-foreground mb-4">Configure products that appear on this customer's homepage. Select a product from the list and/or enter a free text query.</p>
             <div className="mb-4">
               <Label className="text-sm">Only show</Label>
@@ -688,6 +697,9 @@ const CustomerEdit = () => {
         {/* Admin fields */}
         <TabsContent value="admin-fields">
           <Card className="p-6">
+            <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+              ⚠ Not available yet — this section is display only and does not save.
+            </div>
             <p className="text-sm text-muted-foreground mb-4">Custom admin fields for this customer.</p>
             <div className="space-y-4">
               <div>

@@ -120,6 +120,22 @@ const AdminPedidos = () => {
   const setFilter = (key: string, value: string) => setFilters((f) => ({ ...f, [key]: value }));
   const clearFilters = () => setFilters({ ...emptyFilters });
 
+  const handleExport = () => {
+    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const rows = [
+      ["Order", "Company", "Name", "Email", "PO", "Status", "Total", "Created"],
+      ...filtered.map((p) => [
+        p.numero, p.clientes?.empresa, p.clientes?.nome, p.clientes?.email,
+        p.po_number, p.status, Number(p.total ?? 0).toFixed(2), fmtDate(p.created_at),
+      ]),
+    ];
+    const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+    a.download = "orders.csv";
+    a.click();
+  };
+
   const filtered = pedidos.filter((p) => {
     const f = filters;
     if (f.id && !String(p.numero).includes(f.id)) return false;
@@ -284,7 +300,7 @@ const AdminPedidos = () => {
 
       <div className="flex items-center justify-between mb-3">
         <Button onClick={() => navigate("/admin/orders/new")} className="gap-1 bg-green-600 hover:bg-green-700"><Plus className="h-4 w-4" /> Create Order</Button>
-        <Button variant="outline" size="sm" className="gap-1"><Download className="h-4 w-4" /> Export</Button>
+        <Button variant="outline" size="sm" className="gap-1" onClick={handleExport}><Download className="h-4 w-4" /> Export</Button>
       </div>
 
       {!loading && totalPages > 1 && (

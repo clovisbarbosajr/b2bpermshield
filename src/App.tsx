@@ -8,7 +8,6 @@ import { CartProvider } from "@/contexts/CartContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 import Index from "./pages/Index";
-import Login from "./pages/Login";
 import LoginLanding from "./pages/LoginLanding";
 import AdminLogin from "./pages/AdminLogin";
 import CustomerLogin from "./pages/CustomerLogin";

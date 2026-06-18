@@ -186,11 +186,6 @@ const PdfCatalog = () => {
               </div>
 
               <div>
-                <Label>Customer</Label>
-                <Input placeholder="SEARCH" value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} />
-              </div>
-
-              <div>
                 <Label className="text-primary">Product Status *</Label>
                 <div className="border rounded-md max-h-[140px] overflow-y-auto mt-1">
                   {statusOptions.map(s => (
@@ -219,10 +214,6 @@ const PdfCatalog = () => {
               </div>
             </CardContent>
           </Card>
-
-          <Button variant="outline" size="sm" className="text-primary" onClick={() => setSelectProducts(!selectProducts)}>
-            Select products
-          </Button>
 
           <div>
             <Label className="text-primary">Per page *</Label>

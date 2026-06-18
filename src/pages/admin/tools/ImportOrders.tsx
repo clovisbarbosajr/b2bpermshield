@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+﻿import { useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -56,12 +56,12 @@ const ImportOrders = () => {
     setImporting(true);
     const res: Result[] = [];
 
-    // Fetch clientes email→id map
+    // Fetch clientes emailâ†’id map
     const { data: clientes } = await supabase.from("clientes").select("id, email");
     const emailMap: Record<string, string> = {};
     (clientes ?? []).forEach((c: any) => { emailMap[c.email] = c.id; });
 
-    // Fetch produtos sku→{id, nome, preco} map
+    // Fetch produtos skuâ†’{id, nome, preco} map
     const { data: produtos } = await supabase.from("produtos").select("id, sku, nome, preco");
     const skuMap: Record<string, { id: string; nome: string; preco: number | null }> = {};
     (produtos ?? []).forEach((p: any) => { if (p.sku) skuMap[p.sku] = { id: p.id, nome: p.nome, preco: p.preco }; });
@@ -188,7 +188,7 @@ const ImportOrders = () => {
     const okOrd = res.filter((r) => r.status === "ok").length;
     const errOrd = res.filter((r) => r.status === "error").length;
     toast.success(`Imported ${okOrd} orders`);
-    supabase.from("import_logs").insert({ tipo: "orders", arquivo: file.name, registros: rows.length, erros: errOrd, status: errOrd === 0 ? "success" : "partial" } as any).then(() => {});
+    supabase.from("import_logs").insert({ tipo: "orders", arquivo_nome: file.name, registros_total: rows.length, registros_erro: errOrd, registros_sucesso: rows.length - errOrd, status: errOrd === 0 ? "success" : "partial" } as any).then(() => {});
   };
 
   return (

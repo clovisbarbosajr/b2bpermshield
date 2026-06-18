@@ -31,6 +31,7 @@ const PortalDashboard = () => {
   const [clienteNome, setClienteNome] = useState("");
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [totalSpent, setTotalSpent] = useState(0);
+  const [totalOrders, setTotalOrders] = useState(0);
   const [openOrders, setOpenOrders] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -55,6 +56,7 @@ const PortalDashboard = () => {
 
       const all = pedidos ?? [];
       setRecentOrders(all.slice(0, 5));
+      setTotalOrders(all.length);
       setTotalSpent(all.reduce((sum, p) => sum + (Number(p.total) || 0), 0));
       setOpenOrders(all.filter((p) => p.status === "recebido").length);
       setLoading(false);
@@ -89,7 +91,7 @@ const PortalDashboard = () => {
             <ClipboardList className="h-4 w-4 text-accent" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{recentOrders.length > 0 ? (recentOrders.length >= 5 ? "5+" : recentOrders.length) : 0}</p>
+            <p className="text-2xl font-bold">{totalOrders}</p>
           </CardContent>
         </Card>
         <Card>

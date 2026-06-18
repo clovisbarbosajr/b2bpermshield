@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+﻿import { useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -48,12 +48,12 @@ const ImportCustomerPrices = () => {
     setImporting(true);
     const res: Result[] = [];
 
-    // Fetch clientes email→id map
+    // Fetch clientes emailâ†’id map
     const { data: clientes } = await supabase.from("clientes").select("id, email");
     const emailMap: Record<string, string> = {};
     (clientes ?? []).forEach((c: any) => { emailMap[c.email] = c.id; });
 
-    // Fetch produtos sku→id map
+    // Fetch produtos skuâ†’id map
     const { data: produtos } = await supabase.from("produtos").select("id, sku");
     const skuMap: Record<string, string> = {};
     (produtos ?? []).forEach((p: any) => { if (p.sku) skuMap[p.sku] = p.id; });
@@ -104,7 +104,7 @@ const ImportCustomerPrices = () => {
     const okPr = res.filter((r) => r.status === "ok").length;
     const errPr = res.filter((r) => r.status === "error").length;
     toast.success(`Imported ${okPr} of ${rows.length} prices`);
-    supabase.from("import_logs").insert({ tipo: "customer_prices", arquivo: file.name, registros: rows.length, erros: errPr, status: errPr === 0 ? "success" : "partial" } as any).then(() => {});
+    supabase.from("import_logs").insert({ tipo: "customer_prices", arquivo_nome: file.name, registros_total: rows.length, registros_erro: errPr, registros_sucesso: rows.length - errPr, status: errPr === 0 ? "success" : "partial" } as any).then(() => {});
   };
 
   return (

@@ -34,10 +34,11 @@ const AdminCategorias = () => {
   const navigate = useNavigate();
 
   const fetchData = async () => {
+    // Mostrar também categorias inativas no admin (antes o filtro ativo=true
+    // escondia permanentemente uma categoria desativada — bug D6).
     const { data } = await supabase
       .from("categorias")
       .select("*")
-      .eq("ativo", true)
       .order("ordem")
       .order("nome");
     setCategorias((data as Categoria[]) ?? []);

@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Pencil, Trash2, Plus, Save, Printer, FileText, Search, X as XIcon } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
+import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
@@ -28,6 +29,7 @@ const OrderDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { log } = useActivityLog();
+  const { role } = useAuth();
   const [order, setOrder] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [cliente, setCliente] = useState<any>(null);
@@ -472,7 +474,6 @@ const OrderDetail = () => {
                       ))}
                     </SelectContent>
                   </Select>
-                  <button className="text-xs text-primary hover:underline mt-1 block">show history</button>
                 </td>
               </tr>
               <tr className="border-b border-border">
@@ -577,8 +578,8 @@ const OrderDetail = () => {
               <span className="text-right">{order ? fmt(order.subtotal) : "$ 0.00"}</span>
             </div>
             <div className="grid grid-cols-[200px_100px] gap-2">
-              <span className="text-right text-primary cursor-pointer hover:underline">Discount: Add discount</span>
-              <span className="text-right" />
+              <span className="text-right text-muted-foreground">Discount:</span>
+              <span className="text-right">{order?.desconto ? fmt(Number(order.desconto)) : "$ 0.00"}</span>
             </div>
             <div className="grid grid-cols-[200px_100px] gap-2 border-t pt-2 mt-1">
               <span className="text-right font-semibold">Total after discount:</span>
@@ -597,12 +598,11 @@ const OrderDetail = () => {
 
         {/* Delete order */}
         <div className="border-t border-border p-5 flex items-center justify-between">
-          <Button variant="destructive" size="sm" className="gap-1" onClick={handleDeleteOrder}>
-            <Trash2 className="h-4 w-4" /> Delete order
-          </Button>
-          <Button variant="default" size="sm" className="gap-1 bg-blue-600 hover:bg-blue-700">
-            <Save className="h-4 w-4" /> Packed
-          </Button>
+          {role === "admin" ? (
+            <Button variant="destructive" size="sm" className="gap-1" onClick={handleDeleteOrder}>
+              <Trash2 className="h-4 w-4" /> Delete order
+            </Button>
+          ) : <span />}
         </div>
       </Card>
 
@@ -612,10 +612,7 @@ const OrderDetail = () => {
           <h3 className="font-semibold text-sm">Files</h3>
         </div>
         <div className="p-5">
-          <div className="flex items-center gap-3">
-            <Label className="text-sm">Add file for order:</Label>
-            <Input type="file" className="max-w-xs" />
-          </div>
+          <p className="text-sm text-muted-foreground italic">File attachments for orders — coming soon.</p>
         </div>
       </Card>
 
@@ -625,10 +622,7 @@ const OrderDetail = () => {
           <h3 className="font-semibold text-sm">Messages</h3>
         </div>
         <div className="p-5">
-          <Textarea placeholder="Send a message about this order" rows={4} />
-          <Button variant="default" size="sm" className="mt-3 gap-1 bg-green-600 hover:bg-green-700">
-            <Save className="h-4 w-4" /> Send
-          </Button>
+          <p className="text-sm text-muted-foreground italic">Order messaging — coming soon.</p>
         </div>
       </Card>
 

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+﻿import { useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -48,7 +48,7 @@ const ImportProductVariants = () => {
     setImporting(true);
     const res: Result[] = [];
 
-    // Fetch all produtos sku→id map
+    // Fetch all produtos skuâ†’id map
     const { data: produtos } = await supabase.from("produtos").select("id, sku");
     const skuMap: Record<string, string> = {};
     (produtos ?? []).forEach((p: any) => { if (p.sku) skuMap[p.sku] = p.id; });
@@ -59,7 +59,7 @@ const ImportProductVariants = () => {
       const variantSku = r["variant_sku"]?.trim();
 
       if (!parentSku || !variantSku) {
-        res.push({ row: i + 2, sku: variantSku || "—", status: "error", message: "Missing parent_sku or variant_sku" });
+        res.push({ row: i + 2, sku: variantSku || "â€”", status: "error", message: "Missing parent_sku or variant_sku" });
         continue;
       }
 
@@ -91,7 +91,7 @@ const ImportProductVariants = () => {
     const okVar = res.filter((r) => r.status === "ok").length;
     const errVar = res.filter((r) => r.status === "error").length;
     toast.success(`Imported ${okVar} of ${rows.length} variants`);
-    supabase.from("import_logs").insert({ tipo: "product_variants", arquivo: file.name, registros: rows.length, erros: errVar, status: errVar === 0 ? "success" : "partial" } as any).then(() => {});
+    supabase.from("import_logs").insert({ tipo: "product_variants", arquivo_nome: file.name, registros_total: rows.length, registros_erro: errVar, registros_sucesso: rows.length - errVar, status: errVar === 0 ? "success" : "partial" } as any).then(() => {});
   };
 
   return (

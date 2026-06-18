@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+﻿import { useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -59,7 +59,7 @@ const ImportAddresses = () => {
       const clienteId = email ? emailMap[email] : undefined;
 
       if (!clienteId) {
-        res.push({ row: i + 2, email: email || "—", status: "error", message: "Customer not found" });
+        res.push({ row: i + 2, email: email || "â€”", status: "error", message: "Customer not found" });
         continue;
       }
 
@@ -86,7 +86,7 @@ const ImportAddresses = () => {
     const okAddr = res.filter((r) => r.status === "ok").length;
     const errAddr = res.filter((r) => r.status === "error").length;
     toast.success(`Imported ${okAddr} of ${rows.length} addresses`);
-    supabase.from("import_logs").insert({ tipo: "addresses", arquivo: file.name, registros: rows.length, erros: errAddr, status: errAddr === 0 ? "success" : "partial" } as any).then(() => {});
+    supabase.from("import_logs").insert({ tipo: "addresses", arquivo_nome: file.name, registros_total: rows.length, registros_erro: errAddr, registros_sucesso: rows.length - errAddr, status: errAddr === 0 ? "success" : "partial" } as any).then(() => {});
   };
 
   return (

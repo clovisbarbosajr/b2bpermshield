@@ -77,14 +77,13 @@ const ExportsLog = () => {
                     <TableCell>{formatDate(r.created_at)}</TableCell>
                     <TableCell><Badge variant={r.status === "concluido" || r.status === "Finished" ? "default" : "secondary"}>{r.status ?? "Finished"}</Badge></TableCell>
                     <TableCell className="text-right">
-                      {r.arquivo_url && (
+                      {r.arquivo_url ? (
                         <Button variant="ghost" size="sm" asChild>
                           <a href={r.arquivo_url} download><Download className="h-4 w-4 mr-1" /> Download</a>
                         </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
                       )}
-                      <Button variant="ghost" size="sm">
-                        <Download className="h-4 w-4 mr-1" /> Download
-                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

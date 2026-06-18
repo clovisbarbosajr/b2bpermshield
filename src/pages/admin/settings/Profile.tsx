@@ -988,10 +988,7 @@ const SettingsProfile = () => {
                 <div>
                   <p className="text-sm text-muted-foreground italic mb-4">
                     Use <code className="text-primary">window.accept_cookie_policy;</code> when writing Javascript code
-                    to detect if visitor has accepted the cookies.{" "}
-                    <a href="#" className="text-primary underline">
-                      Add sample text
-                    </a>
+                    to detect if visitor has accepted the cookies.
                   </p>
                   <textarea
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[250px]"
@@ -1049,12 +1046,6 @@ const SettingsProfile = () => {
                 <Link to="/admin/settings/extra-fields" className="text-primary underline text-sm">
                   Extra fields
                 </Link>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">See all failed login attempts</p>
-                <a href="#" className="text-primary underline text-sm">
-                  Throttled Customer Logins
-                </a>
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>

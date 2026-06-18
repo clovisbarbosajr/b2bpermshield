@@ -30,10 +30,11 @@ const PortalLayout = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const fetch = async () => {
-      const [{ data: cats }, { data: cfg }] = await Promise.all([
+      const [{ data: cats }, { data: cfgRows }] = await Promise.all([
         supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("ordem").order("nome"),
-        (supabase.from("configuracoes") as any).select("catalog_pdf_url").limit(1).maybeSingle(),
+        (supabase as any).rpc("get_public_config"),
       ]);
+      const cfg = Array.isArray(cfgRows) ? cfgRows[0] : cfgRows;
       setCategorias((cats as Categoria[]) ?? []);
       setCatalogPdfUrl(cfg?.catalog_pdf_url ?? null);
     };
