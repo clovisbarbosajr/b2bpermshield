@@ -2336,6 +2336,24 @@ export type Database = {
           },
         ]
       }
+      sync_state: {
+        Row: {
+          key: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value?: Json
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: []
+      }
       tabela_preco_itens: {
         Row: {
           created_at: string
@@ -2652,6 +2670,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _schedule_b2bwave_job: {
+        Args: { _action: string; _cron: string; _jobname: string }
+        Returns: undefined
+      }
       consume_view_as_token: {
         Args: { _token: string }
         Returns: {
@@ -2664,6 +2686,14 @@ export type Database = {
         }[]
       }
       create_view_as_token: { Args: { _customer_id: string }; Returns: string }
+      get_public_config: {
+        Args: never
+        Returns: {
+          catalog_pdf_url: string
+          stripe_enabled: boolean
+          stripe_publishable_key: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -2671,6 +2701,8 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_company_buyer: { Args: { _cliente_id: string }; Returns: boolean }
+      is_company_contact: { Args: { _cliente_id: string }; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "cliente" | "warehouse" | "manager"
