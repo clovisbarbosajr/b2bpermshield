@@ -32,7 +32,28 @@ type NavEntry = NavItem | NavGroup;
 
 const isGroup = (entry: NavEntry): entry is NavGroup => "children" in entry;
 
-// Full admin nav (no changes needed — admin sees everything)
+// ============================================================================
+// ITENS OCULTOS DO MENU (2026-06-18) — NÃO removidos, apenas comentados.
+// Motivo: enquanto migramos pro fluxo de sync (B2BWave), não vamos usar estas
+// telas manualmente. As ROTAS (App.tsx) e as TELAS continuam 100% funcionais e
+// acessíveis por URL — só não aparecem no menu. Para reativar: descomente a linha.
+// Documentação completa em MENU_OCULTO.md.
+// Ocultos:
+//   Settings → Setup App            (/admin/settings/setup-app)
+//   Banners                         (/admin/banners)
+//   News                            (/admin/news)
+//   Pages                           (/admin/pages)
+//   Tools → Import Customer Prices  (/admin/tools/import-customer-prices)
+//   Tools → Import Customers        (/admin/tools/import-customers)
+//   Tools → Import Addresses        (/admin/tools/import-addresses)
+//   Tools → Import Product Variants (/admin/tools/import-product-variants)
+//   Tools → Import Categories       (/admin/tools/import-categories)
+//   Tools → Import Orders           (/admin/tools/import-orders)
+//   Tools → Bulk Update Orders      (/admin/tools/bulk-update-orders)
+//   Tools → Imports Log             (/admin/tools/imports-log)
+//   Tools → Exports Log             (/admin/tools/exports-log)
+// MANTIDOS visíveis (não estavam na lista): Tools → PDF Catalog, Import Product Discounts.
+// ============================================================================
 const adminNavEntries: NavEntry[] = [
   { to: "/admin", icon: Home, label: "Dashboard" },
   { to: "/admin/orders", icon: ClipboardList, label: "Orders" },
@@ -53,21 +74,23 @@ const adminNavEntries: NavEntry[] = [
     label: "Tools", icon: Wrench,
     children: [
       { to: "/admin/tools/pdf-catalog", icon: FileDown, label: "PDF Catalog" },
-      { to: "/admin/tools/import-customer-prices", icon: DollarSign, label: "Import Customer Prices" },
-      { to: "/admin/tools/import-customers", icon: UserPlus, label: "Import Customers" },
-      { to: "/admin/tools/import-addresses", icon: FileUp, label: "Import Addresses" },
       { to: "/admin/tools/import-product-discounts", icon: Percent, label: "Import Product Discounts" },
-      { to: "/admin/tools/import-product-variants", icon: Layers, label: "Import Product Variants" },
-      { to: "/admin/tools/import-categories", icon: FolderTree, label: "Import Categories" },
-      { to: "/admin/tools/import-orders", icon: ClipboardList, label: "Import Orders" },
-      { to: "/admin/tools/bulk-update-orders", icon: ClipboardCheck, label: "Bulk Update Orders" },
-      { to: "/admin/tools/imports-log", icon: ScrollText, label: "Imports Log" },
-      { to: "/admin/tools/exports-log", icon: ScrollText, label: "Exports Log" },
+      // OCULTOS (rotas/telas intactas — ver MENU_OCULTO.md):
+      // { to: "/admin/tools/import-customer-prices", icon: DollarSign, label: "Import Customer Prices" },
+      // { to: "/admin/tools/import-customers", icon: UserPlus, label: "Import Customers" },
+      // { to: "/admin/tools/import-addresses", icon: FileUp, label: "Import Addresses" },
+      // { to: "/admin/tools/import-product-variants", icon: Layers, label: "Import Product Variants" },
+      // { to: "/admin/tools/import-categories", icon: FolderTree, label: "Import Categories" },
+      // { to: "/admin/tools/import-orders", icon: ClipboardList, label: "Import Orders" },
+      // { to: "/admin/tools/bulk-update-orders", icon: ClipboardCheck, label: "Bulk Update Orders" },
+      // { to: "/admin/tools/imports-log", icon: ScrollText, label: "Imports Log" },
+      // { to: "/admin/tools/exports-log", icon: ScrollText, label: "Exports Log" },
     ],
   },
-  { to: "/admin/banners", icon: Image, label: "Banners" },
-  { to: "/admin/news", icon: Newspaper, label: "News" },
-  { to: "/admin/pages", icon: FileText, label: "Pages" },
+  // OCULTOS (rotas/telas intactas — ver MENU_OCULTO.md):
+  // { to: "/admin/banners", icon: Image, label: "Banners" },
+  // { to: "/admin/news", icon: Newspaper, label: "News" },
+  // { to: "/admin/pages", icon: FileText, label: "Pages" },
   { to: "/admin/sales-reps", icon: UserCheck, label: "Sales Reps" },
   {
     label: "Reports", icon: BarChart3,
@@ -91,7 +114,8 @@ const adminNavEntries: NavEntry[] = [
     label: "Settings", icon: Settings,
     children: [
       { to: "/admin/settings/profile", icon: UserCog, label: "Profile" },
-      { to: "/admin/settings/setup-app", icon: Settings, label: "Setup App" },
+      // OCULTO (rota/tela intacta — ver MENU_OCULTO.md):
+      // { to: "/admin/settings/setup-app", icon: Settings, label: "Setup App" },
       { to: "/admin/settings/payment-options", icon: CreditCard, label: "Payment Options" },
       { to: "/admin/settings/shipping-options", icon: Truck, label: "Shipping Options" },
       { to: "/admin/settings/edit-password", icon: Lock, label: "Edit Password" },
