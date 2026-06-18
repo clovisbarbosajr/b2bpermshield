@@ -57,6 +57,7 @@ export default function Notificacoes() {
       localStorage.setItem('notif_test_to', JSON.stringify(next));
       return next;
     });
+  const [testRecipient, setTestRecipient] = useState<string>(() => localStorage.getItem('notif_test_email') || '');
   const [editing, setEditing] = useState<Set<string>>(new Set());
   const toggleEdit = (id: string, on: boolean) =>
     setEditing((prev) => { const n = new Set(prev); on ? n.add(id) : n.delete(id); return n; });
@@ -102,6 +103,18 @@ export default function Notificacoes() {
     if (error || data?.error || data?.ok === false) {
       toast.error(`Falha: ${data?.error || error?.message || 'erro desconhecido'}`);
     } else { toast.success('Teste enviado'); }
+  }
+
+  // Testa o template de e-mail de um evento, enviando pelo Resend (notify-dispatch).
+  async function sendEventTest(ev: EventRow) {
+    const to = testRecipient.trim();
+    if (!to || !to.includes('@')) { toast.error('Informe um e-mail de destino válido.'); return; }
+    const { data, error } = await sb.functions.invoke('notify-dispatch', {
+      body: { event: ev.id, test: { channel: 'email', to, message: ev.template_email || `Teste do evento ${EVENT_LABELS[ev.id] ?? ev.id}` } },
+    });
+    if (error || data?.error || data?.ok === false) {
+      toast.error(`Falha: ${data?.error || error?.message || 'erro desconhecido'}`);
+    } else { toast.success(`Teste de "${EVENT_LABELS[ev.id] ?? ev.id}" enviado para ${to}`); }
   }
 
   async function saveEvent(ev: EventRow) {
@@ -154,6 +167,7 @@ export default function Notificacoes() {
           <TabsTrigger value="channels">Canais</TabsTrigger>
           <TabsTrigger value="events">Eventos</TabsTrigger>
           <TabsTrigger value="recipients">Destinatários</TabsTrigger>
+          <TabsTrigger value="tests">Testes</TabsTrigger>
         </TabsList>
 
         {/* CANAIS */}
@@ -216,6 +230,27 @@ export default function Notificacoes() {
             );
           })}
           <p className="text-xs text-muted-foreground">As chaves secretas (Resend / Twilio) ficam nos <strong>secrets das Edge Functions</strong>, não aqui.</p>
+        </TabsContent>
+
+        {/* TESTES — envia o e-mail de cada evento (via Resend) para um destino */}
+        <TabsContent value="tests" className="space-y-4">
+          <Card className="p-4">
+            <Label className="text-xs">Destinatário (para todos os testes)</Label>
+            <Input type="email" className="mt-1 max-w-sm" placeholder="voce@empresa.com" value={testRecipient}
+              onChange={(e) => { setTestRecipient(e.target.value); localStorage.setItem('notif_test_email', e.target.value); }} />
+            <p className="text-xs text-muted-foreground mt-1">Todos os e-mails de teste vão para este endereço, enviados pelo <strong>Resend</strong>.</p>
+          </Card>
+          {events.map((ev) => (
+            <Card key={ev.id} className="p-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="font-medium">{EVENT_LABELS[ev.id] ?? ev.id}</p>
+                <p className="text-xs text-muted-foreground">Envia o template de e-mail deste evento.</p>
+              </div>
+              <Button size="sm" variant="outline" className="gap-1.5 shrink-0" onClick={() => sendEventTest(ev)}>
+                <Send className="w-3.5 h-3.5" /> Testar
+              </Button>
+            </Card>
+          ))}
         </TabsContent>
 
         {/* EVENTOS */}

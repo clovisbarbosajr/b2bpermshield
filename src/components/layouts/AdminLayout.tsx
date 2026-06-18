@@ -106,8 +106,6 @@ const adminNavEntries: NavEntry[] = [
       { to: "/admin/settings/users", icon: Users, label: "Users" },
       { to: "/admin/settings/warehouse", icon: Package, label: "Warehouse Settings" },
       { to: "/admin/settings/activity-logs", icon: ClipboardSignature, label: "Activity Logs" },
-      { to: "/admin/settings/email", icon: Mail, label: "Email" },
-      { to: "/admin/settings/email-templates", icon: Mail, label: "Email Templates" },
       { to: "/admin/settings/notifications", icon: Bell, label: "Notifications" },
       { to: "/admin/settings/notifications-log", icon: History, label: "Notifications Log" },
       { to: "/admin/settings/oauth-applications", icon: KeyRound, label: "Oauth Applications" },
@@ -148,12 +146,6 @@ function buildStaffNav(hasPermission: (key: string) => boolean): NavEntry[] {
   settingsChildren.push({ to: "/admin/settings/edit-password", icon: Lock, label: "Change Password" });
   if (hasPermission("view_profile_settings")) {
     settingsChildren.push({ to: "/admin/settings/profile", icon: UserCog, label: "Profile" });
-  }
-  if (hasPermission("view_email_settings")) {
-    settingsChildren.push({ to: "/admin/settings/email", icon: Mail, label: "Email" });
-  }
-  if (hasPermission("view_email_templates")) {
-    settingsChildren.push({ to: "/admin/settings/email-templates", icon: Mail, label: "Email Templates" });
   }
   if (hasPermission("view_warehouse_settings")) {
     settingsChildren.push({ to: "/admin/settings/warehouse", icon: Package, label: "Warehouse Settings" });
