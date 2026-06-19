@@ -49,7 +49,7 @@ const InventoryControl = () => {
       setLoading(true);
       const [prodRes, itemsRes, catRes] = await Promise.all([
         supabase.from("produtos").select("id, sku, nome, custo, estoque_total, estoque_reservado, categoria_id, updated_at"),
-        supabase.from("pedido_itens").select("produto_id, quantidade, subtotal"),
+        supabase.from("pedido_itens").select("produto_id, quantidade, subtotal, pedidos(status)"),
         supabase.from("categorias").select("id, nome").order("nome"),
       ]);
       setProducts(prodRes.data ?? []);
@@ -63,6 +63,9 @@ const InventoryControl = () => {
   const soldMap = useMemo(() => {
     const map: Record<string, { qty: number; value: number }> = {};
     orderItems.forEach((item) => {
+      // Item de pedido CANCELADO não foi vendido — não conta na quantidade.
+      const st = (item as any).pedidos?.status;
+      if (st === "cancelado" || st === "cancelled") return;
       if (!map[item.produto_id]) map[item.produto_id] = { qty: 0, value: 0 };
       map[item.produto_id].qty += item.quantidade;
       map[item.produto_id].value += item.subtotal;
