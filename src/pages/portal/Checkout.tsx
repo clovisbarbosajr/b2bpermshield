@@ -360,6 +360,14 @@ const Checkout = () => {
       )
     );
 
+    // Gate final de preço: nenhum item pode finalizar a $0,00 (preço não configurado).
+    const zeroPriced = recalculated.filter((i) => !i.preco || i.preco <= 0);
+    if (zeroPriced.length > 0) {
+      toast.error(`Cannot finalize: no price set for ${zeroPriced.map((i) => i.nome).join(", ")}. Please contact us.`);
+      setLoading(false);
+      return;
+    }
+
     const recalcSubtotal = recalculated.reduce((sum, i) => sum + i.preco * i.quantidade, 0);
     const recalcDiscount = coupon
       ? coupon.tipo === "percentual"

@@ -116,6 +116,11 @@ const ProdutoDetalhe = () => {
 
   const handleAdd = () => {
     if (!produto || !canBuy) return;
+    // Trava de segurança: não permite adicionar/comprar a $0,00 (preço não configurado).
+    if (!price || price <= 0) {
+      toast.error("Price not available. Please contact us for pricing.");
+      return;
+    }
     addItem({
       produto_id: produto.id, nome: produto.nome, sku: produto.sku, preco: price,
       quantidade, unidade_venda: produto.unidade_venda,
