@@ -24,6 +24,7 @@ import Checkout from "./pages/portal/Checkout";
 import Pedidos from "./pages/portal/Pedidos";
 import PedidoDetalhe from "./pages/portal/PedidoDetalhe";
 import Conta from "./pages/portal/Conta";
+import PortalTeam from "./pages/portal/Team";
 import NotFound from "./pages/NotFound";
 
 // Admin pages
@@ -152,6 +153,7 @@ const App = () => (
               <Route path="/portal/pedidos" element={<ProtectedRoute><Pedidos /></ProtectedRoute>} />
               <Route path="/portal/pedidos/:id" element={<ProtectedRoute><PedidoDetalhe /></ProtectedRoute>} />
               <Route path="/portal/conta" element={<ProtectedRoute><Conta /></ProtectedRoute>} />
+              <Route path="/portal/team" element={<ProtectedRoute><PortalTeam /></ProtectedRoute>} />
 
               {/* Admin Panel — warehouse-accessible */}
               <Route path="/admin" element={<AW><AdminDashboard /></AW>} />

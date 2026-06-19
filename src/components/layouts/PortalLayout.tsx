@@ -1,7 +1,7 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "react-router-dom";
-import { ShoppingCart, Package, ClipboardList, User, Home, LogOut, Shield, Menu, ChevronRight, FileText } from "lucide-react";
+import { ShoppingCart, Package, ClipboardList, User, Home, LogOut, Shield, Menu, ChevronRight, FileText, Users } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -20,8 +20,13 @@ const navItems = [
 ];
 
 const PortalLayout = ({ children }: { children: React.ReactNode }) => {
-  const { user, signOut, impersonatedCustomer } = useAuth();
+  const { user, signOut, impersonatedCustomer, contactRole } = useAuth();
   const location = useLocation();
+  // Dono da conta (sem contactRole) OU contato 'manager' pode gerenciar a equipe.
+  const canManageTeam = !contactRole || contactRole === "manager";
+  const displayedNav = canManageTeam
+    ? [...navItems, { to: "/portal/team", icon: Users, label: "Team" }]
+    : navItems;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
@@ -103,7 +108,7 @@ const PortalLayout = ({ children }: { children: React.ReactNode }) => {
           <span className="font-display text-lg font-bold text-sidebar-primary-foreground">PermShield</span>
         </div>
         <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
-          {navItems.map((item) => {
+          {displayedNav.map((item) => {
             const isActive = location.pathname === item.to;
             return (
               <Link
