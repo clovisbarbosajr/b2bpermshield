@@ -824,11 +824,18 @@ const CustomerEdit = () => {
                     if (ctErr) { toast.error(ctErr.message); setSavingContact(false); return; }
                     // Also give them a 'cliente' role in user_roles
                     await supabase.from("user_roles").upsert({ user_id: fnData.user_id, role: "cliente" }, { onConflict: "user_id" });
+                    // Envia DE VERDADE o link de definição de senha (Resend + Office365 fallback).
+                    // Antes o toast dizia "email enviado" mas nada era enviado -> contato sem senha.
+                    const { error: mailErr } = await supabase.functions.invoke("send-email", {
+                      body: { type: "password_reset", email: contactForm.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
+                    });
                     setContacts(prev => [...prev, ct]);
                     setContactForm({ nome: "", email: "", role: "buyer", ativo: true });
                     setAddingContact(false);
                     setSavingContact(false);
-                    toast.success(`Contact ${contactForm.nome} created. A setup email was sent to ${contactForm.email}.`);
+                    toast.success(mailErr
+                      ? `Contact ${contactForm.nome} created, but the setup email failed — use the 🔒 button to resend.`
+                      : `Contact ${contactForm.nome} created. A setup email was sent to ${contactForm.email}.`);
                   }}>
                     {savingContact ? "Creating..." : "Create Contact"}
                   </Button>

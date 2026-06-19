@@ -83,15 +83,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .select("role, permissions")
       .eq("user_id", userId)
       .maybeSingle();
+    const dbRole = data?.role as AppRole | undefined;
 
-    if (data?.role) {
-      const resolvedRole = data.role as AppRole;
-      setRole(resolvedRole);
+    // STAFF (admin/manager/warehouse) tem prioridade e NUNCA é contato de empresa.
+    if (dbRole && dbRole !== "cliente") {
+      setRole(dbRole);
       setPermissions((data as any).permissions || {});
-      return resolvedRole;
+      return dbRole;
     }
 
-    // Check if this user is a company contact (sub-login)
+    // Cliente OU sem papel: PRIMEIRO checa se é contato de empresa (sub-login).
+    // (Antes o `return` no role 'cliente' impedia isso — o contato nunca resolvia a empresa.)
     const { data: contact } = await supabase
       .from("company_contacts")
       .select("id, cliente_id, nome, email, role, clientes(id, empresa, nome, email, tabela_preco_id, user_id)")
@@ -118,6 +120,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return "cliente";
     }
 
+    // Não é contato: cliente normal (com papel 'cliente') ou sem papel (pendente).
+    if (dbRole === "cliente") {
+      setRole("cliente");
+      setPermissions((data as any).permissions || {});
+      return "cliente";
+    }
     setRole(null);
     setPermissions({});
     return null;
@@ -152,7 +160,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const initUserSession = async (authUser: User) => {
     const resolvedRole = await fetchRoleAndPermissions(authUser.id);
     if (resolvedRole === "cliente" || resolvedRole === null) {
-      await ensureClienteRecord(authUser);
+      // CONTATO de empresa NÃO cria/vincula registro próprio em `clientes` (usa o da
+      // empresa). Sem isso, o claim_customer_record sequestraria/criaria um cliente errado.
+      const { data: contact } = await supabase
+        .from("company_contacts")
+        .select("id")
+        .eq("user_id", authUser.id)
+        .eq("ativo", true)
+        .maybeSingle();
+      if (!contact) await ensureClienteRecord(authUser);
     }
   };
 
