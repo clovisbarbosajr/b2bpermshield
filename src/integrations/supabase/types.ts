@@ -2674,6 +2674,35 @@ export type Database = {
           },
         ]
       }
+      user_locations: {
+        Row: {
+          categoria_id: string
+          created_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          categoria_id: string
+          created_at?: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          categoria_id?: string
+          created_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_locations_categoria_id_fkey"
+            columns: ["categoria_id"]
+            isOneToOne: false
+            referencedRelation: "categorias"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_roles: {
         Row: {
           id: string
@@ -2819,6 +2848,7 @@ export type Database = {
       is_company_manager: { Args: { _cliente_id: string }; Returns: boolean }
       is_ops_manager: { Args: never; Returns: boolean }
       owns_cliente: { Args: { _cliente_id: string }; Returns: boolean }
+      user_can_see_produto: { Args: { _produto_id: string }; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "cliente" | "warehouse" | "manager"
