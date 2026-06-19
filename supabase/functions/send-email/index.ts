@@ -429,35 +429,38 @@ async function sendViaProvider(
 async function sendEmailResilient(
   config: any, fromEmail: string, to: string | string[], subject: string,
   html: string, replyTo?: string, bcc?: string | string[],
-): Promise<{ ok: boolean; provider?: string; fallback?: boolean; error?: string }> {
+): Promise<{ ok: boolean; provider?: string; fallback?: boolean; error?: string; resendError?: string }> {
   const resendKey =
     (config?.email_provider === "resend" ? (config?.email_api_key || "") : "") ||
     Deno.env.get("RESEND_API_KEY") || "";
   const smtpAvailable = !!Deno.env.get("SMTP_PASSWORD");
   const errors: string[] = [];
+  let resendError: string | undefined; // erro EXATO que o Resend retornou (p/ alertar o admin)
 
   // 1) PRIMÁRIO: Resend
   if (resendKey) {
     try {
       await sendViaProvider("resend", resendKey, fromEmail, to, subject, html, replyTo, bcc);
       return { ok: true, provider: "resend" };
-    } catch (e: any) { errors.push(`resend: ${e.message}`); }
+    } catch (e: any) { resendError = e.message; errors.push(`resend: ${e.message}`); }
+  } else {
+    resendError = "RESEND_API_KEY não configurada";
   }
-  // 2) FALLBACK silencioso: Office365 / SMTP
+  // 2) FALLBACK silencioso: Office365 / SMTP (mesmo template/from)
   if (smtpAvailable) {
     try {
       await sendViaProvider("smtp", "", fromEmail, to, subject, html, replyTo, bcc);
-      return { ok: true, provider: "smtp", fallback: true };
+      return { ok: true, provider: "smtp", fallback: true, resendError };
     } catch (e: any) { errors.push(`smtp(office365): ${e.message}`); }
   }
   // 3) Último recurso: SendGrid (se for o provider configurado)
   if (config?.email_provider === "sendgrid" && config?.email_api_key) {
     try {
       await sendViaProvider("sendgrid", config.email_api_key, fromEmail, to, subject, html, replyTo, bcc);
-      return { ok: true, provider: "sendgrid" };
+      return { ok: true, provider: "sendgrid", resendError };
     } catch (e: any) { errors.push(`sendgrid: ${e.message}`); }
   }
-  return { ok: false, error: errors.join(" | ") || "nenhum provedor de email disponível (configure RESEND_API_KEY ou SMTP_PASSWORD)" };
+  return { ok: false, error: errors.join(" | ") || "nenhum provedor de email disponível (configure RESEND_API_KEY ou SMTP_PASSWORD)", resendError };
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
@@ -676,9 +679,32 @@ Deno.serve(async (req) => {
     await adminClient.from("notification_log").insert({
       event: type, channel: "email", recipient: toDisplay,
       status: result.ok ? "sent" : "failed",
-      error: result.ok ? (result.fallback ? "enviado via fallback Office365 (Resend falhou)" : null) : (result.error ?? "send failed"),
-      payload: { provider: result.provider ?? null, fallback: result.fallback ?? false },
+      error: result.ok ? (result.fallback ? `enviado via fallback Office365 — Resend falhou: ${result.resendError ?? "?"}` : null) : (result.error ?? "send failed"),
+      payload: { provider: result.provider ?? null, fallback: result.fallback ?? false, resendError: result.resendError ?? null },
     });
+
+    // Se o RESEND falhou (mesmo que o Office365 tenha salvado), avisa o admin com o
+    // ERRO EXATO do Resend — não genérico. (Não dispara p/ o próprio admin_alert: sem loop.)
+    if (result.resendError && type !== "admin_alert") {
+      const adminEmails = parseEmails(config?.email_new_orders) || [];
+      const adminTo = adminEmails.length ? adminEmails : (config?.email_contato || COMPANY_EMAIL);
+      const alertHtml =
+        `<p>O <b>Resend falhou</b> ao enviar o email "<b>${type}</b>" para <b>${toDisplay}</b>.</p>` +
+        `<p><b>O Resend retornou:</b><br/><code>${result.resendError}</code></p>` +
+        (result.ok
+          ? `<p>✅ O email foi entregue mesmo assim pelo <b>fallback Office365</b> — o destinatário recebeu.</p>`
+          : `<p>❌ O <b>fallback Office365 também falhou</b> — o destinatário NÃO recebeu este email.</p>`) +
+        `<p>Verifique a conta/limite/billing do Resend.</p>`;
+      // Chama o envio resiliente direto (não o handler) p/ não re-disparar alerta. Não bloqueia.
+      sendEmailResilient(config, fromEmail, adminTo, `⚠ Resend falhou ao enviar "${type}"`, alertHtml)
+        .then((r) => adminClient.from("notification_log").insert({
+          event: "resend_failure_alert", channel: "email",
+          recipient: Array.isArray(adminTo) ? adminTo.join(", ") : String(adminTo),
+          status: r.ok ? "sent" : "failed", error: r.error ?? null,
+          payload: { about: type, resend_error: result.resendError },
+        }))
+        .catch(() => {});
+    }
 
     if (!result.ok) {
       console.error(`[send-email] FALHOU "${type}" para ${toDisplay}: ${result.error}`);

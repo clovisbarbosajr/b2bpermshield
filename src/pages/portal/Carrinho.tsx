@@ -22,6 +22,9 @@ const Carrinho = () => {
   const navigate = useNavigate();
   const [salesTax, setSalesTax] = useState(0);
   const [unavailableItems, setUnavailableItems] = useState<Set<string>>(new Set());
+  // Itens COM algum estoque, mas menos que a quantidade pedida (quer 5, tem 3).
+  // Bloqueiam finalizar, mas a quantidade pode ser reduzida (input fica habilitado).
+  const [insufficientItems, setInsufficientItems] = useState<Map<string, number>>(new Map());
   const [savedItems, setSavedItems] = useState<any[]>([]);
 
   // Carrega "saved for later" do usuário atual e limpa a chave global legada (que vazava).
@@ -65,6 +68,7 @@ const Carrinho = () => {
       if (!prods || !statuses) return;
       const statusMap = new Map(statuses.map(s => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
       const blocked = new Set<string>();
+      const insufficient = new Map<string, number>();
       for (const item of items) {
         const prod = prods.find(p => p.id === item.produto_id);
         if (!prod) continue;
@@ -74,9 +78,14 @@ const Carrinho = () => {
         const canBuy = statusMap.get(normalized) ?? true;
         const isPreOrder = normalized === "pre-order";
         const disponivel = prod.estoque_total - prod.estoque_reservado;
-        if (!canBuy || (!isPreOrder && disponivel < 1)) blocked.add(item.produto_id);
+        if (!canBuy || (!isPreOrder && disponivel < 1)) {
+          blocked.add(item.produto_id);                 // esgotado / não comprável → remover
+        } else if (!isPreOrder && disponivel < item.quantidade) {
+          insufficient.set(item.produto_id, disponivel); // tem menos que o pedido → reduzir
+        }
       }
       setUnavailableItems(blocked);
+      setInsufficientItems(insufficient);
     };
     check();
   }, [items]);
@@ -176,7 +185,12 @@ const Carrinho = () => {
                     <TableCell className="font-medium">
                       {item.nome}
                       {unavailableItems.has(item.produto_id) && (
-                        <Badge variant="destructive" className="ml-2 text-xs">Unavailable</Badge>
+                        <Badge variant="destructive" className="ml-2 text-xs">Out of stock</Badge>
+                      )}
+                      {insufficientItems.has(item.produto_id) && (
+                        <Badge variant="destructive" className="ml-2 text-xs">
+                          Only {insufficientItems.get(item.produto_id)} left — reduce qty
+                        </Badge>
                       )}
                     </TableCell>
                     <TableCell>${Number(item.preco).toFixed(2)}</TableCell>
@@ -239,13 +253,18 @@ const Carrinho = () => {
               <div className="flex flex-col items-end gap-2">
                 {unavailableItems.size > 0 && (
                   <p className="text-sm text-destructive flex items-center gap-1">
-                    <AlertTriangle className="h-4 w-4" /> Remove unavailable items to proceed
+                    <AlertTriangle className="h-4 w-4" /> Remove out-of-stock items to proceed
+                  </p>
+                )}
+                {insufficientItems.size > 0 && (
+                  <p className="text-sm text-destructive flex items-center gap-1">
+                    <AlertTriangle className="h-4 w-4" /> Reduce quantities to the available stock to proceed
                   </p>
                 )}
                 {contactRole === "viewer" ? (
                   <p className="text-sm text-muted-foreground italic">View-only access — ordering disabled</p>
                 ) : (
-                  <Button onClick={() => navigate("/portal/checkout")} disabled={unavailableItems.size > 0}>NEXT</Button>
+                  <Button onClick={() => navigate("/portal/checkout")} disabled={unavailableItems.size > 0 || insufficientItems.size > 0}>NEXT</Button>
                 )}
               </div>
             </div>
