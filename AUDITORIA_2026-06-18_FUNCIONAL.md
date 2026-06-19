@@ -161,3 +161,45 @@ com o assistente guiando e lendo o resultado. A verificação de funcionalidade 
 > **A testar pelo dono (não consegui ao vivo):** Create Order salvando; checkout de
 > produto no último item (2 abas) pra ver a trava de oversell; pré-venda não bloqueada;
 > "saved for later" não vazando entre logins.
+
+---
+
+## 7. VARREDURA DE BUGS (2026-06-19) — 3 subagents: botões/rotas, fluxo do cliente, notificações
+
+### 7.1 ✅ CORRIGIDOS (commit `c719b3b`)
+- **🔴 SMS ao cliente nunca disparava (causa-raiz):** `Checkout` não carregava `clientes.telefone`
+  nem repassava `phone` ao `notify-dispatch` → SMS do cliente nunca saía (falha 100% silenciosa).
+  Corrigido: carrega telefone + passa `phone`/`whatsapp`.
+- **🔴 Caminho SEM cartão não chamava `notify-dispatch`:** pedido PO/boleto nunca tentava SMS
+  (só o caminho com cartão). Corrigido: dispara nos dois caminhos.
+- **🔴 Admin "Create Order" não notificava** ninguém. Corrigido: dispara send-email + notify-dispatch.
+- **🔴 `navigate()` durante o render** no Checkout (carrinho vazio) → corrida com o navigate do
+  submit. Movido p/ `useEffect` com guard `orderPlacedRef`.
+- **🟠 `addItem` sem clamp na 1ª inserção** (entrava qtd acima do estoque). Corrigido (guard p/ não
+  rebaixar backorder/pré-venda).
+- **🟠 Reorder inflava estoque p/ 99** (furava validação). Corrigido: usa estoque real.
+- **🟢 `?customer=` ignorado** ao criar pedido do cadastro → agora pré-seleciona o cliente.
+
+### 7.2 ⚠️ ACHADOS QUE DEPENDEM DE DECISÃO SUA (não mexi)
+- **Email DUPLICADO ao cliente:** `send-email` (HTML, SMTP/Resend) E `notify-dispatch` (Resend, texto)
+  disparam no mesmo `new_order` → cliente recebe 2 emails. **Decisão:** qual é o canônico? (sugiro
+  `send-email`=email, `notify-dispatch`=só SMS). Liga com "matar Office365".
+- **Checkout sem validar obrigatórios:** cria pedido sem endereço/frete/pagamento/delivery date
+  (o label diz "Delivery Date *" mas nada checa). **NÃO travei** porque "obrigatório" é regra de
+  negócio (ex.: pedido "pick up" não precisa de endereço). Me diga o que é mandatório.
+- **Cliente logado SEM registro em `clientes`** (criado pelo admin) → checkout morre em "Client not
+  found". Edge case; fix mexe no `AuthContext` (sensível) — confirmar antes.
+- **Falhas silenciosas de notificação:** todos os disparos usam `.catch(()=>{})` → toast diz
+  "sucesso" mesmo se 100% das notificações falharem. Melhorar logging/feedback? (decisão de UX.)
+
+### 7.3 ⏸️ DEIXADO PRO FINAL (seu pedido)
+- **Stripe:** cartão que falha deixa pedido "cancelado" + itens inseridos (estoque reservado preso),
+  sem rollback. Total exibido pode divergir do cobrado após recálculo. (Mexer no fim, com testes.)
+- **Testes de criação ao vivo** (criar cliente/pedido, editar, deletar, trocar senha).
+
+### 7.4 🔵 NÃO são bugs (intencionais/verificados)
+- Nenhuma rota gera 404 real (`/admin/customers/new` e `/admin/orders/new` casam com `:id`).
+- Botões desabilitados do **Quickbooks** (Install/Start) = integração não implementada (proposital).
+- Abas "display only" do CustomerEdit + "coming soon" (Files/Messages no pedido) = placeholders
+  documentados. "Invite by email" = reset de senha (label enganoso, função real).
+- WhatsApp inerte (desabilitado por config, sem tentativa de envio) = correto.
