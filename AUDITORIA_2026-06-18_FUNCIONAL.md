@@ -92,10 +92,12 @@ verificação manual dos pontos críticos + confirmação visual no app rodando 
   linhas $0,00, Gross total $0,00. São produtos com **variante** (Lite/One Plus/Black Box,
   pisos com cor) **sem preço na tabela "Wholesale Price"** do cliente no próprio B2BWave.
   Nosso sync copiou fielmente. **Ação:** corrigir o preço no B2BWave (o sync pega depois).
-  **Lacuna do clone exposta:** o sync de hoje trouxe a *existência* das variantes
-  (`produto_variantes`) mas **não os preços por variante** (`variante_precos` = preço de
-  variante × tabela). Para produtos com variante, o catálogo nosso pode mostrar $0 mesmo se
-  o B2BWave tiver preço de variante. → **adicionar `variante_precos` ao sync (clone gap #2).**
+  **Verificado (correção):** o B2BWave **não tem preço por variante** — não há endpoint de
+  variant-price na API, e `product_variants` só traz `code` + `option_values` (sem preço). A
+  **variante herda o preço do PRODUTO**. Então NÃO há `variante_precos` pra sincronizar; o
+  preço por tabela já é coberto pelo sync `product_prices → tabela_preco_itens` (commit
+  `e07d187`). O $0 desses itens é puramente **produto sem preço na tabela "Wholesale" no
+  B2BWave** (dado upstream). `variante_precos` (tabela local) não faz parte do clone via API.
 - **Gráfico "Total per month" do dashboard vazio** (sem barras). → a verificar.
 - **Vercel 404** em rotas client-side → **corrigido** (`c4fb2d7`).
 
@@ -147,11 +149,14 @@ com o assistente guiando e lendo o resultado. A verificação de funcionalidade 
 3. ✅ **Oversell** — reserva atômica no trigger, gated fail-safe (commit `eb141ba`).
    Sync/admin/backorder/pré-venda não bloqueiam. **Testar um produto de pré-venda.**
 4. ✅ **"Saved for later"** isolado por usuário (commit `6ee4be8`).
-5. ⬜ **Warehouse/segredos** — mover p/ Vault ou restringir `configuracoes` a admin.
-   *(A CONFIRMAR abordagem — pode afetar telas de staff. Ver 1.2.)*
-6. ⬜ Dashboard chart vazio; abas display-only do CustomerEdit (só as que o dono usa).
-7. ⬜ **Clone gap: `variante_precos`** — sync de preços por variante × tabela
-   (produtos com variante mostram $0 sem isso). Ver 2.3.
+5. ⏸️ **Warehouse/segredos** — ADIADO pelo dono. Cuidado: componentes de warehouse
+   (MondayPopup, InactivityLogout, WarehouseSettings) leem `configuracoes` direto, então
+   restringir a admin quebraria warehouse. Fix futuro: VIEW sem colunas secretas, ou Vault.
+6. ✅ **Dashboard chart** — INVESTIGADO: **não é bug.** O código do gráfico está correto
+   (linhas com cor/eixos ok). A observação de "vazio" veio de um screenshot **cortado** no
+   topo do gráfico (só apareceram os eixos). Sem ação.
+7. ✅ **`variante_precos`** — INVESTIGADO: **não é lacuna sincronizável.** B2BWave não expõe
+   preço por variante (variante herda preço do produto); `product_prices` já cobre. Ver 2.3.
 
 > **A testar pelo dono (não consegui ao vivo):** Create Order salvando; checkout de
 > produto no último item (2 abas) pra ver a trava de oversell; pré-venda não bloqueada;
