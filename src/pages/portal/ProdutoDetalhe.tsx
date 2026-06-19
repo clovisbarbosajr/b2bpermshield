@@ -34,6 +34,7 @@ const ProdutoDetalhe = () => {
   const [calculatedPrice, setCalculatedPrice] = useState<number | null>(null);
   const [clienteId, setClienteId] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<{ permite_comprar: boolean; nome: string } | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false); // restrito por privacy group / não-visível
 
   // Fetch clienteId
   useEffect(() => {
@@ -81,6 +82,22 @@ const ProdutoDetalhe = () => {
     };
     fetchData();
   }, [id]);
+
+  // Checa acesso por privacy group (fecha o vazamento via URL direta /portal/produto/:id).
+  // Se o produto é restrito a grupos e o cliente não pertence a nenhum, bloqueia.
+  useEffect(() => {
+    if (!produto) return;
+    const checkAccess = async () => {
+      const { data: acessos } = await supabase.from("produto_acesso").select("grupo_nome").eq("produto_id", produto.id);
+      const required = (acessos ?? []).map((a: any) => a.grupo_nome).filter(Boolean);
+      if (required.length === 0) { setAccessDenied(false); return; } // sem restrição → liberado
+      if (!clienteId) { setAccessDenied(true); return; }             // restrito e sem cliente → bloqueia
+      const { data: cpg } = await supabase.from("cliente_privacy_groups").select("privacy_group_id").eq("cliente_id", clienteId);
+      const myGroups = new Set((cpg ?? []).map((r: any) => r.privacy_group_id));
+      setAccessDenied(!required.some((g: string) => myGroups.has(g)));
+    };
+    checkAccess();
+  }, [produto, clienteId]);
 
   // Fetch calculated price
   useEffect(() => {
@@ -140,10 +157,12 @@ const ProdutoDetalhe = () => {
     );
   }
 
-  if (!produto) {
+  if (!produto || accessDenied) {
     return (
       <PortalLayout>
-        <div className="py-20 text-center text-muted-foreground">Product not found.</div>
+        <div className="py-20 text-center text-muted-foreground">
+          Product not available.
+        </div>
       </PortalLayout>
     );
   }

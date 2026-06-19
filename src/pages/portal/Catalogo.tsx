@@ -98,8 +98,18 @@ const Catalogo = () => {
         clientGroupIds = (cpg ?? []).map((r) => r.privacy_group_id);
       }
 
-      // Filter: show product if it has NO restriction, or client belongs to at least one of its groups
+      // Esconde produto cujo STATUS tem permite_visualizar = false (antes esse flag era
+      // ignorado e o produto aparecia mesmo assim).
+      const visMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
+      const isVisible = (p: Produto) => {
+        const sName = ((p as any).status_produto) || "disponivel";
+        const st = sMap[(visMap[sName] || sName).toLowerCase()];
+        return !(st && st.permite_visualizar === false);
+      };
+
+      // Filter: visível + (sem restrição OU cliente pertence a um dos grupos do produto)
       const filtered = allProducts.filter((p) => {
+        if (!isVisible(p)) return false;
         const required = restrictedProducts.get(p.id);
         if (!required || required.size === 0) return true; // no restriction
         return clientGroupIds.some((id) => required.has(id));
