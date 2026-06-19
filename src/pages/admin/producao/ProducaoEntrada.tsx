@@ -95,13 +95,13 @@ const ProducaoEntrada = () => {
               <div className="md:col-span-4">
                 <Label>Product *</Label>
                 <Select value={l.produto_id} onValueChange={(v) => setLine(l.key, { produto_id: v })}>
-                  <SelectTrigger><SelectValue placeholder="Choose product (by category)" /></SelectTrigger>
-                  <SelectContent className="max-h-72">
+                  <SelectTrigger className="h-11 text-base"><SelectValue placeholder="Choose product (by category)" /></SelectTrigger>
+                  <SelectContent className="max-h-[460px] min-w-[380px]">
                     {grouped.map(([cat, prods]) => (
                       <SelectGroup key={cat}>
-                        <SelectLabel>{cat}</SelectLabel>
+                        <SelectLabel className="text-primary font-bold text-sm uppercase tracking-wide bg-primary/10 px-2 py-2 my-1 rounded-sm">{cat}</SelectLabel>
                         {prods.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></SelectItem>
+                          <SelectItem key={p.id} value={p.id} className="text-base py-2.5 pl-4">{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></SelectItem>
                         ))}
                       </SelectGroup>
                     ))}
