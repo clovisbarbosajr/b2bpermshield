@@ -601,6 +601,12 @@ Deno.serve(async (req) => {
       to = customerEmail;
       subject = `Products back in stock – ${COMPANY_NAME}`;
       html = templateProductAvailable(customerName, products || []);
+    } else if (type === "admin_alert") {
+      // Alerta INTERNO ao admin (ex.: falha de notificação). Subject/html já prontos.
+      const adminEmails = parseEmails(config?.email_new_orders) || [];
+      to = body.adminEmail || (adminEmails.length ? adminEmails : config?.email_contato || COMPANY_EMAIL);
+      subject = body.subject || "Alerta do sistema";
+      html = body.html || "";
     } else if (type === "password_reset") {
       // Password reset — generate link via admin API and send via our SMTP
       const { email: resetEmail, redirectTo } = body;
