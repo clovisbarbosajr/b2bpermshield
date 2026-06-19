@@ -150,9 +150,8 @@ const ProducaoEntrada = () => {
         ))}
       </div>
 
-      <div className="mt-3 flex items-center justify-between">
+      <div className="mt-3">
         <Button variant="outline" onClick={addLine} className="gap-1"><Plus className="h-4 w-4" /> Add another product</Button>
-        <Button onClick={save} disabled={saving} className="gap-1"><Save className="h-4 w-4" /> {saving ? "Saving..." : "Save"}</Button>
       </div>
     </AdminLayout>
   );

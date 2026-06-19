@@ -8,9 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Check, Truck, PackageCheck, Pencil, Trash2 } from "lucide-react";
+import { Check, Truck, PackageCheck, Pencil, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 type Row = {
@@ -22,11 +21,7 @@ type Row = {
 type Produto = { id: string; nome: string; sku: string; categoria_id: string | null };
 type Categoria = { id: string; nome: string };
 
-const STATUS_BADGE: Record<string, { label: string; variant: "secondary" | "default" | "outline" }> = {
-  solicitado: { label: "Requested", variant: "secondary" },
-  a_caminho: { label: "On the way", variant: "default" },
-  delivered: { label: "Delivered", variant: "outline" },
-};
+const fmtDT = (s: string) => new Date(s).toLocaleString("en-US", { month: "short", day: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 const ProducaoStatus = () => {
   const { user } = useAuth();
@@ -39,7 +34,8 @@ const ProducaoStatus = () => {
   const [recvQty, setRecvQty] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
   const [editRow, setEditRow] = useState<Row | null>(null);
-  const [editForm, setEditForm] = useState({ produto_id: "", quantidade: "", est_entrega: "", numero_ordem: "", numero_container: "" });
+  const [editForm, setEditForm] = useState({ produto_id: "", quantidade: "", est_entrega: "", numero_ordem: "", numero_container: "", status: "solicitado" });
+  const [showReceived, setShowReceived] = useState(false);
 
   const load = async () => {
     const [pr, prod, cat] = await Promise.all([
@@ -53,6 +49,9 @@ const ProducaoStatus = () => {
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+
+  const active = useMemo(() => rows.filter((r) => r.status !== "delivered"), [rows]);
+  const received = useMemo(() => rows.filter((r) => r.status === "delivered"), [rows]);
 
   const grouped = useMemo(() => {
     const catName = new Map(categorias.map((c) => [c.id, c.nome]));
@@ -76,9 +75,9 @@ const ProducaoStatus = () => {
     toast.success("Saved"); load();
   };
 
-  const markOnTheWay = async (r: Row) => {
+  const setStatus = async (r: Row, status: string) => {
     setBusy(r.id);
-    const { error } = await supabase.from("producao_pedidos").update({ status: "a_caminho" }).eq("id", r.id);
+    const { error } = await supabase.from("producao_pedidos").update({ status }).eq("id", r.id);
     setBusy(null);
     if (error) { toast.error(error.message); return; }
     load();
@@ -101,13 +100,13 @@ const ProducaoStatus = () => {
 
   const openEdit = (r: Row) => {
     setEditRow(r);
-    setEditForm({ produto_id: r.produto_id, quantidade: String(r.quantidade), est_entrega: r.est_entrega ?? "", numero_ordem: r.numero_ordem ?? "", numero_container: r.numero_container ?? "" });
+    setEditForm({ produto_id: r.produto_id, quantidade: String(r.quantidade), est_entrega: r.est_entrega ?? "", numero_ordem: r.numero_ordem ?? "", numero_container: r.numero_container ?? "", status: r.status });
   };
   const saveEdit = async () => {
     if (!editRow) return;
     if (!editForm.produto_id || !(parseInt(editForm.quantidade) > 0)) { toast.error("Product and quantity are required."); return; }
     const { error } = await supabase.from("producao_pedidos").update({
-      produto_id: editForm.produto_id, quantidade: parseInt(editForm.quantidade),
+      produto_id: editForm.produto_id, quantidade: parseInt(editForm.quantidade), status: editForm.status,
       est_entrega: editForm.est_entrega || null, numero_ordem: editForm.numero_ordem || null, numero_container: editForm.numero_container || null,
     }).eq("id", editRow.id);
     if (error) { toast.error(error.message); return; }
@@ -121,50 +120,63 @@ const ProducaoStatus = () => {
     toast.success("Deleted"); load();
   };
 
+  const StatusPill = ({ r }: { r: Row }) => {
+    if (r.status === "delivered") return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 px-2.5 py-1 text-xs font-medium">
+        <PackageCheck className="h-3.5 w-3.5" /> Delivered
+      </span>
+    );
+    if (r.status === "a_caminho") return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400 px-2.5 py-1 text-xs font-medium">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75 animate-ping" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+        </span>
+        <Truck className="h-3.5 w-3.5" /> On the way
+      </span>
+    );
+    return <span className="inline-flex items-center rounded-full bg-muted text-muted-foreground px-2.5 py-1 text-xs font-medium">Requested</span>;
+  };
+
   return (
     <AdminLayout>
       <div className="mb-6">
         <h2 className="font-display text-2xl font-semibold">Production — Status</h2>
-        <p className="text-sm text-muted-foreground">Track items, add tracking, edit/delete pending ones, and check in received goods (adds to inventory at the product's location).</p>
+        <p className="text-sm text-muted-foreground">Active items in production. When you check in a received item it moves to the Received log below and is added to inventory.</p>
       </div>
 
       <Card className="p-0 overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Product</TableHead><TableHead>Qty</TableHead><TableHead>Est. delivery</TableHead>
+              <TableHead>Product</TableHead><TableHead>Qty</TableHead><TableHead>Created</TableHead><TableHead>Est. delivery</TableHead>
               <TableHead>Order # / Container</TableHead><TableHead className="min-w-[190px]">Tracking</TableHead>
               <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
-            ) : rows.length === 0 ? (
-              <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Nothing in production yet.</TableCell></TableRow>
-            ) : rows.map((r) => {
-              const b = STATUS_BADGE[r.status] ?? { label: r.status, variant: "outline" as const };
-              const isDelivered = r.status === "delivered";
+              <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
+            ) : active.length === 0 ? (
+              <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Nothing active in production.</TableCell></TableRow>
+            ) : active.map((r) => {
               const isReceiving = receivingId === r.id;
               return (
-                <TableRow key={r.id} className={isDelivered ? "bg-muted/20" : ""}>
+                <TableRow key={r.id} className={r.status === "a_caminho" ? "bg-blue-50/40 dark:bg-blue-950/10" : ""}>
                   <TableCell className="font-medium">{r.produtos?.nome ?? "—"} <span className="text-xs text-muted-foreground">({r.produtos?.sku ?? ""})</span></TableCell>
-                  <TableCell>{r.quantidade}{r.quantidade_recebida != null && r.quantidade_recebida !== r.quantidade && (<span className="text-xs text-amber-600"> → {r.quantidade_recebida} recv.</span>)}</TableCell>
+                  <TableCell>{r.quantidade}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{fmtDT(r.created_at)}</TableCell>
                   <TableCell>{r.est_entrega ?? "—"}</TableCell>
                   <TableCell className="text-sm">{r.numero_ordem ?? "—"}{r.numero_container ? ` / ${r.numero_container}` : ""}</TableCell>
                   <TableCell>
-                    {isDelivered ? <span className="text-sm">{r.tracking ?? "—"}</span> : (
-                      <div className="flex gap-1">
-                        <Input className="h-8" placeholder="Tracking #" value={trackingEdit[r.id] ?? r.tracking ?? ""} onChange={(e) => setTrackingEdit((p) => ({ ...p, [r.id]: e.target.value }))} />
-                        <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => saveTracking(r)}>Save</Button>
-                      </div>
-                    )}
+                    <div className="flex gap-1">
+                      <Input className="h-8" placeholder="Tracking #" value={trackingEdit[r.id] ?? r.tracking ?? ""} onChange={(e) => setTrackingEdit((p) => ({ ...p, [r.id]: e.target.value }))} />
+                      <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => saveTracking(r)}>Save</Button>
+                    </div>
                   </TableCell>
-                  <TableCell><Badge variant={b.variant} className="gap-1">{r.status === "a_caminho" && <Truck className="h-3 w-3" />}{isDelivered && <PackageCheck className="h-3 w-3" />}{b.label}</Badge></TableCell>
+                  <TableCell><StatusPill r={r} /></TableCell>
                   <TableCell className="text-right">
-                    {isDelivered ? (
-                      <span className="text-xs text-muted-foreground">{r.recebido_em ? new Date(r.recebido_em).toLocaleDateString() : "received"}</span>
-                    ) : isReceiving ? (
+                    {isReceiving ? (
                       <div className="flex items-center gap-2 justify-end">
                         <Input type="number" min={0} className="h-8 w-20" value={recvQty} onChange={(e) => setRecvQty(e.target.value)} title="Received quantity" />
                         <Button size="sm" className="gap-1 bg-green-600 hover:bg-green-700 text-white" disabled={busy === r.id} onClick={() => checkIn(r)}><Check className="h-4 w-4" /> Check in</Button>
@@ -172,9 +184,9 @@ const ProducaoStatus = () => {
                       </div>
                     ) : (
                       <div className="flex items-center gap-1 justify-end">
-                        {r.status === "solicitado" && (
-                          <Button size="sm" variant="outline" className="gap-1" disabled={busy === r.id} onClick={() => markOnTheWay(r)}><Truck className="h-4 w-4" /> On the way</Button>
-                        )}
+                        {r.status === "solicitado"
+                          ? <Button size="sm" variant="outline" className="gap-1" disabled={busy === r.id} onClick={() => setStatus(r, "a_caminho")}><Truck className="h-4 w-4" /> On the way</Button>
+                          : <Button size="sm" variant="ghost" className="text-xs text-muted-foreground" disabled={busy === r.id} onClick={() => setStatus(r, "solicitado")}>↩ Undo</Button>}
                         <Button size="sm" variant="outline" className="gap-1" onClick={() => startReceive(r)}><PackageCheck className="h-4 w-4" /> Receive</Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8" title="Delete" onClick={() => remove(r)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
@@ -187,9 +199,37 @@ const ProducaoStatus = () => {
           </TableBody>
         </Table>
       </Card>
-      <p className="text-xs text-muted-foreground mt-3">"Receive" lets you adjust the quantity if less arrived than ordered (e.g., ordered 10, got 8), then the green Check in adds the received quantity to inventory. Delivered items can't be edited/deleted here (already in stock).</p>
 
-      {/* Editar item de produção (não-recebido) */}
+      {/* Log de Recebidos (colapsável) */}
+      <Card className="mt-4 overflow-hidden">
+        <button className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors" onClick={() => setShowReceived((v) => !v)}>
+          <span className="flex items-center gap-2 font-semibold text-green-700 dark:text-green-400">
+            <PackageCheck className="h-4 w-4" /> Received log ({received.length})
+          </span>
+          {showReceived ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </button>
+        {showReceived && (
+          <Table>
+            <TableHeader>
+              <TableRow><TableHead>Product</TableHead><TableHead>Ordered → Received</TableHead><TableHead>Container</TableHead><TableHead>Received at</TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {received.length === 0 ? (
+                <TableRow><TableCell colSpan={4} className="text-center py-6 text-muted-foreground">Nothing received yet.</TableCell></TableRow>
+              ) : received.map((r) => (
+                <TableRow key={r.id} className="bg-green-50/30 dark:bg-green-950/10">
+                  <TableCell className="font-medium">{r.produtos?.nome ?? "—"} <span className="text-xs text-muted-foreground">({r.produtos?.sku ?? ""})</span></TableCell>
+                  <TableCell>{r.quantidade} → <b className={r.quantidade_recebida !== r.quantidade ? "text-amber-600" : "text-green-700"}>{r.quantidade_recebida ?? r.quantidade}</b></TableCell>
+                  <TableCell className="text-sm">{r.numero_container ?? "—"}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{r.recebido_em ? fmtDT(r.recebido_em) : "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
+
+      {/* Editar (inclui status — pra desfazer "on the way") */}
       <Dialog open={!!editRow} onOpenChange={(o) => !o && setEditRow(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>Edit production item</DialogTitle></DialogHeader>
@@ -210,10 +250,21 @@ const ProducaoStatus = () => {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Quantity *</Label><Input type="number" min={1} value={editForm.quantidade} onChange={(e) => setEditForm((f) => ({ ...f, quantidade: e.target.value }))} /></div>
+              <div>
+                <Label>Status</Label>
+                <Select value={editForm.status} onValueChange={(v) => setEditForm((f) => ({ ...f, status: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="solicitado">Requested</SelectItem>
+                    <SelectItem value="a_caminho">On the way</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div><Label>Est. delivery</Label><Input type="date" value={editForm.est_entrega} onChange={(e) => setEditForm((f) => ({ ...f, est_entrega: e.target.value }))} /></div>
               <div><Label>Order #</Label><Input value={editForm.numero_ordem} onChange={(e) => setEditForm((f) => ({ ...f, numero_ordem: e.target.value }))} /></div>
-              <div><Label>Container #</Label><Input value={editForm.numero_container} onChange={(e) => setEditForm((f) => ({ ...f, numero_container: e.target.value }))} /></div>
+              <div className="col-span-2"><Label>Container #</Label><Input value={editForm.numero_container} onChange={(e) => setEditForm((f) => ({ ...f, numero_container: e.target.value }))} /></div>
             </div>
+            <p className="text-xs text-muted-foreground">To mark as received (and add to inventory), use the green "Check in" on the list — not here.</p>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEditRow(null)}>Cancel</Button>
