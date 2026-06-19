@@ -403,7 +403,8 @@ const Checkout = () => {
     const itens = recalculated.map(i => ({
       pedido_id: pedido.id,
       produto_id: i.produto_id,
-      nome_produto: i.nome,
+      // Inclui a variante (Size/Color) no nome da linha do pedido; sku = código da variante.
+      nome_produto: (i as any).variante_label ? `${i.nome} (${(i as any).variante_label})` : i.nome,
       sku: i.sku,
       preco_unitario: i.preco,
       quantidade: i.quantidade,

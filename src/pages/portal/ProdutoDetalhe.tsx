@@ -21,6 +21,27 @@ type Produto = {
 
 type Categoria = { id: string; nome: string; parent_id: string | null };
 
+// Formata o valores_opcao da variante (vindo do B2BWave) em texto legível.
+// Robusto a vários formatos: objeto {Size:"M"}, array de strings, array de {name,value}.
+const formatOpcao = (v: any): string => {
+  if (v == null) return "";
+  if (typeof v === "string" || typeof v === "number") return String(v);
+  if (Array.isArray(v)) {
+    return v.map((x) => {
+      if (x == null) return "";
+      if (typeof x === "string" || typeof x === "number") return String(x);
+      const name = x.option_name ?? x.name ?? x.key ?? x.label;
+      const val = x.value ?? x.valor ?? x.v;
+      if (name != null && val != null) return `${name}: ${val}`;
+      return String(val ?? name ?? "");
+    }).filter(Boolean).join(" / ");
+  }
+  if (typeof v === "object") {
+    return Object.entries(v).map(([k, val]) => `${k}: ${val}`).join(" / ");
+  }
+  return String(v);
+};
+
 const ProdutoDetalhe = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -35,6 +56,8 @@ const ProdutoDetalhe = () => {
   const [clienteId, setClienteId] = useState<string | null>(null);
   const [statusInfo, setStatusInfo] = useState<{ permite_comprar: boolean; nome: string } | null>(null);
   const [accessDenied, setAccessDenied] = useState(false); // restrito por privacy group / não-visível
+  const [variantes, setVariantes] = useState<any[]>([]);
+  const [selectedVarianteId, setSelectedVarianteId] = useState<string>("");
 
   // Fetch clienteId
   useEffect(() => {
@@ -83,6 +106,18 @@ const ProdutoDetalhe = () => {
     fetchData();
   }, [id]);
 
+  // Carrega as variantes ativas do produto (Size/Color etc.).
+  useEffect(() => {
+    if (!id) return;
+    supabase
+      .from("produto_variantes")
+      .select("id, codigo, quantidade, valores_opcao, imagem_url, ativo")
+      .eq("produto_id", id)
+      .eq("ativo", true)
+      .order("codigo")
+      .then(({ data }) => setVariantes(data ?? []));
+  }, [id]);
+
   // Checa acesso por privacy group (fecha o vazamento via URL direta /portal/produto/:id).
   // Se o produto é restrito a grupos e o cliente não pertence a nenhum, bloqueia.
   useEffect(() => {
@@ -121,6 +156,13 @@ const ProdutoDetalhe = () => {
   const disponivel = produto ? produto.estoque_total - produto.estoque_reservado : 0;
   const isPreOrder = statusInfo?.nome.toLowerCase() === "pre-order";
   const canBuy = statusInfo ? statusInfo.permite_comprar && (disponivel > 0 || isPreOrder) : disponivel > 0;
+  // Variantes: estoque e "pode comprar" passam a depender da variante escolhida.
+  const hasVariants = variantes.length > 0;
+  const selectedVariante = variantes.find((v) => v.id === selectedVarianteId) || null;
+  const effectiveDisponivel = hasVariants ? (selectedVariante ? (selectedVariante.quantidade ?? 0) : 0) : disponivel;
+  const effectiveCanBuy = hasVariants
+    ? (!!selectedVariante && (statusInfo ? statusInfo.permite_comprar : true) && (effectiveDisponivel > 0 || isPreOrder))
+    : canBuy;
 
   const breadcrumb: Categoria[] = [];
   if (categoria) {
@@ -132,19 +174,27 @@ const ProdutoDetalhe = () => {
   }
 
   const handleAdd = () => {
-    if (!produto || !canBuy) return;
+    if (!produto || !effectiveCanBuy) return;
+    if (hasVariants && !selectedVariante) { toast.error("Please select an option first."); return; }
     // Trava de segurança: não permite adicionar/comprar a $0,00 (preço não configurado).
     if (!price || price <= 0) {
       toast.error("Price not available. Please contact us for pricing.");
       return;
     }
+    const label = selectedVariante ? (formatOpcao(selectedVariante.valores_opcao) || selectedVariante.codigo) : null;
     addItem({
-      produto_id: produto.id, nome: produto.nome, sku: produto.sku, preco: price,
+      produto_id: produto.id,
+      variante_id: selectedVariante?.id ?? null,
+      variante_label: label,
+      nome: produto.nome,
+      sku: selectedVariante?.codigo || produto.sku,
+      preco: price,
       quantidade, unidade_venda: produto.unidade_venda,
-      quantidade_minima: produto.quantidade_minima, estoque_disponivel: isPreOrder ? 999999 : disponivel,
-      imagem_url: produto.imagem_url,
+      quantidade_minima: produto.quantidade_minima,
+      estoque_disponivel: isPreOrder ? 999999 : effectiveDisponivel,
+      imagem_url: selectedVariante?.imagem_url || produto.imagem_url,
     });
-    toast.success(`${produto.nome} ${isPreOrder ? "added as back order" : "added to order"}`);
+    toast.success(`${produto.nome}${label ? ` (${label})` : ""} ${isPreOrder ? "added as back order" : "added to order"}`);
   };
 
   if (loading) {
@@ -198,8 +248,8 @@ const ProdutoDetalhe = () => {
           {/* Details */}
           <div>
             <h1 className="text-2xl font-bold">{produto.nome}</h1>
-            <p className={`mt-2 text-lg font-semibold ${canBuy ? "text-green-500" : "text-destructive"}`}>
-              {statusInfo ? statusInfo.nome : (disponivel > 0 ? "Available" : "Out of Stock")}
+            <p className={`mt-2 text-lg font-semibold ${effectiveCanBuy ? "text-green-500" : "text-destructive"}`}>
+              {statusInfo ? statusInfo.nome : (effectiveDisponivel > 0 ? "Available" : "Out of Stock")}
             </p>
 
             {categoria && (
@@ -211,12 +261,39 @@ const ProdutoDetalhe = () => {
 
             <div className="mt-4 flex items-center gap-4">
               <p className="text-3xl font-bold">${price.toFixed(2)}</p>
-              {(disponivel > 0 || isPreOrder) && (
+              {(effectiveDisponivel > 0 || isPreOrder) && (
                 <Badge variant="outline" className={isPreOrder ? "border-blue-500 text-blue-500" : "border-green-500 text-green-500"}>
-                  {isPreOrder ? "BACK ORDER" : `AVAILABLE QUANTITY: ${disponivel}`}
+                  {isPreOrder ? "BACK ORDER" : `AVAILABLE QUANTITY: ${effectiveDisponivel}`}
                 </Badge>
               )}
             </div>
+
+            {/* Variantes / opções (Size, Color etc.) — só aparece se o produto tiver */}
+            {hasVariants && (
+              <div className="mt-6">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Options</p>
+                <div className="flex flex-wrap gap-2">
+                  {variantes.map((v) => {
+                    const out = (v.quantidade ?? 0) <= 0 && !isPreOrder;
+                    const sel = v.id === selectedVarianteId;
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => setSelectedVarianteId(v.id)}
+                        className={`px-3 py-1.5 rounded-md border text-sm transition-colors ${sel ? "border-primary bg-primary/10 text-primary font-medium" : "border-border hover:bg-muted"} ${out ? "opacity-50" : ""}`}
+                      >
+                        {formatOpcao(v.valores_opcao) || v.codigo}
+                        {out && <span className="ml-1 text-xs">(out of stock)</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!selectedVariante && (
+                  <p className="text-xs text-muted-foreground mt-1">Select an option to continue.</p>
+                )}
+              </div>
+            )}
 
             <div className="mt-6">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Quantity</p>
@@ -224,13 +301,13 @@ const ProdutoDetalhe = () => {
                 <Input
                   type="number"
                   min={produto.quantidade_minima}
-                  max={isPreOrder ? undefined : disponivel}
+                  max={isPreOrder ? undefined : effectiveDisponivel}
                   value={quantidade}
                   onChange={(e) => setQuantidade(Math.max(produto.quantidade_minima, parseInt(e.target.value) || 1))}
                   className="w-24 h-10"
-                  disabled={!canBuy}
+                  disabled={!effectiveCanBuy}
                 />
-                <Button onClick={handleAdd} disabled={!canBuy} className="gap-2 h-10">
+                <Button onClick={handleAdd} disabled={!effectiveCanBuy} className="gap-2 h-10">
                   {isPreOrder ? "BACK ORDER" : "ADD TO ORDER"} <Plus className="h-4 w-4" />
                 </Button>
               </div>

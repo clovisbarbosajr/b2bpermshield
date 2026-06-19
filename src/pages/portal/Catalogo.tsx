@@ -24,6 +24,7 @@ type Categoria = { id: string; nome: string; parent_id: string | null; ordem: nu
 
 const Catalogo = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
+  const [variantProductIds, setVariantProductIds] = useState<Set<string>>(new Set());
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -62,12 +63,15 @@ const Catalogo = () => {
   // Fetch products (with privacy group filtering) and categories
   useEffect(() => {
     const fetchData = async () => {
-      const [prodRes, catRes, acessoRes, statusRes] = await Promise.all([
+      const [prodRes, catRes, acessoRes, statusRes, variantRes] = await Promise.all([
         supabase.from("produtos").select("*").eq("ativo", true).order("nome"),
         supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("ordem").order("nome"),
         supabase.from("produto_acesso").select("produto_id, grupo_nome"),
         supabase.from("product_statuses").select("nome, permite_comprar, permite_visualizar, cor"),
+        supabase.from("produto_variantes").select("produto_id").eq("ativo", true),
       ]);
+      // Produtos que têm variante: o "Add" do grid leva pra página do produto (escolher a opção).
+      setVariantProductIds(new Set((variantRes.data ?? []).map((r: any) => r.produto_id)));
 
       // Build status map
       const sMap: Record<string, ProductStatus> = {};
@@ -211,6 +215,11 @@ const Catalogo = () => {
 
   const handleAdd = (p: Produto) => {
     if (!canBuy(p)) return;
+    // Produto com variante: não dá pra escolher a opção no grid → manda pra página do produto.
+    if (variantProductIds.has(p.id)) {
+      navigate(`/portal/produto/${p.id}`);
+      return;
+    }
     const calculatedPrice = getPrice(p);
     // Trava de segurança: não deixa adicionar/comprar produto a $0,00 (preço não
     // configurado na tabela do cliente). Evita pedido a preço zero.

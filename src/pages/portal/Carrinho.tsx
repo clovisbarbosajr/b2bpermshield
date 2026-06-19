@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import PortalLayout from "@/components/layouts/PortalLayout";
-import { useCart } from "@/contexts/CartContext";
+import { useCart, cartKey } from "@/contexts/CartContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -41,7 +41,7 @@ const Carrinho = () => {
   };
 
   const saveForLater = (item: any) => {
-    removeItem(item.produto_id);
+    removeItem(cartKey(item));
     persistSaved([...savedItems.filter((s) => s.produto_id !== item.produto_id), item]);
     toast.info(`${item.nome} saved for later`);
   };
@@ -184,6 +184,9 @@ const Carrinho = () => {
                     </TableCell>
                     <TableCell className="font-medium">
                       {item.nome}
+                      {item.variante_label && (
+                        <span className="block text-xs text-muted-foreground font-normal">{item.variante_label}</span>
+                      )}
                       {unavailableItems.has(item.produto_id) && (
                         <Badge variant="destructive" className="ml-2 text-xs">Out of stock</Badge>
                       )}
@@ -200,7 +203,7 @@ const Carrinho = () => {
                         min={item.quantidade_minima}
                         max={item.estoque_disponivel}
                         value={item.quantidade}
-                        onChange={e => updateQuantity(item.produto_id, parseInt(e.target.value) || item.quantidade_minima)}
+                        onChange={e => updateQuantity(cartKey(item), parseInt(e.target.value) || item.quantidade_minima)}
                         className="h-8 w-20"
                         disabled={unavailableItems.has(item.produto_id)}
                       />
@@ -217,7 +220,7 @@ const Carrinho = () => {
                           <Bookmark className="h-3.5 w-3.5" />
                         </button>
                         <button
-                          onClick={() => removeItem(item.produto_id)}
+                          onClick={() => removeItem(cartKey(item))}
                           className="h-7 w-7 rounded-full border border-destructive text-destructive flex items-center justify-center hover:bg-destructive hover:text-white transition-colors"
                         >
                           <X className="h-3.5 w-3.5" />

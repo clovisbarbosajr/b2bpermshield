@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 
 export type CartItem = {
   produto_id: string;
+  variante_id?: string | null;     // variante escolhida (Size/Color), se o produto tiver
+  variante_label?: string | null;  // ex.: "Size: M / Color: Blue" (exibição)
   nome: string;
   sku: string;
   preco: number;
@@ -13,11 +15,16 @@ export type CartItem = {
   imagem_url?: string | null;
 };
 
+// Identidade de uma linha do carrinho = produto + variante. Duas variantes do mesmo
+// produto são linhas DISTINTAS. Item sem variante => chave "produto::".
+export const cartKey = (i: { produto_id: string; variante_id?: string | null }) =>
+  `${i.produto_id}::${i.variante_id ?? ""}`;
+
 interface CartContextType {
   items: CartItem[];
   addItem: (item: CartItem) => void;
-  removeItem: (produto_id: string) => void;
-  updateQuantity: (produto_id: string, quantidade: number) => void;
+  removeItem: (key: string) => void;       // key = cartKey(item)
+  updateQuantity: (key: string, quantidade: number) => void;
   clearCart: () => void;
   total: number;
 }
@@ -84,10 +91,11 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
 
   const addItem = (item: CartItem) => {
     setItems((prev) => {
-      const existing = prev.find((i) => i.produto_id === item.produto_id);
+      const key = cartKey(item);
+      const existing = prev.find((i) => cartKey(i) === key);
       if (existing) {
         return prev.map((i) =>
-          i.produto_id === item.produto_id
+          cartKey(i) === key
             ? { ...i, quantidade: Math.min(i.quantidade + item.quantidade, i.estoque_disponivel) }
             : i
         );
@@ -102,14 +110,14 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
-  const removeItem = (produto_id: string) => {
-    setItems((prev) => prev.filter((i) => i.produto_id !== produto_id));
+  const removeItem = (key: string) => {
+    setItems((prev) => prev.filter((i) => cartKey(i) !== key));
   };
 
-  const updateQuantity = (produto_id: string, quantidade: number) => {
+  const updateQuantity = (key: string, quantidade: number) => {
     setItems((prev) =>
       prev.map((i) =>
-        i.produto_id === produto_id
+        cartKey(i) === key
           ? { ...i, quantidade: Math.max(i.quantidade_minima, Math.min(quantidade, i.estoque_disponivel)) }
           : i
       )
