@@ -14,6 +14,7 @@ import { Pencil, Trash2, Plus, Save, Printer, FileText, Search, X as XIcon } fro
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { getProductPrice } from "@/lib/pricing";
 import { toast } from "sonner";
 
 const statusOptions = [
@@ -40,6 +41,9 @@ const OrderDetail = () => {
   const [paymentOptions, setPaymentOptions] = useState<any[]>([]);
   const [tabelasPreco, setTabelasPreco] = useState<any[]>([]);
   const [taxGroups, setTaxGroups] = useState<any[]>([]);
+  // Criação de pedido pelo admin (isNew): lista de clientes + cliente selecionado.
+  const [allClientes, setAllClientes] = useState<any[]>([]);
+  const [selectedClienteId, setSelectedClienteId] = useState("");
 
   const [form, setForm] = useState({
     status: "",
@@ -77,6 +81,14 @@ const OrderDetail = () => {
     setPaymentOptions(pay ?? []);
     setTabelasPreco(tabelas ?? []);
     setTaxGroups(taxG ?? []);
+    // Para criar pedido pelo admin precisamos da lista de clientes.
+    if (isNew) {
+      const { data: cls } = await supabase
+        .from("clientes")
+        .select("id, nome, empresa, email, tabela_preco_id")
+        .order("empresa");
+      setAllClientes(cls ?? []);
+    }
   };
 
   const loadOrder = async () => {
@@ -199,6 +211,73 @@ const OrderDetail = () => {
     toast.success("Item removed");
   };
 
+  // ===== Criação de pedido pelo admin (isNew) — itens ficam em rascunho na memória =====
+  const handleAddProductDraft = async (product: any) => {
+    if (!selectedClienteId) { toast.error("Select a customer first"); return; }
+    let price = Number(product.preco) || 0;
+    try {
+      const r = await getProductPrice({ productId: product.id, customerId: selectedClienteId, quantity: 1 });
+      if (r?.price != null) price = r.price; // preço da tabela do cliente
+    } catch { /* mantém preço base */ }
+    setItems((prev) => {
+      const ex = prev.find((i) => i.produto_id === product.id);
+      if (ex) {
+        return prev.map((i) => i.produto_id === product.id
+          ? { ...i, quantidade: i.quantidade + 1, subtotal: (i.quantidade + 1) * i.preco_unitario }
+          : i);
+      }
+      return [...prev, {
+        id: `draft-${product.id}-${prev.length}`, produto_id: product.id,
+        nome_produto: product.nome, sku: product.sku,
+        preco_unitario: price, quantidade: 1, subtotal: price,
+      }];
+    });
+    setAddProductOpen(false); setProductSearch(""); setProducts([]);
+    toast.success(`${product.nome} added`);
+  };
+
+  const handleSetDraftQty = (produtoId: string, qty: number) => {
+    const q = Math.max(1, qty || 1);
+    setItems((prev) => prev.map((i) => i.produto_id === produtoId
+      ? { ...i, quantidade: q, subtotal: q * i.preco_unitario } : i));
+  };
+
+  const handleRemoveDraftItem = (produtoId: string) => {
+    setItems((prev) => prev.filter((i) => i.produto_id !== produtoId));
+  };
+
+  const handleCreateOrder = async () => {
+    if (!selectedClienteId) { toast.error("Select a customer"); return; }
+    if (items.length === 0) { toast.error("Add at least one product"); return; }
+    setSaving(true);
+    const subtotal = items.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0);
+    const quantidade = items.reduce((s, i) => s + i.quantidade, 0);
+    // numero NÃO é setado de propósito — o banco gera (serial), igual ao Checkout do portal.
+    const { data: pedido, error } = await supabase.from("pedidos").insert({
+      cliente_id: selectedClienteId,
+      status: "recebido",
+      subtotal, total: subtotal,
+      quantidade_total: quantidade,
+      po_number: form.po_number || null,
+      delivery_date: form.delivery_date || null,
+      observacoes: form.observacoes || null,
+      admin_notes: form.admin_notes || null,
+    } as any).select().single();
+    if (error || !pedido) { toast.error("Error creating order: " + (error?.message ?? "")); setSaving(false); return; }
+    // Inserir itens dispara o trigger de reserva de estoque (estoque_reservado), igual ao portal.
+    const itens = items.map((i) => ({
+      pedido_id: pedido.id, produto_id: i.produto_id, nome_produto: i.nome_produto,
+      sku: i.sku, preco_unitario: i.preco_unitario, quantidade: i.quantidade,
+      subtotal: i.preco_unitario * i.quantidade,
+    }));
+    const { error: itErr } = await supabase.from("pedido_itens").insert(itens);
+    setSaving(false);
+    if (itErr) { toast.error("Order created but items failed: " + itErr.message); }
+    log("created", "order", pedido.id, `Order #${pedido.numero || pedido.id}`);
+    toast.success(`Order #${pedido.numero ?? ""} created`);
+    navigate(`/admin/orders/${pedido.id}`);
+  };
+
   const handleDeleteOrder = async () => {
     if (!order) return;
     if (!confirm("Are you sure you want to delete this order? This cannot be undone.")) return;
@@ -270,6 +349,131 @@ const OrderDetail = () => {
           <h2 className="text-xl font-semibold">Order not found</h2>
           <Button variant="link" onClick={() => navigate("/admin/orders")}>Back to Orders</Button>
         </div>
+      </AdminLayout>
+    );
+  }
+
+  // ===== CRIAR PEDIDO (admin) — tela dedicada, grava de verdade em pedidos+pedido_itens =====
+  if (isNew) {
+    const draftSubtotal = items.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0);
+    const draftQty = items.reduce((s, i) => s + i.quantidade, 0);
+    return (
+      <AdminLayout>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Create Order</h2>
+          <Button onClick={handleCreateOrder} disabled={saving || !selectedClienteId || items.length === 0} className="gap-1">
+            <Save className="h-4 w-4" /> {saving ? "Creating..." : "Create Order"}
+          </Button>
+        </div>
+
+        <Card className="mb-6 p-5 space-y-4">
+          <div>
+            <Label>Customer *</Label>
+            <Select value={selectedClienteId} onValueChange={setSelectedClienteId}>
+              <SelectTrigger><SelectValue placeholder="Select a customer" /></SelectTrigger>
+              <SelectContent>
+                {allClientes.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.empresa || c.nome}{c.email ? ` (${c.email})` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedClienteId && (
+              <p className="text-xs text-muted-foreground mt-1">Prices use the customer's price list automatically.</p>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label>Purchase order</Label>
+              <Input value={form.po_number} onChange={(e) => setForm((f) => ({ ...f, po_number: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Delivery date</Label>
+              <Input type="date" value={form.delivery_date} onChange={(e) => setForm((f) => ({ ...f, delivery_date: e.target.value }))} />
+            </div>
+          </div>
+          <div>
+            <Label>Comments</Label>
+            <Textarea value={form.observacoes} onChange={(e) => setForm((f) => ({ ...f, observacoes: e.target.value }))} />
+          </div>
+        </Card>
+
+        <Card className="mb-6 p-0 overflow-hidden">
+          <div className="bg-muted/30 px-5 py-3 border-b border-border flex items-center justify-between">
+            <h3 className="font-semibold text-sm text-primary">Products</h3>
+            <Button size="sm" variant="outline" className="gap-1" disabled={!selectedClienteId} onClick={() => setAddProductOpen(true)}>
+              <Plus className="h-4 w-4" /> Add product
+            </Button>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Code</TableHead><TableHead>Name</TableHead><TableHead>Price</TableHead>
+                <TableHead>Qty</TableHead><TableHead>Total</TableHead><TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                    {selectedClienteId ? 'No products yet — click "Add product".' : "Select a customer first."}
+                  </TableCell>
+                </TableRow>
+              ) : items.map((i) => (
+                <TableRow key={i.produto_id}>
+                  <TableCell>{i.sku}</TableCell>
+                  <TableCell>{i.nome_produto}</TableCell>
+                  <TableCell>{fmt(i.preco_unitario)}</TableCell>
+                  <TableCell>
+                    <Input type="number" min={1} value={i.quantidade}
+                      onChange={(e) => handleSetDraftQty(i.produto_id, parseInt(e.target.value))} className="w-20" />
+                  </TableCell>
+                  <TableCell>{fmt(i.preco_unitario * i.quantidade)}</TableCell>
+                  <TableCell>
+                    <Button size="icon" variant="ghost" onClick={() => handleRemoveDraftItem(i.produto_id)}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="px-5 py-3 border-t border-border text-right text-sm space-y-1">
+            <div>Total Quantity: <b>{draftQty}</b></div>
+            <div>Total: <b>{fmt(draftSubtotal)}</b></div>
+          </div>
+        </Card>
+
+        <div className="flex justify-between">
+          <Button variant="outline" onClick={() => navigate("/admin/orders")}>Back</Button>
+          <Button onClick={handleCreateOrder} disabled={saving || !selectedClienteId || items.length === 0} className="gap-1">
+            <Save className="h-4 w-4" /> {saving ? "Creating..." : "Create Order"}
+          </Button>
+        </div>
+
+        <Dialog open={addProductOpen} onOpenChange={setAddProductOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Add product</DialogTitle></DialogHeader>
+            <div className="relative">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input className="pl-8" placeholder="Search by name or SKU..." value={productSearch}
+                onChange={(e) => searchProducts(e.target.value)} />
+            </div>
+            <div className="max-h-72 overflow-auto divide-y">
+              {products.map((p) => (
+                <button key={p.id} className="w-full text-left px-2 py-2 hover:bg-muted/50 flex justify-between gap-2"
+                  onClick={() => handleAddProductDraft(p)}>
+                  <span>{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></span>
+                  <span className="text-sm whitespace-nowrap">{fmt(Number(p.preco) || 0)}</span>
+                </button>
+              ))}
+              {productSearch.length >= 2 && products.length === 0 && (
+                <p className="text-sm text-muted-foreground px-2 py-3">No products found.</p>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </AdminLayout>
     );
   }
