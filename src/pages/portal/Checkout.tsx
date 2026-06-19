@@ -396,7 +396,13 @@ const Checkout = () => {
     const { error: itensError } = await supabase.from("pedido_itens").insert(itens);
 
     if (itensError) {
-      toast.error("Error saving order items: " + itensError.message);
+      // A reserva atômica (trigger) pode rejeitar em corrida pelo último item.
+      // Remove o pedido órfão (sem itens) e avisa claramente.
+      await supabase.from("pedidos").delete().eq("id", pedido.id);
+      const isStock = /insufficient_stock|check_violation|insufficient stock/i.test(itensError.message);
+      toast.error(isStock
+        ? "Sorry — an item just went out of stock. Please review your cart and try again."
+        : "Error saving order items: " + itensError.message);
       setLoading(false);
       return;
     }
