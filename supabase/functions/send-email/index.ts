@@ -437,14 +437,13 @@ async function sendEmailResilient(
   const errors: string[] = [];
   let resendError: string | undefined; // erro EXATO que o Resend retornou (p/ alertar o admin)
 
-  // 1) PRIMÁRIO: Resend
+  // 1) PRIMÁRIO: Resend. (Se não tiver chave, NÃO é "falha" — é só que o Resend não
+  // está configurado e o Office365 assume; nesse caso não alertamos o admin.)
   if (resendKey) {
     try {
       await sendViaProvider("resend", resendKey, fromEmail, to, subject, html, replyTo, bcc);
       return { ok: true, provider: "resend" };
     } catch (e: any) { resendError = e.message; errors.push(`resend: ${e.message}`); }
-  } else {
-    resendError = "RESEND_API_KEY não configurada";
   }
   // 2) FALLBACK silencioso: Office365 / SMTP (mesmo template/from)
   if (smtpAvailable) {
@@ -679,7 +678,11 @@ Deno.serve(async (req) => {
     await adminClient.from("notification_log").insert({
       event: type, channel: "email", recipient: toDisplay,
       status: result.ok ? "sent" : "failed",
-      error: result.ok ? (result.fallback ? `enviado via fallback Office365 — Resend falhou: ${result.resendError ?? "?"}` : null) : (result.error ?? "send failed"),
+      error: result.ok
+        ? (result.fallback
+            ? (result.resendError ? `via Office365 (fallback) — Resend falhou: ${result.resendError}` : "via Office365 (Resend não configurado)")
+            : null)
+        : (result.error ?? "send failed"),
       payload: { provider: result.provider ?? null, fallback: result.fallback ?? false, resendError: result.resendError ?? null },
     });
 
