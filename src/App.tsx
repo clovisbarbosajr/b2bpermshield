@@ -25,6 +25,9 @@ import Pedidos from "./pages/portal/Pedidos";
 import PedidoDetalhe from "./pages/portal/PedidoDetalhe";
 import Conta from "./pages/portal/Conta";
 import PortalTeam from "./pages/portal/Team";
+import ProducaoEntrada from "./pages/admin/producao/ProducaoEntrada";
+import ProducaoStatus from "./pages/admin/producao/ProducaoStatus";
+import ProducaoDashboard from "./pages/admin/producao/ProducaoDashboard";
 import NotFound from "./pages/NotFound";
 
 // Admin pages
@@ -174,6 +177,11 @@ const App = () => (
               <Route path="/admin/news" element={<A><AdminNoticias /></A>} />
               <Route path="/admin/pages" element={<A><AdminPaginas /></A>} />
               <Route path="/admin/sales-reps" element={<A><AdminRepresentantes /></A>} />
+
+              {/* Produção */}
+              <Route path="/admin/producao/entrada" element={<AW><ProducaoEntrada /></AW>} />
+              <Route path="/admin/producao/status" element={<AW><ProducaoStatus /></AW>} />
+              <Route path="/admin/producao/dashboard" element={<AW><ProducaoDashboard /></AW>} />
 
               {/* Tools */}
               <Route path="/admin/tools/pdf-catalog" element={<A><PdfCatalog /></A>} />

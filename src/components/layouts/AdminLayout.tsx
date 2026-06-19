@@ -8,7 +8,7 @@ import {
   FileUp, ListOrdered, UserCog, CreditCard, Truck, Lock, Link2, Layers,
   Percent, Receipt, Ruler, Building2, UserPlus, Mail, KeyRound, Database,
   Activity, ShoppingCart, TrendingUp, PieChart, PackageSearch, CalendarRange,
-  LayoutGrid, ScrollText, ClipboardCheck, RefreshCw, ClipboardSignature, Bell, History
+  LayoutGrid, ScrollText, ClipboardCheck, RefreshCw, ClipboardSignature, Bell, History, Factory
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -73,6 +73,14 @@ const adminNavEntries: NavEntry[] = [
     ],
   },
   { to: "/admin/product-categories", icon: FolderTree, label: "Product Categories" },
+  {
+    label: "Production", icon: Factory,
+    children: [
+      { to: "/admin/producao/entrada", icon: Package, label: "New Entry" },
+      { to: "/admin/producao/status", icon: ClipboardList, label: "Status" },
+      { to: "/admin/producao/dashboard", icon: LayoutGrid, label: "Dashboard" },
+    ],
+  },
   {
     label: "Tools", icon: Wrench,
     children: [
