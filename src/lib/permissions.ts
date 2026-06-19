@@ -105,7 +105,7 @@ export const DEFAULT_PERMISSIONS: Record<"warehouse" | "manager", Record<Permiss
     view_email_settings:     true,
     view_email_templates:    true,
     view_warehouse_settings: true,
-    view_users_management:   true,
+    view_users_management:   false, // gestão de usuários = só admin (decisão do dono)
     view_activity_logs:      false, // only admin sees logs by default
   },
 };

@@ -118,6 +118,12 @@ const S = ({ children }: { children: React.ReactNode }) => (
 // Legacy alias kept for compatibility
 const AW = S;
 
+// Staff + permissão específica: bloqueia o papel que não tem a permissão (ex.: warehouse
+// não vê Users/Profile). Manager (sub-admin) passa pelas que tem por padrão.
+const SP = ({ perm, children }: { perm: string; children: React.ReactNode }) => (
+  <ProtectedRoute requiredRole="staff" requiredPermission={perm}>{children}</ProtectedRoute>
+);
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -212,23 +218,23 @@ const App = () => (
               <Route path="/admin/settings/b2bwave-sync" element={<A><B2BWaveSync /></A>} />
               <Route path="/admin/settings/oauth-applications" element={<A><OauthApplications /></A>} />
 
-              {/* Settings — staff with permission */}
+              {/* Settings — staff COM checagem de permissão por papel */}
               <Route path="/admin/settings/edit-password" element={<S><EditPassword /></S>} />
-              <Route path="/admin/settings/profile" element={<S><SettingsProfile /></S>} />
-              <Route path="/admin/settings/email" element={<S><EmailSettings /></S>} />
-              <Route path="/admin/settings/email-templates" element={<S><EmailTemplates /></S>} />
+              <Route path="/admin/settings/profile" element={<SP perm="view_profile_settings"><SettingsProfile /></SP>} />
+              <Route path="/admin/settings/email" element={<SP perm="view_email_settings"><EmailSettings /></SP>} />
+              <Route path="/admin/settings/email-templates" element={<SP perm="view_email_templates"><EmailTemplates /></SP>} />
               <Route path="/admin/settings/notifications" element={<A><Notificacoes /></A>} />
               <Route path="/admin/settings/notifications-log" element={<A><NotificacoesLog /></A>} />
-              <Route path="/admin/settings/users" element={<S><UsersManagement /></S>} />
-              <Route path="/admin/settings/warehouse" element={<S><WarehouseSettings /></S>} />
-              <Route path="/admin/settings/activity-logs" element={<S><ActivityLogs /></S>} />
+              <Route path="/admin/settings/users" element={<SP perm="view_users_management"><UsersManagement /></SP>} />
+              <Route path="/admin/settings/warehouse" element={<SP perm="view_warehouse_settings"><WarehouseSettings /></SP>} />
+              <Route path="/admin/settings/activity-logs" element={<SP perm="view_activity_logs"><ActivityLogs /></SP>} />
 
               {/* Legacy routes redirect */}
               <Route path="/admin/pedidos" element={<A><AdminPedidos /></A>} />
               <Route path="/admin/produtos" element={<A><AdminProdutos /></A>} />
               <Route path="/admin/categorias" element={<A><AdminCategorias /></A>} />
               <Route path="/admin/clientes" element={<A><AdminClientes /></A>} />
-              <Route path="/admin/estoque" element={<A><AdminEstoque /></A>} />
+              <Route path="/admin/estoque" element={<AW><AdminEstoque /></AW>} />
               <Route path="/admin/tabelas-preco" element={<A><AdminTabelasPreco /></A>} />
               <Route path="/admin/relatorios" element={<A><AdminRelatorios /></A>} />
               <Route path="/admin/configuracoes" element={<A><AdminConfiguracoes /></A>} />
