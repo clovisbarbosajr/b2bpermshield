@@ -309,6 +309,8 @@ export type Database = {
           activity: string | null
           admin_comments: string | null
           billing_same_as_contact: boolean | null
+          can_confirm_order: boolean
+          can_view_full_history: boolean
           cep: string | null
           cidade: string | null
           company_number: string | null
@@ -341,6 +343,8 @@ export type Database = {
           activity?: string | null
           admin_comments?: string | null
           billing_same_as_contact?: boolean | null
+          can_confirm_order?: boolean
+          can_view_full_history?: boolean
           cep?: string | null
           cidade?: string | null
           company_number?: string | null
@@ -373,6 +377,8 @@ export type Database = {
           activity?: string | null
           admin_comments?: string | null
           billing_same_as_contact?: boolean | null
+          can_confirm_order?: boolean
+          can_view_full_history?: boolean
           cep?: string | null
           cidade?: string | null
           company_number?: string | null
