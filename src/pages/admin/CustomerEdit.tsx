@@ -344,8 +344,8 @@ const CustomerEdit = () => {
                     disabled={!cliente?.id}
                     onClick={async () => {
                       if (!form.email) { toast.error("No email"); return; }
-                      const { error } = await supabase.auth.resetPasswordForEmail(form.email, {
-                        redirectTo: `${window.location.origin}/reset-password`,
+                      const { error } = await supabase.functions.invoke("send-email", {
+                        body: { type: "password_reset", email: form.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
                       });
                       if (error) toast.error(error.message);
                       else toast.success(`Reset password link sent to ${form.email}`);
@@ -757,7 +757,9 @@ const CustomerEdit = () => {
                         <div className="flex gap-1">
                           <Button variant="ghost" size="icon" className="h-7 w-7" title="Send reset password"
                             onClick={async () => {
-                              const { error } = await supabase.auth.resetPasswordForEmail(ct.email, { redirectTo: `${window.location.origin}/reset-password` });
+                              const { error } = await supabase.functions.invoke("send-email", {
+                                body: { type: "password_reset", email: ct.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
+                              });
                               if (error) toast.error(error.message);
                               else toast.success(`Reset link sent to ${ct.email}`);
                             }}>

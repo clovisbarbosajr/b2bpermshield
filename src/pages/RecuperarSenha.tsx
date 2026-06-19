@@ -15,8 +15,10 @@ const RecuperarSenha = () => {
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+    // Envia pelo nosso send-email (Resend + Office365 fallback), não pelo email nativo
+    // do Supabase (que pode não estar configurado e o link não chegar).
+    const { error } = await supabase.functions.invoke("send-email", {
+      body: { type: "password_reset", email: email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
     });
     setLoading(false);
     if (error) {

@@ -146,8 +146,8 @@ const AdminClientes = () => {
   const handleInvite = async () => {
     if (!inviteEmail) { toast.error("Enter an email"); return; }
     setInviting(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(inviteEmail, {
-      redirectTo: `${window.location.origin}/reset-password`,
+    const { error } = await supabase.functions.invoke("send-email", {
+      body: { type: "password_reset", email: inviteEmail.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
     });
     setInviting(false);
     if (error) { toast.error(error.message); return; }
