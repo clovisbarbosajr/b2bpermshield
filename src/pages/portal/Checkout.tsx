@@ -52,12 +52,14 @@ const Checkout = () => {
   const [couponApplying, setCouponApplying] = useState(false);
   const [discount, setDiscount] = useState(0);
   const [customerEmail, setCustomerEmail] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [stripePublishableKey, setStripePublishableKey] = useState("");
   const [payByCard, setPayByCard] = useState(false);
   const [stripeReady, setStripeReady] = useState(false);
   const [stripeError, setStripeError] = useState("");
   const [shippingCost, setShippingCost] = useState(0);
+  const orderPlacedRef = useRef(false); // evita o redirect de "carrinho vazio" após finalizar
   const stripeRef = useRef<any>(null);
   const cardElementRef = useRef<any>(null);
   const cardMountRef = useRef<HTMLDivElement>(null);
@@ -67,8 +69,8 @@ const Checkout = () => {
       if (!user && !impersonatedCustomer) return;
 
       const clienteQuery = impersonatedCustomer?.id
-        ? supabase.from("clientes").select("id, nome, empresa, email").eq("id", impersonatedCustomer.id).maybeSingle()
-        : supabase.from("clientes").select("id, nome, empresa, email").eq("user_id", user!.id).maybeSingle();
+        ? supabase.from("clientes").select("id, nome, empresa, email, telefone").eq("id", impersonatedCustomer.id).maybeSingle()
+        : supabase.from("clientes").select("id, nome, empresa, email, telefone").eq("user_id", user!.id).maybeSingle();
 
       const { data: cliente } = await clienteQuery;
 
@@ -76,6 +78,7 @@ const Checkout = () => {
         setClienteId(cliente.id);
         setCustomerName(cliente.nome || cliente.empresa || "");
         setCustomerEmail(cliente.email || "");
+        setCustomerPhone((cliente as any).telefone || "");
         const { data: ends } = await supabase.from("enderecos").select("*").eq("cliente_id", cliente.id);
         setEnderecos(ends ?? []);
         const principal = ends?.find((e: any) => e.principal);
@@ -471,8 +474,9 @@ const Checkout = () => {
           order_id: (pedido as any).numero ?? pedido.id, total: (pedido as any).total ?? "",
           date: new Date().toLocaleString("pt-BR"),
           items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
-          customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: "",
-        }, customer: { email: customerEmail } } }).catch(() => {});
+          customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
+        }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } }).catch(() => {});
+        orderPlacedRef.current = true;
         clearCart();
         toast.success(`Order #${pedido.numero} placed and payment confirmed!`);
         navigate("/portal/pedidos");
@@ -490,15 +494,28 @@ const Checkout = () => {
     const emailItems = recalculated.map(i => ({ sku: i.sku, nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
     supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
     supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
+    // Caminho sem cartão também dispara o multi-canal (email + SMS) — antes só o de cartão fazia.
+    supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
+      order_id: (pedido as any).numero ?? pedido.id, total: (pedido as any).total ?? "",
+      date: new Date().toLocaleString("pt-BR"),
+      items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
+      customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
+    }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } }).catch(() => {});
 
+    orderPlacedRef.current = true;
     clearCart();
     toast.success(`Order #${pedido.numero} submitted!`);
     navigate("/portal/pedidos");
     setLoading(false);
   };
 
+  // Carrinho vazio: redireciona via efeito (não durante o render, que causava corrida de navegação).
+  // Não redireciona logo após finalizar (clearCart esvazia o carrinho) — aí quem manda é o navigate do submit.
+  useEffect(() => {
+    if (items.length === 0 && !orderPlacedRef.current) navigate("/portal/carrinho");
+  }, [items.length, navigate]);
+
   if (items.length === 0) {
-    navigate("/portal/carrinho");
     return null;
   }
 

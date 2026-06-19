@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -28,6 +28,7 @@ const statusOptions = [
 
 const OrderDetail = () => {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { log } = useActivityLog();
   const { role } = useAuth();
@@ -85,9 +86,14 @@ const OrderDetail = () => {
     if (isNew) {
       const { data: cls } = await supabase
         .from("clientes")
-        .select("id, nome, empresa, email, tabela_preco_id")
+        .select("id, nome, empresa, email, telefone, tabela_preco_id")
         .order("empresa");
       setAllClientes(cls ?? []);
+      // Pré-seleciona o cliente quando aberto via "Create Order" do cadastro (?customer=ID).
+      const customerParam = searchParams.get("customer");
+      if (customerParam && (cls ?? []).some((c) => c.id === customerParam)) {
+        setSelectedClienteId(customerParam);
+      }
     }
   };
 
@@ -274,6 +280,19 @@ const OrderDetail = () => {
     setSaving(false);
     if (itErr) { toast.error("Order created but items failed: " + itErr.message); }
     log("created", "order", pedido.id, `Order #${pedido.numero || pedido.id}`);
+    // Notifica igual ao checkout do portal (respeita a config do evento new_order).
+    const cli = allClientes.find((c) => c.id === selectedClienteId);
+    if (cli) {
+      const emailCustomer = { id: cli.id, email: cli.email, nome: cli.nome, empresa: cli.empresa };
+      const emailItems = items.map((i) => ({ sku: i.sku, nome_produto: i.nome_produto, preco_unitario: i.preco_unitario, quantidade: i.quantidade, subtotal: i.preco_unitario * i.quantidade }));
+      supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
+      supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
+      supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
+        order_id: (pedido as any).numero ?? pedido.id, total: subtotal, date: new Date().toLocaleString("pt-BR"),
+        items: items.map((i) => `• ${i.quantidade}x ${i.nome_produto} — ${i.preco_unitario}`).join("\n"),
+        customer_name: cli.nome ?? "", customer_company: cli.empresa ?? "", customer_email: cli.email ?? "", customer_phone: (cli as any).telefone ?? "",
+      }, customer: { email: cli.email, phone: (cli as any).telefone, whatsapp: (cli as any).telefone } } }).catch(() => {});
+    }
     toast.success(`Order #${pedido.numero ?? ""} created`);
     navigate(`/admin/orders/${pedido.id}`);
   };

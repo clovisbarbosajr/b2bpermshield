@@ -92,7 +92,13 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
             : i
         );
       }
-      return [...prev, item];
+      // Primeira inserção também respeita estoque/mínimo (antes entrava cru, podia
+      // passar do estoque). Só limita pelo disponível quando ele é um número > 0
+      // (não rebaixa backorder/pré-venda, que podem ter disponível 0).
+      const avail = item.estoque_disponivel;
+      const capped = (typeof avail === "number" && avail > 0) ? Math.min(item.quantidade, avail) : item.quantidade;
+      const qtd = Math.max(item.quantidade_minima ?? 1, capped);
+      return [...prev, { ...item, quantidade: qtd }];
     });
   };
 

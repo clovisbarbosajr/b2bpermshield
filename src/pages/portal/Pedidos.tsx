@@ -136,10 +136,10 @@ const Pedidos = () => {
         nome: item.nome_produto,
         sku: item.sku ?? "",
         preco: prod.preco ?? item.preco_unitario,
-        quantidade: Math.min(item.quantidade, Math.max(disponivel, 1)),
+        quantidade: Math.min(item.quantidade, Math.max(disponivel, prod.quantidade_minima ?? 1)),
         unidade_venda: prod.unidade_venda ?? "UN",
         quantidade_minima: prod.quantidade_minima ?? 1,
-        estoque_disponivel: Math.max(disponivel, 99),
+        estoque_disponivel: disponivel, // estoque REAL (antes inflava p/ 99 e furava a validação)
         imagem_url: prod.imagem_url ?? null,
       });
       added++;
