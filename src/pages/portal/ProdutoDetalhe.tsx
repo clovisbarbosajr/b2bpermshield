@@ -71,7 +71,7 @@ const ProdutoDetalhe = () => {
         }
         // Resolve status
         const statusName = (p as any).status_produto || "disponivel";
-        const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out" };
+        const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
         const normalized = (nameMap[statusName] || statusName).toLowerCase();
         const matched = (statusesRes.data ?? []).find((s: any) => s.nome.toLowerCase() === normalized);
         setStatusInfo(matched ? { permite_comprar: matched.permite_comprar ?? true, nome: matched.nome } : { permite_comprar: true, nome: statusName });

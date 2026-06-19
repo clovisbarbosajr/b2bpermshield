@@ -181,7 +181,7 @@ const Catalogo = () => {
   const getStatusInfo = (p: Produto) => {
     const statusName = p.status_produto || "disponivel";
     // Map old values
-    const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out" };
+    const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
     const normalized = (nameMap[statusName] || statusName).toLowerCase();
     return statusMap[normalized] ?? { nome: statusName, permite_comprar: true, permite_visualizar: true, cor: null };
   };

@@ -333,7 +333,7 @@ const Checkout = () => {
         const prod = freshProducts.find(p => p.id === item.produto_id);
         if (!prod) continue;
         const statusName = prod.status_produto || "disponivel";
-        const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out" };
+        const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
         const normalized = (nameMap[statusName] || statusName).toLowerCase();
         const canBuy = statusMap.get(normalized) ?? true;
         const isPreOrder = normalized === "pre-order";
