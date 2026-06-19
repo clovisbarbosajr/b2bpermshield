@@ -2721,6 +2721,7 @@ export type Database = {
         Args: { _desc: string; _name: string; _value: string }
         Returns: undefined
       }
+      claim_customer_record: { Args: never; Returns: string }
       consume_view_as_token: {
         Args: { _token: string }
         Returns: {
@@ -2750,6 +2751,7 @@ export type Database = {
       }
       is_company_buyer: { Args: { _cliente_id: string }; Returns: boolean }
       is_company_contact: { Args: { _cliente_id: string }; Returns: boolean }
+      is_ops_manager: { Args: never; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "cliente" | "warehouse" | "manager"
