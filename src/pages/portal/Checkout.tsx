@@ -53,6 +53,7 @@ const Checkout = () => {
   const [discount, setDiscount] = useState(0);
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [subCannotOrder, setSubCannotOrder] = useState(false);
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [stripePublishableKey, setStripePublishableKey] = useState("");
   const [payByCard, setPayByCard] = useState(false);
@@ -69,8 +70,8 @@ const Checkout = () => {
       if (!user && !impersonatedCustomer) return;
 
       const clienteQuery = impersonatedCustomer?.id
-        ? supabase.from("clientes").select("id, nome, empresa, email, telefone").eq("id", impersonatedCustomer.id).maybeSingle()
-        : supabase.from("clientes").select("id, nome, empresa, email, telefone").eq("user_id", user!.id).maybeSingle();
+        ? supabase.from("clientes").select("id, nome, empresa, email, telefone, parent_customer_id, can_confirm_order").eq("id", impersonatedCustomer.id).maybeSingle()
+        : supabase.from("clientes").select("id, nome, empresa, email, telefone, parent_customer_id, can_confirm_order").eq("user_id", user!.id).maybeSingle();
 
       const { data: cliente } = await clienteQuery;
 
@@ -79,6 +80,8 @@ const Checkout = () => {
         setCustomerName(cliente.nome || cliente.empresa || "");
         setCustomerEmail(cliente.email || "");
         setCustomerPhone((cliente as any).telefone || "");
+        // Sub-customer sem permissão de confirmar não finaliza (espelha a trava do banco).
+        setSubCannotOrder(!!(cliente as any).parent_customer_id && (cliente as any).can_confirm_order === false);
         const { data: ends } = await supabase.from("enderecos").select("*").eq("cliente_id", cliente.id);
         setEnderecos(ends ?? []);
         const principal = ends?.find((e: any) => e.principal);
@@ -299,6 +302,10 @@ const Checkout = () => {
   const handleSubmit = async () => {
     if (!clienteId) {
       toast.error("Client not found");
+      return;
+    }
+    if (subCannotOrder) {
+      toast.error("Your account is not allowed to place orders. Please ask your account owner to confirm orders.");
       return;
     }
     if (items.length === 0) {

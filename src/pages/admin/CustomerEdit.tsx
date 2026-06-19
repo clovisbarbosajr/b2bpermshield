@@ -46,7 +46,7 @@ const CustomerEdit = () => {
     empresa: "", nome: "", email: "", telefone: "", activity: "", language: "English (US)",
     is_active: true, disable_ordering: false, discount: 0, minimum_order_value: "",
     admin_comments: "", tabela_preco_id: "", tax_customer_group_id: "",
-    representante_id: "", parent_customer_id: "",
+    representante_id: "", parent_customer_id: "", can_confirm_order: false, can_view_full_history: false,
     endereco: "", endereco2: "", cidade: "", estado: "", pais: "United States", cep: "",
     website: "", company_number: "", customer_reference_code: "",
     billing_same_as_contact: true,
@@ -94,6 +94,7 @@ const CustomerEdit = () => {
         admin_comments: c.admin_comments || "", tabela_preco_id: c.tabela_preco_id || "",
         tax_customer_group_id: c.tax_customer_group_id || "",
         representante_id: c.representante_id || "", parent_customer_id: c.parent_customer_id || "",
+        can_confirm_order: (c as any).can_confirm_order ?? false, can_view_full_history: (c as any).can_view_full_history ?? false,
         endereco: c.endereco || "", endereco2: c.endereco2 || "", cidade: c.cidade || "",
         estado: c.estado || "", pais: c.pais || "United States", cep: c.cep || "",
         website: c.website || "", company_number: c.company_number || "",
@@ -217,6 +218,8 @@ const CustomerEdit = () => {
     tax_customer_group_id: form.tax_customer_group_id && form.tax_customer_group_id !== '__none__' ? form.tax_customer_group_id : null,
     representante_id: form.representante_id && form.representante_id !== '__none__' ? form.representante_id : null,
     parent_customer_id: form.parent_customer_id && form.parent_customer_id !== '__none__' ? form.parent_customer_id : null,
+    can_confirm_order: !!form.can_confirm_order,
+    can_view_full_history: !!form.can_view_full_history,
     endereco: form.endereco || null,
     endereco2: form.endereco2 || null,
     cidade: form.cidade || null,
@@ -443,6 +446,24 @@ const CustomerEdit = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                  {/* Permissões de sub-customer (modelo B2BWave) — só fazem sentido com um pai. */}
+                  {form.parent_customer_id && form.parent_customer_id !== '__none__' && (
+                    <div className="mt-3 space-y-2 rounded-md border border-border p-3 bg-muted/20">
+                      <p className="text-xs font-semibold text-muted-foreground">Sub-customer permissions</p>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={form.can_confirm_order}
+                          onChange={e => setForm(f => ({ ...f, can_confirm_order: e.target.checked }))} />
+                        Can confirm order without approval
+                        <span className="text-xs text-muted-foreground">(off = can't place orders; the parent does)</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={form.can_view_full_history}
+                          onChange={e => setForm(f => ({ ...f, can_view_full_history: e.target.checked }))} />
+                        Can view full history
+                        <span className="text-xs text-muted-foreground">(off = sees only their own orders)</span>
+                      </label>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <Label>Privacy groups</Label>
