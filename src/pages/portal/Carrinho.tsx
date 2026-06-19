@@ -12,7 +12,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 
-const SAVE_FOR_LATER_KEY = "cart_saved_for_later";
+// Chave POR USUÁRIO (antes era global -> "saved for later" de um usuário aparecia
+// pra outro no mesmo navegador). Espelha o padrão do carrinho (b2b_cart_<uid>).
+const savedKey = (uid?: string | null) => uid ? `cart_saved_for_later_${uid}` : "cart_saved_for_later_anon";
 
 const Carrinho = () => {
   const { items, removeItem, updateQuantity, clearCart, total, addItem } = useCart();
@@ -20,30 +22,35 @@ const Carrinho = () => {
   const navigate = useNavigate();
   const [salesTax, setSalesTax] = useState(0);
   const [unavailableItems, setUnavailableItems] = useState<Set<string>>(new Set());
-  const [savedItems, setSavedItems] = useState<any[]>(() => {
-    try { return JSON.parse(localStorage.getItem(SAVE_FOR_LATER_KEY) ?? "[]"); } catch { return []; }
-  });
+  const [savedItems, setSavedItems] = useState<any[]>([]);
+
+  // Carrega "saved for later" do usuário atual e limpa a chave global legada (que vazava).
+  useEffect(() => {
+    try {
+      setSavedItems(JSON.parse(localStorage.getItem(savedKey(user?.id)) ?? "[]"));
+    } catch { setSavedItems([]); }
+    localStorage.removeItem("cart_saved_for_later"); // remove dados vazados da chave antiga
+  }, [user?.id]);
+
+  const persistSaved = (updated: any[]) => {
+    setSavedItems(updated);
+    localStorage.setItem(savedKey(user?.id), JSON.stringify(updated));
+  };
 
   const saveForLater = (item: any) => {
     removeItem(item.produto_id);
-    const updated = [...savedItems.filter((s) => s.produto_id !== item.produto_id), item];
-    setSavedItems(updated);
-    localStorage.setItem(SAVE_FOR_LATER_KEY, JSON.stringify(updated));
+    persistSaved([...savedItems.filter((s) => s.produto_id !== item.produto_id), item]);
     toast.info(`${item.nome} saved for later`);
   };
 
   const moveToCart = (item: any) => {
     addItem(item);
-    const updated = savedItems.filter((s) => s.produto_id !== item.produto_id);
-    setSavedItems(updated);
-    localStorage.setItem(SAVE_FOR_LATER_KEY, JSON.stringify(updated));
+    persistSaved(savedItems.filter((s) => s.produto_id !== item.produto_id));
     toast.success(`${item.nome} moved to cart`);
   };
 
   const removeSaved = (produto_id: string) => {
-    const updated = savedItems.filter((s) => s.produto_id !== produto_id);
-    setSavedItems(updated);
-    localStorage.setItem(SAVE_FOR_LATER_KEY, JSON.stringify(updated));
+    persistSaved(savedItems.filter((s) => s.produto_id !== produto_id));
   };
 
   // Check product availability in real time
