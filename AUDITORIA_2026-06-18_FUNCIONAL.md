@@ -138,11 +138,21 @@ com o assistente guiando e lendo o resultado. A verificação de funcionalidade 
 
 ---
 
-## 6. SEQUÊNCIA DE CORREÇÃO (em andamento)
+## 6. SEQUÊNCIA DE CORREÇÃO
 
-1. ⏳ **Pedido $0.00** (2547) — prejuízo direto. **EM ANDAMENTO.**
-2. ⬜ **Create Order do admin** — fazer salvar de verdade.
-3. ⬜ **Oversell** — trava atômica de estoque no checkout.
-4. ⬜ **"Saved for later"** isolado por usuário.
-5. ⬜ (a confirmar) **Warehouse/segredos** — Vault.
+1. ✅ **Pedido $0.00** (2547) — INVESTIGADO: **não é bug** (é $0 na origem, B2BWave).
+   Ver 2.3. Expôs o clone gap de `variante_precos` (#7 abaixo).
+2. ✅ **Create Order do admin** — agora cria de verdade (commit `67beed8`). Seletor de
+   cliente + produtos com preço da tabela do cliente + insere pedido/itens.
+3. ✅ **Oversell** — reserva atômica no trigger, gated fail-safe (commit `eb141ba`).
+   Sync/admin/backorder/pré-venda não bloqueiam. **Testar um produto de pré-venda.**
+4. ✅ **"Saved for later"** isolado por usuário (commit `6ee4be8`).
+5. ⬜ **Warehouse/segredos** — mover p/ Vault ou restringir `configuracoes` a admin.
+   *(A CONFIRMAR abordagem — pode afetar telas de staff. Ver 1.2.)*
 6. ⬜ Dashboard chart vazio; abas display-only do CustomerEdit (só as que o dono usa).
+7. ⬜ **Clone gap: `variante_precos`** — sync de preços por variante × tabela
+   (produtos com variante mostram $0 sem isso). Ver 2.3.
+
+> **A testar pelo dono (não consegui ao vivo):** Create Order salvando; checkout de
+> produto no último item (2 abas) pra ver a trava de oversell; pré-venda não bloqueada;
+> "saved for later" não vazando entre logins.
