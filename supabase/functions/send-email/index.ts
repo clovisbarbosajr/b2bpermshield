@@ -423,6 +423,43 @@ async function sendViaProvider(
   return true;
 }
 
+// Envia EMAIL com RESEND como PRIMÁRIO e Office365/SMTP como FALLBACK silencioso
+// (mesmo template e mesmo "from"). Só cai no fallback se o Resend falhar — então
+// nunca há duplicidade. SendGrid fica como última tentativa se for o provider setado.
+async function sendEmailResilient(
+  config: any, fromEmail: string, to: string | string[], subject: string,
+  html: string, replyTo?: string, bcc?: string | string[],
+): Promise<{ ok: boolean; provider?: string; fallback?: boolean; error?: string }> {
+  const resendKey =
+    (config?.email_provider === "resend" ? (config?.email_api_key || "") : "") ||
+    Deno.env.get("RESEND_API_KEY") || "";
+  const smtpAvailable = !!Deno.env.get("SMTP_PASSWORD");
+  const errors: string[] = [];
+
+  // 1) PRIMÁRIO: Resend
+  if (resendKey) {
+    try {
+      await sendViaProvider("resend", resendKey, fromEmail, to, subject, html, replyTo, bcc);
+      return { ok: true, provider: "resend" };
+    } catch (e: any) { errors.push(`resend: ${e.message}`); }
+  }
+  // 2) FALLBACK silencioso: Office365 / SMTP
+  if (smtpAvailable) {
+    try {
+      await sendViaProvider("smtp", "", fromEmail, to, subject, html, replyTo, bcc);
+      return { ok: true, provider: "smtp", fallback: true };
+    } catch (e: any) { errors.push(`smtp(office365): ${e.message}`); }
+  }
+  // 3) Último recurso: SendGrid (se for o provider configurado)
+  if (config?.email_provider === "sendgrid" && config?.email_api_key) {
+    try {
+      await sendViaProvider("sendgrid", config.email_api_key, fromEmail, to, subject, html, replyTo, bcc);
+      return { ok: true, provider: "sendgrid" };
+    } catch (e: any) { errors.push(`sendgrid: ${e.message}`); }
+  }
+  return { ok: false, error: errors.join(" | ") || "nenhum provedor de email disponível (configure RESEND_API_KEY ou SMTP_PASSWORD)" };
+}
+
 // ─── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -445,18 +482,15 @@ Deno.serve(async (req) => {
     const fromEmail = config?.email_from || "noreply@permshield.com";
     const replyTo = config?.email_reply_to || "";
 
-    // For SMTP, credentials come from secrets — apiKey in DB is not required
-    if (!provider) {
+    // Resend é o primário; Office365/SMTP é o fallback. Basta UM estar disponível.
+    const hasResend = !!(Deno.env.get("RESEND_API_KEY") || (provider === "resend" && apiKey));
+    const hasSmtp = !!Deno.env.get("SMTP_PASSWORD");
+    const hasSendgrid = provider === "sendgrid" && !!apiKey;
+    if (!hasResend && !hasSmtp && !hasSendgrid) {
       return new Response(
-        JSON.stringify({ error: "Email service not configured. Go to Settings → Email and select a provider." }),
+        JSON.stringify({ error: "Email não configurado: defina RESEND_API_KEY (primário) ou SMTP_PASSWORD (fallback Office365)." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
-    }
-    if (provider !== "smtp" && !apiKey) {
-      return new Response(JSON.stringify({ error: "Email API key not configured. Go to Settings → Email." }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
     }
 
     const body = await req.json();
@@ -629,11 +663,25 @@ Deno.serve(async (req) => {
     ];
     const bcc = CUSTOMER_TYPES.includes(type) ? config?.bcc_outgoing_emails || "" : "";
 
-    await sendViaProvider(provider, apiKey, fromEmail, to, subject, html, replyTo || undefined, bcc || undefined);
-
+    const result = await sendEmailResilient(config, fromEmail, to, subject, html, replyTo || undefined, bcc || undefined);
     const toDisplay = Array.isArray(to) ? to.join(", ") : to;
-    console.log(`[send-email] Sent "${type}" to ${toDisplay}${bcc ? ` | BCC: ${bcc}` : ""}`);
-    return new Response(JSON.stringify({ success: true, type, to }), {
+
+    // Registra TODO envio (sucesso / fallback / falha) no notification_log — nada silencioso.
+    await adminClient.from("notification_log").insert({
+      event: type, channel: "email", recipient: toDisplay,
+      status: result.ok ? "sent" : "failed",
+      error: result.ok ? (result.fallback ? "enviado via fallback Office365 (Resend falhou)" : null) : (result.error ?? "send failed"),
+      payload: { provider: result.provider ?? null, fallback: result.fallback ?? false },
+    });
+
+    if (!result.ok) {
+      console.error(`[send-email] FALHOU "${type}" para ${toDisplay}: ${result.error}`);
+      return new Response(JSON.stringify({ error: result.error, type, to }), {
+        status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    console.log(`[send-email] Enviado "${type}" para ${toDisplay} via ${result.provider}${result.fallback ? " (fallback)" : ""}`);
+    return new Response(JSON.stringify({ success: true, type, to, provider: result.provider, fallback: result.fallback }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {
