@@ -1633,6 +1633,65 @@ export type Database = {
         }
         Relationships: []
       }
+      producao_pedidos: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          est_entrega: string | null
+          id: string
+          numero_container: string | null
+          numero_ordem: string | null
+          produto_id: string
+          quantidade: number
+          quantidade_recebida: number | null
+          recebido_em: string | null
+          recebido_por: string | null
+          status: string
+          tracking: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          est_entrega?: string | null
+          id?: string
+          numero_container?: string | null
+          numero_ordem?: string | null
+          produto_id: string
+          quantidade: number
+          quantidade_recebida?: number | null
+          recebido_em?: string | null
+          recebido_por?: string | null
+          status?: string
+          tracking?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          est_entrega?: string | null
+          id?: string
+          numero_container?: string | null
+          numero_ordem?: string | null
+          produto_id?: string
+          quantidade?: number
+          quantidade_recebida?: number | null
+          recebido_em?: string | null
+          recebido_por?: string | null
+          status?: string
+          tracking?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "producao_pedidos_produto_id_fkey"
+            columns: ["produto_id"]
+            isOneToOne: false
+            referencedRelation: "produtos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_options: {
         Row: {
           ativo: boolean
