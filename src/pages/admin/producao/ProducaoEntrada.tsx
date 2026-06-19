@@ -12,7 +12,7 @@ import { Plus, Trash2, Save } from "lucide-react";
 import { toast } from "sonner";
 
 type Produto = { id: string; nome: string; sku: string; categoria_id: string | null };
-type Categoria = { id: string; nome: string };
+type Categoria = { id: string; nome: string; parent_id: string | null };
 type Line = { key: string; produto_id: string; quantidade: string; est_entrega: string; numero_ordem: string; numero_container: string };
 
 let LINE_SEQ = 0;
@@ -20,35 +20,51 @@ const newLine = (): Line => ({ key: `l${++LINE_SEQ}`, produto_id: "", quantidade
 
 const ProducaoEntrada = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
+  const [allowedLocs, setAllowedLocs] = useState<Set<string>>(new Set());
   const [lines, setLines] = useState<Line[]>([newLine()]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const load = async () => {
-      const [p, c] = await Promise.all([
+      const [p, c, ul] = await Promise.all([
         supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("nome"),
-        supabase.from("categorias").select("id, nome").eq("ativo", true).order("nome"),
+        supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("nome"),
+        supabase.from("user_locations").select("categoria_id").eq("user_id", user?.id ?? ""),
       ]);
       setProdutos((p.data as Produto[]) ?? []);
       setCategorias((c.data as Categoria[]) ?? []);
+      setAllowedLocs(new Set(((ul.data ?? []) as any[]).map((x) => x.categoria_id)));
     };
-    load();
-  }, []);
+    if (user) load();
+  }, [user]);
 
-  // Produtos agrupados por categoria (a "localização") para o dropdown.
+  // Produtos agrupados por categoria (a "localização") + filtro por local do usuário.
   const grouped = useMemo(() => {
+    const catById = new Map(categorias.map((c) => [c.id, c]));
     const catName = new Map(categorias.map((c) => [c.id, c.nome]));
+    const topId = (catId: string | null): string | null => {
+      let cur = catId ? catById.get(catId) : undefined;
+      if (!cur) return null;
+      while (cur.parent_id && catById.get(cur.parent_id)) cur = catById.get(cur.parent_id)!;
+      return cur.id;
+    };
+    // Restrição: se o usuário tem locais e não é admin, só mostra produtos desses locais.
+    const restricted = role !== "admin" && allowedLocs.size > 0;
     const groups = new Map<string, Produto[]>();
     for (const p of produtos) {
+      if (restricted) {
+        const t = topId(p.categoria_id);
+        if (!t || !allowedLocs.has(t)) continue;
+      }
       const g = p.categoria_id ? (catName.get(p.categoria_id) ?? "Uncategorized") : "Uncategorized";
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g)!.push(p);
     }
     return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [produtos, categorias]);
+  }, [produtos, categorias, allowedLocs, role]);
 
   const setLine = (key: string, patch: Partial<Line>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));

@@ -50,6 +50,14 @@ const UsersManagement = () => {
   const [editPassword, setEditPassword] = useState("");
   const [editPerms, setEditPerms] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
+  // Acesso por localização (categorias de topo). editLocs = locais marcados do usuário em edição.
+  const [topCats, setTopCats] = useState<{ id: string; nome: string }[]>([]);
+  const [editLocs, setEditLocs] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("nome")
+      .then(({ data }) => setTopCats(((data ?? []) as any[]).filter((c) => !c.parent_id).map((c) => ({ id: c.id, nome: c.nome }))));
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -109,13 +117,15 @@ const UsersManagement = () => {
     fetchData();
   };
 
-  const openEdit = (u: StaffUser) => {
+  const openEdit = async (u: StaffUser) => {
     setEditUser(u);
     setEditRole(u.role);
     setEditPassword("");
     // Merge stored permissions with defaults for the role (in case new perms were added)
     const defaults = u.role !== "admin" ? (DEFAULT_PERMISSIONS[u.role as "manager" | "warehouse"] || {}) : {};
     setEditPerms({ ...defaults, ...u.permissions });
+    const { data: locs } = await supabase.from("user_locations").select("categoria_id").eq("user_id", u.user_id);
+    setEditLocs(new Set(((locs ?? []) as any[]).map((l) => l.categoria_id)));
     setEditOpen(true);
   };
 
@@ -140,6 +150,12 @@ const UsersManagement = () => {
     }
 
     await (supabase.from("user_roles") as any).upsert(updatePayload, { onConflict: "user_id" });
+
+    // Sincroniza os LOCAIS (categorias de topo). Vazio = sem restrição (vê tudo).
+    await supabase.from("user_locations").delete().eq("user_id", editUser.user_id);
+    if (editLocs.size > 0) {
+      await supabase.from("user_locations").insert([...editLocs].map((cid) => ({ user_id: editUser.user_id, categoria_id: cid })));
+    }
 
     // Update password if provided
     if (editPassword.trim().length > 0) {
@@ -390,6 +406,28 @@ const UsersManagement = () => {
                         ))}
                       </div>
                     </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Locais (acesso por localização — categorias de topo) */}
+            {editRole !== "admin" && topCats.length > 0 && (
+              <div>
+                <Label className="mb-2 block">Locations</Label>
+                <div className="rounded-md border p-4 space-y-1.5">
+                  <p className="text-xs text-muted-foreground mb-2">Leave all unchecked = sees ALL locations. Check some to limit this user to those locations only (e.g., John = Florida only).</p>
+                  {topCats.map((c) => (
+                    <label key={c.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input type="checkbox" className="h-4 w-4 rounded"
+                        checked={editLocs.has(c.id)}
+                        onChange={(e) => setEditLocs((prev) => {
+                          const n = new Set(prev);
+                          e.target.checked ? n.add(c.id) : n.delete(c.id);
+                          return n;
+                        })} />
+                      {c.nome}
+                    </label>
                   ))}
                 </div>
               </div>
