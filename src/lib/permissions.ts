@@ -59,22 +59,25 @@ export const PERMISSION_GROUPS: { group: string; keys: { key: PermissionKey; lab
 
 // ─── Default permissions per role ─────────────────────────────────────────────
 export const DEFAULT_PERMISSIONS: Record<"warehouse" | "manager", Record<PermissionKey, boolean>> = {
+  // WAREHOUSE = logística: VÊ pedidos/clientes/produtos e muda STATUS + ajusta estoque.
+  // NÃO cria/edita/deleta cliente/pedido/produto, NÃO mexe em settings/segredos.
+  // (Bate com o RLS de 20260619003000 — o banco impõe o mesmo.)
   warehouse: {
     view_dashboard:       true,
     view_orders:          true,
-    create_orders:        true,
-    edit_orders:          true,
+    create_orders:        false,
+    edit_orders:          false,
     delete_orders:        false,
     change_order_status:  true,
-    view_customers:       true,
-    create_customers:     true,
-    edit_customers:       true,
-    approve_customers:    true,
+    view_customers:       true,   // precisa ver o cliente/endereço do pedido p/ logística
+    create_customers:     false,
+    edit_customers:       false,
+    approve_customers:    false,
     delete_customers:     false,
     view_products:        true,
-    create_products:      true,
-    edit_products:        true,
-    delete_products:      true,
+    create_products:      false,
+    edit_products:        false,  // ajuste de estoque é via tela de estoque, não edição plena
+    delete_products:      false,
     view_profile_settings:   false,
     view_email_settings:     false,
     view_email_templates:    false,
