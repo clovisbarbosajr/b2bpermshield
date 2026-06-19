@@ -130,25 +130,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       typeof authUser.user_metadata?.empresa === "string" ? authUser.user_metadata.empresa.trim() : "";
     const emailFromAuth = typeof authUser.email === "string" ? authUser.email.trim() : "";
 
-    const { data: existingCliente, error: existingClienteError } = await supabase
-      .from("clientes")
-      .select("id, nome, email, empresa, status")
-      .eq("user_id", authUser.id)
-      .maybeSingle();
+    // 1) Tenta achar/vincular o registro — inclui LIGAR um registro vindo do sync
+    // (que tem user_id aleatório) a este login, casando pelo email do JWT.
+    const { data: claimedId } = await supabase.rpc("claim_customer_record");
+    if (claimedId) return; // já existe (ou acabou de ser vinculado) — nada a criar.
 
-    if (existingClienteError) {
-      console.error("Erro ao buscar cliente existente", existingClienteError);
-      return;
-    }
-
-    const nome = existingCliente?.nome?.trim() || nomeFromMetadata || emailFromAuth || "Cliente";
-    const email = existingCliente?.email?.trim() || emailFromAuth;
-    const empresa = existingCliente?.empresa?.trim() || empresaFromMetadata || "";
-    const status = existingCliente?.status ?? ("pendente" as any);
-
+    // 2) Nenhum registro encontrado: é um cliente novo de verdade → cria.
+    const nome = nomeFromMetadata || emailFromAuth || "Cliente";
+    const empresa = empresaFromMetadata || "";
     await supabase
       .from("clientes")
-      .upsert({ user_id: authUser.id, nome, email, empresa, status }, { onConflict: "user_id" })
+      .upsert(
+        { user_id: authUser.id, nome, email: emailFromAuth, empresa, status: "pendente" as any },
+        { onConflict: "user_id" },
+      )
       .select("id")
       .single();
   };

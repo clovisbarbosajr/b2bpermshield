@@ -305,6 +305,12 @@ const Checkout = () => {
       toast.error("Cart is empty");
       return;
     }
+    // Único campo obrigatório (regra do negócio): a data de entrega/retirada.
+    // Endereço puxa da conta; pagamento é opcional; frete é filtrado por cliente.
+    if (!deliveryDate) {
+      toast.error("Please select a delivery / pickup date.");
+      return;
+    }
 
     setLoading(true);
 
