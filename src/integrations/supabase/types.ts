@@ -2751,7 +2751,9 @@ export type Database = {
       }
       is_company_buyer: { Args: { _cliente_id: string }; Returns: boolean }
       is_company_contact: { Args: { _cliente_id: string }; Returns: boolean }
+      is_company_manager: { Args: { _cliente_id: string }; Returns: boolean }
       is_ops_manager: { Args: never; Returns: boolean }
+      owns_cliente: { Args: { _cliente_id: string }; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "cliente" | "warehouse" | "manager"
