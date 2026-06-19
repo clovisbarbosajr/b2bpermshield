@@ -9,12 +9,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Check, Truck, PackageCheck, Pencil, Trash2, ChevronDown, ChevronRight } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Check, Truck, PackageCheck, Pencil, Trash2, ChevronDown, ChevronRight, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 
 type Row = {
   id: string; produto_id: string; quantidade: number; est_entrega: string | null; numero_ordem: string | null;
-  numero_container: string | null; status: string; tracking: string | null;
+  numero_container: string | null; status: string; tracking: string | null; notes: string | null;
   quantidade_recebida: number | null; recebido_em: string | null; created_at: string;
   produtos: { nome: string; sku: string } | null;
 };
@@ -36,10 +37,12 @@ const ProducaoStatus = () => {
   const [editRow, setEditRow] = useState<Row | null>(null);
   const [editForm, setEditForm] = useState({ produto_id: "", quantidade: "", est_entrega: "", numero_ordem: "", numero_container: "", status: "solicitado" });
   const [showReceived, setShowReceived] = useState(false);
+  const [notesRow, setNotesRow] = useState<Row | null>(null);
+  const [notesText, setNotesText] = useState("");
 
   const load = async () => {
     const [pr, prod, cat] = await Promise.all([
-      supabase.from("producao_pedidos").select("id, produto_id, quantidade, est_entrega, numero_ordem, numero_container, status, tracking, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)").order("created_at", { ascending: false }),
+      supabase.from("producao_pedidos").select("id, produto_id, quantidade, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)").order("created_at", { ascending: false }),
       supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("nome"),
       supabase.from("categorias").select("id, nome").eq("ativo", true).order("nome"),
     ]);
@@ -64,6 +67,8 @@ const ProducaoStatus = () => {
     return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [produtos, categorias]);
 
+  const clearTrackingEdit = (id: string) => setTrackingEdit((p) => { const n = { ...p }; delete n[id]; return n; });
+
   const saveTracking = async (r: Row) => {
     const tracking = (trackingEdit[r.id] ?? r.tracking ?? "").trim();
     const patch: any = { tracking: tracking || null };
@@ -72,7 +77,18 @@ const ProducaoStatus = () => {
     const { error } = await supabase.from("producao_pedidos").update(patch).eq("id", r.id);
     setBusy(null);
     if (error) { toast.error(error.message); return; }
-    toast.success("Saved"); load();
+    clearTrackingEdit(r.id);
+    toast.success("Tracking saved"); load();
+  };
+
+  // "On the way" também SALVA o tracking pendente (antes sumia ao avançar o status).
+  const goOnTheWay = async (r: Row) => {
+    const tracking = (trackingEdit[r.id] ?? r.tracking ?? "").trim();
+    setBusy(r.id);
+    const { error } = await supabase.from("producao_pedidos").update({ status: "a_caminho", tracking: tracking || null }).eq("id", r.id);
+    setBusy(null);
+    if (error) { toast.error(error.message); return; }
+    clearTrackingEdit(r.id); load();
   };
 
   const setStatus = async (r: Row, status: string) => {
@@ -81,6 +97,14 @@ const ProducaoStatus = () => {
     setBusy(null);
     if (error) { toast.error(error.message); return; }
     load();
+  };
+
+  const openNotes = (r: Row) => { setNotesRow(r); setNotesText(r.notes ?? ""); };
+  const saveNotes = async () => {
+    if (!notesRow) return;
+    const { error } = await supabase.from("producao_pedidos").update({ notes: notesText || null }).eq("id", notesRow.id);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Notes saved"); setNotesRow(null); load();
   };
 
   const startReceive = (r: Row) => { setReceivingId(r.id); setRecvQty(String(r.quantidade)); };
@@ -185,10 +209,11 @@ const ProducaoStatus = () => {
                     ) : (
                       <div className="flex items-center gap-1 justify-end">
                         {r.status === "solicitado"
-                          ? <Button size="sm" variant="outline" className="gap-1" disabled={busy === r.id} onClick={() => setStatus(r, "a_caminho")}><Truck className="h-4 w-4" /> On the way</Button>
+                          ? <Button size="sm" variant="outline" className="gap-1" disabled={busy === r.id} onClick={() => goOnTheWay(r)}><Truck className="h-4 w-4" /> On the way</Button>
                           : <Button size="sm" variant="ghost" className="text-xs text-muted-foreground" disabled={busy === r.id} onClick={() => setStatus(r, "solicitado")}>↩ Undo</Button>}
                         <Button size="sm" variant="outline" className="gap-1" onClick={() => startReceive(r)}><PackageCheck className="h-4 w-4" /> Receive</Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
+                        <Button size="icon" variant="ghost" className="h-8 w-8" title={r.notes ? "Notes (has content)" : "Add notes"} onClick={() => openNotes(r)}><StickyNote className={`h-4 w-4 ${r.notes ? "text-primary fill-primary/20" : ""}`} /></Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8" title="Delete" onClick={() => remove(r)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                       </div>
                     )}
@@ -269,6 +294,18 @@ const ProducaoStatus = () => {
           <DialogFooter>
             <Button variant="ghost" onClick={() => setEditRow(null)}>Cancel</Button>
             <Button onClick={saveEdit}>Save changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Notes do item/container */}
+      <Dialog open={!!notesRow} onOpenChange={(o) => !o && setNotesRow(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><StickyNote className="h-4 w-4" /> Notes — {notesRow?.produtos?.nome}{notesRow?.numero_container ? ` (container ${notesRow.numero_container})` : ""}</DialogTitle></DialogHeader>
+          <Textarea rows={6} value={notesText} onChange={(e) => setNotesText(e.target.value)} placeholder="Write a note about this container/order…" />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setNotesRow(null)}>Close</Button>
+            <Button onClick={saveNotes}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,38 +1,39 @@
 import { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Factory, Truck, ClipboardList, MapPin, Package } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Factory, Truck, MapPin, ChevronRight, PackageCheck } from "lucide-react";
 
-type Item = { id: string; quantidade: number; status: string; produto_id: string };
-type Produto = { id: string; nome: string; categoria_id: string | null };
+type Item = {
+  id: string; quantidade: number; status: string; tracking: string | null;
+  numero_container: string | null; est_entrega: string | null;
+  produtos: { nome: string; sku: string; categoria_id: string | null } | null;
+};
 type Categoria = { id: string; nome: string; parent_id: string | null };
+type Loc = { name: string; items: Item[]; qty: number; onTheWay: number };
 
 const ProducaoDashboard = () => {
   const [items, setItems] = useState<Item[]>([]);
-  const [produtos, setProdutos] = useState<Produto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openLoc, setOpenLoc] = useState<Loc | null>(null);
 
   useEffect(() => {
     const load = async () => {
-      const [it, pr, cat] = await Promise.all([
-        supabase.from("producao_pedidos").select("id, quantidade, status, produto_id").neq("status", "delivered"),
-        supabase.from("produtos").select("id, nome, categoria_id"),
+      const [it, cat] = await Promise.all([
+        supabase.from("producao_pedidos").select("id, quantidade, status, tracking, numero_container, est_entrega, produtos(nome, sku, categoria_id)").neq("status", "delivered"),
         supabase.from("categorias").select("id, nome, parent_id"),
       ]);
-      setItems((it.data as Item[]) ?? []);
-      setProdutos((pr.data as Produto[]) ?? []);
+      setItems((it.data as any[]) ?? []);
       setCategorias((cat.data as Categoria[]) ?? []);
       setLoading(false);
     };
     load();
   }, []);
 
-  // Resolve a LOCALIZAÇÃO = categoria de TOPO do produto (sobe pelo parent_id).
-  const byLocation = useMemo(() => {
+  const locations = useMemo<Loc[]>(() => {
     const catById = new Map(categorias.map((c) => [c.id, c]));
     const topName = (catId: string | null): string => {
       let cur = catId ? catById.get(catId) : undefined;
@@ -40,81 +41,103 @@ const ProducaoDashboard = () => {
       while (cur.parent_id && catById.get(cur.parent_id)) cur = catById.get(cur.parent_id)!;
       return cur.nome;
     };
-    const prodById = new Map(produtos.map((p) => [p.id, p]));
-    const map = new Map<string, { items: number; qty: number; requested: number; onTheWay: number }>();
+    const map = new Map<string, Loc>();
     for (const it of items) {
-      const prod = prodById.get(it.produto_id);
-      const loc = topName(prod?.categoria_id ?? null);
-      if (!map.has(loc)) map.set(loc, { items: 0, qty: 0, requested: 0, onTheWay: 0 });
-      const e = map.get(loc)!;
-      e.items += 1; e.qty += it.quantidade;
-      if (it.status === "solicitado") e.requested += 1;
+      const name = topName(it.produtos?.categoria_id ?? null);
+      if (!map.has(name)) map.set(name, { name, items: [], qty: 0, onTheWay: 0 });
+      const e = map.get(name)!;
+      e.items.push(it); e.qty += it.quantidade;
       if (it.status === "a_caminho") e.onTheWay += 1;
     }
-    return [...map.entries()].sort((a, b) => b[1].qty - a[1].qty);
-  }, [items, produtos, categorias]);
-
-  const totals = useMemo(() => byLocation.reduce((a, [, v]) => ({
-    items: a.items + v.items, qty: a.qty + v.qty, requested: a.requested + v.requested, onTheWay: a.onTheWay + v.onTheWay,
-  }), { items: 0, qty: 0, requested: 0, onTheWay: 0 }), [byLocation]);
+    return [...map.values()].sort((a, b) => b.qty - a.qty);
+  }, [items, categorias]);
 
   return (
     <AdminLayout>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h2 className="font-display text-2xl font-semibold">Production — Dashboard</h2>
-          <p className="text-sm text-muted-foreground">Items currently in production, by location.</p>
-        </div>
-        <Link to="/admin/producao/status" className="text-sm text-primary hover:underline">Open Status →</Link>
-      </div>
-
-      {/* Totais gerais */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        {[
-          { label: "Locations", value: byLocation.length, icon: MapPin },
-          { label: "Items in production", value: totals.items, icon: Factory },
-          { label: "Total units", value: totals.qty.toLocaleString(), icon: Package },
-          { label: "On the way", value: totals.onTheWay, icon: Truck },
-        ].map((s) => (
-          <Card key={s.label} className="p-4 flex items-center gap-3">
-            <div className="h-11 w-11 rounded-lg bg-primary/10 flex items-center justify-center text-primary"><s.icon className="h-5 w-5" /></div>
-            <div>
-              <p className="text-2xl font-bold leading-none">{s.value}</p>
-              <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
-            </div>
-          </Card>
-        ))}
+      <div className="mb-8">
+        <h2 className="font-display text-3xl font-bold">Production by location</h2>
+        <p className="text-base text-muted-foreground mt-1">Tap a location to see everything in production there.</p>
       </div>
 
       {loading ? (
-        <div className="py-16 text-center text-muted-foreground">Loading…</div>
-      ) : byLocation.length === 0 ? (
-        <Card className="p-12 flex flex-col items-center justify-center text-center text-muted-foreground gap-2">
-          <Factory className="h-10 w-10 opacity-40" />
-          <p>Nothing in production right now.</p>
+        <div className="py-20 text-center text-muted-foreground text-lg">Loading…</div>
+      ) : locations.length === 0 ? (
+        <Card className="p-16 flex flex-col items-center justify-center text-center text-muted-foreground gap-3">
+          <Factory className="h-12 w-12 opacity-40" />
+          <p className="text-lg">Nothing in production right now.</p>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {byLocation.map(([loc, v]) => (
-            <Card key={loc} className="overflow-hidden">
-              <div className="bg-primary/10 px-4 py-3 flex items-center gap-2 border-b border-border">
-                <MapPin className="h-4 w-4 text-primary" />
-                <h3 className="font-bold text-primary">{loc}</h3>
-              </div>
-              <div className="p-4 space-y-3">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-3xl font-bold">{v.qty.toLocaleString()}</span>
-                  <span className="text-xs text-muted-foreground">units across {v.items} item{v.items !== 1 ? "s" : ""}</span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {locations.map((loc) => {
+            const arriving = loc.onTheWay > 0;
+            return (
+              <button
+                key={loc.name}
+                onClick={() => setOpenLoc(loc)}
+                className={`group relative text-left rounded-2xl border-2 p-6 transition-all hover:shadow-lg hover:-translate-y-0.5
+                  ${arriving ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20" : "border-border bg-card hover:border-primary/40"}`}
+              >
+                {arriving && (
+                  <span className="absolute top-4 right-4 flex h-3 w-3">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75 animate-ping" />
+                    <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-500" />
+                  </span>
+                )}
+                <div className="flex items-center gap-2 text-primary mb-4">
+                  <MapPin className="h-6 w-6" />
+                  <h3 className="text-2xl font-bold">{loc.name}</h3>
                 </div>
-                <div className="flex gap-2">
-                  <Badge variant="secondary" className="gap-1"><ClipboardList className="h-3 w-3" /> {v.requested} requested</Badge>
-                  <Badge variant="default" className="gap-1"><Truck className="h-3 w-3" /> {v.onTheWay} on the way</Badge>
+                <div className="flex items-end gap-2">
+                  <span className="text-5xl font-extrabold leading-none">{loc.qty.toLocaleString()}</span>
+                  <span className="text-lg text-muted-foreground mb-1">units</span>
                 </div>
-              </div>
-            </Card>
-          ))}
+                <div className="mt-4 flex items-center justify-between">
+                  <div className="flex gap-2">
+                    <Badge variant="secondary" className="text-sm px-3 py-1">{loc.items.length} item{loc.items.length !== 1 ? "s" : ""}</Badge>
+                    {arriving && <Badge className="text-sm px-3 py-1 gap-1 bg-blue-600"><Truck className="h-3.5 w-3.5" /> {loc.onTheWay} arriving</Badge>}
+                  </div>
+                  <ChevronRight className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
+
+      {/* Drill-down: itens da localização */}
+      <Dialog open={!!openLoc} onOpenChange={(o) => !o && setOpenLoc(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-2xl"><MapPin className="h-6 w-6 text-primary" /> {openLoc?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+            {(openLoc?.items ?? []).map((it) => {
+              const arriving = it.status === "a_caminho";
+              return (
+                <div key={it.id} className={`rounded-xl border p-4 flex items-center justify-between ${arriving ? "border-blue-300 bg-blue-50/40 dark:bg-blue-950/10" : "border-border"}`}>
+                  <div>
+                    <p className="text-lg font-semibold">{it.produtos?.nome ?? "—"}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {it.numero_container ? `Container ${it.numero_container}` : "No container"}
+                      {it.tracking ? ` · ${it.tracking}` : ""}
+                      {it.est_entrega ? ` · est. ${it.est_entrega}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl font-bold">{it.quantidade}</span>
+                    {arriving ? (
+                      <Badge className="gap-1 bg-blue-600 text-sm px-3 py-1"><Truck className="h-3.5 w-3.5" /> On the way</Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-sm px-3 py-1">Requested</Badge>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {(openLoc?.items.length ?? 0) === 0 && <p className="text-center text-muted-foreground py-6">No items.</p>}
+          </div>
+        </DialogContent>
+      </Dialog>
     </AdminLayout>
   );
 };
