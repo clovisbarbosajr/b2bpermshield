@@ -10,7 +10,13 @@ import {
   Activity, ShoppingCart, TrendingUp, PieChart, PackageSearch, CalendarRange,
   LayoutGrid, ScrollText, ClipboardCheck, RefreshCw, ClipboardSignature, Bell, History, Factory
 } from "lucide-react";
-import { useState } from "react";
+import { useState, createContext, useContext } from "react";
+
+// Marca que já estamos dentro do shell persistente do admin (layout via <Outlet/>).
+// Quando uma PÁGINA renderiza <AdminLayout> dentro do shell, ele só passa o conteúdo
+// adiante (não duplica a sidebar) — assim a sidebar NÃO remonta ao trocar de aba.
+const AdminShellContext = createContext(false);
+export const useInsideAdminShell = () => useContext(AdminShellContext);
 import { cn } from "@/lib/utils";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import MondayPopup from "@/components/warehouse/MondayPopup";
@@ -205,6 +211,7 @@ const ROLE_BADGE: Record<string, { label: string; className: string }> = {
 };
 
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
+  const insideShell = useInsideAdminShell();
   const { user, role, hasPermission, signOut } = useAuth();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -218,7 +225,11 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const isChildActive = (group: NavGroup) =>
     group.children.some((c) => location.pathname === c.to);
 
+  // Já dentro do shell persistente → só renderiza o conteúdo (a sidebar/header já existem).
+  if (insideShell) return <>{children}</>;
+
   return (
+    <AdminShellContext.Provider value={true}>
     <div className="flex min-h-screen">
       {/* Warehouse-only features: Monday popup + inactivity logout */}
       {role === "warehouse" && <MondayPopup />}
@@ -327,6 +338,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
         </main>
       </div>
     </div>
+    </AdminShellContext.Provider>
   );
 };
 

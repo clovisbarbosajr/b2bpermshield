@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { CartProvider } from "@/contexts/CartContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import AdminLayout from "@/components/layouts/AdminLayout";
 
 import Index from "./pages/Index";
 import LoginLanding from "./pages/LoginLanding";
@@ -158,7 +159,9 @@ const App = () => (
               <Route path="/portal/conta" element={<ProtectedRoute><Conta /></ProtectedRoute>} />
               <Route path="/portal/team" element={<ProtectedRoute><PortalTeam /></ProtectedRoute>} />
 
-              {/* Admin Panel — warehouse-accessible */}
+              {/* Admin Panel — UM shell persistente (sidebar/header não remontam ao trocar de aba).
+                  As páginas continuam renderizando <AdminLayout>, que vira passthrough quando aninhado. */}
+              <Route element={<S><AdminLayout><Outlet /></AdminLayout></S>}>
               <Route path="/admin" element={<AW><AdminDashboard /></AW>} />
               <Route path="/admin/orders" element={<AW><AdminPedidos /></AW>} />
               <Route path="/admin/orders/:id" element={<AW><OrderDetail /></AW>} />
@@ -252,6 +255,7 @@ const App = () => (
               <Route path="/admin/paginas" element={<A><AdminPaginas /></A>} />
               <Route path="/admin/representantes" element={<A><AdminRepresentantes /></A>} />
               <Route path="/admin/ferramentas" element={<A><AdminFerramentas /></A>} />
+              </Route>
 
               <Route path="*" element={<NotFound />} />
             </Routes>
