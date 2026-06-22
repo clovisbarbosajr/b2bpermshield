@@ -1809,21 +1809,31 @@ export type Database = {
           created_at: string | null
           grupo_nome: string
           id: string
+          privacy_group_id: string | null
           produto_id: string
         }
         Insert: {
           created_at?: string | null
           grupo_nome: string
           id?: string
+          privacy_group_id?: string | null
           produto_id: string
         }
         Update: {
           created_at?: string | null
           grupo_nome?: string
           id?: string
+          privacy_group_id?: string | null
           produto_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "produto_acesso_privacy_group_id_fkey"
+            columns: ["privacy_group_id"]
+            isOneToOne: false
+            referencedRelation: "privacy_groups"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "produto_acesso_produto_id_fkey"
             columns: ["produto_id"]
