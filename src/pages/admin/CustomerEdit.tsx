@@ -37,7 +37,7 @@ const CustomerEdit = () => {
   const [selectedPaymentOptions, setSelectedPaymentOptions] = useState<string[]>([]);
   const [selectedShippingOptions, setSelectedShippingOptions] = useState<string[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
-  const [contactForm, setContactForm] = useState({ nome: "", email: "", role: "buyer", ativo: true });
+  const [contactForm, setContactForm] = useState({ nome: "", email: "", can_confirm_order: false, can_view_full_history: false });
   const [addingContact, setAddingContact] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
   const [pedidos, setPedidos] = useState<any[]>([]);
@@ -118,9 +118,11 @@ const CustomerEdit = () => {
       setSelectedPaymentOptions((cpo ?? []).map((x: any) => x.payment_option_id));
       setSelectedShippingOptions((cso ?? []).map((x: any) => x.shipping_option_id));
 
-      // Load contacts
-      const { data: cts } = await supabase.from("company_contacts").select("*").eq("cliente_id", id!).order("created_at");
-      setContacts(cts ?? []);
+      // Load sub-users (modelo B2BWave: clientes filhos com parent_customer_id)
+      const { data: cts } = await supabase.from("clientes")
+        .select("id, nome, email, can_confirm_order, can_view_full_history, status, user_id")
+        .eq("parent_customer_id", id!).order("created_at");
+      setContacts((cts ?? []).map((c: any) => ({ ...c, ativo: c.status !== "inativo" })));
 
       // Load orders
       const { data: orders } = await supabase.from("pedidos").select("*").eq("cliente_id", id!).order("created_at", { ascending: false }).limit(20);
@@ -737,12 +739,14 @@ const CustomerEdit = () => {
           </Card>
         </TabsContent>
 
-        {/* Contacts Tab */}
+        {/* Sub-users Tab (modelo B2BWave: funcionários = clientes filhos com 2 permissões) */}
         <TabsContent value="contacts">
           <Card className="p-6">
             <div className="mb-4">
               <p className="text-sm text-muted-foreground">
-                Company contacts are additional users who can log in to the portal on behalf of this company. Each contact has their own email/password and a role.
+                Employees (sub-users) are additional logins for this company. Each one has their own email/password,
+                shares this account's price list and catalog, and has two permissions: confirm orders without approval,
+                and view the full company order history.
               </p>
             </div>
 
@@ -752,7 +756,8 @@ const CustomerEdit = () => {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
-                    <TableHead>Role</TableHead>
+                    <TableHead className="text-center">Confirm orders</TableHead>
+                    <TableHead className="text-center">Full history</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead />
                   </TableRow>
@@ -762,40 +767,41 @@ const CustomerEdit = () => {
                     <TableRow key={ct.id}>
                       <TableCell>{ct.nome}</TableCell>
                       <TableCell className="text-muted-foreground text-sm">{ct.email}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="capitalize">{ct.role}</Badge>
+                      <TableCell className="text-center">
+                        <Checkbox checked={ct.can_confirm_order} onCheckedChange={async (v) => {
+                          const val = v === true;
+                          await supabase.from("clientes").update({ can_confirm_order: val }).eq("id", ct.id);
+                          setContacts(prev => prev.map(c => c.id === ct.id ? { ...c, can_confirm_order: val } : c));
+                        }} />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Checkbox checked={ct.can_view_full_history} onCheckedChange={async (v) => {
+                          const val = v === true;
+                          await supabase.from("clientes").update({ can_view_full_history: val }).eq("id", ct.id);
+                          setContacts(prev => prev.map(c => c.id === ct.id ? { ...c, can_view_full_history: val } : c));
+                        }} />
                       </TableCell>
                       <TableCell>
                         <Badge variant={ct.ativo ? "default" : "secondary"} className="cursor-pointer"
                           onClick={async () => {
-                            await supabase.from("company_contacts").update({ ativo: !ct.ativo }).eq("id", ct.id);
+                            const next = ct.ativo ? "inativo" : "ativo";
+                            await supabase.from("clientes").update({ status: next, is_active: !ct.ativo }).eq("id", ct.id);
                             setContacts(prev => prev.map(c => c.id === ct.id ? { ...c, ativo: !c.ativo } : c));
                           }}>
                           {ct.ativo ? "Active" : "Inactive"}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" title="Send reset password"
-                            onClick={async () => {
-                              const { error } = await supabase.functions.invoke("send-email", {
-                                body: { type: "password_reset", email: ct.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
-                              });
-                              if (error) toast.error(error.message);
-                              else toast.success(`Reset link sent to ${ct.email}`);
-                            }}>
-                            🔒
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                            onClick={async () => {
-                              if (!confirm(`Remove contact ${ct.nome}?`)) return;
-                              await supabase.from("company_contacts").delete().eq("id", ct.id);
-                              setContacts(prev => prev.filter(c => c.id !== ct.id));
-                              toast.success("Contact removed");
-                            }}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Send reset password"
+                          onClick={async () => {
+                            const { error } = await supabase.functions.invoke("send-email", {
+                              body: { type: "password_reset", email: ct.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
+                            });
+                            if (error) toast.error(error.message);
+                            else toast.success(`Reset link sent to ${ct.email}`);
+                          }}>
+                          🔒
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -805,7 +811,7 @@ const CustomerEdit = () => {
 
             {addingContact ? (
               <div className="mt-4 rounded-lg border p-4 space-y-3">
-                <h4 className="text-sm font-semibold">New Contact</h4>
+                <h4 className="text-sm font-semibold">New employee</h4>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>Name</Label>
@@ -815,50 +821,50 @@ const CustomerEdit = () => {
                     <Label>Email</Label>
                     <Input type="email" value={contactForm.email} onChange={e => setContactForm(f => ({ ...f, email: e.target.value }))} />
                   </div>
-                  <div>
-                    <Label>Role</Label>
-                    <Select value={contactForm.role} onValueChange={v => setContactForm(f => ({ ...f, role: v }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="buyer">Buyer — can browse and place orders</SelectItem>
-                        <SelectItem value="viewer">Viewer — can browse only (no orders)</SelectItem>
-                        <SelectItem value="manager">Manager — buyer + sees all company orders</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox checked={contactForm.can_confirm_order} onCheckedChange={v => setContactForm(f => ({ ...f, can_confirm_order: v === true }))} />
+                    Can confirm orders without approval
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox checked={contactForm.can_view_full_history} onCheckedChange={v => setContactForm(f => ({ ...f, can_view_full_history: v === true }))} />
+                    Can view the full company order history
+                  </label>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" disabled={savingContact} onClick={async () => {
                     if (!contactForm.nome || !contactForm.email) { toast.error("Name and email required"); return; }
                     if (!cliente?.id) { toast.error("Save the customer first"); return; }
                     setSavingContact(true);
-                    // Create auth user
+                    // Cria o auth user
                     const { data: fnData, error: fnErr } = await supabase.functions.invoke("admin-create-user", {
                       body: { email: contactForm.email, nome: contactForm.nome, empresa: cliente.empresa || "" },
                     });
                     if (fnErr || fnData?.error) { toast.error(fnData?.error || fnErr?.message); setSavingContact(false); return; }
-                    // Insert contact record
-                    const { data: ct, error: ctErr } = await supabase.from("company_contacts").insert({
-                      cliente_id: cliente.id, user_id: fnData.user_id,
-                      nome: contactForm.nome, email: contactForm.email, role: contactForm.role, ativo: true,
-                    }).select().single();
+                    // Insere o sub-usuário: clientes filho com parent + 2 flags (herda price list via trigger)
+                    const { data: ct, error: ctErr } = await supabase.from("clientes").insert({
+                      user_id: fnData.user_id, parent_customer_id: cliente.id,
+                      nome: contactForm.nome, email: contactForm.email, empresa: cliente.empresa || "",
+                      can_confirm_order: contactForm.can_confirm_order, can_view_full_history: contactForm.can_view_full_history,
+                      status: "ativo", is_active: true,
+                    }).select("id, nome, email, can_confirm_order, can_view_full_history, status").single();
                     if (ctErr) { toast.error(ctErr.message); setSavingContact(false); return; }
-                    // Also give them a 'cliente' role in user_roles
+                    // Papel 'cliente' apenas (nunca admin/manager/warehouse → sem escalonamento)
                     await supabase.from("user_roles").upsert({ user_id: fnData.user_id, role: "cliente" }, { onConflict: "user_id" });
                     // Envia DE VERDADE o link de definição de senha (Resend + Office365 fallback).
-                    // Antes o toast dizia "email enviado" mas nada era enviado -> contato sem senha.
                     const { error: mailErr } = await supabase.functions.invoke("send-email", {
                       body: { type: "password_reset", email: contactForm.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
                     });
-                    setContacts(prev => [...prev, ct]);
-                    setContactForm({ nome: "", email: "", role: "buyer", ativo: true });
+                    setContacts(prev => [...prev, { ...ct, ativo: true }]);
+                    setContactForm({ nome: "", email: "", can_confirm_order: false, can_view_full_history: false });
                     setAddingContact(false);
                     setSavingContact(false);
                     toast.success(mailErr
-                      ? `Contact ${contactForm.nome} created, but the setup email failed — use the 🔒 button to resend.`
-                      : `Contact ${contactForm.nome} created. A setup email was sent to ${contactForm.email}.`);
+                      ? `Employee ${contactForm.nome} created, but the setup email failed — use the 🔒 button to resend.`
+                      : `Employee ${contactForm.nome} created. A setup email was sent to ${contactForm.email}.`);
                   }}>
-                    {savingContact ? "Creating..." : "Create Contact"}
+                    {savingContact ? "Creating..." : "Create employee"}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setAddingContact(false)}>Cancel</Button>
                 </div>
@@ -866,7 +872,7 @@ const CustomerEdit = () => {
             ) : (
               <Button size="sm" className="mt-4 gap-1" disabled={!cliente?.id}
                 onClick={() => setAddingContact(true)}>
-                <Plus className="h-4 w-4" /> Add Contact
+                <Plus className="h-4 w-4" /> Add employee
               </Button>
             )}
           </Card>

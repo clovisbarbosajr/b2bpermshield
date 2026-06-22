@@ -11,7 +11,6 @@ type ViewAsCustomer = {
   nome?: string;
   email?: string;
   tabela_preco_id?: string | null;
-  contactRole?: string | null;
 };
 
 interface AuthContextType {
@@ -23,7 +22,10 @@ interface AuthContextType {
   loading: boolean;
   isDemo: boolean;
   impersonatedCustomer: ViewAsCustomer | null;
-  contactRole: string | null;
+  // Sub-usuário (clientes com parent) sem "confirmar pedido" não finaliza compra.
+  canPlaceOrders: boolean;
+  // É um sub-usuário (tem parent_customer_id)? Só o DONO da conta gerencia a equipe.
+  isSubUser: boolean;
   signOut: () => Promise<void>;
   loginAsDemo: (demoRole: AppRole) => void;
   clearViewAs: () => void;
@@ -38,7 +40,8 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   isDemo: false,
   impersonatedCustomer: null,
-  contactRole: null,
+  canPlaceOrders: true,
+  isSubUser: false,
   signOut: async () => {},
   loginAsDemo: () => {},
   clearViewAs: () => {},
@@ -68,7 +71,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
   const [impersonatedCustomer, setImpersonatedCustomer] = useState<ViewAsCustomer | null>(null);
-  const [contactRole, setContactRole] = useState<string | null>(null);
+  const [canPlaceOrders, setCanPlaceOrders] = useState<boolean>(true);
+  const [isSubUser, setIsSubUser] = useState<boolean>(false);
 
   // Admin always has full access; for others check the permissions map
   const hasPermission = (key: string): boolean => {
@@ -85,49 +89,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .maybeSingle();
     const dbRole = data?.role as AppRole | undefined;
 
-    // STAFF (admin/manager/warehouse) tem prioridade e NUNCA é contato de empresa.
+    // STAFF (admin/manager/warehouse) tem prioridade.
     if (dbRole && dbRole !== "cliente") {
       setRole(dbRole);
       setPermissions((data as any).permissions || {});
+      setCanPlaceOrders(true);
+      setIsSubUser(false);
       return dbRole;
     }
 
-    // Cliente OU sem papel: PRIMEIRO checa se é contato de empresa (sub-login).
-    // (Antes o `return` no role 'cliente' impedia isso — o contato nunca resolvia a empresa.)
-    const { data: contact } = await supabase
-      .from("company_contacts")
-      .select("id, cliente_id, nome, email, role, clientes(id, empresa, nome, email, tabela_preco_id, user_id)")
-      .eq("user_id", userId)
-      .eq("ativo", true)
-      .maybeSingle();
-
-    if (contact && contact.clientes) {
-      const company = contact.clientes as any;
-      const viewAs: ViewAsCustomer = {
-        id: company.id,
-        user_id: company.user_id,
-        empresa: company.empresa,
-        nome: contact.nome,
-        email: contact.email,
-        tabela_preco_id: company.tabela_preco_id,
-        contactRole: contact.role,
-      };
-      localStorage.setItem("viewAsCustomer", JSON.stringify(viewAs));
-      setImpersonatedCustomer(viewAs);
-      setContactRole(contact.role);
-      setRole("cliente");
-      setPermissions({});
-      return "cliente";
-    }
-
-    // Não é contato: cliente normal (com papel 'cliente') ou sem papel (pendente).
+    // Cliente — INCLUI sub-usuário (modelo B2BWave: registro próprio em `clientes`
+    // com `parent_customer_id` + flags). Ele resolve sozinho pelo user_id, herda a
+    // tabela de preço do pai e segue as 2 flags. Não há mais "contato de empresa".
     if (dbRole === "cliente") {
       setRole("cliente");
       setPermissions((data as any).permissions || {});
+      // Sub-usuário SEM "confirmar pedido sem aprovação" não finaliza compra (igual B2BWave).
+      const { data: me } = await supabase
+        .from("clientes")
+        .select("parent_customer_id, can_confirm_order")
+        .eq("user_id", userId)
+        .maybeSingle();
+      setCanPlaceOrders(!(me?.parent_customer_id && me?.can_confirm_order === false));
+      setIsSubUser(!!me?.parent_customer_id);
       return "cliente";
     }
+
+    // Sem papel (pendente de aprovação).
     setRole(null);
     setPermissions({});
+    setCanPlaceOrders(true);
+    setIsSubUser(false);
     return null;
   };
 
@@ -160,22 +152,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const initUserSession = async (authUser: User) => {
     const resolvedRole = await fetchRoleAndPermissions(authUser.id);
     if (resolvedRole === "cliente" || resolvedRole === null) {
-      // CONTATO de empresa NÃO cria/vincula registro próprio em `clientes` (usa o da
-      // empresa). Sem isso, o claim_customer_record sequestraria/criaria um cliente errado.
-      const { data: contact } = await supabase
-        .from("company_contacts")
-        .select("id")
-        .eq("user_id", authUser.id)
-        .eq("ativo", true)
-        .maybeSingle();
-      if (!contact) await ensureClienteRecord(authUser);
+      // Sub-usuário já tem registro próprio em `clientes` (criado pelo admin com
+      // parent_customer_id) — claim_customer_record o encontra pelo user_id e não
+      // duplica. Cliente novo de verdade é criado aqui.
+      await ensureClienteRecord(authUser);
     }
   };
 
   const applyViewAsSession = (customer: ViewAsCustomer) => {
     const effectiveUserId = customer.user_id ?? customer.id;
     setImpersonatedCustomer(customer);
-    setContactRole(customer.contactRole ?? null);
+    setCanPlaceOrders(true);
+    setIsSubUser(false);
     setIsDemo(true);
     setRole("cliente");
     setPermissions({});
@@ -220,7 +208,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
       setImpersonatedCustomer(null);
-      setContactRole(null);
+      setCanPlaceOrders(true);
+      setIsSubUser(false);
       setIsDemo(false);
 
       if (nextSession?.user) {
@@ -306,7 +295,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         isDemo,
         impersonatedCustomer,
-        contactRole,
+        canPlaceOrders,
+        isSubUser,
         signOut,
         loginAsDemo,
         clearViewAs,

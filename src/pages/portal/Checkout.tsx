@@ -29,7 +29,7 @@ function loadStripeScript(): Promise<void> {
 
 const Checkout = () => {
   const { items, total, clearCart } = useCart();
-  const { user, impersonatedCustomer, contactRole } = useAuth();
+  const { user, impersonatedCustomer } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [clienteId, setClienteId] = useState<string | null>(null);
@@ -82,7 +82,9 @@ const Checkout = () => {
         setCustomerPhone((cliente as any).telefone || "");
         // Sub-customer sem permissão de confirmar não finaliza (espelha a trava do banco).
         setSubCannotOrder(!!(cliente as any).parent_customer_id && (cliente as any).can_confirm_order === false);
-        const { data: ends } = await supabase.from("enderecos").select("*").eq("cliente_id", cliente.id);
+        // Endereço puxa da conta da EMPRESA: sub-usuário usa os endereços do pai.
+        const addressClienteId = (cliente as any).parent_customer_id ?? cliente.id;
+        const { data: ends } = await supabase.from("enderecos").select("*").eq("cliente_id", addressClienteId);
         setEnderecos(ends ?? []);
         const principal = ends?.find((e: any) => e.principal);
         if (principal) {
@@ -541,12 +543,12 @@ const Checkout = () => {
     return null;
   }
 
-  if (contactRole === "viewer") {
+  if (subCannotOrder) {
     return (
       <PortalLayout>
         <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
-          <p className="text-xl font-semibold text-muted-foreground">View-only access</p>
-          <p className="text-sm text-muted-foreground">Your account has view-only permissions and cannot place orders.<br/>Contact your account manager for assistance.</p>
+          <p className="text-xl font-semibold text-muted-foreground">Approval required</p>
+          <p className="text-sm text-muted-foreground">Your account needs approval to place orders.<br/>Contact your account owner for assistance.</p>
           <Button variant="outline" onClick={() => navigate("/portal/catalogo")}>Back to Catalog</Button>
         </div>
       </PortalLayout>

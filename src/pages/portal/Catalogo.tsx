@@ -34,8 +34,8 @@ const Catalogo = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const categoryParam = searchParams.get("category");
-  const { user, impersonatedCustomer, contactRole } = useAuth();
-  const isViewer = contactRole === "viewer";
+  const { user, impersonatedCustomer, canPlaceOrders } = useAuth();
+  const isViewer = !canPlaceOrders;
 
   // Calculated prices map: productId -> PriceResult
   const [prices, setPrices] = useState<Record<string, PriceResult>>({});

@@ -1,11 +1,11 @@
-// company-member — o CLIENTE (dono da conta) ou um CONTATO 'manager' gerencia os
-// funcionários (sub-logins) da própria empresa: criar / atualizar papel / desativar.
-// Cada funcionário herda o acesso da empresa (mesmo price list / privacidade), via
-// company_contacts.cliente_id. Permissões por papel:
-//   buyer   = pode finalizar pedido      (is_company_buyer = true)
-//   viewer  = só visualiza, NÃO finaliza
-//   manager = finaliza + gerencia a equipe
-// Roda com service_role (cria auth user), mas valida que o chamador é dono/manager.
+// company-member — o DONO da conta gerencia os funcionários (sub-logins) da própria
+// empresa no modelo ÚNICO do B2BWave: cada funcionário é um registro próprio em
+// `clientes` com `parent_customer_id` = a conta do dono + 2 flags:
+//   can_confirm_order      = pode finalizar pedido sem aprovação
+//   can_view_full_history  = vê o histórico completo da empresa
+// O funcionário HERDA a tabela de preço do pai (trigger fn_subuser_inherit_pricelist)
+// e recebe SEMPRE o papel 'cliente' (nunca admin/manager/warehouse → sem escalonamento).
+// Roda com service_role (cria auth user), mas valida que o chamador é o DONO da conta.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -13,7 +13,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-const ROLES = ["buyer", "viewer", "manager"];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -31,62 +30,80 @@ Deno.serve(async (req) => {
 
     const db = createClient(supabaseUrl, serviceKey);
 
-    // Resolve a EMPRESA que o chamador gerencia: dono da conta (clientes.user_id) OU contato 'manager'.
-    let companyId: string | null = null;
-    const { data: ownCliente } = await db.from("clientes").select("id").eq("user_id", caller.id).maybeSingle();
-    if (ownCliente) companyId = ownCliente.id;
-    if (!companyId) {
-      const { data: mgr } = await db.from("company_contacts")
-        .select("cliente_id, role").eq("user_id", caller.id).eq("ativo", true).eq("role", "manager").maybeSingle();
-      if (mgr) companyId = mgr.cliente_id;
+    // Só o DONO da conta gerencia a equipe: registro em `clientes` com este user_id
+    // E SEM pai (parent_customer_id IS NULL). Um sub-usuário NÃO pode gerenciar/escalar.
+    const { data: owner } = await db.from("clientes")
+      .select("id, empresa, nome, tabela_preco_id, parent_customer_id")
+      .eq("user_id", caller.id).maybeSingle();
+    if (!owner || owner.parent_customer_id) {
+      return json({ error: "Only the account owner can manage the team" }, 403);
     }
-    if (!companyId) return json({ error: "Only the account owner or a manager can manage the team" }, 403);
+    const companyId = owner.id;
 
     const body = await req.json();
     const action = body.action || "create";
 
-    // ── Listar a equipe da empresa ──
+    // ── Listar a equipe (sub-clientes desta conta) ──
     if (action === "list") {
-      const { data } = await db.from("company_contacts")
-        .select("id, nome, email, role, ativo, created_at").eq("cliente_id", companyId).order("created_at");
-      return json({ members: data ?? [] });
+      const { data } = await db.from("clientes")
+        .select("id, nome, email, can_confirm_order, can_view_full_history, status")
+        .eq("parent_customer_id", companyId).order("created_at");
+      const members = (data ?? []).map((m: any) => ({
+        id: m.id, nome: m.nome, email: m.email,
+        can_confirm_order: m.can_confirm_order, can_view_full_history: m.can_view_full_history,
+        ativo: m.status !== "inativo",
+      }));
+      return json({ members });
     }
 
-    // ── Atualizar papel / ativo ──
+    // ── Atualizar flags / status ── (sempre amarrado a parent_customer_id = companyId)
     if (action === "update") {
-      const { contact_id, role, ativo } = body;
-      if (!contact_id) return json({ error: "contact_id required" }, 400);
+      const { member_id, can_confirm_order, can_view_full_history, ativo } = body;
+      if (!member_id) return json({ error: "member_id required" }, 400);
       const patch: any = {};
-      if (role && ROLES.includes(role)) patch.role = role;
-      if (typeof ativo === "boolean") patch.ativo = ativo;
-      const { error } = await db.from("company_contacts").update(patch).eq("id", contact_id).eq("cliente_id", companyId);
+      if (typeof can_confirm_order === "boolean") patch.can_confirm_order = can_confirm_order;
+      if (typeof can_view_full_history === "boolean") patch.can_view_full_history = can_view_full_history;
+      if (typeof ativo === "boolean") { patch.status = ativo ? "ativo" : "inativo"; patch.is_active = ativo; }
+      const { error } = await db.from("clientes").update(patch)
+        .eq("id", member_id).eq("parent_customer_id", companyId);
       if (error) return json({ error: error.message }, 400);
       return json({ success: true });
     }
 
-    // ── Remover (desativa o contato; mantém o login pra histórico) ──
+    // ── Remover (desativa; mantém o login para histórico) ──
     if (action === "delete") {
-      const { contact_id } = body;
-      if (!contact_id) return json({ error: "contact_id required" }, 400);
-      const { error } = await db.from("company_contacts").update({ ativo: false }).eq("id", contact_id).eq("cliente_id", companyId);
+      const { member_id } = body;
+      if (!member_id) return json({ error: "member_id required" }, 400);
+      const { error } = await db.from("clientes").update({ status: "inativo", is_active: false })
+        .eq("id", member_id).eq("parent_customer_id", companyId);
       if (error) return json({ error: error.message }, 400);
       return json({ success: true });
     }
 
     // ── Criar funcionário (sub-login) ──
-    const { email, nome, role } = body;
+    const { email, nome } = body;
     if (!email || typeof email !== "string" || !email.includes("@")) return json({ error: "Valid email is required" }, 400);
-    const memberRole = ROLES.includes(role) ? role : "buyer";
+    const canConfirm = body.can_confirm_order === true;
+    const canHistory = body.can_view_full_history === true;
 
     const { data: newUser, error: createErr } = await db.auth.admin.createUser({
       email, email_confirm: true, user_metadata: { nome: nome || "" },
     });
     if (createErr || !newUser?.user) return json({ error: createErr?.message ?? "Failed to create user" }, 400);
 
-    const { data: ct, error: ctErr } = await db.from("company_contacts").insert({
-      cliente_id: companyId, user_id: newUser.user.id, nome: nome || "", email, role: memberRole, ativo: true,
-    }).select("id, nome, email, role, ativo, created_at").single();
-    if (ctErr) return json({ error: ctErr.message }, 400);
+    // Sub-cliente: papel 'cliente' apenas, pai = a própria conta, herda price list (trigger).
+    const { data: sub, error: subErr } = await db.from("clientes").insert({
+      user_id: newUser.user.id,
+      parent_customer_id: companyId,
+      nome: nome || email,
+      email,
+      empresa: owner.empresa || owner.nome || "",
+      can_confirm_order: canConfirm,
+      can_view_full_history: canHistory,
+      status: "ativo",
+      is_active: true,
+    }).select("id, nome, email, can_confirm_order, can_view_full_history, status").single();
+    if (subErr) return json({ error: subErr.message }, 400);
 
     await db.from("user_roles").upsert({ user_id: newUser.user.id, role: "cliente" }, { onConflict: "user_id" });
 
@@ -101,7 +118,11 @@ Deno.serve(async (req) => {
       mailOk = r.ok;
     } catch { mailOk = false; }
 
-    return json({ success: true, member: ct, mailOk });
+    return json({
+      success: true,
+      member: { id: sub.id, nome: sub.nome, email: sub.email, can_confirm_order: sub.can_confirm_order, can_view_full_history: sub.can_view_full_history, ativo: true },
+      mailOk,
+    });
   } catch (err: any) {
     return json({ error: err.message }, 500);
   }

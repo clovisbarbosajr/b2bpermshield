@@ -20,10 +20,10 @@ const navItems = [
 ];
 
 const PortalLayout = ({ children }: { children: React.ReactNode }) => {
-  const { user, signOut, impersonatedCustomer, contactRole } = useAuth();
+  const { user, signOut, impersonatedCustomer, isSubUser } = useAuth();
   const location = useLocation();
-  // Dono da conta (sem contactRole) OU contato 'manager' pode gerenciar a equipe.
-  const canManageTeam = !contactRole || contactRole === "manager";
+  // Só o DONO da conta gerencia a equipe; sub-usuário não vê o menu Team.
+  const canManageTeam = !isSubUser;
   const displayedNav = canManageTeam
     ? [...navItems, { to: "/portal/team", icon: Users, label: "Team" }]
     : navItems;

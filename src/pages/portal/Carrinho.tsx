@@ -18,7 +18,7 @@ const savedKey = (uid?: string | null) => uid ? `cart_saved_for_later_${uid}` : 
 
 const Carrinho = () => {
   const { items, removeItem, updateQuantity, clearCart, total, addItem } = useCart();
-  const { user, contactRole, impersonatedCustomer } = useAuth();
+  const { user, canPlaceOrders, impersonatedCustomer } = useAuth();
   const navigate = useNavigate();
   const [salesTax, setSalesTax] = useState(0);
   const [unavailableItems, setUnavailableItems] = useState<Set<string>>(new Set());
@@ -264,8 +264,8 @@ const Carrinho = () => {
                     <AlertTriangle className="h-4 w-4" /> Reduce quantities to the available stock to proceed
                   </p>
                 )}
-                {contactRole === "viewer" ? (
-                  <p className="text-sm text-muted-foreground italic">View-only access — ordering disabled</p>
+                {!canPlaceOrders ? (
+                  <p className="text-sm text-muted-foreground italic">Your account needs approval to place orders — ordering disabled</p>
                 ) : (
                   <Button onClick={() => navigate("/portal/checkout")} disabled={unavailableItems.size > 0 || insufficientItems.size > 0}>NEXT</Button>
                 )}

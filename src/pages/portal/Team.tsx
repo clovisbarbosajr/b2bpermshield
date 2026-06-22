@@ -6,28 +6,26 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { UserPlus, Trash2 } from "lucide-react";
+import { UserPlus, Trash2, Check } from "lucide-react";
 import { toast } from "sonner";
 
-type Member = { id: string; nome: string; email: string; role: string; ativo: boolean; created_at: string };
-
-const ROLE_LABEL: Record<string, string> = {
-  buyer: "Can place orders",
-  viewer: "View only (cannot order)",
-  manager: "Manager (orders + team)",
+// Sub-usuário no modelo do B2BWave: registro próprio em `clientes`, com 2 permissões.
+type Member = {
+  id: string; nome: string; email: string;
+  can_confirm_order: boolean; can_view_full_history: boolean; ativo: boolean;
 };
 
 const Team = () => {
-  const { contactRole } = useAuth();
-  const canManage = !contactRole || contactRole === "manager";
+  const { isSubUser } = useAuth();
+  const canManage = !isSubUser; // só o dono da conta gerencia a equipe
 
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ nome: "", email: "", role: "buyer" });
+  const [form, setForm] = useState({ nome: "", email: "", can_confirm_order: false, can_view_full_history: false });
 
   const load = async () => {
     const { data, error } = await supabase.functions.invoke("company-member", { body: { action: "list" } });
@@ -42,26 +40,30 @@ const Team = () => {
     if (!form.nome) { toast.error("Name required"); return; }
     setSaving(true);
     const { data, error } = await supabase.functions.invoke("company-member", {
-      body: { action: "create", email: form.email.trim().toLowerCase(), nome: form.nome.trim(), role: form.role, redirectTo: `${window.location.origin}/reset-password` },
+      body: {
+        action: "create", email: form.email.trim().toLowerCase(), nome: form.nome.trim(),
+        can_confirm_order: form.can_confirm_order, can_view_full_history: form.can_view_full_history,
+        redirectTo: `${window.location.origin}/reset-password`,
+      },
     });
     setSaving(false);
     if (error || data?.error) { toast.error(data?.error || error?.message || "Failed"); return; }
     toast.success(data?.mailOk
       ? `${form.nome} added — a setup email was sent.`
       : `${form.nome} added, but the setup email failed. They can use "Forgot password" to set it.`);
-    setForm({ nome: "", email: "", role: "buyer" });
+    setForm({ nome: "", email: "", can_confirm_order: false, can_view_full_history: false });
     load();
   };
 
-  const updateRole = async (m: Member, role: string) => {
-    const { error } = await supabase.functions.invoke("company-member", { body: { action: "update", contact_id: m.id, role } });
-    if (error) { toast.error(error.message); return; }
-    setMembers((prev) => prev.map((x) => x.id === m.id ? { ...x, role } : x));
+  const toggleFlag = async (m: Member, field: "can_confirm_order" | "can_view_full_history", value: boolean) => {
+    setMembers((prev) => prev.map((x) => x.id === m.id ? { ...x, [field]: value } : x));
+    const { error } = await supabase.functions.invoke("company-member", { body: { action: "update", member_id: m.id, [field]: value } });
+    if (error) { toast.error(error.message); load(); }
   };
 
   const removeMember = async (m: Member) => {
     if (!confirm(`Remove ${m.nome}'s access?`)) return;
-    const { error } = await supabase.functions.invoke("company-member", { body: { action: "delete", contact_id: m.id } });
+    const { error } = await supabase.functions.invoke("company-member", { body: { action: "delete", member_id: m.id } });
     if (error) { toast.error(error.message); return; }
     toast.success(`${m.nome} removed`);
     setMembers((prev) => prev.map((x) => x.id === m.id ? { ...x, ativo: false } : x));
@@ -84,51 +86,51 @@ const Team = () => {
 
       <Card className="p-5 mb-6">
         <h2 className="font-semibold mb-3 flex items-center gap-2"><UserPlus className="h-4 w-4" /> Add employee</h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
           <div><Label>Name</Label><Input value={form.nome} onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))} /></div>
           <div><Label>Email</Label><Input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></div>
-          <div>
-            <Label>Permission</Label>
-            <Select value={form.role} onValueChange={(v) => setForm((f) => ({ ...f, role: v }))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="buyer">Can place orders</SelectItem>
-                <SelectItem value="viewer">View only (cannot order)</SelectItem>
-                <SelectItem value="manager">Manager (orders + team)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <Button onClick={addMember} disabled={saving} className="gap-1"><UserPlus className="h-4 w-4" /> {saving ? "Adding..." : "Add"}</Button>
         </div>
+        <div className="flex flex-col gap-2 mb-4">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <Checkbox checked={form.can_confirm_order} onCheckedChange={(v) => setForm((f) => ({ ...f, can_confirm_order: v === true }))} />
+            Can confirm orders without approval
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <Checkbox checked={form.can_view_full_history} onCheckedChange={(v) => setForm((f) => ({ ...f, can_view_full_history: v === true }))} />
+            Can view the full company order history
+          </label>
+        </div>
+        <Button onClick={addMember} disabled={saving} className="gap-1"><UserPlus className="h-4 w-4" /> {saving ? "Adding..." : "Add employee"}</Button>
       </Card>
 
       <Card className="p-0 overflow-hidden">
         <Table>
           <TableHeader>
-            <TableRow><TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Permission</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow>
+            <TableRow>
+              <TableHead>Name</TableHead><TableHead>Email</TableHead>
+              <TableHead className="text-center">Confirm orders</TableHead>
+              <TableHead className="text-center">Full history</TableHead>
+              <TableHead>Status</TableHead><TableHead></TableHead>
+            </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
             ) : members.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No employees yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No employees yet.</TableCell></TableRow>
             ) : members.map((m) => (
               <TableRow key={m.id} className={m.ativo ? "" : "opacity-50"}>
                 <TableCell className="font-medium">{m.nome}</TableCell>
                 <TableCell>{m.email}</TableCell>
-                <TableCell>
+                <TableCell className="text-center">
                   {m.ativo ? (
-                    <Select value={m.role} onValueChange={(v) => updateRole(m, v)}>
-                      <SelectTrigger className="h-8 w-56"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="buyer">Can place orders</SelectItem>
-                        <SelectItem value="viewer">View only (cannot order)</SelectItem>
-                        <SelectItem value="manager">Manager (orders + team)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">{ROLE_LABEL[m.role] ?? m.role}</span>
-                  )}
+                    <Checkbox checked={m.can_confirm_order} onCheckedChange={(v) => toggleFlag(m, "can_confirm_order", v === true)} />
+                  ) : (m.can_confirm_order ? <Check className="h-4 w-4 inline text-muted-foreground" /> : "—")}
+                </TableCell>
+                <TableCell className="text-center">
+                  {m.ativo ? (
+                    <Checkbox checked={m.can_view_full_history} onCheckedChange={(v) => toggleFlag(m, "can_view_full_history", v === true)} />
+                  ) : (m.can_view_full_history ? <Check className="h-4 w-4 inline text-muted-foreground" /> : "—")}
                 </TableCell>
                 <TableCell>{m.ativo ? <Badge variant="secondary">Active</Badge> : <Badge variant="outline">Removed</Badge>}</TableCell>
                 <TableCell>
