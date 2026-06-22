@@ -136,7 +136,7 @@ const AdminPedidos = () => {
     if (f.phone && !(p.clientes?.telefone ?? "").includes(f.phone)) return false;
     if (f.email && !(p.clientes?.email ?? "").toLowerCase().includes(f.email.toLowerCase())) return false;
     if (f.purchaseOrder && !(p.po_number ?? "").toLowerCase().includes(f.purchaseOrder.toLowerCase())) return false;
-    if (f.status && p.status !== f.status) return false;
+    if (f.status && canonicalStatus(p.status) !== f.status) return false;
     if (f.fromDate && new Date(p.created_at) < new Date(f.fromDate)) return false;
     if (f.toDate && new Date(p.created_at) > new Date(f.toDate + "T23:59:59")) return false;
     if (f.fromDeliveryDate && (!p.delivery_date || new Date(p.delivery_date) < new Date(f.fromDeliveryDate))) return false;

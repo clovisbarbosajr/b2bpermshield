@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { canonicalStatus } from "@/lib/orderStatuses";
+import { canonicalStatus, statusLabel } from "@/lib/orderStatuses";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -43,10 +43,11 @@ const AdminRelatorios = () => {
 
   // Orders by status
   const statusCounts = pedidos.reduce((acc: Record<string, number>, p) => {
-    acc[p.status] = (acc[p.status] ?? 0) + 1;
+    const k = canonicalStatus(p.status);
+    acc[k] = (acc[k] ?? 0) + 1;
     return acc;
   }, {});
-  const statusData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
+  const statusData = Object.entries(statusCounts).map(([k, value]) => ({ name: statusLabel(k), value }));
 
   // Top products by quantity sold
   const productSales = itens.reduce((acc: Record<string, { name: string; qty: number; revenue: number }>, i) => {

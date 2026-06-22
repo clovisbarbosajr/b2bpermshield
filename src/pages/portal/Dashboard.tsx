@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { canonicalStatus } from "@/lib/orderStatuses";
+import { canonicalStatus, statusLabel, statusBadge } from "@/lib/orderStatuses";
 import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,18 +13,6 @@ type RecentOrder = {
   created_at: string;
   total: number;
   status: string;
-};
-
-const statusLabel: Record<string, string> = {
-  recebido: "Submitted",
-  concluido: "Complete",
-  cancelado: "Cancelled",
-};
-
-const statusColor: Record<string, string> = {
-  recebido: "text-amber-400",
-  concluido: "text-green-400",
-  cancelado: "text-destructive",
 };
 
 const PortalDashboard = () => {
@@ -173,8 +161,8 @@ const PortalDashboard = () => {
                     </span>
                   </div>
                   <div className="flex items-center gap-4">
-                    <span className={`text-xs font-medium ${statusColor[order.status] ?? ""}`}>
-                      {statusLabel[order.status] ?? order.status}
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded border ${statusBadge(order.status)}`}>
+                      {statusLabel(order.status)}
                     </span>
                     <span className="font-bold">${Number(order.total).toFixed(2)}</span>
                   </div>
