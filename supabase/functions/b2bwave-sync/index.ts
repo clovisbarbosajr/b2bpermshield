@@ -387,13 +387,17 @@ Deno.serve(async (req) => {
           b2bwave_id: b2bId,
           desconto: parseFloat(c.discount || "0") || 0,
           ordem: parseInt(c.position || c.sort_order || "0") || 0,
+          // B2BWave expõe is_private na categoria (mas NÃO os grupos/clientes — esses
+          // vêm do scrape). is a fonte de verdade; sincroniza o flag.
+          is_private: c.is_private === true || c.private === true,
         };
         const existing = existingMap.get(b2bId);
         if (existing) {
           // Compare key fields to see if update needed
           const changed = existing.nome !== row.nome || existing.descricao !== row.descricao ||
             existing.ativo !== row.ativo || existing.imagem_url !== row.imagem_url ||
-            Number(existing.desconto) !== row.desconto || existing.ordem !== row.ordem;
+            Number(existing.desconto) !== row.desconto || existing.ordem !== row.ordem ||
+            existing.is_private !== row.is_private;
           if (changed) {
             await adminClient.from("categorias").update(row).eq("id", existing.id);
             synced++;
@@ -538,6 +542,8 @@ Deno.serve(async (req) => {
           permitir_backorder: p.can_backorder === true,
           promover_categoria: p.promote_category === true,
           promover_destaque: p.promote_front === true,
+          // Privacidade: B2BWave expõe is_private no produto (grupos/clientes vêm do scrape).
+          is_private: p.is_private === true || p.private === true,
         };
         // created_at / disponibilidade REAIS do B2BWave (clone): só grava se vier.
         if (p.created_at) row.created_at = p.created_at;
