@@ -146,6 +146,81 @@ export type Database = {
         }
         Relationships: []
       }
+      categoria_acesso: {
+        Row: {
+          categoria_id: string
+          created_at: string
+          id: string
+          privacy_group_id: string
+        }
+        Insert: {
+          categoria_id: string
+          created_at?: string
+          id?: string
+          privacy_group_id: string
+        }
+        Update: {
+          categoria_id?: string
+          created_at?: string
+          id?: string
+          privacy_group_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "categoria_acesso_categoria_id_fkey"
+            columns: ["categoria_id"]
+            isOneToOne: false
+            referencedRelation: "categorias"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "categoria_acesso_privacy_group_id_fkey"
+            columns: ["privacy_group_id"]
+            isOneToOne: false
+            referencedRelation: "privacy_groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      categoria_cliente_acesso: {
+        Row: {
+          categoria_id: string
+          cliente_id: string
+          created_at: string
+          id: string
+          tipo: string
+        }
+        Insert: {
+          categoria_id: string
+          cliente_id: string
+          created_at?: string
+          id?: string
+          tipo: string
+        }
+        Update: {
+          categoria_id?: string
+          cliente_id?: string
+          created_at?: string
+          id?: string
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "categoria_cliente_acesso_categoria_id_fkey"
+            columns: ["categoria_id"]
+            isOneToOne: false
+            referencedRelation: "categorias"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "categoria_cliente_acesso_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       categorias: {
         Row: {
           ativo: boolean
@@ -155,9 +230,11 @@ export type Database = {
           descricao: string | null
           id: string
           imagem_url: string | null
+          is_private: boolean
           nome: string
           ordem: number
           parent_id: string | null
+          subcategorias_herdam: boolean
           updated_at: string
         }
         Insert: {
@@ -168,9 +245,11 @@ export type Database = {
           descricao?: string | null
           id?: string
           imagem_url?: string | null
+          is_private?: boolean
           nome: string
           ordem?: number
           parent_id?: string | null
+          subcategorias_herdam?: boolean
           updated_at?: string
         }
         Update: {
@@ -181,9 +260,11 @@ export type Database = {
           descricao?: string | null
           id?: string
           imagem_url?: string | null
+          is_private?: boolean
           nome?: string
           ordem?: number
           parent_id?: string | null
+          subcategorias_herdam?: boolean
           updated_at?: string
         }
         Relationships: [
@@ -1784,6 +1865,45 @@ export type Database = {
           },
         ]
       }
+      produto_cliente_acesso: {
+        Row: {
+          cliente_id: string
+          created_at: string
+          id: string
+          produto_id: string
+          tipo: string
+        }
+        Insert: {
+          cliente_id: string
+          created_at?: string
+          id?: string
+          produto_id: string
+          tipo: string
+        }
+        Update: {
+          cliente_id?: string
+          created_at?: string
+          id?: string
+          produto_id?: string
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "produto_cliente_acesso_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "produto_cliente_acesso_produto_id_fkey"
+            columns: ["produto_id"]
+            isOneToOne: false
+            referencedRelation: "produtos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       produto_descontos: {
         Row: {
           created_at: string | null
@@ -2044,6 +2164,7 @@ export type Database = {
           estoque_total: number
           id: string
           imagem_url: string | null
+          is_private: boolean
           largura: number | null
           meta_descricao: string | null
           mostrar_ofertas: string | null
@@ -2085,6 +2206,7 @@ export type Database = {
           estoque_total?: number
           id?: string
           imagem_url?: string | null
+          is_private?: boolean
           largura?: number | null
           meta_descricao?: string | null
           mostrar_ofertas?: string | null
@@ -2126,6 +2248,7 @@ export type Database = {
           estoque_total?: number
           id?: string
           imagem_url?: string | null
+          is_private?: boolean
           largura?: number | null
           meta_descricao?: string | null
           mostrar_ofertas?: string | null
@@ -2778,6 +2901,11 @@ export type Database = {
         Returns: undefined
       }
       claim_customer_record: { Args: never; Returns: string }
+      cliente_pode_ver_categoria: {
+        Args: { _cat_id: string }
+        Returns: boolean
+      }
+      cliente_pode_ver_produto: { Args: { _prod_id: string }; Returns: boolean }
       consume_view_as_token: {
         Args: { _token: string }
         Returns: {
