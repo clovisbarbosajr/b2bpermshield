@@ -780,7 +780,22 @@ const OrderDetail = () => {
                     }}
                   />
                 </TableCell>
-                <TableCell>{order?.status ? statusLabel(order.status) : "—"}</TableCell>
+                <TableCell>
+                  <Select
+                    value={item.status_linha ?? ""}
+                    onValueChange={(v) => {
+                      setItems((prev) => prev.map((it) => it.id === item.id ? { ...it, status_linha: v } : it));
+                      supabase.from("pedido_itens").update({ status_linha: v } as any).eq("id", item.id);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-[150px] text-xs">
+                      <SelectValue placeholder={order?.status ? statusLabel(order.status) : "Status"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {statusOptions.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </TableCell>
                 <TableCell>—</TableCell>
                 <TableCell className="text-right font-medium">{fmt(item.subtotal)}</TableCell>
                 <TableCell>
