@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
         if (pedidoId) {
           await adminClient
             .from("pedidos")
-            .update({ status: "cancelado", admin_notes: `Payment failed: ${reason}` } as any)
+            .update({ status: "cancelled", admin_notes: `Payment failed: ${reason}` } as any)
             .eq("id", pedidoId)
             .eq("is_paid", false);
 
