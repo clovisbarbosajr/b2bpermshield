@@ -462,47 +462,6 @@ export type Database = {
         }
         Relationships: []
       }
-      company_contacts: {
-        Row: {
-          ativo: boolean
-          cliente_id: string
-          created_at: string
-          email: string
-          id: string
-          nome: string
-          role: string
-          user_id: string | null
-        }
-        Insert: {
-          ativo?: boolean
-          cliente_id: string
-          created_at?: string
-          email?: string
-          id?: string
-          nome?: string
-          role?: string
-          user_id?: string | null
-        }
-        Update: {
-          ativo?: boolean
-          cliente_id?: string
-          created_at?: string
-          email?: string
-          id?: string
-          nome?: string
-          role?: string
-          user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "company_contacts_cliente_id_fkey"
-            columns: ["cliente_id"]
-            isOneToOne: false
-            referencedRelation: "clientes"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       configuracoes: {
         Row: {
           admin_title_homepage: string | null
@@ -2846,11 +2805,8 @@ export type Database = {
         }
         Returns: boolean
       }
-      is_company_buyer: { Args: { _cliente_id: string }; Returns: boolean }
-      is_company_contact: { Args: { _cliente_id: string }; Returns: boolean }
-      is_company_manager: { Args: { _cliente_id: string }; Returns: boolean }
       is_ops_manager: { Args: never; Returns: boolean }
-      owns_cliente: { Args: { _cliente_id: string }; Returns: boolean }
+      is_subcustomer_of: { Args: { _parent_id: string }; Returns: boolean }
       user_can_see_produto: { Args: { _produto_id: string }; Returns: boolean }
     }
     Enums: {
