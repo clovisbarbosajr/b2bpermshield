@@ -93,10 +93,25 @@ const Checkout = () => {
         }
       }
 
+      // Opções PRIVATE (frete/pagamento) só aparecem pro cliente ATRIBUÍDO
+      // (cliente_payment_options / cliente_shipping_options). Públicas (privado=false)
+      // aparecem pra todos. Sub-usuário herda as atribuições da conta do pai.
+      const acctId = (cliente as any)?.parent_customer_id ?? cliente?.id ?? null;
+      let allowedPay = new Set<string>(), allowedShip = new Set<string>();
+      if (acctId) {
+        const [{ data: cpo }, { data: cso }] = await Promise.all([
+          supabase.from("cliente_payment_options").select("payment_option_id").eq("cliente_id", acctId),
+          supabase.from("cliente_shipping_options").select("shipping_option_id").eq("cliente_id", acctId),
+        ]);
+        allowedPay = new Set((cpo ?? []).map((x: any) => x.payment_option_id));
+        allowedShip = new Set((cso ?? []).map((x: any) => x.shipping_option_id));
+      }
+      const canSee = (o: any, allowed: Set<string>) => !o.privado || allowed.has(o.id);
+
       const { data: ship } = await supabase.from("shipping_options").select("*").eq("ativo", true).order("ordem");
-      setShippingOptions(ship ?? []);
+      setShippingOptions((ship ?? []).filter((s: any) => s.show_to_customers !== false && canSee(s, allowedShip)));
       const { data: pay } = await supabase.from("payment_options").select("*").eq("ativo", true).order("ordem");
-      setPaymentOptions(pay ?? []);
+      setPaymentOptions((pay ?? []).filter((p: any) => canSee(p, allowedPay)));
 
       // Compute tax using rules: match customer's tax_customer_group_id
       if (cliente) {
