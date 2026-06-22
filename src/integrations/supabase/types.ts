@@ -1496,6 +1496,7 @@ export type Database = {
       }
       pedido_itens: {
         Row: {
+          backorder: boolean
           created_at: string
           id: string
           nome_produto: string
@@ -1503,10 +1504,13 @@ export type Database = {
           preco_unitario: number
           produto_id: string
           quantidade: number
+          quantidade_enviada: number
           sku: string
+          status_linha: string | null
           subtotal: number
         }
         Insert: {
+          backorder?: boolean
           created_at?: string
           id?: string
           nome_produto: string
@@ -1514,10 +1518,13 @@ export type Database = {
           preco_unitario?: number
           produto_id: string
           quantidade?: number
+          quantidade_enviada?: number
           sku: string
+          status_linha?: string | null
           subtotal?: number
         }
         Update: {
+          backorder?: boolean
           created_at?: string
           id?: string
           nome_produto?: string
@@ -1525,7 +1532,9 @@ export type Database = {
           preco_unitario?: number
           produto_id?: string
           quantidade?: number
+          quantidade_enviada?: number
           sku?: string
+          status_linha?: string | null
           subtotal?: number
         }
         Relationships: [
