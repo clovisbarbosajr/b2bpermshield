@@ -47,6 +47,9 @@ $$;
 --      buyer/manager -> pode confirmar pedido;  manager -> vê histórico completo.
 --    Só migra contatos com user_id e que ainda não tenham clientes próprio.
 -- ----------------------------------------------------------------------------
+-- Best-effort: se houver colisão (e-mail/user_id já em clientes, etc.) não aborta a
+-- migração inteira — o objetivo crítico é o schema novo. Contatos não-migrados podem
+-- ser recriados pela nova UI (clientes filhos).
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables
@@ -64,8 +67,11 @@ BEGIN
     FROM public.company_contacts cc
     JOIN public.clientes p ON p.id = cc.cliente_id
     WHERE cc.user_id IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM public.clientes x WHERE x.user_id = cc.user_id);
+      AND NOT EXISTS (SELECT 1 FROM public.clientes x  WHERE x.user_id = cc.user_id)
+      AND NOT EXISTS (SELECT 1 FROM public.clientes x2 WHERE lower(x2.email) = lower(cc.email));
   END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'consolidate_subusers: migracao de contatos pulada (%) — schema novo aplicado mesmo assim', SQLERRM;
 END $$;
 
 -- ----------------------------------------------------------------------------
