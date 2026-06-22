@@ -63,10 +63,11 @@ const Catalogo = () => {
   // Fetch products (with privacy group filtering) and categories
   useEffect(() => {
     const fetchData = async () => {
-      const [prodRes, catRes, acessoRes, statusRes, variantRes] = await Promise.all([
+      // Privacidade (categoria/produto privado) é imposta no RLS: estas queries já
+      // retornam SÓ o que o cliente pode ver. Aqui resta apenas o filtro de STATUS.
+      const [prodRes, catRes, statusRes, variantRes] = await Promise.all([
         supabase.from("produtos").select("*").eq("ativo", true).order("nome"),
         supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("ordem").order("nome"),
-        supabase.from("produto_acesso").select("produto_id, grupo_nome"),
         supabase.from("product_statuses").select("nome, permite_comprar, permite_visualizar, cor"),
         supabase.from("produto_variantes").select("produto_id").eq("ativo", true),
       ]);
@@ -79,28 +80,7 @@ const Catalogo = () => {
       setStatusMap(sMap);
 
       const allProducts = (prodRes.data as Produto[]) ?? [];
-      const acessoRows = acessoRes.data ?? [];
       setCategorias((catRes.data as Categoria[]) ?? []);
-
-      // Build map: productId -> set of privacy_group_id that can see it
-      const restrictedProducts = new Map<string, Set<string>>();
-      for (const row of acessoRows) {
-        if (!(row as any).grupo_nome) continue;
-        if (!restrictedProducts.has((row as any).produto_id)) {
-          restrictedProducts.set((row as any).produto_id, new Set());
-        }
-        restrictedProducts.get((row as any).produto_id)!.add((row as any).grupo_nome);
-      }
-
-      // Get client's privacy group IDs
-      let clientGroupIds: string[] = [];
-      if (clienteId) {
-        const { data: cpg } = await supabase
-          .from("cliente_privacy_groups")
-          .select("privacy_group_id")
-          .eq("cliente_id", clienteId);
-        clientGroupIds = (cpg ?? []).map((r) => r.privacy_group_id);
-      }
 
       // Esconde produto cujo STATUS tem permite_visualizar = false (antes esse flag era
       // ignorado e o produto aparecia mesmo assim).
@@ -111,14 +91,7 @@ const Catalogo = () => {
         return !(st && st.permite_visualizar === false);
       };
 
-      // Filter: visível + (sem restrição OU cliente pertence a um dos grupos do produto)
-      const filtered = allProducts.filter((p) => {
-        if (!isVisible(p)) return false;
-        const required = restrictedProducts.get(p.id);
-        if (!required || required.size === 0) return true; // no restriction
-        return clientGroupIds.some((id) => required.has(id));
-      });
-
+      const filtered = allProducts.filter(isVisible);
       setProdutos(filtered);
       setLoading(false);
     };
