@@ -12,7 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { ArrowLeft, Save, Upload, Plus, Trash2, Image as ImageIcon, FileText, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Upload, Plus, Trash2, Image as ImageIcon, FileText, Loader2, Lock, X } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
 
 type Categoria = { id: string; nome: string };
@@ -66,6 +66,7 @@ const ProductEdit = () => {
     ativo: true, barcode: "", codigo_upc: "", codigo_referencia: "",
     quantidade_pacote: 0, meta_descricao: "", descricao_pdf: "", tag_line: "",
     promover_categoria: false, promover_destaque: false, mostrar_ofertas: "nunca",
+    is_private: false,
   });
 
   // Sub-tab data
@@ -77,7 +78,10 @@ const ProductEdit = () => {
   const [assignedOptions, setAssignedOptions] = useState<any[]>([]);
   const [variants, setVariants] = useState<any[]>([]);
   const [statusRules, setStatusRules] = useState<any[]>([]);
-  const [accessGroups, setAccessGroups] = useState<any[]>([]);
+  // Acesso/privacidade (modelo B2BWave): grupos com acesso + grant/exclude por cliente.
+  const [accGroups, setAccGroups] = useState<Set<string>>(new Set());
+  const [accGrant, setAccGrant] = useState<string[]>([]);
+  const [accExclude, setAccExclude] = useState<string[]>([]);
   const [priceLists, setPriceLists] = useState<{ tabela_preco_id: string; preco: number }[]>([]);
 
   useEffect(() => {
@@ -124,12 +128,13 @@ const ProductEdit = () => {
       promover_categoria: (data as any).promover_categoria ?? false,
       promover_destaque: (data as any).promover_destaque ?? false,
       mostrar_ofertas: (data as any).mostrar_ofertas ?? "nunca",
+      is_private: (data as any).is_private ?? false,
     });
 
     setMeta({ created_at: (data as any).created_at, updated_at: (data as any).updated_at });
 
     // Fetch sub-data in parallel
-    const [imgs, fls, disc, cp, rel, opts, vars, sr, acc, pl] = await Promise.all([
+    const [imgs, fls, disc, cp, rel, opts, vars, sr, acc, pl, cliAcc, pgRes] = await Promise.all([
       supabase.from("produto_imagens").select("*").eq("produto_id", id).order("ordem"),
       supabase.from("produto_arquivos").select("*").eq("produto_id", id),
       supabase.from("produto_descontos").select("*").eq("produto_id", id),
@@ -140,6 +145,8 @@ const ProductEdit = () => {
       supabase.from("produto_status_regras").select("*").eq("produto_id", id),
       supabase.from("produto_acesso").select("*").eq("produto_id", id),
       supabase.from("tabela_preco_itens").select("*").eq("produto_id", id),
+      (supabase as any).from("produto_cliente_acesso").select("cliente_id, tipo").eq("produto_id", id),
+      supabase.from("privacy_groups").select("id, nome"),
     ]);
     setGalleryImages(imgs.data ?? []);
     setFiles(fls.data ?? []);
@@ -149,7 +156,18 @@ const ProductEdit = () => {
     setAssignedOptions(opts.data ?? []);
     setVariants(vars.data ?? []);
     setStatusRules(sr.data ?? []);
-    setAccessGroups(acc.data ?? []);
+    // produto_acesso pode ter privacy_group_id (uuid) OU grupo_nome (nome ou, em
+    // dados antigos, um uuid) — resolvemos para o id do grupo dos dois jeitos.
+    const groupIds = new Set<string>();
+    for (const r of ((acc.data ?? []) as any[])) {
+      const gid = r.privacy_group_id
+        || (pgRes.data ?? []).find((p: any) => p.id === r.grupo_nome)?.id
+        || (pgRes.data ?? []).find((p: any) => p.nome === r.grupo_nome)?.id;
+      if (gid) groupIds.add(gid);
+    }
+    setAccGroups(groupIds);
+    setAccGrant(((cliAcc.data ?? []) as any[]).filter((r) => r.tipo === "grant").map((r) => r.cliente_id));
+    setAccExclude(((cliAcc.data ?? []) as any[]).filter((r) => r.tipo === "exclude").map((r) => r.cliente_id));
     setPriceLists((pl.data ?? []).map((p: any) => ({ tabela_preco_id: p.tabela_preco_id, preco: Number(p.preco) })));
 
     setLoading(false);
@@ -207,6 +225,7 @@ const ProductEdit = () => {
       tag_line: form.tag_line || null,
       promover_categoria: form.promover_categoria, promover_destaque: form.promover_destaque,
       mostrar_ofertas: form.mostrar_ofertas,
+      is_private: form.is_private,
     };
 
     let productId = id;
@@ -286,13 +305,25 @@ const ProductEdit = () => {
       );
     }
 
-    // Access groups
+    // Access: grupos (em privacy_group_id + grupo_nome p/ compat) e grant/exclude por cliente.
     await supabase.from("produto_acesso").delete().eq("produto_id", pid);
-    if (accessGroups.length > 0) {
+    if (form.is_private && accGroups.size > 0) {
       await supabase.from("produto_acesso").insert(
-        accessGroups.filter(ag => ag.privacy_group_id).map(ag => ({ produto_id: pid, grupo_nome: ag.privacy_group_id }))
+        [...accGroups].map((gid) => ({
+          produto_id: pid,
+          privacy_group_id: gid,
+          grupo_nome: privacyGroups.find((p) => p.id === gid)?.nome ?? null,
+        })) as any,
       );
     }
+    await (supabase as any).from("produto_cliente_acesso").delete().eq("produto_id", pid);
+    const cliRows = form.is_private
+      ? [
+          ...accGrant.map((cid) => ({ produto_id: pid, cliente_id: cid, tipo: "grant" })),
+          ...accExclude.map((cid) => ({ produto_id: pid, cliente_id: cid, tipo: "exclude" })),
+        ]
+      : [];
+    if (cliRows.length > 0) await (supabase as any).from("produto_cliente_acesso").insert(cliRows);
   };
 
   const f = (key: string, val: any) => setForm(prev => ({ ...prev, [key]: val }));
@@ -872,36 +903,72 @@ const ProductEdit = () => {
           </Card>
         </TabsContent>
 
-        {/* ========== ACCESS TAB ========== */}
+        {/* ========== ACCESS TAB (privacidade — modelo B2BWave) ========== */}
         <TabsContent value="access">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">Access / Privacy Groups</CardTitle>
-              <Button size="sm" onClick={() => setAccessGroups([...accessGroups, { privacy_group_id: "" }])}>
-                <Plus className="h-3 w-3 mr-1" /> Add Group
-              </Button>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2"><Lock className="h-4 w-4 text-amber-500" /> Access</CardTitle>
             </CardHeader>
-            <CardContent>
-              {accessGroups.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">No access restrictions. All customers can see this product. Add privacy groups to restrict access.</p>
-              ) : (
-                <div className="space-y-2">
-                  {accessGroups.map((ag, i) => (
-                    <div key={i} className="flex items-center gap-3 rounded-lg border p-3">
-                      <Select
-                        value={ag.privacy_group_id}
-                        onValueChange={(v) => { const n = [...accessGroups]; n[i].privacy_group_id = v; setAccessGroups(n); }}
-                      >
-                        <SelectTrigger className="flex-1"><SelectValue placeholder="Select privacy group..." /></SelectTrigger>
-                        <SelectContent>
-                          {privacyGroups.map((pg) => (
-                            <SelectItem key={pg.id} value={pg.id}>{pg.nome}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button variant="ghost" size="icon" onClick={() => setAccessGroups(accessGroups.filter((_, idx) => idx !== i))}><Trash2 className="h-3 w-3 text-destructive" /></Button>
+            <CardContent className="space-y-4">
+              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                <Checkbox checked={form.is_private} onCheckedChange={(v) => f("is_private", v === true)} />
+                Private — visible only to selected customers
+              </label>
+
+              {form.is_private && (
+                <div className="space-y-4 pl-1">
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Privacy groups</p>
+                    <div className="flex flex-wrap gap-2">
+                      {privacyGroups.length === 0 && <span className="text-xs text-muted-foreground">No privacy groups yet.</span>}
+                      {privacyGroups.map((pg) => (
+                        <label key={pg.id} className="flex items-center gap-1.5 text-sm border rounded px-2 py-1 cursor-pointer">
+                          <Checkbox
+                            checked={accGroups.has(pg.id)}
+                            onCheckedChange={(v) => setAccGroups((prev) => {
+                              const s = new Set(prev);
+                              if (v === true) s.add(pg.id); else s.delete(pg.id);
+                              return s;
+                            })}
+                          />
+                          {pg.nome}
+                        </label>
+                      ))}
                     </div>
-                  ))}
+                  </div>
+
+                  {([
+                    { label: "Grant access to specific customers", sel: accGrant, set: setAccGrant },
+                    { label: "Exclude customers from accessing product", sel: accExclude, set: setAccExclude },
+                  ] as const).map(({ label, sel, set }) => {
+                    const available = clientes.filter((c) => !sel.includes(c.id));
+                    return (
+                      <div key={label}>
+                        <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                        <Select value="" onValueChange={(v) => v && set([...sel, v])}>
+                          <SelectTrigger className="h-9"><SelectValue placeholder="Add customer…" /></SelectTrigger>
+                          <SelectContent className="max-h-64">
+                            {available.length === 0
+                              ? <div className="px-2 py-1.5 text-sm text-muted-foreground">No more customers</div>
+                              : available.map((c) => <SelectItem key={c.id} value={c.id}>{c.empresa || c.nome}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        {sel.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {sel.map((cid) => {
+                              const c = clientes.find((x) => x.id === cid);
+                              return (
+                                <Badge key={cid} variant="secondary" className="gap-1">
+                                  {c?.empresa || c?.nome || cid}
+                                  <button type="button" onClick={() => set(sel.filter((x) => x !== cid))}><X className="h-3 w-3" /></button>
+                                </Badge>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
