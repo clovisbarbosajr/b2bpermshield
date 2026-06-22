@@ -5,11 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Check, Eye, Monitor } from "lucide-react";
+import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Check, Monitor, Lock, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 
@@ -22,6 +23,48 @@ type Categoria = {
   ordem: number;
   desconto: number;
   imagem_url: string | null;
+  is_private?: boolean;
+  subcategorias_herdam?: boolean;
+};
+
+type PrivacyGroup = { id: string; nome: string };
+type Customer = { id: string; nome: string; empresa: string | null };
+
+// Acesso (privacidade) de uma categoria — espelha a aba "Access" do B2BWave.
+type Access = { isPrivate: boolean; herdam: boolean; groups: Set<string>; grant: string[]; exclude: string[] };
+const emptyAccess = (): Access => ({ isPrivate: false, herdam: true, groups: new Set(), grant: [], exclude: [] });
+
+// Picker reutilizável: escolhe clientes de um dropdown e mostra como chips removíveis.
+const CustomerPicker = ({ label, options, selected, onChange }: {
+  label: string; options: Customer[]; selected: string[]; onChange: (ids: string[]) => void;
+}) => {
+  const byId = (id: string) => options.find((o) => o.id === id);
+  const available = options.filter((o) => !selected.includes(o.id));
+  return (
+    <div>
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <Select value="" onValueChange={(v) => v && onChange([...selected, v])}>
+        <SelectTrigger className="h-9"><SelectValue placeholder="Add customer…" /></SelectTrigger>
+        <SelectContent className="max-h-64">
+          {available.length === 0 ? (
+            <div className="px-2 py-1.5 text-sm text-muted-foreground">No more customers</div>
+          ) : available.map((o) => (
+            <SelectItem key={o.id} value={o.id}>{o.empresa || o.nome}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {selected.map((id) => (
+            <Badge key={id} variant="secondary" className="gap-1">
+              {byId(id)?.empresa || byId(id)?.nome || id}
+              <button type="button" onClick={() => onChange(selected.filter((x) => x !== id))}><X className="h-3 w-3" /></button>
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 };
 
 const AdminCategorias = () => {
@@ -30,6 +73,9 @@ const AdminCategorias = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Categoria | null>(null);
   const [form, setForm] = useState({ nome: "", descricao: "", parent_id: "", ativo: true, ordem: 0, desconto: 0 });
+  const [acc, setAcc] = useState<Access>(emptyAccess());
+  const [pgList, setPgList] = useState<PrivacyGroup[]>([]);
+  const [custList, setCustList] = useState<Customer[]>([]);
   const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
 
@@ -47,13 +93,26 @@ const AdminCategorias = () => {
 
   useEffect(() => { fetchData(); }, []);
 
+  // Grupos de privacidade + clientes (só donos de conta — subs herdam o pai) para os pickers.
+  useEffect(() => {
+    (async () => {
+      const [{ data: pg }, { data: cu }] = await Promise.all([
+        supabase.from("privacy_groups").select("id, nome").order("nome"),
+        supabase.from("clientes").select("id, nome, empresa").is("parent_customer_id", null).order("empresa"),
+      ]);
+      setPgList((pg as PrivacyGroup[]) ?? []);
+      setCustList((cu as Customer[]) ?? []);
+    })();
+  }, []);
+
   const openNew = () => {
     setEditing(null);
     setForm({ nome: "", descricao: "", parent_id: "", ativo: true, ordem: 0, desconto: 0 });
+    setAcc(emptyAccess());
     setDialogOpen(true);
   };
 
-  const openEdit = (c: Categoria) => {
+  const openEdit = async (c: Categoria) => {
     setEditing(c);
     setForm({
       nome: c.nome,
@@ -63,7 +122,42 @@ const AdminCategorias = () => {
       ordem: c.ordem ?? 0,
       desconto: c.desconto ?? 0,
     });
+    setAcc({
+      isPrivate: c.is_private ?? false,
+      herdam: c.subcategorias_herdam ?? true,
+      groups: new Set(), grant: [], exclude: [],
+    });
     setDialogOpen(true);
+    // Carrega as ligações de acesso da categoria.
+    const [{ data: ca }, { data: cca }] = await Promise.all([
+      (supabase as any).from("categoria_acesso").select("privacy_group_id").eq("categoria_id", c.id),
+      (supabase as any).from("categoria_cliente_acesso").select("cliente_id, tipo").eq("categoria_id", c.id),
+    ]);
+    setAcc({
+      isPrivate: c.is_private ?? false,
+      herdam: c.subcategorias_herdam ?? true,
+      groups: new Set(((ca ?? []) as any[]).map((r) => r.privacy_group_id)),
+      grant: ((cca ?? []) as any[]).filter((r) => r.tipo === "grant").map((r) => r.cliente_id),
+      exclude: ((cca ?? []) as any[]).filter((r) => r.tipo === "exclude").map((r) => r.cliente_id),
+    });
+  };
+
+  // Persiste as 3 ligações de acesso (grupos, grant, exclude) de uma categoria.
+  const saveAccess = async (categoriaId: string) => {
+    await (supabase as any).from("categoria_acesso").delete().eq("categoria_id", categoriaId);
+    if (acc.isPrivate && acc.groups.size > 0) {
+      await (supabase as any).from("categoria_acesso").insert(
+        [...acc.groups].map((g) => ({ categoria_id: categoriaId, privacy_group_id: g })) as any,
+      );
+    }
+    await (supabase as any).from("categoria_cliente_acesso").delete().eq("categoria_id", categoriaId);
+    const rows = acc.isPrivate
+      ? [
+          ...acc.grant.map((cid) => ({ categoria_id: categoriaId, cliente_id: cid, tipo: "grant" })),
+          ...acc.exclude.map((cid) => ({ categoria_id: categoriaId, cliente_id: cid, tipo: "exclude" })),
+        ]
+      : [];
+    if (rows.length > 0) await (supabase as any).from("categoria_cliente_acesso").insert(rows as any);
   };
 
   const handleSave = async () => {
@@ -76,16 +170,20 @@ const AdminCategorias = () => {
       ativo: form.ativo,
       ordem: form.ordem,
       desconto: form.desconto,
+      is_private: acc.isPrivate,
+      subcategorias_herdam: acc.herdam,
     };
+    let categoriaId = editing?.id;
     if (editing) {
       const { error } = await supabase.from("categorias").update(payload as any).eq("id", editing.id);
       if (error) { toast.error(error.message); setSaving(false); return; }
-      toast.success("Category updated");
     } else {
-      const { error } = await supabase.from("categorias").insert(payload as any);
+      const { data, error } = await supabase.from("categorias").insert(payload as any).select("id").single();
       if (error) { toast.error(error.message); setSaving(false); return; }
-      toast.success("Category created");
+      categoriaId = (data as any).id;
     }
+    if (categoriaId) await saveAccess(categoriaId);
+    toast.success(editing ? "Category updated" : "Category created");
     setSaving(false);
     setDialogOpen(false);
     fetchData();
@@ -207,6 +305,7 @@ const AdminCategorias = () => {
                     <TableCell>
                       <span style={{ paddingLeft: level * 24 }} className="flex items-center gap-2">
                         <span className="font-medium text-primary">{cat.nome}</span>
+                        {cat.is_private && <Lock className="h-3 w-3 text-amber-500" aria-label="Private" />}
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground border-muted-foreground/30">
                           {productCounts[cat.id] || 0}
                         </Badge>
@@ -294,7 +393,7 @@ const AdminCategorias = () => {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? "Edit Category" : "New Category"}</DialogTitle>
           </DialogHeader>
@@ -342,6 +441,46 @@ const AdminCategorias = () => {
                 Active
               </label>
             </div>
+
+            {/* Access — privacidade (modelo B2BWave) */}
+            <div className="border-t pt-3 space-y-3">
+              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                <Checkbox checked={acc.isPrivate} onCheckedChange={(v) => setAcc((a) => ({ ...a, isPrivate: v === true }))} />
+                <Lock className="h-3.5 w-3.5 text-amber-500" /> Private — visible only to selected customers
+              </label>
+              {acc.isPrivate && (
+                <div className="space-y-3 pl-1">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Privacy groups</Label>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {pgList.length === 0 && <span className="text-xs text-muted-foreground">No privacy groups yet.</span>}
+                      {pgList.map((g) => (
+                        <label key={g.id} className="flex items-center gap-1.5 text-sm border rounded px-2 py-1 cursor-pointer">
+                          <Checkbox
+                            checked={acc.groups.has(g.id)}
+                            onCheckedChange={(v) => setAcc((a) => {
+                              const s = new Set(a.groups);
+                              if (v === true) s.add(g.id); else s.delete(g.id);
+                              return { ...a, groups: s };
+                            })}
+                          />
+                          {g.nome}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <CustomerPicker label="Grant access to specific customers" options={custList}
+                    selected={acc.grant} onChange={(ids) => setAcc((a) => ({ ...a, grant: ids }))} />
+                  <CustomerPicker label="Exclude customers from accessing category" options={custList}
+                    selected={acc.exclude} onChange={(ids) => setAcc((a) => ({ ...a, exclude: ids }))} />
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <Checkbox checked={acc.herdam} onCheckedChange={(v) => setAcc((a) => ({ ...a, herdam: v === true }))} />
+                    Subcategories inherit these access settings
+                  </label>
+                </div>
+              )}
+            </div>
+
             <Button onClick={handleSave} disabled={saving} className="w-full">
               {saving ? "Saving..." : "Save"}
             </Button>
