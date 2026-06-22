@@ -17,7 +17,8 @@ ALTER TABLE public.pedidos ALTER COLUMN status SET DEFAULT 'submitted';
 -- 2) Migra valores legados (PT) -> canônico (EN).
 UPDATE public.pedidos SET status = 'submitted' WHERE status = 'recebido';
 UPDATE public.pedidos SET status = 'on_hold'   WHERE status = 'em_processamento';
-UPDATE public.pedidos SET status = 'ready_for_pickup' WHERE status = 'em_separacao';
+-- (nota: 'em_separacao' nunca existiu no enum pedido_status — Postgres recusa o
+--  literal no parse, então não há UPDATE para ele.)
 UPDATE public.pedidos SET status = 'sent'      WHERE status = 'enviado';
 UPDATE public.pedidos SET status = 'complete'  WHERE status = 'concluido';
 UPDATE public.pedidos SET status = 'cancelled' WHERE status = 'cancelado';
