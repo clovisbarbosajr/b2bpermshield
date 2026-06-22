@@ -67,7 +67,7 @@ function buildTestBody(type: string, recipientEmail: string): Record<string, any
 
     case "order_status_change":
       // edge function uses `customer.email` as destination
-      return { type, order: SAMPLE_ORDER, customer: SAMPLE_CUSTOMER, newStatus: "em_separacao" };
+      return { type, order: SAMPLE_ORDER, customer: SAMPLE_CUSTOMER, newStatus: "ready_for_pickup" };
 
     case "raw":
     default:

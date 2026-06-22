@@ -16,15 +16,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getProductPrice } from "@/lib/pricing";
 import { toast } from "sonner";
+import { ORDER_STATUSES, statusLabel, canonicalStatus } from "@/lib/orderStatuses";
 
-const statusOptions = [
-  { value: "recebido",     label: "Submitted" },
-  { value: "processando",  label: "Processing" },
-  { value: "em_separacao", label: "Picking / Packing" },
-  { value: "enviado",      label: "Shipped" },
-  { value: "concluido",    label: "Complete" },
-  { value: "cancelado",    label: "Cancelled" },
-];
+// Os 7 status do B2BWave (fonte única em lib/orderStatuses).
+const statusOptions = ORDER_STATUSES;
 
 const OrderDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -111,7 +106,7 @@ const OrderDetail = () => {
     setCliente(data.clientes);
     setRep(data.clientes?.representantes);
     setForm({
-      status: data.status || "recebido",
+      status: canonicalStatus(data.status),
       po_number: data.po_number || "",
       delivery_date: data.delivery_date ? data.delivery_date.split("T")[0] : "",
       delivery_mode: data.delivery_mode || "",
@@ -261,7 +256,7 @@ const OrderDetail = () => {
     // numero NÃO é setado de propósito — o banco gera (serial), igual ao Checkout do portal.
     const { data: pedido, error } = await supabase.from("pedidos").insert({
       cliente_id: selectedClienteId,
-      status: "recebido",
+      status: "submitted",
       subtotal, total: subtotal,
       quantidade_total: quantidade,
       po_number: form.po_number || null,
@@ -763,9 +758,29 @@ const OrderDetail = () => {
                 <TableCell className="font-medium text-primary">{item.nome_produto}</TableCell>
                 <TableCell className="text-right">{fmt(item.preco_unitario)}</TableCell>
                 <TableCell className="text-center">{item.quantidade}</TableCell>
-                <TableCell className="text-center">—</TableCell>
-                <TableCell className="text-center">—</TableCell>
-                <TableCell>{statusOptions.find((s) => s.value === order?.status)?.label ?? order?.status ?? "—"}</TableCell>
+                <TableCell className="text-center">
+                  <Checkbox
+                    checked={item.backorder ?? false}
+                    onCheckedChange={(v) => {
+                      const b = v === true;
+                      setItems((prev) => prev.map((it) => it.id === item.id ? { ...it, backorder: b } : it));
+                      supabase.from("pedido_itens").update({ backorder: b } as any).eq("id", item.id);
+                    }}
+                  />
+                </TableCell>
+                <TableCell className="text-center">
+                  <Input
+                    type="number" min={0} max={item.quantidade}
+                    className="h-8 w-16 mx-auto text-center"
+                    value={item.quantidade_enviada ?? 0}
+                    onChange={(e) => {
+                      const q = parseInt(e.target.value) || 0;
+                      setItems((prev) => prev.map((it) => it.id === item.id ? { ...it, quantidade_enviada: q } : it));
+                      supabase.from("pedido_itens").update({ quantidade_enviada: q } as any).eq("id", item.id);
+                    }}
+                  />
+                </TableCell>
+                <TableCell>{order?.status ? statusLabel(order.status) : "—"}</TableCell>
                 <TableCell>—</TableCell>
                 <TableCell className="text-right font-medium">{fmt(item.subtotal)}</TableCell>
                 <TableCell>

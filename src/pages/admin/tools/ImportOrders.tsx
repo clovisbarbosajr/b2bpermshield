@@ -8,7 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const TEMPLATE_HEADERS = ["customer_email", "product_sku", "quantity", "price", "status", "po_number", "delivery_date"];
-const TEMPLATE_ROW = ["john@acme.com", "PROD-001", "10", "45.90", "recebido", "PO-2024-001", "2024-12-31"];
+const TEMPLATE_ROW = ["john@acme.com", "PROD-001", "10", "45.90", "submitted", "PO-2024-001", "2024-12-31"];
 
 function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split(/\r?\n/);
@@ -98,7 +98,7 @@ const ImportOrders = () => {
         groups[groupKey] = {
           customerEmail: email,
           poNumber,
-          status: r["status"]?.trim() || "recebido",
+          status: r["status"]?.trim() || "submitted",
           deliveryDate: r["delivery_date"]?.trim() || "",
           rows: [],
         };

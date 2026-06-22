@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { canonicalStatus } from "@/lib/orderStatuses";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -33,7 +34,7 @@ const AdminRelatorios = () => {
 
   // Sales by month
   const salesByMonth = pedidos.reduce((acc: Record<string, number>, p) => {
-    if (p.status === "cancelado") return acc;
+    if (canonicalStatus(p.status) === "cancelled") return acc;
     const month = new Date(p.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short" });
     acc[month] = (acc[month] ?? 0) + Number(p.total);
     return acc;
@@ -60,8 +61,8 @@ const AdminRelatorios = () => {
   const lowStock = produtos.filter((p) => (p.estoque_total - p.estoque_reservado) <= p.quantidade_minima);
 
   // Summary stats
-  const totalRevenue = pedidos.filter((p) => p.status !== "cancelado").reduce((sum, p) => sum + Number(p.total), 0);
-  const totalOrders = pedidos.filter((p) => p.status !== "cancelado").length;
+  const totalRevenue = pedidos.filter((p) => canonicalStatus(p.status) !== "cancelled").reduce((sum, p) => sum + Number(p.total), 0);
+  const totalOrders = pedidos.filter((p) => canonicalStatus(p.status) !== "cancelled").length;
   const avgOrder = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
   if (loading) return <AdminLayout><div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div></AdminLayout>;

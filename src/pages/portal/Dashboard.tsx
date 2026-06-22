@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { canonicalStatus } from "@/lib/orderStatuses";
 import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,7 +59,7 @@ const PortalDashboard = () => {
       setRecentOrders(all.slice(0, 5));
       setTotalOrders(all.length);
       setTotalSpent(all.reduce((sum, p) => sum + (Number(p.total) || 0), 0));
-      setOpenOrders(all.filter((p) => p.status === "recebido").length);
+      setOpenOrders(all.filter((p) => { const s = canonicalStatus(p.status); return s !== "complete" && s !== "cancelled"; }).length);
       setLoading(false);
     };
     fetch();

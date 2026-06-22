@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Button } from "@/components/ui/button";
 import { FancyButton } from "@/components/ui/fancy-button";
+import { canonicalStatus, statusLabel as orderStatusLabel } from "@/lib/orderStatuses";
 import { cn } from "@/lib/utils";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -78,7 +79,7 @@ const AdminDashboard = () => {
 
       const byMonthYear: Record<string, number> = {};
       (allOrders.data ?? []).forEach((o: any) => {
-        if (o.status === "cancelado") return;
+        if (canonicalStatus(o.status) === "cancelled") return;
         const d = new Date(o.created_at);
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
         byMonthYear[key] = (byMonthYear[key] ?? 0) + Number(o.subtotal || o.total || 0);
@@ -125,14 +126,11 @@ const AdminDashboard = () => {
   }, [anchorMonth, monthlyTotals]);
 
   const statusLabel = (s: string) => {
-    const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-      concluido: { label: "Complete", variant: "default" },
-      recebido: { label: "Submitted", variant: "secondary" },
-      em_processamento: { label: "Processing", variant: "outline" },
-      enviado: { label: "Shipped", variant: "default" },
-      cancelado: { label: "Cancelled", variant: "destructive" },
+    const variant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+      complete: "default", sent: "default", submitted: "secondary",
+      cancelled: "destructive", on_hold: "outline", ready_for_pickup: "outline", partial: "outline",
     };
-    return map[s] || { label: s, variant: "outline" as const };
+    return { label: orderStatusLabel(s), variant: variant[canonicalStatus(s)] ?? ("outline" as const) };
   };
 
   const getDeliveryDate = (o: any) => {

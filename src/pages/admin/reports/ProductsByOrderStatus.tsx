@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
 
-const STATUSES = ["recebido", "em_processamento", "enviado", "concluido", "cancelado"];
+const STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 const PAGE_SIZE = 25;
 
 const ProductsByOrderStatus = () => {

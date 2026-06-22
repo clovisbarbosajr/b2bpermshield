@@ -10,34 +10,15 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ClipboardList, Download } from "lucide-react";
 import { toast } from "sonner";
+import { ORDER_STATUSES, statusLabel, statusBadge as statusBadgeClass } from "@/lib/orderStatuses";
 
-const STATUS_OPTIONS = [
-  { value: "", label: "Please select..." },
-  { value: "recebido", label: "Submitted" },
-  { value: "em_processamento", label: "Processing" },
-  { value: "enviado", label: "Shipped" },
-  { value: "concluido", label: "Complete" },
-  { value: "cancelado", label: "Cancelled" },
-];
+const STATUS_OPTIONS = [{ value: "", label: "Please select..." }, ...ORDER_STATUSES];
 
-const statusBadge = (status: string) => {
-  const map: Record<string, string> = {
-    recebido: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-    em_processamento: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-    enviado: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-    concluido: "bg-green-500/20 text-green-400 border-green-500/30",
-    cancelado: "bg-red-500/20 text-red-400 border-red-500/30",
-  };
-  const label: Record<string, string> = {
-    recebido: "SUBMITTED", em_processamento: "PROCESSING",
-    enviado: "SHIPPED", concluido: "COMPLETE", cancelado: "CANCELLED",
-  };
-  return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold border ${map[status] ?? "bg-muted text-muted-foreground"}`}>
-      {label[status] ?? status.toUpperCase()}
-    </span>
-  );
-};
+const statusBadge = (status: string) => (
+  <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold border ${statusBadgeClass(status)}`}>
+    {statusLabel(status).toUpperCase()}
+  </span>
+);
 
 const PAGE_SIZE = 10;
 

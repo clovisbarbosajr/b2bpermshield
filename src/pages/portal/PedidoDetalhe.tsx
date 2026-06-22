@@ -8,11 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Download } from "lucide-react";
 import { toast } from "sonner";
-
-const statusLabel: Record<string, string> = {
-  recebido: "SUBMITTED", em_processamento: "PROCESSING",
-  enviado: "SHIPPED", concluido: "COMPLETE", cancelado: "CANCELLED",
-};
+import { statusLabel, statusBadge } from "@/lib/orderStatuses";
 
 const PedidoDetalhe = () => {
   const { id } = useParams();
@@ -188,12 +184,8 @@ const PedidoDetalhe = () => {
             <div />
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Status</p>
-              <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold border ${
-                pedido.status === "concluido" ? "bg-green-500/20 text-green-400 border-green-500/30" :
-                pedido.status === "cancelado" ? "bg-red-500/20 text-red-400 border-red-500/30" :
-                "bg-blue-500/20 text-blue-400 border-blue-500/30"
-              }`}>
-                {statusLabel[pedido.status] ?? pedido.status?.toUpperCase()}
+              <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold border ${statusBadge(pedido.status)}`}>
+                {statusLabel(pedido.status).toUpperCase()}
               </span>
             </div>
             <Field label="Payment Option" value={paymentOption?.nome} />

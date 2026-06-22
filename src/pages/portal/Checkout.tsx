@@ -465,7 +465,7 @@ const Checkout = () => {
         const msg = piData?.error || piError?.message || "Failed to create payment intent";
         toast.error("Payment error: " + msg);
         // Mark order as failed — leave it in DB so admin can see
-        await supabase.from("pedidos").update({ status: "cancelado" } as any).eq("id", pedido.id);
+        await supabase.from("pedidos").update({ status: "cancelled" } as any).eq("id", pedido.id);
         setLoading(false);
         return;
       }
@@ -478,7 +478,7 @@ const Checkout = () => {
 
       if (confirmError) {
         toast.error("Payment failed: " + confirmError.message);
-        await supabase.from("pedidos").update({ status: "cancelado" } as any).eq("id", pedido.id);
+        await supabase.from("pedidos").update({ status: "cancelled" } as any).eq("id", pedido.id);
         setLoading(false);
         return;
       }

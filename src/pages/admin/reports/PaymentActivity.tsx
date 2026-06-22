@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { canonicalStatus } from "@/lib/orderStatuses";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,15 +51,15 @@ const PaymentActivity = () => {
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const totals = useMemo(() => {
-    const paid = filtered.filter((o) => o.status === "concluido").reduce((a, o) => a + o.total, 0);
-    const pending = filtered.filter((o) => o.status !== "concluido" && o.status !== "cancelado").reduce((a, o) => a + o.total, 0);
-    const cancelled = filtered.filter((o) => o.status === "cancelado").reduce((a, o) => a + o.total, 0);
+    const paid = filtered.filter((o) => canonicalStatus(o.status) === "complete").reduce((a, o) => a + o.total, 0);
+    const pending = filtered.filter((o) => { const s = canonicalStatus(o.status); return s !== "complete" && s !== "cancelled"; }).reduce((a, o) => a + o.total, 0);
+    const cancelled = filtered.filter((o) => canonicalStatus(o.status) === "cancelled").reduce((a, o) => a + o.total, 0);
     return { paid, pending, cancelled, total: paid + pending };
   }, [filtered]);
 
   const paymentStatus = (status: string) => {
-    if (status === "concluido") return { label: "Paid", className: "bg-green-500/20 text-green-400" };
-    if (status === "cancelado") return { label: "Cancelled", className: "bg-red-500/20 text-red-400" };
+    if (canonicalStatus(status) === "complete") return { label: "Paid", className: "bg-green-500/20 text-green-400" };
+    if (canonicalStatus(status) === "cancelled") return { label: "Cancelled", className: "bg-red-500/20 text-red-400" };
     return { label: "Pending", className: "bg-yellow-500/20 text-yellow-400" };
   };
 

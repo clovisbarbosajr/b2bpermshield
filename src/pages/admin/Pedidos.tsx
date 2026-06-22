@@ -11,18 +11,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Plus, ChevronLeft, ChevronRight, Pencil, X, Download } from "lucide-react";
 import { toast } from "sonner";
+import { ORDER_STATUSES, statusLabel, statusBadge, canonicalStatus } from "@/lib/orderStatuses";
 
-const statusOptions = [
-  { value: "recebido", label: "Submitted" },
-  { value: "concluido", label: "Complete" },
-  { value: "cancelado", label: "Cancelled" },
-];
-
-const statusClasses: Record<string, string> = {
-  recebido: "bg-muted text-foreground",
-  concluido: "bg-primary/15 text-primary",
-  cancelado: "bg-destructive/15 text-destructive",
-};
+// Os 7 status do B2BWave (fonte única).
+const statusOptions = ORDER_STATUSES;
 
 const PAGE_SIZE = 25;
 
@@ -177,7 +169,7 @@ const AdminPedidos = () => {
     });
   };
 
-  const getStatusLabel = (status: string) => statusOptions.find((s) => s.value === status)?.label ?? status;
+  const getStatusLabel = (status: string) => statusLabel(status);
 
   return (
     <AdminLayout>
@@ -353,8 +345,8 @@ const AdminPedidos = () => {
                   <TableCell className="text-right font-medium">{fmt(p.total || p.subtotal || 0)}</TableCell>
                   <TableCell className="text-right">{p._real_qty || p.quantidade_total || 0}</TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
-                    <Select value={p.status} onValueChange={(val) => handleStatusChange(p.id, val)}>
-                      <SelectTrigger className={`h-7 w-[150px] border-0 text-xs ${statusClasses[p.status] || "bg-muted text-foreground"}`}>
+                    <Select value={canonicalStatus(p.status)} onValueChange={(val) => handleStatusChange(p.id, val)}>
+                      <SelectTrigger className={`h-7 w-[150px] border-0 text-xs ${statusBadge(p.status)}`}>
                         <SelectValue>{getStatusLabel(p.status)}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>

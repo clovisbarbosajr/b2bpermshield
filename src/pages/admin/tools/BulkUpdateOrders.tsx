@@ -8,9 +8,9 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const TEMPLATE_HEADERS = ["order_number", "status", "tracking_number", "delivery_date"];
-const TEMPLATE_ROW = ["1001", "concluido", "BR123456789", "2024-12-31"];
+const TEMPLATE_ROW = ["1001", "complete", "BR123456789", "2024-12-31"];
 
-const VALID_STATUSES = ["recebido", "concluido", "cancelado"];
+const VALID_STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 
 function parseCSV(text: string): Record<string, string>[] {
   const lines = text.trim().split(/\r?\n/);
