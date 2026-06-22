@@ -1639,6 +1639,7 @@ export type Database = {
           created_by: string | null
           est_entrega: string | null
           id: string
+          notes: string | null
           numero_container: string | null
           numero_ordem: string | null
           produto_id: string
@@ -1655,6 +1656,7 @@ export type Database = {
           created_by?: string | null
           est_entrega?: string | null
           id?: string
+          notes?: string | null
           numero_container?: string | null
           numero_ordem?: string | null
           produto_id: string
@@ -1671,6 +1673,7 @@ export type Database = {
           created_by?: string | null
           est_entrega?: string | null
           id?: string
+          notes?: string | null
           numero_container?: string | null
           numero_ordem?: string | null
           produto_id?: string

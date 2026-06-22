@@ -1,0 +1,1 @@
+ALTER TABLE public.producao_pedidos ADD COLUMN IF NOT EXISTS notes text;
