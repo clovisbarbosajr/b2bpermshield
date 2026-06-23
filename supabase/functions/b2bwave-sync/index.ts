@@ -194,7 +194,7 @@ async function upsertOrder(
   }
 
   const ins = await db.from("pedidos").insert({
-    numero, cliente_id: clienteId, status, subtotal, total,
+    numero, b2bwave_order_id: numero, cliente_id: clienteId, status, subtotal, total,
     observacoes: o.comments_customer || o.customer_comments || null,
     admin_notes: o.admin_notes || o.internal_notes || null,
     po_number: o.customer_order_reference || o.purchase_order || o.po_number || null,
@@ -246,11 +246,13 @@ async function setOrdersCursor(db: any, page: number) {
 
 // Processa um conjunto de pedidos (carrega lookups + existentes, faz upsert de cada um).
 async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, notify: boolean) {
-  const orderNums = slice.map((it: any) => parseInt((it.order || it).id) || 0).filter((n: number) => n > 0);
-  const { data: existingOrders } = await db.from("pedidos").select("id, numero, status, total, subtotal, quantidade_total").in("numero", orderNums);
+  // Casa por b2bwave_order_id (NÃO por numero — que colide com o serial dos pedidos
+  // do app). Pedido nativo do app (b2bwave_order_id NULL) nunca entra aqui.
+  const b2bIds = slice.map((it: any) => parseInt((it.order || it).id) || 0).filter((n: number) => n > 0);
+  const { data: existingOrders } = await db.from("pedidos").select("id, b2bwave_order_id, status, total, subtotal, quantidade_total").in("b2bwave_order_id", b2bIds);
   const existing = new Map<number, ExistingOrder>();
   for (const e of existingOrders || []) {
-    existing.set(e.numero, { id: e.id, status: e.status, total: Number(e.total), subtotal: Number(e.subtotal), quantidade_total: e.quantidade_total ?? 0 });
+    existing.set(e.b2bwave_order_id, { id: e.id, status: e.status, total: Number(e.total), subtotal: Number(e.subtotal), quantidade_total: e.quantidade_total ?? 0 });
   }
   const [clientesRes, productsRes] = await Promise.all([
     db.from("clientes").select("id, email"),
