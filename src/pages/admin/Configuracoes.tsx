@@ -25,11 +25,24 @@ const AdminConfiguracoes = () => {
 
   useEffect(() => { fetchData(); }, []);
 
+  // Só os campos que ESTA página edita. Antes gravava a linha inteira (spread),
+  // revertendo settings de OUTRAS páginas (warehouse, templates, recipients) por
+  // lost-update e re-persistindo segredos à toa.
+  const SAVE_FIELDS = [
+    "nome_empresa", "email_contato", "telefone_contato", "endereco", "logo_url",
+    "cor_primaria", "cor_secundaria", "moeda", "fuso_horario", "pedido_minimo",
+    "mensagem_boas_vindas", "politica_privacidade", "termos_condicoes",
+    "permite_cadastro_aberto", "allow_order_without_payment",
+    "email_provider", "email_api_key", "email_from", "email_reply_to",
+    "stripe_enabled", "stripe_publishable_key", "stripe_secret_key", "stripe_webhook_secret",
+  ];
+
   const handleSave = async () => {
     if (!config) return;
     setSaving(true);
-    const { id, created_at, updated_at, ...payload } = config;
-    const { error } = await supabase.from("configuracoes").update(payload).eq("id", id);
+    const payload: any = {};
+    for (const f of SAVE_FIELDS) if (f in config) payload[f] = (config as any)[f];
+    const { error } = await supabase.from("configuracoes").update(payload).eq("id", (config as any).id);
     if (error) { toast.error(error.message); setSaving(false); return; }
     toast.success("Settings saved");
     setSaving(false);

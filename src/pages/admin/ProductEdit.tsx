@@ -239,8 +239,15 @@ const ProductEdit = () => {
       if (error) { toast.error(error.message); setSaving(false); return; }
     }
 
-    // Save sub-data
-    await saveSubData(productId!);
+    // Save sub-data — se um insert de privacidade/preço falhar, avisa e NÃO declara
+    // sucesso (o estado segue em memória, é só reenviar).
+    try {
+      await saveSubData(productId!);
+    } catch (e: any) {
+      setSaving(false);
+      toast.error(e?.message || "Erro ao salvar dados do produto. Tente salvar de novo.");
+      return;
+    }
 
     setSaving(false);
     toast.success(isNew ? "Product created" : "Product saved");
@@ -306,15 +313,19 @@ const ProductEdit = () => {
     }
 
     // Access: grupos (em privacy_group_id + grupo_nome p/ compat) e grant/exclude por cliente.
+    // CHECA erro nos inserts de privacidade: se falhar após o delete, o produto privado
+    // ficaria sem acesso nenhum (vazamento/sumiço). Lança -> handleSave avisa e o admin
+    // reenvia (o estado ainda está em memória, nada é perdido de verdade).
     await supabase.from("produto_acesso").delete().eq("produto_id", pid);
     if (form.is_private && accGroups.size > 0) {
-      await supabase.from("produto_acesso").insert(
+      const { error: accErr } = await supabase.from("produto_acesso").insert(
         [...accGroups].map((gid) => ({
           produto_id: pid,
           privacy_group_id: gid,
           grupo_nome: privacyGroups.find((p) => p.id === gid)?.nome ?? null,
         })) as any,
       );
+      if (accErr) throw new Error("Falha ao salvar grupos de acesso (privacidade): " + accErr.message);
     }
     await (supabase as any).from("produto_cliente_acesso").delete().eq("produto_id", pid);
     const cliRows = form.is_private
@@ -323,7 +334,10 @@ const ProductEdit = () => {
           ...accExclude.map((cid) => ({ produto_id: pid, cliente_id: cid, tipo: "exclude" })),
         ]
       : [];
-    if (cliRows.length > 0) await (supabase as any).from("produto_cliente_acesso").insert(cliRows);
+    if (cliRows.length > 0) {
+      const { error: cliErr } = await (supabase as any).from("produto_cliente_acesso").insert(cliRows);
+      if (cliErr) throw new Error("Falha ao salvar acesso por cliente (privacidade): " + cliErr.message);
+    }
   };
 
   const f = (key: string, val: any) => setForm(prev => ({ ...prev, [key]: val }));

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download, Search } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 
 const OrderRepsPerformance = () => {
   const [orders, setOrders] = useState<any[]>([]);
@@ -36,6 +37,7 @@ const OrderRepsPerformance = () => {
     clients.forEach((c) => (clientRepMap[c.id] = c.representante_id));
 
     const filteredOrders = orders.filter((o) => {
+      if (canonicalStatus(o.status) === "cancelled") return false; // não paga comissão/receita de cancelado
       if (dateFrom && new Date(o.created_at) < new Date(dateFrom)) return false;
       if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
       return true;
