@@ -1,7 +1,8 @@
 project_id = "bnicfvxvyblzzatvursw"
 
+# PDF de pedido tem PII -> exige JWT no gateway; a função ainda valida staff por dentro.
 [functions.generate-pdf]
-verify_jwt = false
+verify_jwt = true
 
 [functions.b2bwave-sync]
 verify_jwt = false

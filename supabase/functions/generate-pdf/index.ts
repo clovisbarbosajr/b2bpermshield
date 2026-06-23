@@ -215,6 +215,28 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // AUTORIZAÇÃO: o PDF traz PII do pedido (nome/email/endereço/itens). Antes a função
+    // era aberta -> qualquer um com um pedido_id baixava dados de outro cliente. Agora
+    // exige usuário logado e papel de staff (admin/manager/warehouse).
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const userClient = createClient(
+      Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      { global: { headers: { Authorization: authHeader } } },
+    );
+    const { data: { user } } = await userClient.auth.getUser();
+    if (!user) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { data: staffRow } = await supabase.from("user_roles")
+      .select("role").eq("user_id", user.id).in("role", ["admin", "manager", "warehouse"]).maybeSingle();
+    if (!staffRow) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Fetch all needed data in parallel
     const [{ data: pedido, error: pedidoErr }, { data: cfg }] = await Promise.all([
       supabase

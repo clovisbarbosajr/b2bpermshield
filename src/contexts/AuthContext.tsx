@@ -190,7 +190,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      const activeViewAsCustomer = getStoredViewAsCustomer();
+      // Logout limpa a impersonação — senão um "ver como cliente" esquecido vaza
+      // pro próximo login no mesmo navegador (ficava preso na visão do cliente).
+      if (_event === "SIGNED_OUT") localStorage.removeItem(VIEW_AS_KEY);
+      const activeViewAsCustomer = _event === "SIGNED_OUT" ? null : getStoredViewAsCustomer();
       if (activeViewAsCustomer) {
         applyViewAsSession(activeViewAsCustomer);
         return;
@@ -272,6 +275,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(null);
       return;
     }
+    localStorage.removeItem(VIEW_AS_KEY); // garante que não fica impersonação pendurada
     await supabase.auth.signOut();
   };
 

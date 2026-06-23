@@ -114,3 +114,25 @@ agrupar por status canônico (`canonicalStatus`, PT↔EN):
   **pedido sincronizado** (só exibição; estoque do sync é ignorado).
 - **`Estoque`/`ProductEdit`**: `parseInt(...) || 0` ao limpar campo salva estoque 0
   (re-baseado pelo sync no próximo ciclo de qualquer forma).
+
+---
+
+## 8. Varredura de áreas não cobertas (2026-06-23, parte 2)
+
+| # | Bug | Gravidade | Correção | Onde |
+|---|-----|-----------|----------|------|
+| P1 | `generate-pdf` **sem auth** (verify_jwt=false + service role) → qualquer um com um `pedido_id` baixava PII de outro pedido (nome/email/endereço/itens/total). | 🟠 alto | `verify_jwt=true` + gate de **staff** dentro da função. | `config.toml`, `generate-pdf/index.ts` |
+| P2 | `increment_coupon_usage(uuid)` chamável em loop p/ qualquer cupom → exaurir promo (griefing). | 🟡 médio | Só incrementa se o cupom está num **pedido do próprio chamador**. | `20260623070000` |
+| P3 | `preco_autoritativo`/`_resolve_desconto` com `EXECUTE` público → cliente chamava com `_cliente_id` de outro e **descobria preço negociado alheio** (vaza price list). | 🟡 médio | `REVOKE EXECUTE` de public/authenticated (só os triggers usam). | `20260623070000` |
+| P4 | `pedido_itens` sem `CHECK(quantidade>0)` → POST de quantidade **negativa** via PostgREST gera subtotal negativo (pedido quase de graça). | 🟡 médio | `ADD CONSTRAINT CHECK (quantidade > 0) NOT VALID`. | `20260623070000` |
+| P5 | `api` edge function: token aceito por **query param** (vaza em log/Referer) + compare não constant-time. | 🟡 médio | Header-only + comparação constant-time. | `api/index.ts` |
+| P6 | `viewAs` (impersonação) persistia no localStorage no logout → próximo login no mesmo navegador caía preso na visão do cliente. | 🟢 baixo | Limpa `VIEW_AS_KEY` no `SIGNED_OUT` e no signOut real. | `AuthContext.tsx` |
+| P7 | `_schedule_b2bwave_job` SECURITY DEFINER sem `SET search_path`. | 🟢 baixo | Pina search_path (sem GRANT público hoje). | `20260623070000` |
+
+### Verificado OK nesta parte
+- **Checkout RLS (`20260623060000`)**: SEGURO (não vaza opção privada p/ anon/cliente não-atribuído) **e** FUNCIONAL (cliente logado lê tudo que precisa). Confirmado por revisão adversarial.
+- Signup, reset de senha (não vaza existência de email), `admin-create-user`/`company-member` (re-validam admin/dono), `get_public_config` (só não-segredos), cart/saved-for-later (namespaced por uid), sem realtime/subscriptions no app.
+
+### ⚠️ PENDENTE — decisão sua (não corrigi sozinho)
+- **Bucket `product-images` é público** e guarda também o **PDF de catálogo** e os **arquivos de produto** (`files/`) → qualquer um com o link (estável, sem auth) baixa, furando a privacidade de grupo/price list. Fix = mover catálogo/arquivos privados p/ bucket privado servido por `createSignedUrl` (TTL curto). Imagens de produto podem seguir públicas. **Precisa você decidir o que é privado** antes de eu mexer (não quero quebrar a exibição de imagem do catálogo).
+- **`api` edge function**: o `PUT` ainda aceita body cru (`update(body)`) em produtos/pedidos/clientes (com o token). Hardening restante = allow-list de colunas. Se a API não estiver em uso, considere desabilitar.

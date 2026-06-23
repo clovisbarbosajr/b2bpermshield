@@ -35,6 +35,8 @@ const AdminConfiguracoes = () => {
     "permite_cadastro_aberto", "allow_order_without_payment",
     "email_provider", "email_api_key", "email_from", "email_reply_to",
     "stripe_enabled", "stripe_publishable_key", "stripe_secret_key", "stripe_webhook_secret",
+    "email_on_new_registration", "email_on_approval", "email_on_rejection",
+    "email_on_new_order", "email_on_order_status",
   ];
 
   const handleSave = async () => {

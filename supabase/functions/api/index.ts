@@ -14,19 +14,26 @@ serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceKey);
 
-  // Auth: check API token from header or query param
+  // Auth: API token só via HEADER (query param vazava em log de proxy/Referer).
   const url = new URL(req.url);
-  const apiToken = req.headers.get("x-api-token") || url.searchParams.get("token");
-  
+  const apiToken = req.headers.get("x-api-token") || "";
+
   if (!apiToken) {
-    return new Response(JSON.stringify({ error: "Missing API token. Pass via x-api-token header or ?token= query param" }), 
+    return new Response(JSON.stringify({ error: "Missing API token. Pass via x-api-token header." }),
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // Validate token against configuracoes
+  // Validate token (constant-time, evita timing side-channel).
   const { data: cfg } = await supabase.from("configuracoes").select("api_token").limit(1).maybeSingle();
-  if (!cfg?.api_token || cfg.api_token !== apiToken) {
-    return new Response(JSON.stringify({ error: "Invalid API token" }), 
+  const expected = cfg?.api_token || "";
+  const ctEqual = (a: string, b: string) => {
+    if (a.length === 0 || a.length !== b.length) return false;
+    let r = 0;
+    for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return r === 0;
+  };
+  if (!expected || !ctEqual(apiToken, expected)) {
+    return new Response(JSON.stringify({ error: "Invalid API token" }),
       { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
