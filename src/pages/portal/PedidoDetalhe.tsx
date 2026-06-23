@@ -91,7 +91,7 @@ const PedidoDetalhe = () => {
       quantidade: Math.min(item.quantidade, Math.max(disponivel, 1)),
       unidade_venda: prod.unidade_venda ?? "UN",
       quantidade_minima: prod.quantidade_minima ?? 1,
-      estoque_disponivel: Math.max(disponivel, 99),
+      estoque_disponivel: disponivel,   // estoque REAL (antes era Math.max(...,99) -> oversell)
       imagem_url: prod.imagem_url ?? null,
     });
     toast.success(`${item.nome_produto} added to cart`);

@@ -387,17 +387,20 @@ Deno.serve(async (req) => {
           b2bwave_id: b2bId,
           desconto: parseFloat(c.discount || "0") || 0,
           ordem: parseInt(c.position || c.sort_order || "0") || 0,
-          // B2BWave expõe is_private na categoria (mas NÃO os grupos/clientes — esses
-          // vêm do scrape). is a fonte de verdade; sincroniza o flag.
-          is_private: c.is_private === true || c.private === true,
         };
+        // is_private: só sincroniza quando a API REALMENTE traz o campo. Campo ausente
+        // (undefined) != "false" — senão um payload sem o campo zeraria a privacidade
+        // raspada (os grupos/clientes vêm do scrape, não da API).
+        if (c.is_private !== undefined || c.private !== undefined) {
+          row.is_private = c.is_private === true || c.private === true;
+        }
         const existing = existingMap.get(b2bId);
         if (existing) {
           // Compare key fields to see if update needed
           const changed = existing.nome !== row.nome || existing.descricao !== row.descricao ||
             existing.ativo !== row.ativo || existing.imagem_url !== row.imagem_url ||
             Number(existing.desconto) !== row.desconto || existing.ordem !== row.ordem ||
-            existing.is_private !== row.is_private;
+            (row.is_private !== undefined && existing.is_private !== row.is_private);
           if (changed) {
             await adminClient.from("categorias").update(row).eq("id", existing.id);
             synced++;
@@ -542,9 +545,12 @@ Deno.serve(async (req) => {
           permitir_backorder: p.can_backorder === true,
           promover_categoria: p.promote_category === true,
           promover_destaque: p.promote_front === true,
-          // Privacidade: B2BWave expõe is_private no produto (grupos/clientes vêm do scrape).
-          is_private: p.is_private === true || p.private === true,
         };
+        // is_private: só quando a API traz o campo (ausente != false), pra não clobbar a
+        // privacidade raspada (grupos/clientes vêm do scrape).
+        if (p.is_private !== undefined || p.private !== undefined) {
+          row.is_private = p.is_private === true || p.private === true;
+        }
         // created_at / disponibilidade REAIS do B2BWave (clone): só grava se vier.
         if (p.created_at) row.created_at = p.created_at;
         if (p.scheduled_at) row.data_disponibilidade = p.scheduled_at;
@@ -639,13 +645,16 @@ Deno.serve(async (req) => {
         if (!error) variantRows += vrows.length;
       }
 
-      // Delete stale products
+      // Stale products. SEGURANÇA: nunca DELETA (irreversível); apenas DESATIVA, e só
+      // produtos que vieram do B2BWave (b2bwave_id) — produto nativo do app é preservado.
+      // Sanity: só roda se o feed veio "completo" (>=50% dos b2b locais vistos), pra um
+      // fetch truncado (página curta) não desativar a base inteira.
       let deleted = 0;
-      for (const p of allProds || []) {
-        if (!seenSkus.has(p.sku)) {
-          const { data: refs } = await adminClient.from("pedido_itens").select("id").eq("produto_id", p.id).limit(1);
-          if (!refs || refs.length === 0) {
-            await adminClient.from("produtos").delete().eq("id", p.id);
+      const b2bLocal = (allProds || []).filter((p: any) => p.b2bwave_id);
+      if (b2bLocal.length === 0 || seenSkus.size >= b2bLocal.length * 0.5) {
+        for (const p of b2bLocal) {
+          if (!seenSkus.has(p.sku)) {
+            await adminClient.from("produtos").update({ ativo: false }).eq("id", p.id);
             deleted++;
           }
         }
@@ -752,8 +761,8 @@ Deno.serve(async (req) => {
           email,
           telefone: c.phone || c.phone2 || null,
           status,
-          tabela_preco_id: tabelaPrecoId,
-          representante_id: repId,
+          // tabela_preco_id / representante_id: NÃO incluir quando não resolvido (preserva
+          // a atribuição existente — antes virava null e zerava o price list do cliente).
           // Endereço de entrega (clone):
           endereco: c.address || null,
           endereco2: c.address2 || null,
@@ -774,6 +783,9 @@ Deno.serve(async (req) => {
         };
         // created_at REAL do B2BWave (clone): só grava se a API trouxe a data.
         if (c.created_at) row.created_at = c.created_at;
+        // Só sobrescreve price list / rep se resolveu (senão preserva o existente).
+        if (tabelaPrecoId) row.tabela_preco_id = tabelaPrecoId;
+        if (repId) row.representante_id = repId;
 
         const existing = existingMap.get(email.toLowerCase());
         if (existing) {
@@ -782,7 +794,8 @@ Deno.serve(async (req) => {
             Math.abs(Date.parse(existing.created_at) - Date.parse(row.created_at)) > 1000;
           const changed = existing.nome !== row.nome || existing.empresa !== row.empresa ||
             existing.telefone !== row.telefone || existing.status !== row.status ||
-            existing.tabela_preco_id !== row.tabela_preco_id || existing.representante_id !== row.representante_id ||
+            (row.tabela_preco_id !== undefined && existing.tabela_preco_id !== row.tabela_preco_id) ||
+            (row.representante_id !== undefined && existing.representante_id !== row.representante_id) ||
             existing.endereco !== row.endereco || existing.cidade !== row.cidade || existing.cep !== row.cep ||
             Number(existing.discount ?? 0) !== Number(row.discount ?? 0) || dateFixNeeded;
           if (changed) {
@@ -798,13 +811,13 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Soft-delete: inativa clientes que não vieram mais na lista do B2BWave (nunca apaga).
-      for (const c of existingCustomers || []) {
-        if (!seenEmails.has((c.email || "").toLowerCase()) && c.status !== "inativo") {
-          const r = await adminClient.from("clientes").update({ status: "inativo" }).eq("id", c.id);
-          if (!r.error) deactivated++;
-        }
-      }
+      // Soft-delete DESABILITADO de propósito: este sync casa clientes por EMAIL e não
+      // distingue clientes nativos do app (auto-cadastro, sub-usuários com parent_customer_id,
+      // contas criadas no admin) dos vindos do B2BWave. Inativar "os que sumiram da lista"
+      // mataria sub-usuários e cadastros do app a cada ciclo (15 min), e um fetch truncado
+      // (página curta) inativaria em massa. Cliente removido no B2BWave ficar ativo aqui é
+      // inofensivo; matar cliente real não é. Reativar só com um marcador de origem confiável.
+      void deactivated;
 
       await logRun(adminClient, "customers", { created: synced, skipped, errors });
       return new Response(JSON.stringify({ success: true, message: `${synced} updated/created, ${skipped} unchanged, ${deactivated} deactivated, ${errors} errors` }), { headers: jsonHeaders });

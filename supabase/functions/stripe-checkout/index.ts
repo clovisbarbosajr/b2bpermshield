@@ -170,7 +170,8 @@ Deno.serve(async (req) => {
           await adminClient
             .from("pedidos")
             .update({ is_paid: true, payment_intent_id } as any)
-            .eq("id", pedidoId);
+            .eq("id", pedidoId)
+            .eq("is_paid", false);   // idempotente (igual ao webhook) — evita re-stamp
         }
         return new Response(
           JSON.stringify({ success: true, status: "succeeded", pedido_id: pedidoId }),

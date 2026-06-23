@@ -192,9 +192,11 @@ const OrderDetail = () => {
       subtotal: product.preco * qty,
     });
     if (error) { toast.error("Error adding product"); return; }
-    // Update order subtotal
+    // Update order subtotal — PRESERVA imposto/frete/desconto no total (antes virava
+    // só o subtotal e zerava esses valores -> cobrança errada).
     const newSubtotal = items.reduce((s, i) => s + i.subtotal, 0) + product.preco * qty;
-    await supabase.from("pedidos").update({ subtotal: newSubtotal, total: newSubtotal }).eq("id", order.id);
+    const extras = (Number((order as any).sales_tax) || 0) + (Number((order as any).shipping_costs) || 0) - (Number((order as any).desconto) || 0);
+    await supabase.from("pedidos").update({ subtotal: newSubtotal, total: Math.max(0, newSubtotal + extras) }).eq("id", order.id);
     setAddProductOpen(false);
     setProductSearch("");
     setProducts([]);
@@ -206,9 +208,11 @@ const OrderDetail = () => {
     if (!order || !confirm("Remove this item?")) return;
     await supabase.from("pedido_itens").delete().eq("id", itemId);
     const newSubtotal = Math.max(0, (order.subtotal ?? 0) - itemSubtotal);
-    await supabase.from("pedidos").update({ subtotal: newSubtotal, total: newSubtotal }).eq("id", order.id);
+    const extras = (Number((order as any).sales_tax) || 0) + (Number((order as any).shipping_costs) || 0) - (Number((order as any).desconto) || 0);
+    const newTotal = Math.max(0, newSubtotal + extras);
+    await supabase.from("pedidos").update({ subtotal: newSubtotal, total: newTotal }).eq("id", order.id);
     setItems((prev) => prev.filter((i) => i.id !== itemId));
-    setOrder({ ...order, subtotal: newSubtotal, total: newSubtotal });
+    setOrder({ ...order, subtotal: newSubtotal, total: newTotal });
     toast.success("Item removed");
   };
 
