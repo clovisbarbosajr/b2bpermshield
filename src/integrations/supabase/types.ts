@@ -634,6 +634,8 @@ export type Database = {
           smtp_username: string | null
           stripe_enabled: boolean
           stripe_publishable_key: string | null
+          stripe_secret_key: string | null
+          stripe_webhook_secret: string | null
           telefone_contato: string | null
           termos_condicoes: string | null
           theme: string | null
@@ -741,6 +743,8 @@ export type Database = {
           smtp_username?: string | null
           stripe_enabled?: boolean
           stripe_publishable_key?: string | null
+          stripe_secret_key?: string | null
+          stripe_webhook_secret?: string | null
           telefone_contato?: string | null
           termos_condicoes?: string | null
           theme?: string | null
@@ -848,6 +852,8 @@ export type Database = {
           smtp_username?: string | null
           stripe_enabled?: boolean
           stripe_publishable_key?: string | null
+          stripe_secret_key?: string | null
+          stripe_webhook_secret?: string | null
           telefone_contato?: string | null
           termos_condicoes?: string | null
           theme?: string | null
@@ -1557,6 +1563,7 @@ export type Database = {
       pedidos: {
         Row: {
           admin_notes: string | null
+          b2bwave_order_id: number | null
           cliente_id: string
           created_at: string
           delivery_date: string | null
@@ -1580,6 +1587,7 @@ export type Database = {
         }
         Insert: {
           admin_notes?: string | null
+          b2bwave_order_id?: number | null
           cliente_id: string
           created_at?: string
           delivery_date?: string | null
@@ -1603,6 +1611,7 @@ export type Database = {
         }
         Update: {
           admin_notes?: string | null
+          b2bwave_order_id?: number | null
           cliente_id?: string
           created_at?: string
           delivery_date?: string | null
