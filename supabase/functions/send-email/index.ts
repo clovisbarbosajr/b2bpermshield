@@ -55,7 +55,7 @@ function templateWaitingApproval(customerEmail: string) {
   return wrapTemplate(`
 <h2 style="color:#1a7fbd;">Thank you for your application!</h2>
 <p>Thank you for the registration request. We will check your request as soon as possible and activate your account.</p>
-<p><strong>Username:</strong> ${customerEmail}</p>
+<p><strong>Username:</strong> ${esc(customerEmail)}</p>
 `);
 }
 
@@ -210,8 +210,8 @@ function templateNewOrderCustomer(order: any, customer: any, items?: any[], comp
         <tr><td style="color:#555;">Order Date:</td><td style="text-align:right;font-weight:bold;">${orderDate}</td></tr>
         ${order.po_number ? `<tr><td style="color:#555;">PO Number:</td><td style="text-align:right;font-weight:bold;">${esc(order.po_number)}</td></tr>` : ""}
         ${order.delivery_date ? `<tr><td style="color:#555;">Delivery Date:</td><td style="text-align:right;font-weight:bold;">${order.delivery_date}</td></tr>` : ""}
-        ${order.pagamento || order.payment_method ? `<tr><td style="color:#555;">Payment:</td><td style="text-align:right;font-weight:bold;">${order.pagamento || order.payment_method}</td></tr>` : ""}
-        ${order.frete || order.shipping_method ? `<tr><td style="color:#555;">Shipping:</td><td style="text-align:right;font-weight:bold;">${order.frete || order.shipping_method}</td></tr>` : ""}
+        ${order.pagamento || order.payment_method ? `<tr><td style="color:#555;">Payment:</td><td style="text-align:right;font-weight:bold;">${esc(order.pagamento || order.payment_method)}</td></tr>` : ""}
+        ${order.frete || order.shipping_method ? `<tr><td style="color:#555;">Shipping:</td><td style="text-align:right;font-weight:bold;">${esc(order.frete || order.shipping_method)}</td></tr>` : ""}
       </table>
     </td>
   </tr>
@@ -263,8 +263,8 @@ function templateOrderStatusChange(order: any, customer: any, newStatus: string)
   };
   return wrapTemplate(`
 <h2 style="color:#1a7fbd;">Order Status Update</h2>
-<p>Hello ${customer.nome || customer.empresa || ""},</p>
-<p>Your order <strong>#${order.numero || order.id}</strong> status has been updated to: <strong>${statusLabel[newStatus] || newStatus}</strong></p>
+<p>Hello ${esc(customer.nome || customer.empresa || "")},</p>
+<p>Your order <strong>#${esc(order.numero || order.id)}</strong> status has been updated to: <strong>${esc(statusLabel[newStatus] || newStatus)}</strong></p>
 <p><a href="${COMPANY_SITE}" style="display:inline-block;background:#1a7fbd;color:#fff;padding:10px 24px;border-radius:4px;text-decoration:none;font-weight:bold;">View My Orders</a></p>
 `);
 }
@@ -273,7 +273,7 @@ function templateOrderStatusChange(order: any, customer: any, newStatus: string)
 function templateRejection(customerName: string) {
   return wrapTemplate(`
 <h2 style="color:#1a7fbd;">Application Update</h2>
-<p>Hello ${customerName || ""},</p>
+<p>Hello ${esc(customerName || "")},</p>
 <p>Thank you for your interest in becoming a ${COMPANY_NAME} customer.</p>
 <p>After reviewing your application, we were unable to approve your account at this time.</p>
 <p>If you have any questions or believe this was an error, please contact us at <a href="mailto:${COMPANY_EMAIL}" style="color:#1a7fbd;">${COMPANY_EMAIL}</a>.</p>
@@ -510,13 +510,17 @@ Deno.serve(async (req) => {
     //    só admin ou cron. Sem isto, qualquer um com a anon key (que está no
     //    bundle do front) usava `raw` como relay de spam/phishing pelo seu domínio,
     //    ou disparava set_password/magic_link com link forjado.
-    const PRIVILEGED_TYPES = new Set(["raw", "set_password", "magic_link"]);
+    // `admin_alert` também é arbitrário (to/subject/html do body) -> privilegiado.
+    const PRIVILEGED_TYPES = new Set(["raw", "set_password", "magic_link", "admin_alert"]);
     if (PRIVILEGED_TYPES.has(type)) {
+      const authHeader = req.headers.get("Authorization") ?? "";
       const cronSecret = Deno.env.get("CRON_SECRET");
       const viaCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
-      let isAdmin = viaCron;
-      if (!viaCron) {
-        const authHeader = req.headers.get("Authorization") ?? "";
+      // chamada server-to-server (dispatch.ts) usa a service-role key como bearer
+      const viaService = !!Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+        && authHeader === `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`;
+      let isAdmin = viaCron || viaService;
+      if (!isAdmin) {
         const userClient = createClient(
           Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY") ?? "",
           { global: { headers: { Authorization: authHeader } } },

@@ -130,22 +130,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       typeof authUser.user_metadata?.empresa === "string" ? authUser.user_metadata.empresa.trim() : "";
     const emailFromAuth = typeof authUser.email === "string" ? authUser.email.trim() : "";
 
-    // 1) Tenta achar/vincular o registro — inclui LIGAR um registro vindo do sync
-    // (que tem user_id aleatório) a este login, casando pelo email do JWT.
-    const { data: claimedId } = await supabase.rpc("claim_customer_record");
-    if (claimedId) return; // já existe (ou acabou de ser vinculado) — nada a criar.
-
-    // 2) Nenhum registro encontrado: é um cliente novo de verdade → cria.
-    const nome = nomeFromMetadata || emailFromAuth || "Cliente";
-    const empresa = empresaFromMetadata || "";
-    await supabase
-      .from("clientes")
-      .upsert(
-        { user_id: authUser.id, nome, email: emailFromAuth, empresa, status: "pendente" as any },
-        { onConflict: "user_id" },
-      )
-      .select("id")
-      .single();
+    // Acha/vincula/cria o registro em UMA RPC SECURITY DEFINER. Cliente novo é criado
+    // com defaults seguros forçados no servidor (sem INSERT direto, que a RLS bloqueia
+    // e que permitiria forjar price list/aprovação no insert).
+    await supabase.rpc("ensure_my_cliente_record", {
+      _nome: nomeFromMetadata || emailFromAuth || "Cliente",
+      _empresa: empresaFromMetadata || "",
+    });
   };
 
   // Initialize a user session: fetch role first, then only ensure cliente record for customers
