@@ -733,7 +733,7 @@ Deno.serve(async (req) => {
       for (const r of localReps || []) repEmailToId.set(r.email.toLowerCase(), r.id);
 
       // Load existing customers for comparison
-      const { data: existingCustomers } = await adminClient.from("clientes").select("id, email, nome, empresa, telefone, status, tabela_preco_id, representante_id, endereco, cidade, cep, created_at, discount");
+      const { data: existingCustomers } = await adminClient.from("clientes").select("id, email, nome, empresa, telefone, status, tabela_preco_id, representante_id, endereco, cidade, cep, created_at, discount, parent_customer_id");
       const existingMap = new Map<string, any>();
       for (const c of existingCustomers || []) existingMap.set(c.email.toLowerCase(), c);
 
@@ -792,6 +792,9 @@ Deno.serve(async (req) => {
 
         const existing = existingMap.get(email.toLowerCase());
         if (existing) {
+          // SUB-USER (parent_customer_id) é nativo do app e pode compartilhar o email
+          // do dono -> o sync NUNCA toca nele (senão sobrescreve status/is_active/flags).
+          if (existing.parent_customer_id) { skipped++; continue; }
           // Backfill one-shot da data real + dados de endereço.
           const dateFixNeeded = !!row.created_at && existing.created_at &&
             Math.abs(Date.parse(existing.created_at) - Date.parse(row.created_at)) > 1000;

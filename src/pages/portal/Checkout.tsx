@@ -449,12 +449,17 @@ const Checkout = () => {
       return;
     }
 
-    // Increment coupon usage
-    if (coupon) {
-      await supabase
-        .from("coupons")
-        .update({ uso_atual: (coupon.uso_atual ?? 0) + 1 })
-        .eq("id", coupon.id);
+    // Os triggers recomputam preço/subtotal/desconto/total no banco. Relê o pedido
+    // pra usar os valores AUTORITATIVOS (cobrança e contador de cupom).
+    const { data: fresh } = await supabase.from("pedidos")
+      .select("desconto, total").eq("id", pedido.id).maybeSingle();
+    const finalTotal = Number((fresh as any)?.total ?? recalcGrossTotal);
+    const couponApplied = Number((fresh as any)?.desconto ?? 0) > 0;
+
+    // Incrementa uso do cupom de forma ATÔMICA (não read-modify-write) e só se o
+    // desconto realmente entrou (o trigger valida ativo/datas/uso no servidor).
+    if (coupon && couponApplied) {
+      await supabase.rpc("increment_coupon_usage", { _coupon_id: coupon.id });
     }
 
     // Stripe card payment
@@ -469,7 +474,7 @@ const Checkout = () => {
       const { data: piData, error: piError } = await supabase.functions.invoke("stripe-checkout", {
         body: {
           action: "create_payment_intent",
-          amount: Math.round(recalcGrossTotal * 100) / 100,
+          amount: Math.round(finalTotal * 100) / 100,
           currency: "usd",
           pedido_id: pedido.id,
           metadata: { order_number: pedido.numero ?? "" },

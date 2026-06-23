@@ -156,7 +156,7 @@ const OrderDetail = () => {
       observacoes: form.observacoes || null,
       shipping_option_id: form.shipping_option_id && form.shipping_option_id !== '__none__' ? form.shipping_option_id : null,
       payment_option_id: form.payment_option_id && form.payment_option_id !== '__none__' ? form.payment_option_id : null,
-      shipping_costs: form.shipping_costs ? parseFloat(form.shipping_costs) : null,
+      shipping_costs: Number.isFinite(parseFloat(form.shipping_costs)) ? parseFloat(form.shipping_costs) : null,
       is_paid: form.is_paid,
     };
     const { error } = await supabase.from("pedidos").update(update).eq("id", order.id);
@@ -192,11 +192,8 @@ const OrderDetail = () => {
       subtotal: product.preco * qty,
     });
     if (error) { toast.error("Error adding product"); return; }
-    // Update order subtotal — PRESERVA imposto/frete/desconto no total (antes virava
-    // só o subtotal e zerava esses valores -> cobrança errada).
-    const newSubtotal = items.reduce((s, i) => s + i.subtotal, 0) + product.preco * qty;
-    const extras = (Number((order as any).sales_tax) || 0) + (Number((order as any).shipping_costs) || 0) - (Number((order as any).desconto) || 0);
-    await supabase.from("pedidos").update({ subtotal: newSubtotal, total: Math.max(0, newSubtotal + extras) }).eq("id", order.id);
+    // Os triggers recomputam preço do item, subtotal e total no banco (incl. desconto/
+    // imposto/frete). Não calcula nada no client — só recarrega o valor autoritativo.
     setAddProductOpen(false);
     setProductSearch("");
     setProducts([]);
@@ -204,16 +201,13 @@ const OrderDetail = () => {
     loadOrder();
   };
 
-  const handleDeleteItem = async (itemId: string, itemSubtotal: number) => {
+  const handleDeleteItem = async (itemId: string, _itemSubtotal?: number) => {
     if (!order || !confirm("Remove this item?")) return;
-    await supabase.from("pedido_itens").delete().eq("id", itemId);
-    const newSubtotal = Math.max(0, (order.subtotal ?? 0) - itemSubtotal);
-    const extras = (Number((order as any).sales_tax) || 0) + (Number((order as any).shipping_costs) || 0) - (Number((order as any).desconto) || 0);
-    const newTotal = Math.max(0, newSubtotal + extras);
-    await supabase.from("pedidos").update({ subtotal: newSubtotal, total: newTotal }).eq("id", order.id);
-    setItems((prev) => prev.filter((i) => i.id !== itemId));
-    setOrder({ ...order, subtotal: newSubtotal, total: newTotal });
+    const { error } = await supabase.from("pedido_itens").delete().eq("id", itemId);
+    if (error) { toast.error("Error removing item"); return; }
+    // Triggers recomputam subtotal/total e devolvem a reserva de estoque; recarrega.
     toast.success("Item removed");
+    loadOrder();
   };
 
   // ===== Criação de pedido pelo admin (isNew) — itens ficam em rascunho na memória =====
@@ -840,11 +834,15 @@ const OrderDetail = () => {
             </div>
             <div className="grid grid-cols-[200px_100px] gap-2 border-t pt-2 mt-1">
               <span className="text-right font-semibold">Total after discount:</span>
-              <span className="text-right">{order ? fmt(order.subtotal) : "$ 0.00"}</span>
+              <span className="text-right">{order ? fmt(Math.max(0, Number(order.subtotal || 0) - Number(order.desconto || 0))) : "$ 0.00"}</span>
             </div>
             <div className="grid grid-cols-[200px_100px] gap-2">
               <span className="text-right font-semibold">Sales Tax:</span>
-              <span className="text-right">$ 0.00</span>
+              <span className="text-right">{order ? fmt(Number(order.sales_tax || 0)) : "$ 0.00"}</span>
+            </div>
+            <div className="grid grid-cols-[200px_100px] gap-2">
+              <span className="text-right font-semibold">Shipping:</span>
+              <span className="text-right">{order ? fmt(Number(order.shipping_costs || 0)) : "$ 0.00"}</span>
             </div>
             <div className="grid grid-cols-[200px_100px] gap-2 border-t pt-2 mt-1">
               <span className="text-right font-bold text-base">Gross total:</span>

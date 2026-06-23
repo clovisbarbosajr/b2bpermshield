@@ -8,6 +8,14 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Escapa HTML em qualquer valor livre interpolado (nome da empresa, comentário do
+// pedido, nome de produto, etc.) — evita injeção de HTML/script no inbox do admin
+// e na confirmação do cliente (esses campos vêm do cliente/B2BWave).
+function esc(v: any): string {
+  return String(v ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+}
+
 // ─── Email Templates ──────────────────────────────────────────────────────────
 // Following the B2BWave email template style (Zap Supplies, LLC branding)
 
@@ -58,10 +66,10 @@ function templateNewOrderAdmin(order: any, customer: any, items: any[]) {
       (i) => `
     <tr>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;">
-        <span style="color:#1a7fbd;">${i.sku || "–"}</span><br/>
-        <small style="color:#888;">${i.sku || ""}</small>
+        <span style="color:#1a7fbd;">${esc(i.sku || "–")}</span><br/>
+        <small style="color:#888;">${esc(i.sku || "")}</small>
       </td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;">${i.nome_produto || i.name || ""}<br/><small>${i.notes || ""}</small></td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto || i.name || "")}<br/><small>${esc(i.notes || "")}</small></td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario).toFixed(2)}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">${i.quantidade}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal).toFixed(2)}</td>
@@ -73,11 +81,11 @@ function templateNewOrderAdmin(order: any, customer: any, items: any[]) {
   return wrapTemplate(`
 <h2 style="color:#1a7fbd;">New Order</h2>
 <p>
-  <strong>Customer:</strong> ${customer.empresa || customer.nome || ""}<br/>
-  <strong>Email:</strong> ${customer.email || ""}<br/>
-  <strong>Order Id:</strong> ${order.numero || order.id || ""}<br/>
-  ${order.po_number ? `<strong>Purchase order:</strong> ${order.po_number}<br/>` : ""}
-  ${order.observacoes ? `<strong>Comments:</strong> ${order.observacoes}<br/>` : ""}
+  <strong>Customer:</strong> ${esc(customer.empresa || customer.nome || "")}<br/>
+  <strong>Email:</strong> ${esc(customer.email || "")}<br/>
+  <strong>Order Id:</strong> ${esc(order.numero || order.id || "")}<br/>
+  ${order.po_number ? `<strong>Purchase order:</strong> ${esc(order.po_number)}<br/>` : ""}
+  ${order.observacoes ? `<strong>Comments:</strong> ${esc(order.observacoes)}<br/>` : ""}
   <strong>Total:</strong> $${Number(order.subtotal || 0).toFixed(2)}<br/>
   <strong>Gross total:</strong> $${Number(order.total || 0).toFixed(2)}<br/>
   ${order.delivery_date ? `<strong>Delivery date:</strong> ${order.delivery_date}<br/>` : ""}
@@ -132,8 +140,8 @@ function templateNewOrderCustomer(order: any, customer: any, items?: any[], comp
           .map(
             (i: any) => `
     <tr>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;color:#1a7fbd;">${i.sku || i.codigo || "–"}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;">${i.nome_produto || i.name || ""}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;color:#1a7fbd;">${esc(i.sku || i.codigo || "–")}</td>
+      <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;">${esc(i.nome_produto || i.name || "")}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;text-align:center;">${i.quantidade}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;text-align:right;">${fmt(i.preco_unitario)}</td>
       <td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:13px;text-align:right;">${fmt(i.subtotal)}</td>
@@ -190,17 +198,17 @@ function templateNewOrderCustomer(order: any, customer: any, items?: any[], comp
     <td width="50%" style="vertical-align:top;padding-right:16px;">
       <p style="margin:0 0 4px 0;font-size:12px;font-weight:bold;color:#888;text-transform:uppercase;letter-spacing:0.5px;">Bill To</p>
       <p style="margin:0;font-size:13px;line-height:1.6;">
-        <strong>${customer.empresa || customer.nome || ""}</strong><br/>
-        ${customer.nome && customer.empresa ? `${customer.nome}<br/>` : ""}
-        ${customer.email ? `${customer.email}<br/>` : ""}
-        ${addr ? `${addr}<br/>` : ""}
-        ${custCity || custState || custZip ? `${custCity}${custState ? `, ${custState}` : ""}${custZip ? ` ${custZip}` : ""}<br/>` : ""}
+        <strong>${esc(customer.empresa || customer.nome || "")}</strong><br/>
+        ${customer.nome && customer.empresa ? `${esc(customer.nome)}<br/>` : ""}
+        ${customer.email ? `${esc(customer.email)}<br/>` : ""}
+        ${addr ? `${esc(addr)}<br/>` : ""}
+        ${custCity || custState || custZip ? `${esc(custCity)}${custState ? `, ${esc(custState)}` : ""}${custZip ? ` ${esc(custZip)}` : ""}<br/>` : ""}
       </p>
     </td>
     <td width="50%" style="vertical-align:top;">
       <table width="100%" cellpadding="4" cellspacing="0" style="font-size:13px;">
         <tr><td style="color:#555;">Order Date:</td><td style="text-align:right;font-weight:bold;">${orderDate}</td></tr>
-        ${order.po_number ? `<tr><td style="color:#555;">PO Number:</td><td style="text-align:right;font-weight:bold;">${order.po_number}</td></tr>` : ""}
+        ${order.po_number ? `<tr><td style="color:#555;">PO Number:</td><td style="text-align:right;font-weight:bold;">${esc(order.po_number)}</td></tr>` : ""}
         ${order.delivery_date ? `<tr><td style="color:#555;">Delivery Date:</td><td style="text-align:right;font-weight:bold;">${order.delivery_date}</td></tr>` : ""}
         ${order.pagamento || order.payment_method ? `<tr><td style="color:#555;">Payment:</td><td style="text-align:right;font-weight:bold;">${order.pagamento || order.payment_method}</td></tr>` : ""}
         ${order.frete || order.shipping_method ? `<tr><td style="color:#555;">Shipping:</td><td style="text-align:right;font-weight:bold;">${order.frete || order.shipping_method}</td></tr>` : ""}
@@ -230,7 +238,7 @@ function templateNewOrderCustomer(order: any, customer: any, items?: any[], comp
   </tfoot>
 </table>
 
-${order.observacoes ? `<p style="margin:16px 0 0 0;padding:12px;background:#fffbea;border-left:3px solid #f5a623;font-size:13px;color:#333;"><strong>Notes:</strong> ${order.observacoes}</p>` : ""}
+${order.observacoes ? `<p style="margin:16px 0 0 0;padding:12px;background:#fffbea;border-left:3px solid #f5a623;font-size:13px;color:#333;"><strong>Notes:</strong> ${esc(order.observacoes)}</p>` : ""}
 
 <p style="margin:20px 0 4px 0;font-size:13px;color:#555;">You can track your order status at any time by logging into your account.</p>
 
