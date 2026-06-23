@@ -495,7 +495,7 @@ Deno.serve(async (req) => {
       }
 
       // Load existing products for comparison
-      const { data: existingProds } = await adminClient.from("produtos").select("id, sku, nome, preco, ativo, imagem_url, estoque_total, created_at");
+      const { data: existingProds } = await adminClient.from("produtos").select("id, sku, nome, preco, ativo, imagem_url, estoque_total, estoque_reservado, created_at");
       const existingMap = new Map<string, any>();
       for (const p of existingProds || []) existingMap.set(p.sku.toLowerCase(), p);
 
@@ -573,6 +573,7 @@ Deno.serve(async (req) => {
           const changed = existing.nome !== row.nome || Number(existing.preco) !== row.preco ||
             existing.ativo !== row.ativo || existing.imagem_url !== row.imagem_url ||
             existing.estoque_total !== row.estoque_total || existing.categoria_id !== row.categoria_id ||
+            (existing.estoque_reservado ?? 0) !== (row.estoque_reservado ?? 0) ||
             Number(existing.preco_msrp) !== (row.preco_msrp ?? 0) || dateFixNeeded;
           if (!changed) { skipped++; continue; }
         }

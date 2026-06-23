@@ -94,11 +94,14 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
       const key = cartKey(item);
       const existing = prev.find((i) => cartKey(i) === key);
       if (existing) {
-        return prev.map((i) =>
-          cartKey(i) === key
-            ? { ...i, quantidade: Math.min(i.quantidade + item.quantidade, i.estoque_disponivel) }
-            : i
-        );
+        return prev.map((i) => {
+          if (cartKey(i) !== key) return i;
+          const want = i.quantidade + item.quantidade;
+          // só limita pelo disponível quando ele é número > 0 (não rebaixa backorder/pré-venda)
+          const qtd = (typeof i.estoque_disponivel === "number" && i.estoque_disponivel > 0)
+            ? Math.min(want, i.estoque_disponivel) : want;
+          return { ...i, quantidade: qtd };
+        });
       }
       // Primeira inserção também respeita estoque/mínimo (antes entrava cru, podia
       // passar do estoque). Só limita pelo disponível quando ele é um número > 0
@@ -116,11 +119,13 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
 
   const updateQuantity = (key: string, quantidade: number) => {
     setItems((prev) =>
-      prev.map((i) =>
-        cartKey(i) === key
-          ? { ...i, quantidade: Math.max(i.quantidade_minima, Math.min(quantidade, i.estoque_disponivel)) }
-          : i
-      )
+      prev.map((i) => {
+        if (cartKey(i) !== key) return i;
+        // só limita pelo disponível quando número > 0 (não trava backorder/pré-venda em 0)
+        const capped = (typeof i.estoque_disponivel === "number" && i.estoque_disponivel > 0)
+          ? Math.min(quantidade, i.estoque_disponivel) : quantidade;
+        return { ...i, quantidade: Math.max(i.quantidade_minima ?? 1, capped) };
+      })
     );
   };
 
