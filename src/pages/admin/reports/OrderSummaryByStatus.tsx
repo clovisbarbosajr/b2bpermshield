@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 
 const STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 
@@ -47,7 +48,7 @@ const OrderSummaryByStatus = () => {
 
   const statusSummary = useMemo(() => {
     return STATUSES.map((s) => {
-      const statusOrders = filtered.filter((o) => o.status === s);
+      const statusOrders = filtered.filter((o) => canonicalStatus(o.status) === s);
       return {
         status: s,
         count: statusOrders.length,

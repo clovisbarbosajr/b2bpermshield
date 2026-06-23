@@ -6,25 +6,34 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 
 const PAGE_SIZE = 25;
 
 const ProductSales = () => {
   const [items, setItems] = useState<any[]>([]);
+  const [cancelled, setCancelled] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [nameFilter, setNameFilter] = useState("");
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    supabase.from("pedido_itens").select("produto_id, nome_produto, sku, quantidade, subtotal").then(({ data }) => {
-      setItems(data ?? []);
+    const load = async () => {
+      const [itemRes, ordRes] = await Promise.all([
+        supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal"),
+        supabase.from("pedidos").select("id, status"),
+      ]);
+      setItems(itemRes.data ?? []);
+      setCancelled(new Set((ordRes.data ?? []).filter((o: any) => canonicalStatus(o.status) === "cancelled").map((o: any) => o.id)));
       setLoading(false);
-    });
+    };
+    load();
   }, []);
 
   const reportData = useMemo(() => {
     const map: Record<string, { sku: string; nome: string; qty: number; revenue: number; orders: number }> = {};
     items.forEach((i) => {
+      if (cancelled.has(i.pedido_id)) return; // item de pedido cancelado não conta
       if (!map[i.produto_id]) map[i.produto_id] = { sku: i.sku, nome: i.nome_produto, qty: 0, revenue: 0, orders: 0 };
       map[i.produto_id].qty += i.quantidade;
       map[i.produto_id].revenue += i.subtotal;
@@ -34,7 +43,7 @@ const ProductSales = () => {
       .map(([id, d]) => ({ id, ...d }))
       .filter((d) => !nameFilter || d.nome.toLowerCase().includes(nameFilter.toLowerCase()) || d.sku.toLowerCase().includes(nameFilter.toLowerCase()))
       .sort((a, b) => b.revenue - a.revenue);
-  }, [items, nameFilter]);
+  }, [items, cancelled, nameFilter]);
 
   const totalPages = Math.ceil(reportData.length / PAGE_SIZE);
   const paginated = reportData.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

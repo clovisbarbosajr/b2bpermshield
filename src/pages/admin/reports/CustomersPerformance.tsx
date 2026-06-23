@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 
 const PAGE_SIZE = 25;
 
@@ -22,7 +23,7 @@ const CustomersPerformance = () => {
     const fetch = async () => {
       setLoading(true);
       const [ordRes, cliRes] = await Promise.all([
-        supabase.from("pedidos").select("id, cliente_id, total, created_at"),
+        supabase.from("pedidos").select("id, cliente_id, total, created_at, status"),
         supabase.from("clientes").select("id, nome, empresa, email"),
       ]);
       setOrders(ordRes.data ?? []);
@@ -34,6 +35,7 @@ const CustomersPerformance = () => {
 
   const reportData = useMemo(() => {
     const filteredOrders = orders.filter((o) => {
+      if (canonicalStatus(o.status) === "cancelled") return false; // cancelado não conta receita
       if (dateFrom && new Date(o.created_at) < new Date(dateFrom)) return false;
       if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
       return true;

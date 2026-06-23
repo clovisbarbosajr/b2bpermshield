@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 
 const SalesPerCategory = () => {
   const [orders, setOrders] = useState<any[]>([]);
@@ -19,7 +20,7 @@ const SalesPerCategory = () => {
     const fetch = async () => {
       setLoading(true);
       const [ordRes, itemRes, prodRes, catRes] = await Promise.all([
-        supabase.from("pedidos").select("id, created_at"),
+        supabase.from("pedidos").select("id, created_at, status"),
         supabase.from("pedido_itens").select("pedido_id, produto_id, subtotal"),
         supabase.from("produtos").select("id, categoria_id"),
         supabase.from("categorias").select("id, nome"),
@@ -45,7 +46,7 @@ const SalesPerCategory = () => {
     const catNameMap: Record<string, string> = {};
     categories.forEach((c) => (catNameMap[c.id] = c.nome));
     const orderDateMap: Record<string, string> = {};
-    orders.forEach((o) => (orderDateMap[o.id] = o.created_at));
+    orders.forEach((o) => { if (canonicalStatus(o.status) !== "cancelled") orderDateMap[o.id] = o.created_at; }); // item de pedido cancelado é ignorado
 
     const map: Record<string, Record<number, number>> = {};
     items.forEach((i) => {

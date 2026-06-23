@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 const OrdersPerMonth = () => {
@@ -21,6 +22,7 @@ const OrdersPerMonth = () => {
   const monthlyData = useMemo(() => {
     const map: Record<string, { month: string; orders: number; revenue: number }> = {};
     orders.forEach((o) => {
+      if (canonicalStatus(o.status) === "cancelled") return; // cancelado não conta receita
       const d = new Date(o.created_at);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       if (!map[key]) map[key] = { month: key, orders: 0, revenue: 0 };

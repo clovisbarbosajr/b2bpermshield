@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 
 const STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 const PAGE_SIZE = 25;
@@ -48,7 +49,7 @@ const OrdersSummary = () => {
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {
-      if (statusFilter !== "all" && o.status !== statusFilter) return false;
+      if (statusFilter !== "all" && canonicalStatus(o.status) !== statusFilter) return false;
       if (dateFrom && new Date(o.created_at) < new Date(dateFrom)) return false;
       if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
       return true;
@@ -102,8 +103,8 @@ const OrdersSummary = () => {
       {/* Summary cards */}
       <div className="mb-4 grid grid-cols-2 md:grid-cols-5 gap-3">
         {STATUSES.map((s) => {
-          const count = filtered.filter((o) => o.status === s).length;
-          const total = filtered.filter((o) => o.status === s).reduce((a, o) => a + o.total, 0);
+          const count = filtered.filter((o) => canonicalStatus(o.status) === s).length;
+          const total = filtered.filter((o) => canonicalStatus(o.status) === s).reduce((a, o) => a + o.total, 0);
           return (
             <div key={s} className="rounded-md border p-3">
               <p className="text-xs text-muted-foreground capitalize">{s.replace("_", " ")}</p>

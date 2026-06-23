@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 
 const PAGE_SIZE = 25;
 
@@ -23,7 +24,7 @@ const CustomerProductSales = () => {
     const fetch = async () => {
       setLoading(true);
       const [ordRes, itemRes, cliRes] = await Promise.all([
-        supabase.from("pedidos").select("id, cliente_id"),
+        supabase.from("pedidos").select("id, cliente_id, status"),
         supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal"),
         supabase.from("clientes").select("id, nome, empresa"),
       ]);
@@ -37,7 +38,7 @@ const CustomerProductSales = () => {
 
   const reportData = useMemo(() => {
     const orderClientMap: Record<string, string> = {};
-    orders.forEach((o) => (orderClientMap[o.id] = o.cliente_id));
+    orders.forEach((o) => { if (canonicalStatus(o.status) !== "cancelled") orderClientMap[o.id] = o.cliente_id; }); // item de pedido cancelado é ignorado
     const clientMap: Record<string, { nome: string; empresa: string }> = {};
     customers.forEach((c) => (clientMap[c.id] = { nome: c.nome, empresa: c.empresa }));
 

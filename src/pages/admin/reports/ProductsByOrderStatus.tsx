@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 
 const STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 const PAGE_SIZE = 25;
@@ -34,7 +35,7 @@ const ProductsByOrderStatus = () => {
 
   const reportData = useMemo(() => {
     const orderStatusMap: Record<string, string> = {};
-    orders.forEach((o) => (orderStatusMap[o.id] = o.status));
+    orders.forEach((o) => (orderStatusMap[o.id] = canonicalStatus(o.status)));
 
     const map: Record<string, { sku: string; product: string; status: string; qty: number; revenue: number }> = {};
     items.forEach((i) => {

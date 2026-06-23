@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
+import { canonicalStatus } from "@/lib/orderStatuses";
 
 const PAGE_SIZE = 25;
 
@@ -21,7 +22,7 @@ const CustomerActivity = () => {
       setLoading(true);
       const [cliRes, ordRes] = await Promise.all([
         supabase.from("clientes").select("id, nome, empresa, email, status, created_at"),
-        supabase.from("pedidos").select("id, cliente_id, total, created_at"),
+        supabase.from("pedidos").select("id, cliente_id, total, created_at, status"),
       ]);
       setCustomers(cliRes.data ?? []);
       setOrders(ordRes.data ?? []);
@@ -33,6 +34,7 @@ const CustomerActivity = () => {
   const reportData = useMemo(() => {
     const orderMap: Record<string, { count: number; total: number; first: string; last: string }> = {};
     orders.forEach((o) => {
+      if (canonicalStatus(o.status) === "cancelled") return; // cancelado não conta
       if (!orderMap[o.cliente_id]) orderMap[o.cliente_id] = { count: 0, total: 0, first: o.created_at, last: o.created_at };
       orderMap[o.cliente_id].count += 1;
       orderMap[o.cliente_id].total += o.total;
