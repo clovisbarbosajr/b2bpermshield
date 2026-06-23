@@ -23,11 +23,13 @@ Deno.serve(async (req) => {
 
   // Quem chama? Cron-secret (força, = admin) OU usuário logado.
   let isAdmin = viaCron;
+  let callerUserId: string | null = null;
   if (!viaCron) {
     const authHeader = req.headers.get("Authorization") ?? "";
     const userClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
     const { data: { user } } = await userClient.auth.getUser();
     if (!user) return json({ error: "Authentication required" }, 401);
+    callerUserId = user.id;
     const { data: adminRow } = await db.from("user_roles")
       .select("role").eq("user_id", user.id).eq("role", "admin").maybeSingle();
     isAdmin = !!adminRow;
@@ -56,7 +58,19 @@ Deno.serve(async (req) => {
 
     // ---- Evento (qualquer logado/cron; destinatários vêm da config) -------
     if (!event) return json({ error: "Missing 'event'" }, 400);
-    const r = await dispatchEvent(db, event, vars, customer);
+    // SEGURANÇA: chamador não-admin NÃO escolhe o destino. Ignora o `customer`
+    // do body e usa o cliente do próprio usuário logado (evita SMS/email pra
+    // número/endereço arbitrário = fraude de toll). Admin/cron mantêm o controle.
+    let safeCustomer = customer;
+    if (!isAdmin && !viaCron) {
+      safeCustomer = undefined;
+      if (callerUserId) {
+        const { data: ownCli } = await db.from("clientes")
+          .select("email, telefone").eq("user_id", callerUserId).maybeSingle();
+        if (ownCli) safeCustomer = { email: ownCli.email, phone: ownCli.telefone, whatsapp: ownCli.telefone };
+      }
+    }
+    const r = await dispatchEvent(db, event, vars, safeCustomer);
     return json(r);
   } catch (e) {
     console.error("notify-dispatch error:", e);

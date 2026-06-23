@@ -498,6 +498,34 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { type } = body;
 
+    // ── SEGURANÇA: tipos privilegiados (email 100% arbitrário / links de auth)
+    //    só admin ou cron. Sem isto, qualquer um com a anon key (que está no
+    //    bundle do front) usava `raw` como relay de spam/phishing pelo seu domínio,
+    //    ou disparava set_password/magic_link com link forjado.
+    const PRIVILEGED_TYPES = new Set(["raw", "set_password", "magic_link"]);
+    if (PRIVILEGED_TYPES.has(type)) {
+      const cronSecret = Deno.env.get("CRON_SECRET");
+      const viaCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
+      let isAdmin = viaCron;
+      if (!viaCron) {
+        const authHeader = req.headers.get("Authorization") ?? "";
+        const userClient = createClient(
+          Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+          { global: { headers: { Authorization: authHeader } } },
+        );
+        const { data: { user } } = await userClient.auth.getUser();
+        if (user) {
+          const { data: adminRow } = await adminClient.from("user_roles")
+            .select("role").eq("user_id", user.id).eq("role", "admin").maybeSingle();
+          isAdmin = !!adminRow;
+        }
+      }
+      if (!isAdmin) {
+        return new Response(JSON.stringify({ error: "Not authorized for this email type" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
     // ── Route by email type ──────────────────────────────────────────────────
     let to = "";
     let subject = "";
