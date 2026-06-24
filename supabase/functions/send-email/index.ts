@@ -286,9 +286,9 @@ function templateNewRegistrationAdmin(customerName: string, customerEmail: strin
 <h2 style="color:#1a7fbd;">New Customer Registration</h2>
 <p>A new customer has registered and is waiting for approval:</p>
 <ul style="line-height:1.8;">
-  <li><strong>Name:</strong> ${customerName || "—"}</li>
-  <li><strong>Company:</strong> ${empresa || "—"}</li>
-  <li><strong>Email:</strong> ${customerEmail}</li>
+  <li><strong>Name:</strong> ${esc(customerName || "—")}</li>
+  <li><strong>Company:</strong> ${esc(empresa || "—")}</li>
+  <li><strong>Email:</strong> ${esc(customerEmail)}</li>
 </ul>
 <p><a href="${COMPANY_SITE}admin/customers" style="display:inline-block;background:#1a7fbd;color:#fff;padding:10px 24px;border-radius:4px;text-decoration:none;font-weight:bold;">Review in Admin Panel</a></p>
 `);
@@ -657,11 +657,21 @@ Deno.serve(async (req) => {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+      // SEGURANÇA: valida o redirectTo contra uma allow-list (env ALLOWED_REDIRECT_ORIGINS,
+      // CSV de origins). Sem isso, um atacante chamando direto com redirectTo=evil.com
+      // levaria o token de recuperação pro domínio dele (account takeover). Se não casar
+      // (ou env vazio), dropa -> Supabase usa o Site URL configurado (seguro).
+      const allowedOrigins = (Deno.env.get("ALLOWED_REDIRECT_ORIGINS") || "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      let safeRedirect: string | undefined = undefined;
+      if (redirectTo && allowedOrigins.length > 0) {
+        try { if (allowedOrigins.includes(new URL(redirectTo).origin)) safeRedirect = redirectTo; } catch { /* url inválida: dropa */ }
+      }
       // Generate the reset link using Supabase Admin API
       const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
         type: "recovery",
         email: resetEmail,
-        options: { redirectTo: redirectTo || undefined },
+        options: { redirectTo: safeRedirect },
       });
       if (linkError) {
         // Don't reveal if the user doesn't exist — just return success silently

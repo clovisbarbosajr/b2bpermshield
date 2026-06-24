@@ -452,9 +452,11 @@ const Checkout = () => {
     // Os triggers recomputam preço/subtotal/desconto/total no banco. Relê o pedido
     // pra usar os valores AUTORITATIVOS (cobrança e contador de cupom).
     const { data: fresh } = await supabase.from("pedidos")
-      .select("desconto, total").eq("id", pedido.id).maybeSingle();
+      .select("subtotal, desconto, sales_tax, shipping_costs, total").eq("id", pedido.id).maybeSingle();
     const finalTotal = Number((fresh as any)?.total ?? recalcGrossTotal);
     const couponApplied = Number((fresh as any)?.desconto ?? 0) > 0;
+    // Email usa os totais AUTORITATIVOS (recomputados pelos triggers), não os do insert.
+    const emailOrder = { ...pedido, ...((fresh as any) || {}) };
 
     // Incrementa uso do cupom de forma ATÔMICA (não read-modify-write) e só se o
     // desconto realmente entrou (o trigger valida ativo/datas/uso no servidor).
@@ -509,17 +511,20 @@ const Checkout = () => {
           .from("pedidos")
           .update({ is_paid: true, payment_intent_id: paymentIntent.id } as any)
           .eq("id", pedido.id);
-        // Fire-and-forget email notifications
+        // Notificações: AGUARDA antes de navegar — fire-and-forget + navigate cancelava
+        // o fetch no unload (pedido sem email). allSettled não bloqueia por falha.
         const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerName };
         const emailItems = recalculated.map(i => ({ sku: i.sku, nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
-        supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
-        supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
-        supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
-          order_id: (pedido as any).numero ?? pedido.id, total: (pedido as any).total ?? "",
-          date: new Date().toLocaleString("pt-BR"),
-          items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
-          customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
-        }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } }).catch(() => {});
+        await Promise.allSettled([
+          supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } }),
+          supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } }),
+          supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
+            order_id: (pedido as any).numero ?? pedido.id, total: finalTotal,
+            date: new Date().toLocaleString("pt-BR"),
+            items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
+            customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
+          }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } }),
+        ]);
         orderPlacedRef.current = true;
         clearCart();
         toast.success(`Order #${pedido.numero} placed and payment confirmed!`);
@@ -533,18 +538,19 @@ const Checkout = () => {
       return;
     }
 
-    // Fire-and-forget email notifications
+    // Notificações: AGUARDA antes de navegar (mesmo motivo do caminho com cartão).
     const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerName };
     const emailItems = recalculated.map(i => ({ sku: i.sku, nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
-    supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
-    supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
-    // Caminho sem cartão também dispara o multi-canal (email + SMS) — antes só o de cartão fazia.
-    supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
-      order_id: (pedido as any).numero ?? pedido.id, total: (pedido as any).total ?? "",
-      date: new Date().toLocaleString("pt-BR"),
-      items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
-      customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
-    }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } }).catch(() => {});
+    await Promise.allSettled([
+      supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } }),
+      supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } }),
+      supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
+        order_id: (pedido as any).numero ?? pedido.id, total: finalTotal,
+        date: new Date().toLocaleString("pt-BR"),
+        items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
+        customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
+      }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } }),
+    ]);
 
     orderPlacedRef.current = true;
     clearCart();

@@ -31,6 +31,15 @@ const AdminEstoque = () => {
 
   useEffect(() => { fetchData(); }, []);
 
+  // Estoque AO VIVO: refaz a lista quando produtos mudam (ex.: item comprado reserva/baixa).
+  useEffect(() => {
+    const channel = supabase
+      .channel("admin-estoque-produtos")
+      .on("postgres_changes", { event: "*", schema: "public", table: "produtos" }, () => fetchData())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   const openAjuste = async (p: any) => {
     setSelected(p);
     setNovaQtd(p.estoque_total);

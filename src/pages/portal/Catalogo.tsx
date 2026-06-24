@@ -98,6 +98,22 @@ const Catalogo = () => {
     fetchData();
   }, [clienteId]);
 
+  // Estoque AO VIVO: quando um produto muda (item comprado reserva/baixa), atualiza
+  // o disponível na tela sem refresh. Realtime respeita a RLS (só produtos visíveis).
+  useEffect(() => {
+    const channel = supabase
+      .channel("portal-catalogo-estoque")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "produtos" }, (payload) => {
+        const n = payload.new as any;
+        if (!n?.id) return;
+        setProdutos((prev) => prev.map((p) => p.id === n.id
+          ? { ...p, estoque_total: n.estoque_total, estoque_reservado: n.estoque_reservado }
+          : p));
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   // Fetch prices for all products when clienteId and produtos are ready
   useEffect(() => {
     if (!clienteId || produtos.length === 0) return;
