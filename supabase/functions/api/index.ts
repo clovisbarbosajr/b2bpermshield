@@ -71,6 +71,27 @@ serve(async (req) => {
 
   const json = (data: any, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+  // SEGURANÇA: o PUT só pode gravar colunas da allow-list. Nunca campos sensíveis
+  // (tabela_preco_id/parent_customer_id/user_id/can_confirm_order, total/subtotal/
+  // desconto/is_paid/coupon_id, estoque_reservado, b2bwave_*) — com o token, body
+  // cru deixava sobrescrever qualquer coluna.
+  const WRITABLE: Record<string, string[]> = {
+    products: ["nome", "descricao", "preco", "preco_msrp", "custo", "estoque_total", "ativo",
+      "quantidade_minima", "quantidade_maxima", "categoria_id", "brand_id", "status_produto",
+      "imagem_url", "peso", "barcode", "codigo_upc", "unidade_venda", "permitir_backorder"],
+    orders: ["status", "admin_notes", "observacoes", "tracking_number", "delivery_date",
+      "delivery_mode", "po_number"],
+    customers: ["nome", "empresa", "email", "telefone", "endereco", "endereco2", "cidade",
+      "estado", "cep", "pais", "website", "company_number", "discount", "minimum_order_value",
+      "customer_reference_code", "admin_comments", "status", "is_active", "disable_ordering"],
+  };
+  const pickWritable = (obj: any, res: string) => {
+    const allowed = WRITABLE[res] || [];
+    const out: Record<string, any> = {};
+    for (const k of allowed) if (obj && k in obj) out[k] = obj[k];
+    return out;
+  };
+
   try {
     switch (resource) {
       // ============ PRODUCTS ============
@@ -85,8 +106,9 @@ serve(async (req) => {
           return json({ data, total: count, page, per_page: perPage });
         }
         if (req.method === "PUT" && resourceId) {
-          const body = await req.json();
-          const { data, error } = await supabase.from("produtos").update(body).eq("id", resourceId).select().single();
+          const payload = pickWritable(await req.json(), "products");
+          if (Object.keys(payload).length === 0) return json({ error: "No writable fields. Allowed: " + WRITABLE.products.join(", ") }, 400);
+          const { data, error } = await supabase.from("produtos").update(payload).eq("id", resourceId).select().single();
           if (error) return json({ error: error.message }, 400);
           return json({ data });
         }
@@ -108,8 +130,9 @@ serve(async (req) => {
           return json({ data, total: count, page, per_page: perPage });
         }
         if (req.method === "PUT" && resourceId) {
-          const body = await req.json();
-          const { data, error } = await supabase.from("pedidos").update(body).eq("id", resourceId).select().single();
+          const payload = pickWritable(await req.json(), "orders");
+          if (Object.keys(payload).length === 0) return json({ error: "No writable fields. Allowed: " + WRITABLE.orders.join(", ") }, 400);
+          const { data, error } = await supabase.from("pedidos").update(payload).eq("id", resourceId).select().single();
           if (error) return json({ error: error.message }, 400);
           return json({ data });
         }
@@ -128,8 +151,9 @@ serve(async (req) => {
           return json({ data, total: count, page, per_page: perPage });
         }
         if (req.method === "PUT" && resourceId) {
-          const body = await req.json();
-          const { data, error } = await supabase.from("clientes").update(body).eq("id", resourceId).select().single();
+          const payload = pickWritable(await req.json(), "customers");
+          if (Object.keys(payload).length === 0) return json({ error: "No writable fields. Allowed: " + WRITABLE.customers.join(", ") }, 400);
+          const { data, error } = await supabase.from("clientes").update(payload).eq("id", resourceId).select().single();
           if (error) return json({ error: error.message }, 400);
           return json({ data });
         }

@@ -135,4 +135,8 @@ agrupar por status canônico (`canonicalStatus`, PT↔EN):
 
 ### ⚠️ PENDENTE — decisão sua (não corrigi sozinho)
 - **Bucket `product-images` é público** e guarda também o **PDF de catálogo** e os **arquivos de produto** (`files/`) → qualquer um com o link (estável, sem auth) baixa, furando a privacidade de grupo/price list. Fix = mover catálogo/arquivos privados p/ bucket privado servido por `createSignedUrl` (TTL curto). Imagens de produto podem seguir públicas. **Precisa você decidir o que é privado** antes de eu mexer (não quero quebrar a exibição de imagem do catálogo).
-- **`api` edge function**: o `PUT` ainda aceita body cru (`update(body)`) em produtos/pedidos/clientes (com o token). Hardening restante = allow-list de colunas. Se a API não estiver em uso, considere desabilitar.
+- ~~`api` edge function PUT com body cru~~ → **RESOLVIDO**: allow-list de colunas por
+  recurso (products/orders/customers); nunca grava campos sensíveis (price list, parent,
+  user_id, total, is_paid, estoque_reservado, b2bwave_*). Só GET + PUT escopado, sem
+  create/delete. É a API REST própria do clone (espelha a do B2BWave), pra integrações
+  externas; token configurável em admin → Profile. Não é usada internamente pelo app.
