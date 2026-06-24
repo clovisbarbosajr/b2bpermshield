@@ -37,6 +37,7 @@ BEGIN
 END; $$;
 
 -- Q4: pina o search_path do job scheduler (defensivo; hoje sem GRANT público).
+-- Assinatura real: _schedule_b2bwave_job(_jobname text, _cron text, _action text).
 DO $$ BEGIN
-  EXECUTE 'ALTER FUNCTION public._schedule_b2bwave_job() SET search_path = public, cron, net, vault, pg_catalog';
+  EXECUTE 'ALTER FUNCTION public._schedule_b2bwave_job(text, text, text) SET search_path = public, cron, net, vault, pg_catalog';
 EXCEPTION WHEN OTHERS THEN NULL; END $$;
