@@ -759,6 +759,26 @@ Deno.serve(async (req) => {
         .catch(() => {});
     }
 
+    // Se NENHUM provedor enviou e não houve erro específico do Resend (ex.: Resend nem
+    // configurado e o fallback falhou), avisa o admin assim mesmo — antes só o caso do
+    // Resend disparava alerta, então uma falha total sumia (só ficava no notification_log).
+    if (!result.ok && !result.resendError && type !== "admin_alert" && type !== "resend_failure_alert") {
+      const adminEmails = parseEmails(config?.email_new_orders) || [];
+      const adminTo = adminEmails.length ? adminEmails : (config?.email_contato || COMPANY_EMAIL);
+      const alertHtml =
+        `<p>❌ Nenhum provedor conseguiu enviar o email "<b>${type}</b>" para <b>${toDisplay}</b> — o destinatário NÃO recebeu.</p>` +
+        `<p><b>Erro:</b> <code>${result.error ?? "nenhum provedor de email disponível"}</code></p>` +
+        `<p>Verifique a configuração de email (Resend / Office365 / SMTP).</p>`;
+      sendEmailResilient(config, fromEmail, adminTo, `⚠ Email NÃO enviado: "${type}"`, alertHtml)
+        .then((r) => adminClient.from("notification_log").insert({
+          event: "email_failure_alert", channel: "email",
+          recipient: Array.isArray(adminTo) ? adminTo.join(", ") : String(adminTo),
+          status: r.ok ? "sent" : "failed", error: r.error ?? null,
+          payload: { about: type },
+        }))
+        .catch(() => {});
+    }
+
     if (!result.ok) {
       console.error(`[send-email] FALHOU "${type}" para ${toDisplay}: ${result.error}`);
       return new Response(JSON.stringify({ error: result.error, type, to }), {
