@@ -133,7 +133,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Acha/vincula/cria o registro em UMA RPC SECURITY DEFINER. Cliente novo é criado
     // com defaults seguros forçados no servidor (sem INSERT direto, que a RLS bloqueia
     // e que permitiria forjar price list/aprovação no insert).
-    await supabase.rpc("ensure_my_cliente_record", {
+    await (supabase as any).rpc("ensure_my_cliente_record", {
       _nome: nomeFromMetadata || emailFromAuth || "Cliente",
       _empresa: empresaFromMetadata || "",
     });
