@@ -133,7 +133,27 @@ agrupar por status canônico (`canonicalStatus`, PT↔EN):
 - **Checkout RLS (`20260623060000`)**: SEGURO (não vaza opção privada p/ anon/cliente não-atribuído) **e** FUNCIONAL (cliente logado lê tudo que precisa). Confirmado por revisão adversarial.
 - Signup, reset de senha (não vaza existência de email), `admin-create-user`/`company-member` (re-validam admin/dono), `get_public_config` (só não-segredos), cart/saved-for-later (namespaced por uid), sem realtime/subscriptions no app.
 
-### ⚠️ PENDENTE — decisão sua (não corrigi sozinho)
+---
+
+## 9. Última volta — compra / estoque / email / senha (2026-06-23, parte 3)
+
+| # | Item | Status | Onde |
+|---|------|--------|------|
+| R1 | **Estoque em TEMPO REAL** — não atualizava na tela (sem subscription); concorrente/admin via estoque velho. | ✅ Realtime na tabela `produtos`; admin Estoque e catálogo do cliente atualizam o disponível ao vivo quando item é comprado. | `20260623080000`, `Estoque.tsx`, `Catalogo.tsx` |
+| R2 | **Emails do pedido** eram fire-and-forget **antes** do `navigate()` → unload cancelava (pedido sem email). | ✅ Checkout AGUARDA (`Promise.allSettled`) antes de navegar; email usa totais autoritativos. | `Checkout.tsx` |
+| R3 | **`redirectTo` do reset não validado** → atacante levava o token de recuperação pro domínio dele (account takeover). | ✅ Validação contra allow-list (`ALLOWED_REDIRECT_ORIGINS`); sem match, Supabase usa o Site URL. | `send-email/index.ts` |
+| R4 | Template de admin do cadastro novo sem `esc()`. | ✅ escapado. | `send-email/index.ts` |
+
+**Verificado OK:** estoque baixa correto e atômico (sem oversell), reserva na compra + baixa no complete, sem double/missed-deduct; senhas só no Supabase (bcrypt, sem texto/tabela própria); reset não abusável pela UI; impersonação sem JWT real (zero privilégio no servidor).
+
+### 🔴 AÇÃO DO DONO (fora do código)
+- **Trocar a senha semente `Admin@1234`** (`jess@zapsupplies.com`, migração `20260617215903`) se ela rodou em produção — é uma senha de admin conhecida e commitada.
+- **Travar o allow-list de Redirect URLs** no painel do Supabase (Auth → URL Configuration) só pros origins de produção — é a proteção principal do token de reset. Opcional: setar env `ALLOWED_REDIRECT_ORIGINS` (defesa extra no código).
+- **HIGH-2 (email):** se TODOS os provedores de email falharem, hoje o cliente/admin não é avisado (só vai pro `notification_log`). Considerar um alerta. Documentado; baixo se o provedor está configurado.
+
+---
+
+## ⚠️ PENDENTE — decisão sua (não corrigi sozinho)
 - **Bucket `product-images` é público** e guarda também o **PDF de catálogo** e os **arquivos de produto** (`files/`) → qualquer um com o link (estável, sem auth) baixa, furando a privacidade de grupo/price list. Fix = mover catálogo/arquivos privados p/ bucket privado servido por `createSignedUrl` (TTL curto). Imagens de produto podem seguir públicas. **Precisa você decidir o que é privado** antes de eu mexer (não quero quebrar a exibição de imagem do catálogo).
 - ~~`api` edge function PUT com body cru~~ → **RESOLVIDO**: allow-list de colunas por
   recurso (products/orders/customers); nunca grava campos sensíveis (price list, parent,
