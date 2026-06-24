@@ -1565,9 +1565,11 @@ export type Database = {
           admin_notes: string | null
           b2bwave_order_id: number | null
           cliente_id: string
+          coupon_id: string | null
           created_at: string
           delivery_date: string | null
           delivery_mode: string | null
+          desconto: number | null
           endereco_entrega_id: string | null
           id: string
           is_paid: boolean | null
@@ -1589,9 +1591,11 @@ export type Database = {
           admin_notes?: string | null
           b2bwave_order_id?: number | null
           cliente_id: string
+          coupon_id?: string | null
           created_at?: string
           delivery_date?: string | null
           delivery_mode?: string | null
+          desconto?: number | null
           endereco_entrega_id?: string | null
           id?: string
           is_paid?: boolean | null
@@ -1613,9 +1617,11 @@ export type Database = {
           admin_notes?: string | null
           b2bwave_order_id?: number | null
           cliente_id?: string
+          coupon_id?: string | null
           created_at?: string
           delivery_date?: string | null
           delivery_mode?: string | null
+          desconto?: number | null
           endereco_entrega_id?: string | null
           id?: string
           is_paid?: boolean | null
@@ -1639,6 +1645,13 @@ export type Database = {
             columns: ["cliente_id"]
             isOneToOne: false
             referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pedidos_coupon_id_fkey"
+            columns: ["coupon_id"]
+            isOneToOne: false
+            referencedRelation: "coupons"
             referencedColumns: ["id"]
           },
           {
@@ -2919,6 +2932,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _resolve_desconto: {
+        Args: { _produto_id: string; _qtd: number; _ref: number; _tpid: string }
+        Returns: number
+      }
       _schedule_b2bwave_job: {
         Args: { _action: string; _cron: string; _jobname: string }
         Returns: undefined
@@ -2934,6 +2951,8 @@ export type Database = {
         Returns: boolean
       }
       cliente_pode_ver_produto: { Args: { _prod_id: string }; Returns: boolean }
+      cliente_ve_payment_option: { Args: { _opt: string }; Returns: boolean }
+      cliente_ve_shipping_option: { Args: { _opt: string }; Returns: boolean }
       consume_view_as_token: {
         Args: { _token: string }
         Returns: {
@@ -2961,8 +2980,16 @@ export type Database = {
         }
         Returns: boolean
       }
+      increment_coupon_usage: {
+        Args: { _coupon_id: string }
+        Returns: undefined
+      }
       is_ops_manager: { Args: never; Returns: boolean }
       is_subcustomer_of: { Args: { _parent_id: string }; Returns: boolean }
+      preco_autoritativo: {
+        Args: { _cliente_id: string; _produto_id: string; _qtd: number }
+        Returns: number
+      }
       user_can_see_produto: { Args: { _produto_id: string }; Returns: boolean }
     }
     Enums: {
