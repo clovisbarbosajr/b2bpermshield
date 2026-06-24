@@ -2965,6 +2965,10 @@ export type Database = {
         }[]
       }
       create_view_as_token: { Args: { _customer_id: string }; Returns: string }
+      ensure_my_cliente_record: {
+        Args: { _empresa?: string; _nome?: string }
+        Returns: string
+      }
       get_public_config: {
         Args: never
         Returns: {
