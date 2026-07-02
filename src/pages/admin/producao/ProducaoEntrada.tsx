@@ -41,29 +41,39 @@ const ProducaoEntrada = () => {
     if (user) load();
   }, [user]);
 
-  // Produtos agrupados por categoria (a "localização") + filtro por local do usuário.
+  // Produtos agrupados pela categoria REAL (id) — não pelo nome. Antes, categorias
+  // homônimas em estados diferentes (ex.: "One Plus" em 3 estados) viravam UM grupo só
+  // e ficava impossível saber qual é qual. Agora cada categoria é um grupo, rotulado
+  // com o CAMINHO completo (Estado › ... › One Plus).
   const grouped = useMemo(() => {
     const catById = new Map(categorias.map((c) => [c.id, c]));
-    const catName = new Map(categorias.map((c) => [c.id, c.nome]));
     const topId = (catId: string | null): string | null => {
       let cur = catId ? catById.get(catId) : undefined;
       if (!cur) return null;
       while (cur.parent_id && catById.get(cur.parent_id)) cur = catById.get(cur.parent_id)!;
       return cur.id;
     };
+    // Caminho "Pai › Filho" do topo até a categoria imediata.
+    const catPath = (catId: string | null): string => {
+      const chain: string[] = [];
+      let cur = catId ? catById.get(catId) : undefined;
+      let guard = 0;
+      while (cur && guard++ < 12) { chain.unshift(cur.nome); cur = cur.parent_id ? catById.get(cur.parent_id) : undefined; }
+      return chain.length ? chain.join(" › ") : "Uncategorized";
+    };
     // Restrição: se o usuário tem locais e não é admin, só mostra produtos desses locais.
     const restricted = role !== "admin" && allowedLocs.size > 0;
-    const groups = new Map<string, Produto[]>();
+    const groups = new Map<string, { path: string; prods: Produto[] }>();
     for (const p of produtos) {
       if (restricted) {
         const t = topId(p.categoria_id);
         if (!t || !allowedLocs.has(t)) continue;
       }
-      const g = p.categoria_id ? (catName.get(p.categoria_id) ?? "Uncategorized") : "Uncategorized";
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g)!.push(p);
+      const key = p.categoria_id ?? "__uncat__";
+      if (!groups.has(key)) groups.set(key, { path: catPath(p.categoria_id), prods: [] });
+      groups.get(key)!.prods.push(p);
     }
-    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return [...groups.values()].sort((a, b) => a.path.localeCompare(b.path));
   }, [produtos, categorias, allowedLocs, role]);
 
   const setLine = (key: string, patch: Partial<Line>) =>
@@ -113,10 +123,10 @@ const ProducaoEntrada = () => {
                 <Select value={l.produto_id} onValueChange={(v) => setLine(l.key, { produto_id: v })}>
                   <SelectTrigger className="h-11 text-base"><SelectValue placeholder="Choose product (by category)" /></SelectTrigger>
                   <SelectContent className="max-h-[460px] min-w-[380px]">
-                    {grouped.map(([cat, prods]) => (
-                      <SelectGroup key={cat}>
-                        <SelectLabel className="text-primary font-bold text-sm uppercase tracking-wide bg-primary/10 px-2 py-2 my-1 rounded-sm">{cat}</SelectLabel>
-                        {prods.map((p) => (
+                    {grouped.map((g) => (
+                      <SelectGroup key={g.path}>
+                        <SelectLabel className="text-primary font-bold text-sm uppercase tracking-wide bg-primary/10 px-2 py-2 my-1 rounded-sm">{g.path}</SelectLabel>
+                        {g.prods.map((p) => (
                           <SelectItem key={p.id} value={p.id} className="text-base py-2.5 pl-4">{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></SelectItem>
                         ))}
                       </SelectGroup>

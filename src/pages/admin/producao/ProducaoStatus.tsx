@@ -20,7 +20,7 @@ type Row = {
   produtos: { nome: string; sku: string } | null;
 };
 type Produto = { id: string; nome: string; sku: string; categoria_id: string | null };
-type Categoria = { id: string; nome: string };
+type Categoria = { id: string; nome: string; parent_id: string | null };
 
 const fmtDT = (s: string) => new Date(s).toLocaleString("en-US", { month: "short", day: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -44,7 +44,7 @@ const ProducaoStatus = () => {
     const [pr, prod, cat] = await Promise.all([
       supabase.from("producao_pedidos").select("id, produto_id, quantidade, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)").order("created_at", { ascending: false }),
       supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("nome"),
-      supabase.from("categorias").select("id, nome").eq("ativo", true).order("nome"),
+      supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("nome"),
     ]);
     setRows((pr.data as any[]) ?? []);
     setProdutos((prod.data as Produto[]) ?? []);
@@ -56,15 +56,24 @@ const ProducaoStatus = () => {
   const active = useMemo(() => rows.filter((r) => r.status !== "delivered"), [rows]);
   const received = useMemo(() => rows.filter((r) => r.status === "delivered"), [rows]);
 
+  // Agrupa pela categoria REAL (id) e rotula com o caminho completo (Estado › ... › One Plus)
+  // — categorias homônimas em estados diferentes ficavam misturadas num grupo só.
   const grouped = useMemo(() => {
-    const catName = new Map(categorias.map((c) => [c.id, c.nome]));
-    const groups = new Map<string, Produto[]>();
+    const catById = new Map(categorias.map((c) => [c.id, c]));
+    const catPath = (catId: string | null): string => {
+      const chain: string[] = [];
+      let cur = catId ? catById.get(catId) : undefined;
+      let guard = 0;
+      while (cur && guard++ < 12) { chain.unshift(cur.nome); cur = cur.parent_id ? catById.get(cur.parent_id) : undefined; }
+      return chain.length ? chain.join(" › ") : "Uncategorized";
+    };
+    const groups = new Map<string, { path: string; prods: Produto[] }>();
     for (const p of produtos) {
-      const g = p.categoria_id ? (catName.get(p.categoria_id) ?? "Uncategorized") : "Uncategorized";
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g)!.push(p);
+      const key = p.categoria_id ?? "__uncat__";
+      if (!groups.has(key)) groups.set(key, { path: catPath(p.categoria_id), prods: [] });
+      groups.get(key)!.prods.push(p);
     }
-    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return [...groups.values()].sort((a, b) => a.path.localeCompare(b.path));
   }, [produtos, categorias]);
 
   const clearTrackingEdit = (id: string) => setTrackingEdit((p) => { const n = { ...p }; delete n[id]; return n; });
@@ -264,10 +273,10 @@ const ProducaoStatus = () => {
               <Select value={editForm.produto_id} onValueChange={(v) => setEditForm((f) => ({ ...f, produto_id: v }))}>
                 <SelectTrigger className="h-11"><SelectValue placeholder="Choose product" /></SelectTrigger>
                 <SelectContent className="max-h-[400px]">
-                  {grouped.map(([cat, prods]) => (
-                    <SelectGroup key={cat}>
-                      <SelectLabel className="text-primary font-bold text-sm uppercase bg-primary/10 px-2 py-1.5 my-1 rounded-sm">{cat}</SelectLabel>
-                      {prods.map((p) => <SelectItem key={p.id} value={p.id} className="py-2 pl-4">{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></SelectItem>)}
+                  {grouped.map((g) => (
+                    <SelectGroup key={g.path}>
+                      <SelectLabel className="text-primary font-bold text-sm uppercase bg-primary/10 px-2 py-1.5 my-1 rounded-sm">{g.path}</SelectLabel>
+                      {g.prods.map((p) => <SelectItem key={p.id} value={p.id} className="py-2 pl-4">{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></SelectItem>)}
                     </SelectGroup>
                   ))}
                 </SelectContent>
