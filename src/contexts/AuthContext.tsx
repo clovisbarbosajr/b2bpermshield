@@ -27,7 +27,7 @@ interface AuthContextType {
   // É um sub-usuário (tem parent_customer_id)? Só o DONO da conta gerencia a equipe.
   isSubUser: boolean;
   signOut: () => Promise<void>;
-  clearViewAs: () => void;
+  clearViewAs: (dest?: string) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -174,6 +174,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const viewAsCustomer = getStoredViewAsCustomer();
     if (viewAsCustomer) {
       applyViewAsSession(viewAsCustomer);
+      // GUARDA: view-as só vale se a sessão REAL do navegador for de STAFF. Sem isso,
+      // uma chave "viewAsCustomer" pendurada no localStorage sequestrava até o login
+      // de um CLIENTE real (ele abria o portal "como" outro cliente) — e o "Return to"
+      // do banner revelava a sessão errada. Se a sessão não é staff (ou não existe),
+      // limpa a chave e reinicia como o usuário real.
+      supabase.auth.getSession().then(async ({ data: { session: real } }) => {
+        let staff = false;
+        if (real?.user?.id) {
+          const { data } = await (supabase as any)
+            .from("user_roles").select("role").eq("user_id", real.user.id).maybeSingle();
+          staff = data?.role === "admin" || data?.role === "manager" || data?.role === "warehouse";
+        }
+        if (!staff) {
+          localStorage.removeItem(VIEW_AS_KEY);
+          window.location.replace("/");
+        }
+      });
       return;
     }
 
@@ -229,10 +246,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const clearViewAs = () => {
+  const clearViewAs = (dest: string = "/admin/customers") => {
     localStorage.removeItem(VIEW_AS_KEY);
     setImpersonatedCustomer(null);
-    window.location.href = "/admin/customers";
+    window.location.href = dest;
   };
 
   const signOut = async () => {

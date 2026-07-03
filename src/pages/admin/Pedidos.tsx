@@ -234,13 +234,12 @@ const AdminPedidos = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 text-sm mt-3">
+        {/* 8 campos em grid de 4 colunas = 2 fileiras cheias (sem buracos — os filtros
+            Phone/Email/Country/Sales Rep/Submitted By foram removidos a pedido). */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 text-sm mt-3">
           <div><Label className="text-xs text-primary">Id</Label><Input value={filters.id} onChange={(e) => setFilter("id", e.target.value)} className="h-8" /></div>
           <div><Label className="text-xs text-primary">Company</Label><Input value={filters.company} onChange={(e) => setFilter("company", e.target.value)} className="h-8" /></div>
           <div><Label className="text-xs text-primary">Full Name</Label><Input value={filters.fullName} onChange={(e) => setFilter("fullName", e.target.value)} className="h-8" /></div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 text-sm mt-3">
           <div><Label className="text-xs text-primary">State</Label><Input value={filters.state} onChange={(e) => setFilter("state", e.target.value)} className="h-8" /></div>
           <div><Label className="text-xs text-primary">Purchase order</Label><Input value={filters.purchaseOrder} onChange={(e) => setFilter("purchaseOrder", e.target.value)} className="h-8" /></div>
           <div>
@@ -257,10 +256,6 @@ const AdminPedidos = () => {
               <SelectContent><SelectItem value="__all__">All</SelectItem><SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem></SelectContent>
             </Select>
           </div>
-          <div />
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 text-sm mt-3">
           <div><Label className="text-xs text-primary">Product SKU</Label><Input value={filters.productSku} onChange={(e) => setFilter("productSku", e.target.value)} className="h-8" /></div>
         </div>
 
