@@ -27,7 +27,6 @@ interface AuthContextType {
   // É um sub-usuário (tem parent_customer_id)? Só o DONO da conta gerencia a equipe.
   isSubUser: boolean;
   signOut: () => Promise<void>;
-  loginAsDemo: (demoRole: AppRole) => void;
   clearViewAs: () => void;
 }
 
@@ -43,14 +42,15 @@ const AuthContext = createContext<AuthContextType>({
   canPlaceOrders: true,
   isSubUser: false,
   signOut: async () => {},
-  loginAsDemo: () => {},
   clearViewAs: () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
 
 const VIEW_AS_KEY = "viewAsCustomer";
-const DEMO_ROLE_KEY = "demo_role";
+// Modo demo (sessionStorage "demo_role") REMOVIDO no go-live (2026-07-03): permitia abrir o
+// shell da UI sem login (dados sempre bloqueados pela RLS, mas não deve existir em produção).
+// isDemo continua existindo — o "view as" (impersonação) usa pra marcar sessão sintética.
 
 const getStoredViewAsCustomer = (): ViewAsCustomer | null => {
   const raw = localStorage.getItem(VIEW_AS_KEY);
@@ -177,16 +177,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    const demoRole = sessionStorage.getItem(DEMO_ROLE_KEY) as AppRole | null;
-    if (demoRole) {
-      setIsDemo(true);
-      setRole(demoRole);
-      setPermissions({});
-      setUser({ id: "demo", email: demoRole === "admin" ? "admin@demo" : "user@demo" } as User);
-      setLoading(false);
-      return;
-    }
-
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
@@ -239,17 +229,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const loginAsDemo = (demoRole: AppRole) => {
-    localStorage.removeItem(VIEW_AS_KEY);
-    sessionStorage.setItem(DEMO_ROLE_KEY, demoRole);
-    setImpersonatedCustomer(null);
-    setIsDemo(true);
-    setRole(demoRole);
-    setPermissions({});
-    setUser({ id: "demo", email: demoRole === "admin" ? "admin@demo" : "user@demo" } as User);
-    setLoading(false);
-  };
-
   const clearViewAs = () => {
     localStorage.removeItem(VIEW_AS_KEY);
     setImpersonatedCustomer(null);
@@ -259,15 +238,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     if (impersonatedCustomer) {
       clearViewAs();
-      setIsDemo(false);
-      setRole(null);
-      setPermissions({});
-      setUser(null);
-      setSession(null);
-      return;
-    }
-    if (isDemo) {
-      sessionStorage.removeItem(DEMO_ROLE_KEY);
       setIsDemo(false);
       setRole(null);
       setPermissions({});
@@ -293,7 +263,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canPlaceOrders,
         isSubUser,
         signOut,
-        loginAsDemo,
         clearViewAs,
       }}
     >

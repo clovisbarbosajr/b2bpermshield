@@ -95,3 +95,30 @@ dá o mesmo resultado (RLS).
 
 **Resíduo conhecido (opcional):** `src/pages/portal/ProdutoDetalhe.tsx` por URL direta na impersonação
 ainda usa RLS (admin vê). Fechar via `produto_visivel_para` seria mudança de comportamento — decisão do dono.
+
+---
+
+## 6) Rodada 2 da auditoria (mesmo dia) — Bug 3 + limpeza pré-go-live
+
+### 🐞 Bug 3 — funções `_visivel_para` executáveis por qualquer role via PostgREST (CORRIGIDO)
+- **Onde:** `categoria_visivel_para`/`produto_visivel_para` recebem o cliente-alvo como PARÂMETRO e
+  não têm gate interno (o gate fica nas RPCs). `CREATE FUNCTION` concede EXECUTE a PUBLIC por default
+  e nenhuma migração revogava → qualquer usuário (authenticated/anon) podia sondar via
+  `/rest/v1/rpc/...` a visibilidade de OUTROS clientes (information disclosure da config de privacidade).
+- **Fix:** migração `20260703130000_revoke_visivel_para_exec.sql` (2 REVOKEs). **Aplicada no banco ✅**
+  ("No rows returned" é o retorno normal de DDL). RPCs staff-gated (SECURITY DEFINER) inalteradas.
+
+### Varredura fake-data / fake-buttons (a pedido do dono)
+- ZERO mock/lorem/dummy; ZERO botões sem ação. Troca de senha é REAL (`supabase.auth.updateUser`);
+  "saved for later" do carrinho é REAL (localStorage por usuário + moveToCart).
+- **Ocultado:** cards "Files" e "Messages" ("coming soon") em `src/pages/admin/OrderDetail.tsx` —
+  NADA implementado por trás (sem tabela/upload/mensagens). Comentados no JSX com instrução de
+  reativação; decisão do dono (não exibir seção vazia em produção).
+- **Removido:** modo demo (`loginAsDemo` + caminho `sessionStorage "demo_role"`) em
+  `src/contexts/AuthContext.tsx` — era dead code (nenhum botão chamava) e permitia abrir o shell
+  da UI sem login (dados sempre bloqueados por RLS). `isDemo` FOI MANTIDO: o "view as"
+  (impersonação) usa pra marcar sessão sintética (`applyViewAsSession`), e `ProtectedRoute`/
+  `Index`/`EditPassword` dependem dele. O bloco `if (isDemo)` do `signOut` saiu por ficar
+  inalcançável (isDemo=true agora implica impersonatedCustomer, tratado no 1º branch).
+  Logins reais (ex.: Jess) intocados — demo não tinha relação com usuários do banco.
+- **Validação:** `tsc --noEmit` exit 0 + `npm run build` OK.

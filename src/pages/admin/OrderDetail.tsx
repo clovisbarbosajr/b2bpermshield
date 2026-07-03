@@ -862,7 +862,10 @@ const OrderDetail = () => {
         </div>
       </Card>
 
-      {/* Files */}
+      {/* Files / Messages (B2BWave tem; aqui NÃO há nada implementado por trás — sem tabela,
+          sem upload, sem mensagens). Ocultados no go-live (2026-07-03) a pedido do dono para
+          não exibir seção "coming soon" vazia em produção. Para reativar quando implementar,
+          descomente os dois <Card> abaixo.
       <Card className="mb-6 p-0 overflow-hidden bg-card/80 backdrop-blur-sm">
         <div className="bg-muted/30 px-5 py-3 border-b border-border">
           <h3 className="font-semibold text-sm">Files</h3>
@@ -871,8 +874,6 @@ const OrderDetail = () => {
           <p className="text-sm text-muted-foreground italic">File attachments for orders — coming soon.</p>
         </div>
       </Card>
-
-      {/* Messages */}
       <Card className="mb-6 p-0 overflow-hidden bg-card/80 backdrop-blur-sm">
         <div className="bg-muted/30 px-5 py-3 border-b border-border">
           <h3 className="font-semibold text-sm">Messages</h3>
@@ -881,6 +882,7 @@ const OrderDetail = () => {
           <p className="text-sm text-muted-foreground italic">Order messaging — coming soon.</p>
         </div>
       </Card>
+      */}
 
       {/* Bottom action bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-8">
