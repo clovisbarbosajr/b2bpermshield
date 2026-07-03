@@ -210,12 +210,8 @@ const Catalogo = () => {
       return;
     }
     const calculatedPrice = getPrice(p);
-    // Trava de segurança: não deixa adicionar/comprar produto a $0,00 (preço não
-    // configurado na tabela do cliente). Evita pedido a preço zero.
-    if (!calculatedPrice || calculatedPrice <= 0) {
-      toast.error(`${p.nome}: price not available. Please contact us for pricing.`);
-      return;
-    }
+    // Preço $0 (não configurado / "contact us") PODE ser adicionado ao carrinho — o
+    // vendedor ajusta o preço depois. (Sem trava de preço zero aqui.)
     const isPreOrder = getStatusInfo(p).nome.toLowerCase() === "pre-order";
     addItem({
       produto_id: p.id, nome: p.nome, sku: p.sku, preco: calculatedPrice,

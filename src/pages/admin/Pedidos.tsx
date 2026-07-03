@@ -238,16 +238,6 @@ const AdminPedidos = () => {
           <div><Label className="text-xs text-primary">Id</Label><Input value={filters.id} onChange={(e) => setFilter("id", e.target.value)} className="h-8" /></div>
           <div><Label className="text-xs text-primary">Company</Label><Input value={filters.company} onChange={(e) => setFilter("company", e.target.value)} className="h-8" /></div>
           <div><Label className="text-xs text-primary">Full Name</Label><Input value={filters.fullName} onChange={(e) => setFilter("fullName", e.target.value)} className="h-8" /></div>
-          <div><Label className="text-xs text-primary">Phone</Label><Input value={filters.phone} onChange={(e) => setFilter("phone", e.target.value)} className="h-8" /></div>
-          <div><Label className="text-xs text-primary">Email</Label><Input value={filters.email} onChange={(e) => setFilter("email", e.target.value)} className="h-8" /></div>
-          <div>
-            <Label className="text-xs text-primary">Country</Label>
-            <Select value={filters.country || "__all__"} onValueChange={(v) => setFilter("country", v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8"><SelectValue placeholder="Please select..." /></SelectTrigger>
-              <SelectContent><SelectItem value="__all__">Please select...</SelectItem><SelectItem value="United States">United States</SelectItem><SelectItem value="Canada">Canada</SelectItem><SelectItem value="Brazil">Brazil</SelectItem></SelectContent>
-            </Select>
-          </div>
-          <div />
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 text-sm mt-3">
@@ -260,17 +250,6 @@ const AdminPedidos = () => {
               <SelectContent><SelectItem value="__all__">All</SelectItem><SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem></SelectContent>
             </Select>
           </div>
-          <div>
-            <Label className="text-xs text-primary">Sales Rep</Label>
-            <Select value={filters.salesRep || "__all__"} onValueChange={(v) => setFilter("salesRep", v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8"><SelectValue placeholder="Please select..." /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">Please select...</SelectItem>
-                {reps.map((r) => <SelectItem key={r.id} value={r.id}>{r.nome}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div><Label className="text-xs text-primary">Submitted By</Label><Input value={filters.submittedBy} onChange={(e) => setFilter("submittedBy", e.target.value)} className="h-8" /></div>
           <div>
             <Label className="text-xs text-primary">With backordered items</Label>
             <Select value={filters.withBackorderedItems || "__all__"} onValueChange={(v) => setFilter("withBackorderedItems", v === "__all__" ? "" : v)}>

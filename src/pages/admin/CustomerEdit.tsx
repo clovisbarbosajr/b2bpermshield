@@ -882,8 +882,8 @@ const CustomerEdit = () => {
       {/* Bottom action bar */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-2">
-          <Button size="sm" onClick={() => handleSave(true)}>Back</Button>
-          <Button size="sm" className="bg-primary" onClick={() => handleSave(false)} disabled={saving}>
+          <Button size="sm" variant="outline" onClick={() => navigate("/admin/customers")}>Back</Button>
+          <Button size="sm" className="bg-primary" onClick={() => handleSave(true)} disabled={saving}>
             {saving ? "Saving..." : "Save"}
           </Button>
           <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => handleSave(false)} disabled={saving}>

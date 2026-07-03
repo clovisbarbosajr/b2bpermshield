@@ -176,11 +176,8 @@ const ProdutoDetalhe = () => {
   const handleAdd = () => {
     if (!produto || !effectiveCanBuy) return;
     if (hasVariants && !selectedVariante) { toast.error("Please select an option first."); return; }
-    // Trava de segurança: não permite adicionar/comprar a $0,00 (preço não configurado).
-    if (!price || price <= 0) {
-      toast.error("Price not available. Please contact us for pricing.");
-      return;
-    }
+    // Preço $0 (não configurado / "contact us") PODE ser adicionado — vira pedido/pedido
+    // de cotação; o vendedor ajusta o preço depois no admin.
     const label = selectedVariante ? (formatOpcao(selectedVariante.valores_opcao) || selectedVariante.codigo) : null;
     addItem({
       produto_id: produto.id,

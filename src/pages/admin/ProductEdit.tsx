@@ -205,7 +205,7 @@ const ProductEdit = () => {
     toast.success("File uploaded");
   };
 
-  const handleSave = async () => {
+  const handleSave = async (goBack = false) => {
     if (!form.nome || !form.sku) { toast.error("Name and Code are required"); return; }
     setSaving(true);
 
@@ -252,6 +252,7 @@ const ProductEdit = () => {
     setSaving(false);
     toast.success(isNew ? "Product created" : "Product saved");
     log(isNew ? "created" : "updated", "product", productId!, form.nome as string);
+    if (goBack) { navigate("/admin/products"); return; }
     if (isNew) navigate(`/admin/products/${productId}`);
   };
 
@@ -368,12 +369,12 @@ const ProductEdit = () => {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => navigate("/admin/products")}>Cancel</Button>
-          <Button onClick={handleSave} disabled={saving} className="gap-1">
+          <Button onClick={() => handleSave(true)} disabled={saving} className="gap-1">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save
           </Button>
           {!isNew && (
-            <Button variant="secondary" onClick={async () => { await handleSave(); }} disabled={saving}>
+            <Button variant="secondary" onClick={() => handleSave(false)} disabled={saving}>
               Save and stay on page
             </Button>
           )}

@@ -144,7 +144,7 @@ const OrderDetail = () => {
     }, customer: { email: cliente?.email, phone: (cliente as any)?.telefone, whatsapp: (cliente as any)?.telefone } } }).catch(() => {});
   };
 
-  const handleSave = async () => {
+  const handleSave = async (goBack = false) => {
     if (!order) return;
     setSaving(true);
     const update: any = {
@@ -165,6 +165,7 @@ const OrderDetail = () => {
     toast.success("Order saved");
     log("updated", "order", order.id, `Order #${order.numero || order.id}`);
     setOrder({ ...order, ...update });
+    if (goBack) navigate("/admin/orders");
   };
 
   const searchProducts = async (q: string) => {
@@ -884,13 +885,13 @@ const OrderDetail = () => {
       {/* Bottom action bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-8">
         <div className="flex gap-2">
-          <Button variant="default" size="sm" onClick={() => { handleSave().then(() => navigate("/admin/orders")); }}>
+          <Button variant="outline" size="sm" onClick={() => navigate("/admin/orders")}>
             Back
           </Button>
-          <Button variant="default" size="sm" onClick={handleSave} disabled={saving}>
+          <Button variant="default" size="sm" onClick={() => handleSave(true)} disabled={saving}>
             {saving ? "Saving..." : "Save"}
           </Button>
-          <Button variant="default" size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleSave()} disabled={saving}>
+          <Button variant="default" size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleSave(false)} disabled={saving}>
             Save and stay on page
           </Button>
         </div>

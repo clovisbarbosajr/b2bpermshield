@@ -384,13 +384,8 @@ const Checkout = () => {
       )
     );
 
-    // Gate final de preço: nenhum item pode finalizar a $0,00 (preço não configurado).
-    const zeroPriced = recalculated.filter((i) => !i.preco || i.preco <= 0);
-    if (zeroPriced.length > 0) {
-      toast.error(`Cannot finalize: no price set for ${zeroPriced.map((i) => i.nome).join(", ")}. Please contact us.`);
-      setLoading(false);
-      return;
-    }
+    // Item a $0 (preço não configurado / "contact us") PODE finalizar — vira pedido de
+    // cotação; o vendedor ajusta os preços depois no admin. (Sem gate de preço zero.)
 
     const recalcSubtotal = recalculated.reduce((sum, i) => sum + i.preco * i.quantidade, 0);
     const recalcDiscount = coupon
