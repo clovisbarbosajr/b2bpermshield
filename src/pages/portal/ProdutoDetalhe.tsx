@@ -123,6 +123,14 @@ const ProdutoDetalhe = () => {
   useEffect(() => {
     if (!produto) return;
     const checkAccess = async () => {
+      // Impersonação ("view as"): a sessão é do admin, então a RLS não escopa. Decide pela
+      // RPC staff-gated (mesma do catálogo), que cobre TODA a lógica de privacidade
+      // (categoria privada, grant/exclude, herança sub-user→pai) — fecha a URL direta.
+      if (impersonatedCustomer?.id) {
+        const { data: visIds } = await (supabase as any).rpc("produtos_visiveis_cliente", { _cli_id: impersonatedCustomer.id });
+        setAccessDenied(!(Array.isArray(visIds) && visIds.includes(produto.id)));
+        return;
+      }
       const { data: acessos } = await supabase.from("produto_acesso").select("grupo_nome").eq("produto_id", produto.id);
       const required = (acessos ?? []).map((a: any) => a.grupo_nome).filter(Boolean);
       if (required.length === 0) { setAccessDenied(false); return; } // sem restrição → liberado
@@ -132,7 +140,7 @@ const ProdutoDetalhe = () => {
       setAccessDenied(!required.some((g: string) => myGroups.has(g)));
     };
     checkAccess();
-  }, [produto, clienteId]);
+  }, [produto, clienteId, impersonatedCustomer]);
 
   // Fetch calculated price
   useEffect(() => {

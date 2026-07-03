@@ -122,3 +122,11 @@ ainda usa RLS (admin vê). Fechar via `produto_visivel_para` seria mudança de c
   inalcançável (isDemo=true agora implica impersonatedCustomer, tratado no 1º branch).
   Logins reais (ex.: Jess) intocados — demo não tinha relação com usuários do banco.
 - **Validação:** `tsc --noEmit` exit 0 + `npm run build` OK.
+
+### Resíduo do ProdutoDetalhe FECHADO (rodada 3)
+- No "view as", URL direta `/portal/produto/:id` de produto oculto ainda abria (RLS libera admin).
+- Fix mínimo em `src/pages/portal/ProdutoDetalhe.tsx` (useEffect `checkAccess`): na impersonação,
+  decide pela RPC staff-gated `produtos_visiveis_cliente` (a MESMA do catálogo — cobre categoria
+  privada, grant/exclude, herança sub-user→pai e grupo_nome legado) e usa o `accessDenied` que já
+  existia (página "not found"). Cliente real: comportamento intocado (RLS + check existente).
+  Zero migração nova. Preview do "view as" agora é 100% fiel em todas as superfícies.
