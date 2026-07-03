@@ -3,8 +3,7 @@ import AdminLayout from "@/components/layouts/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Factory, Truck, MapPin, ChevronRight, PackageCheck } from "lucide-react";
+import { Factory, Truck, MapPin, ChevronRight, PackageCheck, X } from "lucide-react";
 
 type Item = {
   id: string; quantidade: number; status: string; tracking: string | null;
@@ -73,8 +72,9 @@ const ProducaoDashboard = () => {
             return (
               <button
                 key={loc.name}
-                onClick={() => setOpenLoc(loc)}
+                onClick={() => setOpenLoc((cur) => (cur?.name === loc.name ? null : loc))}
                 className={`group relative text-left rounded-2xl border-2 p-6 transition-all hover:shadow-lg hover:-translate-y-0.5
+                  ${openLoc?.name === loc.name ? "ring-2 ring-primary ring-offset-2" : ""}
                   ${arriving ? "border-blue-400 bg-blue-50/50 dark:bg-blue-950/20" : "border-border bg-card hover:border-primary/40"}`}
               >
                 {arriving && (
@@ -94,7 +94,7 @@ const ProducaoDashboard = () => {
                 <div className="mt-4 flex items-center justify-between">
                   <div className="flex gap-2">
                     <Badge variant="secondary" className="text-sm px-3 py-1">{loc.items.length} item{loc.items.length !== 1 ? "s" : ""}</Badge>
-                    {arriving && <Badge className="text-sm px-3 py-1 gap-1 bg-blue-600"><Truck className="h-3.5 w-3.5" /> {loc.onTheWay} arriving</Badge>}
+                    {arriving && <Badge className="text-sm px-3 py-1 gap-1 bg-blue-600"><Truck className="h-3.5 w-3.5" /> {loc.onTheWay} on the way</Badge>}
                   </div>
                   <ChevronRight className="h-6 w-6 text-muted-foreground group-hover:text-primary transition-colors" />
                 </div>
@@ -104,14 +104,15 @@ const ProducaoDashboard = () => {
         </div>
       )}
 
-      {/* Drill-down: itens da localização */}
-      <Dialog open={!!openLoc} onOpenChange={(o) => !o && setOpenLoc(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-2xl"><MapPin className="h-6 w-6 text-primary" /> {openLoc?.name}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {(openLoc?.items ?? []).map((it) => {
+      {/* Drill-down INLINE (mesma página, não popup) */}
+      {openLoc && (
+        <Card className="mt-6 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="flex items-center gap-2 text-2xl font-bold"><MapPin className="h-6 w-6 text-primary" /> {openLoc.name}</h3>
+            <button onClick={() => setOpenLoc(null)} className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted transition-colors flex items-center gap-1"><X className="h-4 w-4" /> Close</button>
+          </div>
+          <div className="space-y-2">
+            {openLoc.items.map((it) => {
               const arriving = it.status === "a_caminho";
               return (
                 <div key={it.id} className={`rounded-xl border p-4 flex items-center justify-between ${arriving ? "border-blue-300 bg-blue-50/40 dark:bg-blue-950/10" : "border-border"}`}>
@@ -134,10 +135,10 @@ const ProducaoDashboard = () => {
                 </div>
               );
             })}
-            {(openLoc?.items.length ?? 0) === 0 && <p className="text-center text-muted-foreground py-6">No items.</p>}
+            {openLoc.items.length === 0 && <p className="text-center text-muted-foreground py-6">No items.</p>}
           </div>
-        </DialogContent>
-      </Dialog>
+        </Card>
+      )}
     </AdminLayout>
   );
 };

@@ -10,11 +10,11 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Check, Truck, PackageCheck, Pencil, Trash2, ChevronDown, ChevronRight, StickyNote } from "lucide-react";
+import { Check, Truck, PackageCheck, Pencil, Trash2, ChevronDown, ChevronRight, StickyNote, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 type Row = {
-  id: string; produto_id: string; quantidade: number; est_entrega: string | null; numero_ordem: string | null;
+  id: string; produto_id: string; quantidade: number; est_ready: string | null; est_entrega: string | null; numero_ordem: string | null;
   numero_container: string | null; status: string; tracking: string | null; notes: string | null;
   quantidade_recebida: number | null; recebido_em: string | null; created_at: string;
   produtos: { nome: string; sku: string } | null;
@@ -35,14 +35,14 @@ const ProducaoStatus = () => {
   const [recvQty, setRecvQty] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
   const [editRow, setEditRow] = useState<Row | null>(null);
-  const [editForm, setEditForm] = useState({ produto_id: "", quantidade: "", est_entrega: "", numero_ordem: "", numero_container: "", status: "solicitado" });
+  const [editForm, setEditForm] = useState({ produto_id: "", quantidade: "", est_ready: "", est_entrega: "", numero_ordem: "", numero_container: "", status: "solicitado" });
   const [showReceived, setShowReceived] = useState(false);
   const [notesRow, setNotesRow] = useState<Row | null>(null);
   const [notesText, setNotesText] = useState("");
 
   const load = async () => {
     const [pr, prod, cat] = await Promise.all([
-      supabase.from("producao_pedidos").select("id, produto_id, quantidade, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)").order("created_at", { ascending: false }),
+      supabase.from("producao_pedidos").select("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)").order("created_at", { ascending: false }),
       supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("nome"),
       supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("nome"),
     ]);
@@ -133,15 +133,16 @@ const ProducaoStatus = () => {
 
   const openEdit = (r: Row) => {
     setEditRow(r);
-    setEditForm({ produto_id: r.produto_id, quantidade: String(r.quantidade), est_entrega: r.est_entrega ?? "", numero_ordem: r.numero_ordem ?? "", numero_container: r.numero_container ?? "", status: r.status });
+    setEditForm({ produto_id: r.produto_id, quantidade: String(r.quantidade), est_ready: r.est_ready ?? "", est_entrega: r.est_entrega ?? "", numero_ordem: r.numero_ordem ?? "", numero_container: r.numero_container ?? "", status: r.status });
   };
   const saveEdit = async () => {
     if (!editRow) return;
     if (!editForm.produto_id || !(parseInt(editForm.quantidade) > 0)) { toast.error("Product and quantity are required."); return; }
     const { error } = await supabase.from("producao_pedidos").update({
       produto_id: editForm.produto_id, quantidade: parseInt(editForm.quantidade), status: editForm.status,
-      est_entrega: editForm.est_entrega || null, numero_ordem: editForm.numero_ordem || null, numero_container: editForm.numero_container || null,
-    }).eq("id", editRow.id);
+      est_ready: editForm.est_ready || null, est_entrega: editForm.est_entrega || null,
+      numero_ordem: editForm.numero_ordem || null, numero_container: editForm.numero_container || null,
+    } as any).eq("id", editRow.id);
     if (error) { toast.error(error.message); return; }
     toast.success("Updated"); setEditRow(null); load();
   };
@@ -151,6 +152,20 @@ const ProducaoStatus = () => {
     const { error } = await supabase.from("producao_pedidos").delete().eq("id", r.id);
     if (error) { toast.error(error.message); return; }
     toast.success("Deleted"); load();
+  };
+
+  // Duplica a entrada (mesmo produto/qtd/datas/ordem), como nova solicitação.
+  const duplicate = async (r: Row) => {
+    setBusy(r.id);
+    const { error } = await supabase.from("producao_pedidos").insert({
+      produto_id: r.produto_id, quantidade: r.quantidade,
+      est_ready: r.est_ready ?? null, est_entrega: r.est_entrega ?? null,
+      numero_ordem: r.numero_ordem ?? null, numero_container: r.numero_container ?? null,
+      status: "solicitado", created_by: user?.id ?? null,
+    } as any);
+    setBusy(null);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Entry duplicated"); load();
   };
 
   const StatusPill = ({ r }: { r: Row }) => {
@@ -182,7 +197,7 @@ const ProducaoStatus = () => {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Product</TableHead><TableHead>Qty</TableHead><TableHead>Created</TableHead><TableHead>Est. delivery</TableHead>
+              <TableHead>Product</TableHead><TableHead>Qty</TableHead><TableHead>Est Ready</TableHead><TableHead>ETA</TableHead>
               <TableHead>Order # / Container</TableHead><TableHead className="min-w-[190px]">Tracking</TableHead>
               <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -198,7 +213,7 @@ const ProducaoStatus = () => {
                 <TableRow key={r.id} className={r.status === "a_caminho" ? "bg-blue-50/40 dark:bg-blue-950/10" : ""}>
                   <TableCell className="font-medium">{r.produtos?.nome ?? "—"} <span className="text-xs text-muted-foreground">({r.produtos?.sku ?? ""})</span></TableCell>
                   <TableCell>{r.quantidade}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{fmtDT(r.created_at)}</TableCell>
+                  <TableCell>{r.est_ready ?? "—"}</TableCell>
                   <TableCell>{r.est_entrega ?? "—"}</TableCell>
                   <TableCell className="text-sm">{r.numero_ordem ?? "—"}{r.numero_container ? ` / ${r.numero_container}` : ""}</TableCell>
                   <TableCell>
@@ -223,6 +238,7 @@ const ProducaoStatus = () => {
                         <Button size="sm" variant="outline" className="gap-1" onClick={() => startReceive(r)}><PackageCheck className="h-4 w-4" /> Receive</Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8" title={r.notes ? "Notes (has content)" : "Add notes"} onClick={() => openNotes(r)}><StickyNote className={`h-4 w-4 ${r.notes ? "text-primary fill-primary/20" : ""}`} /></Button>
+                        <Button size="icon" variant="ghost" className="h-8 w-8" title="Duplicate entry" disabled={busy === r.id} onClick={() => duplicate(r)}><Copy className="h-4 w-4" /></Button>
                         <Button size="icon" variant="ghost" className="h-8 w-8" title="Delete" onClick={() => remove(r)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                       </div>
                     )}
@@ -294,9 +310,10 @@ const ProducaoStatus = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div><Label>Est. delivery</Label><Input type="date" value={editForm.est_entrega} onChange={(e) => setEditForm((f) => ({ ...f, est_entrega: e.target.value }))} /></div>
+              <div><Label>Est Ready</Label><Input type="date" value={editForm.est_ready} onChange={(e) => setEditForm((f) => ({ ...f, est_ready: e.target.value }))} /></div>
+              <div><Label>ETA</Label><Input type="date" value={editForm.est_entrega} onChange={(e) => setEditForm((f) => ({ ...f, est_entrega: e.target.value }))} /></div>
               <div><Label>Order #</Label><Input value={editForm.numero_ordem} onChange={(e) => setEditForm((f) => ({ ...f, numero_ordem: e.target.value }))} /></div>
-              <div className="col-span-2"><Label>Container #</Label><Input value={editForm.numero_container} onChange={(e) => setEditForm((f) => ({ ...f, numero_container: e.target.value }))} /></div>
+              <div><Label>Container #</Label><Input value={editForm.numero_container} onChange={(e) => setEditForm((f) => ({ ...f, numero_container: e.target.value }))} /></div>
             </div>
             <p className="text-xs text-muted-foreground">To mark as received (and add to inventory), use the green "Check in" on the list — not here.</p>
           </div>

@@ -7,16 +7,16 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2, Save } from "lucide-react";
 import { toast } from "sonner";
 
 type Produto = { id: string; nome: string; sku: string; categoria_id: string | null };
 type Categoria = { id: string; nome: string; parent_id: string | null };
-type Line = { key: string; produto_id: string; quantidade: string; est_entrega: string; numero_ordem: string; numero_container: string };
+type Line = { key: string; categoria_id: string; produto_id: string; quantidade: string; est_ready: string; est_entrega: string; numero_ordem: string; numero_container: string };
 
 let LINE_SEQ = 0;
-const newLine = (): Line => ({ key: `l${++LINE_SEQ}`, produto_id: "", quantidade: "", est_entrega: "", numero_ordem: "", numero_container: "" });
+const newLine = (): Line => ({ key: `l${++LINE_SEQ}`, categoria_id: "", produto_id: "", quantidade: "", est_ready: "", est_entrega: "", numero_ordem: "", numero_container: "" });
 
 const ProducaoEntrada = () => {
   const navigate = useNavigate();
@@ -63,18 +63,21 @@ const ProducaoEntrada = () => {
     };
     // Restrição: se o usuário tem locais e não é admin, só mostra produtos desses locais.
     const restricted = role !== "admin" && allowedLocs.size > 0;
-    const groups = new Map<string, { path: string; prods: Produto[] }>();
+    const groups = new Map<string, { id: string; path: string; prods: Produto[] }>();
     for (const p of produtos) {
       if (restricted) {
         const t = topId(p.categoria_id);
         if (!t || !allowedLocs.has(t)) continue;
       }
       const key = p.categoria_id ?? "__uncat__";
-      if (!groups.has(key)) groups.set(key, { path: catPath(p.categoria_id), prods: [] });
+      if (!groups.has(key)) groups.set(key, { id: key, path: catPath(p.categoria_id), prods: [] });
       groups.get(key)!.prods.push(p);
     }
     return [...groups.values()].sort((a, b) => a.path.localeCompare(b.path));
   }, [produtos, categorias, allowedLocs, role]);
+
+  // Produtos da categoria selecionada numa linha (o 2º select puxa só desses).
+  const prodsOfCat = (catId: string): Produto[] => grouped.find((g) => g.id === catId)?.prods ?? [];
 
   const setLine = (key: string, patch: Partial<Line>) =>
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -91,13 +94,14 @@ const ProducaoEntrada = () => {
     const rows = valid.map((l) => ({
       produto_id: l.produto_id,
       quantidade: parseInt(l.quantidade),
+      est_ready: l.est_ready || null,
       est_entrega: l.est_entrega || null,
       numero_ordem: l.numero_ordem || null,
       numero_container: l.numero_container || null,
       status: "solicitado",
       created_by: user?.id ?? null,
     }));
-    const { error } = await supabase.from("producao_pedidos").insert(rows);
+    const { error } = await supabase.from("producao_pedidos").insert(rows as any);
     setSaving(false);
     if (error) { toast.error("Error: " + error.message); return; }
     toast.success(`${rows.length} production item(s) saved.`);
@@ -118,31 +122,41 @@ const ProducaoEntrada = () => {
         {lines.map((l, idx) => (
           <Card key={l.key} className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-              <div className="md:col-span-4">
-                <Label>Product *</Label>
-                <Select value={l.produto_id} onValueChange={(v) => setLine(l.key, { produto_id: v })}>
-                  <SelectTrigger className="h-11 text-base"><SelectValue placeholder="Choose product (by category)" /></SelectTrigger>
-                  <SelectContent className="max-h-[460px] min-w-[380px]">
+              <div className="md:col-span-2">
+                <Label>Category *</Label>
+                <Select value={l.categoria_id} onValueChange={(v) => setLine(l.key, { categoria_id: v, produto_id: "" })}>
+                  <SelectTrigger className="h-11 text-base"><SelectValue placeholder="Choose category" /></SelectTrigger>
+                  <SelectContent className="max-h-[460px] min-w-[300px]">
                     {grouped.map((g) => (
-                      <SelectGroup key={g.path}>
-                        <SelectLabel className="text-primary font-bold text-sm uppercase tracking-wide bg-primary/10 px-2 py-2 my-1 rounded-sm">{g.path}</SelectLabel>
-                        {g.prods.map((p) => (
-                          <SelectItem key={p.id} value={p.id} className="text-base py-2.5 pl-4">{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></SelectItem>
-                        ))}
-                      </SelectGroup>
+                      <SelectItem key={g.id} value={g.id} className="text-base py-2.5">{g.path}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="md:col-span-2">
-                <Label>Quantity *</Label>
+                <Label>Product *</Label>
+                <Select value={l.produto_id} onValueChange={(v) => setLine(l.key, { produto_id: v })} disabled={!l.categoria_id}>
+                  <SelectTrigger className="h-11 text-base"><SelectValue placeholder={l.categoria_id ? "Choose product" : "Pick a category first"} /></SelectTrigger>
+                  <SelectContent className="max-h-[460px] min-w-[300px]">
+                    {prodsOfCat(l.categoria_id).map((p) => (
+                      <SelectItem key={p.id} value={p.id} className="text-base py-2.5">{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-1">
+                <Label>Qty *</Label>
                 <Input type="number" min={1} value={l.quantidade} onChange={(e) => setLine(l.key, { quantidade: e.target.value })} />
               </div>
               <div className="md:col-span-2">
-                <Label>Est. delivery</Label>
-                <Input type="date" value={l.est_entrega} onChange={(e) => setLine(l.key, { est_entrega: e.target.value })} />
+                <Label>Est Ready</Label>
+                <Input type="date" value={l.est_ready} onChange={(e) => setLine(l.key, { est_ready: e.target.value })} />
               </div>
               <div className="md:col-span-2">
+                <Label>ETA</Label>
+                <Input type="date" value={l.est_entrega} onChange={(e) => setLine(l.key, { est_entrega: e.target.value })} />
+              </div>
+              <div className="md:col-span-1">
                 <Label>Order #</Label>
                 <Input value={l.numero_ordem} onChange={(e) => setLine(l.key, { numero_ordem: e.target.value })} />
               </div>
