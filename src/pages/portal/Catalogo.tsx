@@ -79,8 +79,21 @@ const Catalogo = () => {
       (statusRes.data ?? []).forEach((s: any) => { sMap[s.nome.toLowerCase()] = s; });
       setStatusMap(sMap);
 
-      const allProducts = (prodRes.data as Produto[]) ?? [];
-      setCategorias((catRes.data as Categoria[]) ?? []);
+      let allProducts = (prodRes.data as Produto[]) ?? [];
+      let cats = (catRes.data as Categoria[]) ?? [];
+      // Impersonação ("view as"): a sessão é do admin, então a RLS não escopa. Filtra
+      // categorias E produtos pelo que o CLIENTE realmente veria (RPCs staff-gated).
+      if (impersonatedCustomer?.id) {
+        const [{ data: visCats }, { data: visProds }] = await Promise.all([
+          (supabase as any).rpc("categorias_visiveis_cliente", { _cli_id: impersonatedCustomer.id }),
+          (supabase as any).rpc("produtos_visiveis_cliente", { _cli_id: impersonatedCustomer.id }),
+        ]);
+        const okC = new Set<string>(Array.isArray(visCats) ? visCats : []);
+        const okP = new Set<string>(Array.isArray(visProds) ? visProds : []);
+        cats = cats.filter((c) => okC.has(c.id));
+        allProducts = allProducts.filter((p) => okP.has(p.id));
+      }
+      setCategorias(cats);
 
       // Esconde produto cujo STATUS tem permite_visualizar = false (antes esse flag era
       // ignorado e o produto aparecia mesmo assim).

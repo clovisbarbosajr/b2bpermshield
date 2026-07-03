@@ -40,11 +40,19 @@ const PortalLayout = ({ children }: { children: React.ReactNode }) => {
         (supabase as any).rpc("get_public_config"),
       ]);
       const cfg = Array.isArray(cfgRows) ? cfgRows[0] : cfgRows;
-      setCategorias((cats as Categoria[]) ?? []);
+      let list = (cats as Categoria[]) ?? [];
+      // Impersonação ("view as"): a sessão é do admin, então a RLS não escopa a
+      // privacidade. Filtra as categorias ao que o CLIENTE veria (RPC staff-gated).
+      if (impersonatedCustomer?.id) {
+        const { data: visIds } = await (supabase as any).rpc("categorias_visiveis_cliente", { _cli_id: impersonatedCustomer.id });
+        const allowed = new Set<string>(Array.isArray(visIds) ? visIds : []);
+        list = list.filter((c) => allowed.has(c.id));
+      }
+      setCategorias(list);
       setCatalogPdfUrl(cfg?.catalog_pdf_url ?? null);
     };
     fetch();
-  }, []);
+  }, [impersonatedCustomer]);
 
   const rootCats = categorias.filter(c => !c.parent_id);
   const childrenOf = (parentId: string) => categorias.filter(c => c.parent_id === parentId);
