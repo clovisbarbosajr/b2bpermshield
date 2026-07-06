@@ -85,6 +85,7 @@ const adminNavEntries: NavEntry[] = [
       { to: "/admin/producao/entrada", icon: Package, label: "New Entry" },
       { to: "/admin/producao/status", icon: ClipboardList, label: "Status" },
       { to: "/admin/producao/dashboard", icon: LayoutGrid, label: "Dashboard" },
+      { to: "/admin/estoque/adjustment", icon: Package, label: "Inventory Adjustment" },
     ],
   },
   {
@@ -181,6 +182,16 @@ function buildStaffNav(hasPermission: (key: string) => boolean): NavEntry[] {
       ],
     });
     entries.push({ to: "/admin/product-categories", icon: FolderTree, label: "Product Categories" });
+    // Warehouse/manager: produção + ajuste de estoque em massa (logado no Activity Logs).
+    entries.push({
+      label: "Production", icon: Factory,
+      children: [
+        { to: "/admin/producao/entrada", icon: Package, label: "New Entry" },
+        { to: "/admin/producao/status", icon: ClipboardList, label: "Status" },
+        { to: "/admin/producao/dashboard", icon: LayoutGrid, label: "Dashboard" },
+        { to: "/admin/estoque/adjustment", icon: Package, label: "Inventory Adjustment" },
+      ],
+    });
   }
 
   const settingsChildren: NavItem[] = [];

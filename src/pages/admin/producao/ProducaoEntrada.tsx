@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useActivityLog } from "@/hooks/useActivityLog";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ const newLine = (): Line => ({ key: `l${++LINE_SEQ}`, categoria_id: "", produto_
 const ProducaoEntrada = () => {
   const navigate = useNavigate();
   const { user, role } = useAuth();
+  const { log } = useActivityLog();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [allowedLocs, setAllowedLocs] = useState<Set<string>>(new Set());
@@ -104,6 +106,15 @@ const ProducaoEntrada = () => {
     const { error } = await supabase.from("producao_pedidos").insert(rows as any);
     setSaving(false);
     if (error) { toast.error("Error: " + error.message); return; }
+    // Log de atividade: uma entrada por linha criada (aparece em Activity Logs).
+    const prodById = new Map(produtos.map((p) => [p.id, p]));
+    for (const l of valid) {
+      const p = prodById.get(l.produto_id);
+      log("created", "production", l.produto_id, `${p?.nome ?? "Item"} (qty ${l.quantidade})`, {
+        sku: p?.sku ?? null, qty: parseInt(l.quantidade), est_ready: l.est_ready || null,
+        eta: l.est_entrega || null, order_no: l.numero_ordem || null, container: l.numero_container || null,
+      });
+    }
     toast.success(`${rows.length} production item(s) saved.`);
     navigate("/admin/producao/status");
   };

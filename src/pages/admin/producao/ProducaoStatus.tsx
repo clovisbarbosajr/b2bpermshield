@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useActivityLog } from "@/hooks/useActivityLog";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ const fmtDT = (s: string) => new Date(s).toLocaleString("en-US", { month: "short
 
 const ProducaoStatus = () => {
   const { user } = useAuth();
+  const { log } = useActivityLog();
   const [rows, setRows] = useState<Row[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
@@ -86,6 +88,7 @@ const ProducaoStatus = () => {
     const { error } = await supabase.from("producao_pedidos").update(patch).eq("id", r.id);
     setBusy(null);
     if (error) { toast.error(error.message); return; }
+    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { field: "tracking", tracking: tracking || null, ...(patch.status ? { status: patch.status } : {}) });
     clearTrackingEdit(r.id);
     toast.success("Tracking saved"); load();
   };
@@ -97,6 +100,7 @@ const ProducaoStatus = () => {
     const { error } = await supabase.from("producao_pedidos").update({ status: "a_caminho", tracking: tracking || null }).eq("id", r.id);
     setBusy(null);
     if (error) { toast.error(error.message); return; }
+    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { status: "a_caminho", tracking: tracking || null });
     clearTrackingEdit(r.id); load();
   };
 
@@ -105,6 +109,7 @@ const ProducaoStatus = () => {
     const { error } = await supabase.from("producao_pedidos").update({ status }).eq("id", r.id);
     setBusy(null);
     if (error) { toast.error(error.message); return; }
+    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { status_before: r.status, status_after: status });
     load();
   };
 
@@ -127,6 +132,7 @@ const ProducaoStatus = () => {
       .update({ status: "delivered", quantidade_recebida: q, recebido_em: new Date().toISOString(), recebido_por: user?.id ?? null }).eq("id", r.id);
     setBusy(null);
     if (error) { toast.error("Error: " + error.message); return; }
+    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"}`, { received_qty: q, ordered_qty: r.quantidade, status: "delivered", added_to_inventory: true });
     toast.success(`Received — ${q} added to inventory.`);
     setReceivingId(null); load();
   };
@@ -144,6 +150,11 @@ const ProducaoStatus = () => {
       numero_ordem: editForm.numero_ordem || null, numero_container: editForm.numero_container || null,
     } as any).eq("id", editRow.id);
     if (error) { toast.error(error.message); return; }
+    log("updated", "production", editRow.id, `${editRow.produtos?.nome ?? "Item"}`, {
+      qty_before: editRow.quantidade, qty_after: parseInt(editForm.quantidade),
+      status: editForm.status, est_ready: editForm.est_ready || null, eta: editForm.est_entrega || null,
+      order_no: editForm.numero_ordem || null, container: editForm.numero_container || null,
+    });
     toast.success("Updated"); setEditRow(null); load();
   };
 
@@ -151,6 +162,7 @@ const ProducaoStatus = () => {
     if (!confirm(`Delete this production item ("${r.produtos?.nome}")? This cannot be undone.`)) return;
     const { error } = await supabase.from("producao_pedidos").delete().eq("id", r.id);
     if (error) { toast.error(error.message); return; }
+    log("deleted", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { status: r.status, order_no: r.numero_ordem, container: r.numero_container });
     toast.success("Deleted"); load();
   };
 
@@ -165,6 +177,7 @@ const ProducaoStatus = () => {
     } as any);
     setBusy(null);
     if (error) { toast.error(error.message); return; }
+    log("created", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { duplicated_from: r.id, order_no: r.numero_ordem, container: r.numero_container });
     toast.success("Entry duplicated"); load();
   };
 

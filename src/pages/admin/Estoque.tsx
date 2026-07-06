@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useActivityLog } from "@/hooks/useActivityLog";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ import { toast } from "sonner";
 
 const AdminEstoque = () => {
   const { user } = useAuth();
+  const { log } = useActivityLog();
   const [produtos, setProdutos] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -56,6 +58,11 @@ const AdminEstoque = () => {
       quantidade_nova: novaQtd, motivo: motivo || null, usuario_id: user?.id ?? null,
     });
     await supabase.from("produtos").update({ estoque_total: novaQtd }).eq("id", selected.id);
+    // Também no Activity Logs (Settings → Activity Logs), com detalhes.
+    log("updated", "inventory", selected.id, `${selected.nome} (${selected.sku})`, {
+      qty_before: selected.estoque_total, qty_after: novaQtd,
+      difference: novaQtd - selected.estoque_total, memo: motivo || null,
+    });
     setSaving(false);
     toast.success("Stock updated");
     setSelected(null);

@@ -29,9 +29,35 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 const ENTITY_LABELS: Record<string, string> = {
-  product:  "Product",
-  customer: "Customer",
-  order:    "Order",
+  product:    "Product",
+  customer:   "Customer",
+  order:      "Order",
+  inventory:  "Inventory",
+  production: "Production",
+};
+
+// Renderiza os `details` (jsonb) de forma legível. Ajuste de estoque tem formato
+// dedicado (qty antes → depois); o resto cai no genérico "chave: valor".
+const DetailsLine = ({ details }: { details: any }) => {
+  if (!details || typeof details !== "object") return null;
+  if (details.qty_before !== undefined && details.qty_after !== undefined) {
+    const diff = Number(details.difference ?? details.qty_after - details.qty_before);
+    return (
+      <div className="text-xs text-muted-foreground mt-0.5">
+        Qty <strong>{details.qty_before} → {details.qty_after}</strong> ({diff > 0 ? `+${diff}` : diff})
+        {details.category ? <> · {details.category}</> : null}
+        {details.reference ? <> · Ref {details.reference}</> : null}
+        {details.memo ? <> · {details.memo}</> : null}
+      </div>
+    );
+  }
+  const pairs = Object.entries(details).filter(([, v]) => v !== null && v !== undefined && v !== "");
+  if (pairs.length === 0) return null;
+  return (
+    <div className="text-xs text-muted-foreground mt-0.5">
+      {pairs.map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ")}
+    </div>
+  );
 };
 
 const PAGE_SIZE = 50;
@@ -47,6 +73,23 @@ const ActivityLogs = () => {
   const [filterUser, setFilterUser] = useState("");
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
+  // Usuários que já aparecem nos logs — alimenta o dropdown "User" (filtro por usuário).
+  const [users, setUsers] = useState<{ email: string; name: string | null }[]>([]);
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      const { data } = await (supabase as any)
+        .from("activity_logs")
+        .select("user_email, user_name")
+        .not("user_email", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(2000);
+      const seen = new Map<string, string | null>();
+      (data ?? []).forEach((r: any) => { if (r.user_email && !seen.has(r.user_email)) seen.set(r.user_email, r.user_name); });
+      setUsers([...seen.entries()].map(([email, name]) => ({ email, name })).sort((a, b) => a.email.localeCompare(b.email)));
+    };
+    fetchUsers();
+  }, []);
 
   const fetchLogs = async (p = 1) => {
     setLoading(true);
@@ -61,7 +104,7 @@ const ActivityLogs = () => {
 
     if (filterAction) q = q.eq("action", filterAction);
     if (filterEntity) q = q.eq("entity_type", filterEntity);
-    if (filterUser.trim()) q = q.ilike("user_email", `%${filterUser.trim()}%`);
+    if (filterUser) q = q.eq("user_email", filterUser);
     if (filterFrom) q = q.gte("created_at", `${filterFrom}T00:00:00`);
     if (filterTo) q = q.lte("created_at", `${filterTo}T23:59:59`);
 
@@ -142,18 +185,24 @@ const ActivityLogs = () => {
                 <SelectItem value="product">Product</SelectItem>
                 <SelectItem value="customer">Customer</SelectItem>
                 <SelectItem value="order">Order</SelectItem>
+                <SelectItem value="inventory">Inventory</SelectItem>
+                <SelectItem value="production">Production</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label className="text-xs">User email</Label>
-            <Input
-              className="mt-1"
-              value={filterUser}
-              onChange={e => setFilterUser(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleSearch()}
-              placeholder="Filter by user..."
-            />
+            <Label className="text-xs">User</Label>
+            <Select value={filterUser || "all"} onValueChange={v => setFilterUser(v === "all" ? "" : v)}>
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="All users" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All users</SelectItem>
+                {users.map(u => (
+                  <SelectItem key={u.email} value={u.email}>{u.name ? `${u.name} — ${u.email}` : u.email}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -242,6 +291,7 @@ const ActivityLogs = () => {
                   </TableCell>
                   <TableCell className="text-sm">
                     <div className="font-medium">{log.entity_name || "—"}</div>
+                    <DetailsLine details={log.details} />
                     {log.entity_id && (
                       <div className="text-xs text-muted-foreground font-mono">{log.entity_id.slice(0, 8)}…</div>
                     )}

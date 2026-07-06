@@ -2,7 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 type Action = "created" | "updated" | "deleted";
-type EntityType = "product" | "customer" | "order";
+type EntityType = "product" | "customer" | "order" | "inventory" | "production";
 
 export function useActivityLog() {
   const { user } = useAuth();

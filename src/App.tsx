@@ -41,6 +41,7 @@ import CustomerEdit from "./pages/admin/CustomerEdit";
 import AdminPedidos from "./pages/admin/Pedidos";
 import OrderDetail from "./pages/admin/OrderDetail";
 import AdminEstoque from "./pages/admin/Estoque";
+import InventoryAdjustment from "./pages/admin/InventoryAdjustment";
 import AdminTabelasPreco from "./pages/admin/TabelasPreco";
 import AdminRelatorios from "./pages/admin/Relatorios";
 import AdminConfiguracoes from "./pages/admin/Configuracoes";
@@ -248,6 +249,7 @@ const App = () => (
               <Route path="/admin/categorias" element={<A><AdminCategorias /></A>} />
               <Route path="/admin/clientes" element={<A><AdminClientes /></A>} />
               <Route path="/admin/estoque" element={<AW><AdminEstoque /></AW>} />
+              <Route path="/admin/estoque/adjustment" element={<AW><InventoryAdjustment /></AW>} />
               <Route path="/admin/tabelas-preco" element={<A><AdminTabelasPreco /></A>} />
               <Route path="/admin/relatorios" element={<A><AdminRelatorios /></A>} />
               <Route path="/admin/configuracoes" element={<A><AdminConfiguracoes /></A>} />
