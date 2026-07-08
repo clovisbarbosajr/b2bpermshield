@@ -215,6 +215,14 @@ const Catalogo = () => {
     return status.nome;
   };
 
+  // Quantidade escolhida por produto no grid/lista (default = quantidade mínima).
+  const [qtys, setQtys] = useState<Record<string, number>>({});
+  const qtyOf = (p: Produto) => qtys[p.id] ?? Math.max(p.quantidade_minima || 1, 1);
+  const setQty = (p: Produto, v: number) => {
+    const min = Math.max(p.quantidade_minima || 1, 1);
+    setQtys((prev) => ({ ...prev, [p.id]: Math.max(min, Math.floor(v) || min) }));
+  };
+
   const handleAdd = (p: Produto) => {
     if (!canBuy(p)) return;
     // Produto com variante: não dá pra escolher a opção no grid → manda pra página do produto.
@@ -226,13 +234,14 @@ const Catalogo = () => {
     // Preço $0 (não configurado / "contact us") PODE ser adicionado ao carrinho — o
     // vendedor ajusta o preço depois. (Sem trava de preço zero aqui.)
     const isPreOrder = getStatusInfo(p).nome.toLowerCase() === "pre-order";
+    const qty = qtyOf(p);
     addItem({
       produto_id: p.id, nome: p.nome, sku: p.sku, preco: calculatedPrice,
-      quantidade: p.quantidade_minima, unidade_venda: p.unidade_venda,
+      quantidade: qty, unidade_venda: p.unidade_venda,
       quantidade_minima: p.quantidade_minima, estoque_disponivel: isPreOrder ? 999999 : disponivel(p),
       imagem_url: p.imagem_url,
     });
-    toast.success(`${p.nome} ${isPreOrder ? "added as back order" : "added to cart"}`);
+    toast.success(`${qty} × ${p.nome} ${isPreOrder ? "added as back order" : "added to cart"}`);
   };
 
   return (
@@ -336,9 +345,24 @@ const Catalogo = () => {
                     <Badge className="text-xs bg-blue-600">Pre-order</Badge>
                   )}
                 </div>
-                <Button className="mt-3 w-full gap-2 h-9" size="sm" disabled={!canBuy(p) || isViewer} onClick={(e) => { e.stopPropagation(); handleAdd(p); }}>
-                  <ShoppingCart className="h-4 w-4" /> {getStatusInfo(p).nome.toLowerCase() === "pre-order" ? "Back Order" : "Add to Cart"}
-                </Button>
+                {/* Estoque disponível */}
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {getStatusInfo(p).nome.toLowerCase() === "pre-order"
+                    ? "Pre-order"
+                    : <>Available: <span className={disponivel(p) > 0 ? "font-medium text-foreground" : "font-medium text-destructive"}>{Math.max(disponivel(p), 0)}</span> {p.unidade_venda}</>}
+                </p>
+                {/* Quantidade + adicionar (produto com variante vai pra página do produto) */}
+                <div className="mt-3 flex gap-2" onClick={(e) => e.stopPropagation()}>
+                  {!variantProductIds.has(p.id) && (
+                    <Input type="number" min={Math.max(p.quantidade_minima || 1, 1)} value={qtyOf(p)}
+                      disabled={!canBuy(p) || isViewer}
+                      onChange={(e) => setQty(p, parseInt(e.target.value))}
+                      className="h-9 w-20 shrink-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                  )}
+                  <Button className="flex-1 gap-2 h-9" size="sm" disabled={!canBuy(p) || isViewer} onClick={(e) => { e.stopPropagation(); handleAdd(p); }}>
+                    <ShoppingCart className="h-4 w-4" /> {getStatusInfo(p).nome.toLowerCase() === "pre-order" ? "Back Order" : "Add to Cart"}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -357,10 +381,21 @@ const Catalogo = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="font-semibold truncate">{p.nome}</h3>
-                  <p className="text-xs text-muted-foreground">{p.sku}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {p.sku ? `${p.sku} · ` : ""}
+                    {getStatusInfo(p).nome.toLowerCase() === "pre-order"
+                      ? "Pre-order"
+                      : <>Available: <span className={disponivel(p) > 0 ? "font-medium text-foreground" : "font-medium text-destructive"}>{Math.max(disponivel(p), 0)}</span></>}
+                  </p>
                 </div>
                 <p className="text-lg font-bold text-accent">${getPrice(p).toFixed(2)}</p>
                 {!canBuy(p) && <Badge variant="destructive" className="text-xs">{getStatusLabel(p)}</Badge>}
+                {canBuy(p) && !isViewer && !variantProductIds.has(p.id) && (
+                  <Input type="number" min={Math.max(p.quantidade_minima || 1, 1)} value={qtyOf(p)}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setQty(p, parseInt(e.target.value))}
+                    className="h-9 w-20 shrink-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                )}
                 <Button size="sm" className="gap-1" disabled={!canBuy(p) || isViewer} onClick={(e) => { e.stopPropagation(); handleAdd(p); }}>
                   <ShoppingCart className="h-4 w-4" /> {getStatusInfo(p).nome.toLowerCase() === "pre-order" ? "Back Order" : "Add"}
                 </Button>
