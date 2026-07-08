@@ -30,6 +30,14 @@ const sortItems = (items: Item[], sortKey: string, sortDir: "asc" | "desc"): Ite
   return [...items].sort((a, b) => {
     if (sortKey === "quantidade") return (a.quantidade - b.quantidade) * dir;
     if (sortKey === "status") return (a.status ?? "").localeCompare(b.status ?? "") * dir;
+    if (sortKey === "eta") {
+      // Sem ETA vai sempre pro fim, independente da direção.
+      const x = a.est_entrega ?? "", y = b.est_entrega ?? "";
+      if (!x && !y) return 0;
+      if (!x) return 1;
+      if (!y) return -1;
+      return x.localeCompare(y) * dir;
+    }
     return (a.produtos?.nome ?? "").localeCompare(b.produtos?.nome ?? "") * dir;
   });
 };
@@ -39,9 +47,10 @@ const ProducaoDashboard = () => {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   const [openLoc, setOpenLoc] = useState<Loc | null>(null);
-  // Ordenação do drill-down (setas, igual à tela de Status). Padrão: alfabético.
-  type SortKey = "nome" | "quantidade" | "status";
-  const [sortKey, setSortKey] = useState<SortKey>("nome");
+  // Ordenação do drill-down (setas, igual à tela de Status). Padrão: ETA
+  // (mais próximo primeiro; sem ETA vai pro fim).
+  type SortKey = "nome" | "quantidade" | "status" | "eta";
+  const [sortKey, setSortKey] = useState<SortKey>("eta");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -162,6 +171,7 @@ const ProducaoDashboard = () => {
           <div className="flex items-center justify-between px-4 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
             <SortBtn k="nome" label="Product" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
             <div className="flex items-center gap-4">
+              <SortBtn k="eta" label="ETA" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
               <SortBtn k="quantidade" label="Qty" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
               <SortBtn k="status" label="Status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
             </div>

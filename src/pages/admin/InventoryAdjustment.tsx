@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Save } from "lucide-react";
+import { Search, Save, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 
 // Ajuste de estoque em MASSA (estilo QuickBooks "Adjust Quantity/Value on Hand"):
@@ -19,6 +19,20 @@ import { toast } from "sonner";
 
 type Produto = { id: string; nome: string; sku: string; categoria_id: string | null; estoque_total: number };
 type Categoria = { id: string; nome: string; parent_id: string | null };
+
+// Cabeçalho ordenável — mesmo padrão visual da Produção (Status/Dashboard).
+const SortHead = ({ k, label, sortKey, sortDir, onSort, className }: {
+  k: string; label: string; sortKey: string; sortDir: "asc" | "desc"; onSort: (k: any) => void; className?: string;
+}) => (
+  <TableHead onClick={() => onSort(k)} className={`cursor-pointer select-none whitespace-nowrap hover:text-foreground ${className ?? ""}`}>
+    <span className="inline-flex items-center gap-1">
+      {label}
+      {sortKey === k
+        ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />)
+        : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+    </span>
+  </TableHead>
+);
 
 const InventoryAdjustment = () => {
   const { user } = useAuth();
@@ -56,12 +70,26 @@ const InventoryAdjustment = () => {
     };
   }, [categorias]);
 
+  // Ordenação por coluna (padrão: alfabético por Item — não há ETA aqui).
+  type SortKey = "nome" | "categoria" | "estoque";
+  const [sortKey, setSortKey] = useState<SortKey>("nome");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const toggleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir("asc"); }
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return produtos;
-    return produtos.filter((p) =>
+    const base = !q ? produtos : produtos.filter((p) =>
       p.nome.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || catPath(p.categoria_id).toLowerCase().includes(q));
-  }, [produtos, search, catPath]);
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...base].sort((a, b) => {
+      if (sortKey === "estoque") return (a.estoque_total - b.estoque_total) * dir;
+      if (sortKey === "categoria") return catPath(a.categoria_id).localeCompare(catPath(b.categoria_id)) * dir;
+      return a.nome.localeCompare(b.nome) * dir;
+    });
+  }, [produtos, search, catPath, sortKey, sortDir]);
 
   // Linhas efetivamente alteradas (valor preenchido, válido e diferente do atual).
   const changes = useMemo(() =>
@@ -140,8 +168,9 @@ const InventoryAdjustment = () => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Item</TableHead><TableHead>Category</TableHead>
-                <TableHead className="text-right">Qty on Hand</TableHead>
+                <SortHead k="nome" label="Item" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortHead k="categoria" label="Category" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortHead k="estoque" label="Qty on Hand" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} className="text-right" />
                 <TableHead className="w-36 text-right">New Quantity</TableHead>
                 <TableHead className="text-right">Qty Difference</TableHead>
               </TableRow>

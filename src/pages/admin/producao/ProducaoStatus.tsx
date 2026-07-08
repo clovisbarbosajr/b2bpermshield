@@ -70,10 +70,11 @@ const ProducaoStatus = () => {
   useEffect(() => { load(); }, []);
 
   // Busca (produto/SKU/order/container/tracking) + ordenação por coluna.
-  // Padrão: alfabético por produto; clicar no cabeçalho alterna asc/desc.
+  // Padrão: por ETA (mais próximo primeiro; sem ETA no fim) — mesmo padrão do
+  // Dashboard. Clicar no cabeçalho alterna asc/desc.
   const [search, setSearch] = useState("");
   type SortKey = "produto" | "quantidade" | "est_ready" | "est_entrega" | "numero_ordem" | "status";
-  const [sortKey, setSortKey] = useState<SortKey>("produto");
+  const [sortKey, setSortKey] = useState<SortKey>("est_entrega");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
