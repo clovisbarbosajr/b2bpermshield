@@ -718,17 +718,20 @@ Deno.serve(async (req) => {
           }
         }
       }
-      // DIAGNÓSTICO: se não veio nenhum relacionado, mostra os campos que a API
-      // realmente manda no produto (arrays + qualquer chave "relat/bundle/together")
-      // — assim sabemos se o dado existe no payload e com qual nome.
-      let relDiag = "";
+      // DIAGNÓSTICO (persistido em sync_log.samples p/ consulta via SQL): se não veio
+      // nenhum relacionado, registra os campos que a API realmente manda no produto
+      // (arrays + qualquer chave "relat/bundle/together") — revela se o dado existe
+      // no payload e com qual nome. Marcador "SYNC_VERSION:related-v2" confirma que
+      // esta versão (com o passo de related) está de fato deployada.
+      const diagSamples: string[] = ["SYNC_VERSION:related-v2"];
       if (relatedRows === 0 && allProducts.length) {
         const s = allProducts[0] as Record<string, any>;
         const arrays = Object.keys(s).filter((k) => Array.isArray(s[k]));
         const relish = Object.keys(s).filter((k) => /relat|bundle|together/i.test(k));
-        relDiag = ` | diag arrays=[${arrays.join(",")}] relish=[${relish.join(",") || "none"}]`;
+        diagSamples.push(`arrays=[${arrays.join(",")}]`, `relish=[${relish.join(",") || "none"}]`);
       }
-      await logRun(adminClient, "products", { created: synced, errors, samples: errorSamples });
+      const relDiag = relatedRows === 0 ? ` | ${diagSamples.join(" ")}` : "";
+      await logRun(adminClient, "products", { created: synced, errors, samples: [...diagSamples, ...errorSamples] });
       return new Response(JSON.stringify({
         success: true,
         samples: errorSamples,
