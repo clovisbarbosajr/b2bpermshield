@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Plus, ChevronLeft, ChevronRight, Pencil, X, Download } from "lucide-react";
 import { toast } from "sonner";
 import { ORDER_STATUSES, statusLabel, statusBadge, canonicalStatus } from "@/lib/orderStatuses";
+import { categoryTreeOptions } from "@/lib/categoryTree";
 
 // Os 7 status do B2BWave (fonte única).
 const statusOptions = ORDER_STATUSES;
@@ -59,7 +60,7 @@ const AdminPedidos = () => {
   const fetchData = useCallback(async () => {
     const [{ data }, { data: cats }, { data: payOpts }, { data: shipOpts }, { data: repData }] = await Promise.all([
       supabase.from("pedidos").select("*, clientes(nome, empresa, email, telefone)").order("created_at", { ascending: false }),
-      supabase.from("categorias").select("id, nome").eq("ativo", true).order("nome"),
+      supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("nome"),
       supabase.from("payment_options").select("id, nome").eq("ativo", true).order("ordem"),
       supabase.from("shipping_options").select("id, nome").eq("ativo", true).order("ordem"),
       supabase.from("representantes").select("id, nome").eq("ativo", true).order("nome"),
@@ -201,7 +202,7 @@ const AdminPedidos = () => {
               <SelectTrigger className="h-8"><SelectValue placeholder="Choose category" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">Choose category</SelectItem>
-                {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                {categoryTreeOptions(categories).map((c) => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

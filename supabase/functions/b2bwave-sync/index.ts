@@ -507,21 +507,15 @@ Deno.serve(async (req) => {
         if (p.sku) existingBySku.set(p.sku.toLowerCase(), p);
       }
 
-      const seenSkus = new Set<string>();
       const toUpsert: any[] = [];
       const legacyFixes: { id: string; row: any }[] = [];  // linhas antigas sem b2bwave_id: update por id
       let skipped = 0;
 
       for (const p of allProducts) {
-        // Código REAL do B2BWave, ou NULO (sem invenção). Dedup só quando há
-        // código repetido no lote (a UNIQUE do sku vale só p/ preenchidos).
-        let finalSku: string | null = p.code || p.sku || null;
-        if (finalSku) {
-          const base = finalSku;
-          let counter = 2;
-          while (seenSkus.has(finalSku.toLowerCase())) finalSku = `${base}-${counter++}`;
-          seenSkus.add(finalSku.toLowerCase());
-        }
+        // Código REAL do B2BWave, ou NULO — SEM sufixos "-87": no original vários
+        // produtos compartilham o mesmo código, e a UNIQUE local foi removida
+        // (migração 20260708140000). O casamento é por b2bwave_id, não por sku.
+        const finalSku: string | null = p.code || p.sku || null;
 
         // Preço base: usa o preço da tabela DEFAULT do B2BWave (fonte real).
         // Fallbacks: qualquer tabela com preço > 0 -> p.price -> MSRP. Resolve $0,00.
@@ -587,6 +581,9 @@ Deno.serve(async (req) => {
             existing.ativo !== row.ativo || existing.imagem_url !== row.imagem_url ||
             existing.estoque_total !== row.estoque_total || existing.categoria_id !== row.categoria_id ||
             (existing.estoque_reservado ?? 0) !== (row.estoque_reservado ?? 0) ||
+            // sku no diff: repõe o código real do B2BWave quando o local diverge
+            // (é o caminho de RESTAURAÇÃO dos códigos zerados por engano).
+            (existing.sku ?? null) !== (row.sku ?? null) ||
             Number(existing.preco_msrp) !== (row.preco_msrp ?? 0) || dateFixNeeded;
           if (!changed) { skipped++; continue; }
           // Linha legada sem b2bwave_id: upsert por b2bwave_id INSERIRIA duplicata.

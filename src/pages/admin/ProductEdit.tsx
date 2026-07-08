@@ -14,8 +14,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import { ArrowLeft, Save, Upload, Plus, Trash2, Image as ImageIcon, FileText, Loader2, Lock, X } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
+import { categoryTreeOptions } from "@/lib/categoryTree";
 
-type Categoria = { id: string; nome: string };
+type Categoria = { id: string; nome: string; parent_id: string | null; ordem?: number | null };
 type Brand = { id: string; nome: string };
 type TabelaPreco = { id: string; nome: string };
 type Cliente = { id: string; nome: string; empresa: string };
@@ -91,7 +92,7 @@ const ProductEdit = () => {
 
   const fetchLookups = async () => {
     const [c, b, tp, cl, po, pg] = await Promise.all([
-      supabase.from("categorias").select("id, nome").eq("ativo", true).order("nome"),
+      supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("nome"),
       supabase.from("brands").select("id, nome").order("nome"),
       supabase.from("tabelas_preco").select("id, nome").order("nome"),
       supabase.from("clientes").select("id, nome, empresa").order("nome"),
@@ -420,7 +421,7 @@ const ProductEdit = () => {
                       <Label>Category *</Label>
                       <Select value={form.categoria_id} onValueChange={v => f("categoria_id", v)}>
                         <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                        <SelectContent>{categorias.map(c => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}</SelectContent>
+                        <SelectContent>{categoryTreeOptions(categorias).map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                   </div>

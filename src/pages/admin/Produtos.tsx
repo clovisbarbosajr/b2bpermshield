@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Pencil, Search, Image as ImageIcon, Eye, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useActivityLog } from "@/hooks/useActivityLog";
+import { categoryTreeOptions } from "@/lib/categoryTree";
 
 const PAGE_SIZE = 25;
 
@@ -28,7 +29,7 @@ type Produto = {
   imagem_url: string | null; status_produto: string | null; preco_msrp: number | null;
   custo: number | null; created_at: string; updated_at: string;
 };
-type Categoria = { id: string; nome: string };
+type Categoria = { id: string; nome: string; parent_id: string | null; ordem?: number | null };
 type Brand = { id: string; nome: string };
 
 const emptyFilters = {
@@ -56,7 +57,7 @@ const AdminProdutos = () => {
       const [p, c, b, pg, pl, pa] = await Promise.all([
         // Ordena por data de cadastro (mais recente primeiro) para espelhar o B2BWave (clone).
         supabase.from("produtos").select("*").order("created_at", { ascending: false }),
-        supabase.from("categorias").select("id, nome").order("nome"),
+        supabase.from("categorias").select("id, nome, parent_id, ordem").order("nome"),
         supabase.from("brands").select("id, nome").order("nome"),
         supabase.from("privacy_groups").select("id, nome").eq("ativo", true),
         supabase.from("tabelas_preco").select("id, nome").eq("ativo", true).order("nome"),
@@ -157,7 +158,7 @@ const AdminProdutos = () => {
               <SelectTrigger className="h-8"><SelectValue placeholder="Choose category" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__all__">Choose category</SelectItem>
-                {categorias.map(c => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+                {categoryTreeOptions(categorias).map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
