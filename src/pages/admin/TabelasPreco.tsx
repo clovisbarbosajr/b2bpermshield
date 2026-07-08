@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, DollarSign, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, DollarSign, Search, Copy } from "lucide-react";
 
 type TabelaPreco = {
   id: string; nome: string; descricao: string | null; ativo: boolean; is_default: boolean;
@@ -71,6 +71,26 @@ const AdminTabelasPreco = () => {
     const { error } = await supabase.from("tabelas_preco").delete().eq("id", id);
     if (error) { toast.error(error.message); return; }
     toast.success("Price list removed"); fetchData();
+  };
+
+  // Duplica a price list: cria "<nome> (copy)" (nunca default) e copia TODOS os
+  // preços custom. Se a cópia dos preços falhar, avisa — a lista fica criada e
+  // é só apagar/repetir (nada da lista original é tocado).
+  const handleDuplicate = async (t: TabelaPreco) => {
+    const { data: nova, error } = await supabase.from("tabelas_preco")
+      .insert({ nome: `${t.nome} (copy)`, descricao: t.descricao, ativo: t.ativo, is_default: false })
+      .select("id").single();
+    if (error || !nova) { toast.error(error?.message ?? "Error duplicating"); return; }
+    const { data: items, error: readErr } = await supabase.from("tabela_preco_itens")
+      .select("produto_id, preco").eq("tabela_preco_id", t.id);
+    if (readErr) { toast.error("List created, but failed to read prices: " + readErr.message); fetchData(); return; }
+    if (items && items.length > 0) {
+      const rows = items.map((i) => ({ tabela_preco_id: nova.id, produto_id: i.produto_id, preco: i.preco }));
+      const { error: insErr } = await supabase.from("tabela_preco_itens").insert(rows);
+      if (insErr) { toast.error("List created, but prices failed to copy: " + insErr.message); fetchData(); return; }
+    }
+    toast.success(`Price list duplicated (${items?.length ?? 0} price(s) copied)`);
+    fetchData();
   };
 
   const openItems = async (t: TabelaPreco) => {
@@ -169,6 +189,7 @@ const AdminTabelasPreco = () => {
                   <TableCell>{t.is_default && <Badge variant="outline">Default</Badge>}</TableCell>
                   <TableCell className="text-right space-x-1">
                     <Button variant="ghost" size="icon" onClick={() => openItems(t)} title="Manage prices"><DollarSign className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="icon" onClick={() => handleDuplicate(t)} title="Duplicate price list"><Copy className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" onClick={() => openEdit(t)}><Pencil className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(t.id)}><Trash2 className="h-4 w-4" /></Button>
                   </TableCell>

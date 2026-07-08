@@ -263,7 +263,9 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
   const productSkuToId = new Map<string, string>();
   const productNameToId = new Map<string, string>();
   for (const p of productsRes.data || []) {
-    productSkuToId.set((p.sku || "").toLowerCase(), p.id);
+    // Só indexa sku PREENCHIDO — sku vazio no índice casaria o produto errado
+    // (qualquer código "startsWith" de string vazia é true).
+    if (p.sku) productSkuToId.set(p.sku.toLowerCase(), p.id);
     productNameToId.set((p.nome || "").toLowerCase(), p.id);
   }
   let created = 0, updated = 0, skipped = 0, errors = 0;
@@ -494,22 +496,32 @@ Deno.serve(async (req) => {
         pricesByProduct.get(pid)!.set(plid, val);
       }
 
-      // Load existing products for comparison
-      const { data: existingProds } = await adminClient.from("produtos").select("id, sku, nome, preco, ativo, imagem_url, estoque_total, estoque_reservado, created_at");
-      const existingMap = new Map<string, any>();
-      for (const p of existingProds || []) existingMap.set((p.sku || "").toLowerCase(), p);
+      // Load existing products for comparison. O casamento agora é por B2BWAVE_ID
+      // (a identidade real) — o sku deixou de ser chave: é OPCIONAL (igual ao
+      // B2BWave) e NÃO é mais auto-gerado ("b2b-123"/sufixos) quando não existe.
+      const { data: existingProds } = await adminClient.from("produtos").select("id, sku, nome, preco, ativo, imagem_url, estoque_total, estoque_reservado, created_at, b2bwave_id");
+      const existingMap = new Map<string, any>();          // por b2bwave_id
+      const existingBySku = new Map<string, any>();        // fallback p/ linhas legadas sem b2bwave_id
+      for (const p of existingProds || []) {
+        if (p.b2bwave_id) existingMap.set(String(p.b2bwave_id), p);
+        if (p.sku) existingBySku.set(p.sku.toLowerCase(), p);
+      }
 
       const seenSkus = new Set<string>();
       const toUpsert: any[] = [];
+      const legacyFixes: { id: string; row: any }[] = [];  // linhas antigas sem b2bwave_id: update por id
       let skipped = 0;
 
       for (const p of allProducts) {
-        let sku = p.code || p.sku || `b2b-${p.id}`;
-        if (seenSkus.has(sku)) sku = `${sku}-${p.id}`;
-        let finalSku = sku;
-        let counter = 2;
-        while (seenSkus.has(finalSku)) finalSku = `${sku}-${counter++}`;
-        seenSkus.add(finalSku);
+        // Código REAL do B2BWave, ou NULO (sem invenção). Dedup só quando há
+        // código repetido no lote (a UNIQUE do sku vale só p/ preenchidos).
+        let finalSku: string | null = p.code || p.sku || null;
+        if (finalSku) {
+          const base = finalSku;
+          let counter = 2;
+          while (seenSkus.has(finalSku.toLowerCase())) finalSku = `${base}-${counter++}`;
+          seenSkus.add(finalSku.toLowerCase());
+        }
 
         // Preço base: usa o preço da tabela DEFAULT do B2BWave (fonte real).
         // Fallbacks: qualquer tabela com preço > 0 -> p.price -> MSRP. Resolve $0,00.
@@ -564,8 +576,9 @@ Deno.serve(async (req) => {
           if (resolvedCategoryId) row.categoria_id = resolvedCategoryId;
         }
 
-        // Check if changed
-        const existing = existingMap.get(finalSku.toLowerCase());
+        // Check if changed — casa por b2bwave_id; legado (sem b2bwave_id) casa por sku.
+        const existing = existingMap.get(String(p.id))
+          ?? (finalSku ? existingBySku.get(finalSku.toLowerCase()) : undefined);
         if (existing) {
           // Backfill one-shot: se a data local difere da real do B2BWave, atualiza.
           const dateFixNeeded = !!row.created_at && existing.created_at &&
@@ -576,6 +589,9 @@ Deno.serve(async (req) => {
             (existing.estoque_reservado ?? 0) !== (row.estoque_reservado ?? 0) ||
             Number(existing.preco_msrp) !== (row.preco_msrp ?? 0) || dateFixNeeded;
           if (!changed) { skipped++; continue; }
+          // Linha legada sem b2bwave_id: upsert por b2bwave_id INSERIRIA duplicata.
+          // Atualiza por id (e de quebra grava o b2bwave_id que faltava).
+          if (!existing.b2bwave_id) { legacyFixes.push({ id: existing.id, row }); continue; }
         }
         toUpsert.push(row);
       }
@@ -585,18 +601,23 @@ Deno.serve(async (req) => {
       const chunkSize = 50;
       for (let i = 0; i < toUpsert.length; i += chunkSize) {
         const chunk = toUpsert.slice(i, i + chunkSize);
-        const { error } = await adminClient.from("produtos").upsert(chunk, { onConflict: "sku" });
+        const { error } = await adminClient.from("produtos").upsert(chunk, { onConflict: "b2bwave_id" });
         if (error) {
           for (const row of chunk) {
-            const r = await adminClient.from("produtos").upsert(row, { onConflict: "sku" });
+            const r = await adminClient.from("produtos").upsert(row, { onConflict: "b2bwave_id" });
             if (r.error) {
               errors++;
-              if (errorSamples.length < 5) errorSamples.push(`${row.sku}: ${r.error.message}`);
+              if (errorSamples.length < 5) errorSamples.push(`${row.sku ?? row.nome}: ${r.error.message}`);
             } else synced++;
           }
         } else {
           synced += chunk.length;
         }
+      }
+      for (const f of legacyFixes) {
+        const r = await adminClient.from("produtos").update(f.row).eq("id", f.id);
+        if (r.error) { errors++; if (errorSamples.length < 5) errorSamples.push(`${f.row.nome}: ${r.error.message}`); }
+        else synced++;
       }
 
       // Mapa produto b2b id -> local id (reaproveitado p/ preços, variantes e stale).
