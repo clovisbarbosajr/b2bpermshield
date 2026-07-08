@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Upload, CheckCircle, XCircle, Link2 } from "lucide-react";
 import { toast } from "sonner";
+import * as XLSX from "xlsx";
 
 // IMPORTA RELATED PRODUCTS do export de produtos do B2BWave.
 // A API do B2BWave NÃO expõe related products (confirmado na documentação oficial),
@@ -47,6 +48,23 @@ function parseCSV(text: string): Record<string, string>[] {
   });
 }
 
+// Lê .xlsx/.xls (export do B2BWave) e devolve no MESMO formato do parseCSV:
+// linhas como objetos com chaves de cabeçalho em minúsculas.
+function parseXlsx(buf: ArrayBuffer): Record<string, string>[] {
+  const wb = XLSX.read(buf, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const grid: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
+  if (grid.length < 2) return [];
+  const headers = grid[0].map((h) => String(h ?? "").trim().toLowerCase());
+  return grid.slice(1)
+    .filter((vals) => vals.some((c) => String(c ?? "").trim() !== ""))
+    .map((vals) => {
+      const r: Record<string, string> = {};
+      headers.forEach((h, i) => { r[h] = String(vals[i] ?? "").trim(); });
+      return r;
+    });
+}
+
 type Result = { row: number; product: string; status: "ok" | "skip" | "error"; message: string };
 
 const ImportRelatedProducts = () => {
@@ -60,8 +78,9 @@ const ImportRelatedProducts = () => {
     setFileName(file.name);
     setResults([]);
     setSummary("");
-    const text = await file.text();
-    const rows = parseCSV(text);
+    // Detecta o formato: .xlsx/.xls (export do B2BWave) ou .csv/.txt.
+    const isXlsx = /\.x(ls|lsx)$/i.test(file.name);
+    const rows = isXlsx ? parseXlsx(await file.arrayBuffer()) : parseCSV(await file.text());
     if (rows.length === 0) { toast.error("No data rows found"); return; }
     if (!("related_products" in rows[0])) {
       toast.error('Column "related_products" not found. Use the B2BWave product EXPORT file (Products > Export).');
@@ -138,11 +157,11 @@ const ImportRelatedProducts = () => {
       </div>
 
       <Card className="p-6 mb-4">
-        <input ref={inputRef} type="file" accept=".csv,.txt" className="hidden"
+        <input ref={inputRef} type="file" accept=".csv,.txt,.xlsx,.xls" className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
         <div className="flex items-center gap-3">
           <Button onClick={() => inputRef.current?.click()} disabled={importing} className="gap-1">
-            <Upload className="h-4 w-4" /> {importing ? "Importing..." : "Upload B2BWave export (.csv)"}
+            <Upload className="h-4 w-4" /> {importing ? "Importing..." : "Upload B2BWave export (.xlsx or .csv)"}
           </Button>
           {fileName && <span className="text-sm text-muted-foreground">{fileName}</span>}
         </div>
