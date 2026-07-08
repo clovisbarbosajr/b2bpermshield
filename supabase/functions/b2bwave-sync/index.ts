@@ -718,11 +718,21 @@ Deno.serve(async (req) => {
           }
         }
       }
+      // DIAGNÓSTICO: se não veio nenhum relacionado, mostra os campos que a API
+      // realmente manda no produto (arrays + qualquer chave "relat/bundle/together")
+      // — assim sabemos se o dado existe no payload e com qual nome.
+      let relDiag = "";
+      if (relatedRows === 0 && allProducts.length) {
+        const s = allProducts[0] as Record<string, any>;
+        const arrays = Object.keys(s).filter((k) => Array.isArray(s[k]));
+        const relish = Object.keys(s).filter((k) => /relat|bundle|together/i.test(k));
+        relDiag = ` | diag arrays=[${arrays.join(",")}] relish=[${relish.join(",") || "none"}]`;
+      }
       await logRun(adminClient, "products", { created: synced, errors, samples: errorSamples });
       return new Response(JSON.stringify({
         success: true,
         samples: errorSamples,
-        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${deleted} stale deleted${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
+        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${deleted} stale deleted${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
       }), { headers: jsonHeaders });
     }
 
