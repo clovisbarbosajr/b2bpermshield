@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Check, Truck, PackageCheck, Pencil, Trash2, ChevronDown, ChevronRight, StickyNote, Copy } from "lucide-react";
+import { Check, Truck, PackageCheck, Pencil, Trash2, ChevronDown, ChevronRight, StickyNote, Copy, Search, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 
 type Row = {
@@ -24,6 +24,20 @@ type Produto = { id: string; nome: string; sku: string; categoria_id: string | n
 type Categoria = { id: string; nome: string; parent_id: string | null };
 
 const fmtDT = (s: string) => new Date(s).toLocaleString("en-US", { month: "short", day: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+// Cabeçalho ordenável: seta cheia = coluna ativa (asc/desc); seta dupla apagada = clicável.
+const SortHead = ({ k, label, sortKey, sortDir, onSort }: {
+  k: string; label: string; sortKey: string; sortDir: "asc" | "desc"; onSort: (k: any) => void;
+}) => (
+  <TableHead onClick={() => onSort(k)} className="cursor-pointer select-none whitespace-nowrap hover:text-foreground">
+    <span className="inline-flex items-center gap-1">
+      {label}
+      {sortKey === k
+        ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />)
+        : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+    </span>
+  </TableHead>
+);
 
 const ProducaoStatus = () => {
   const { user } = useAuth();
@@ -55,8 +69,46 @@ const ProducaoStatus = () => {
   };
   useEffect(() => { load(); }, []);
 
-  const active = useMemo(() => rows.filter((r) => r.status !== "delivered"), [rows]);
-  const received = useMemo(() => rows.filter((r) => r.status === "delivered"), [rows]);
+  // Busca (produto/SKU/order/container/tracking) + ordenação por coluna.
+  // Padrão: alfabético por produto; clicar no cabeçalho alterna asc/desc.
+  const [search, setSearch] = useState("");
+  type SortKey = "produto" | "quantidade" | "est_ready" | "est_entrega" | "numero_ordem" | "status";
+  const [sortKey, setSortKey] = useState<SortKey>("produto");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const toggleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir("asc"); }
+  };
+  const matches = (r: Row) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [r.produtos?.nome, r.produtos?.sku, r.numero_ordem, r.numero_container, r.tracking]
+      .some((v) => (v ?? "").toLowerCase().includes(q));
+  };
+  const cmp = (a: Row, b: Row): number => {
+    // Vazios sempre por último, independente da direção.
+    const txt = (va: string | null | undefined, vb: string | null | undefined) => {
+      const x = (va ?? "").trim(), y = (vb ?? "").trim();
+      if (!x && !y) return 0;
+      if (!x) return 1;
+      if (!y) return -1;
+      return sortDir === "asc" ? x.localeCompare(y) : y.localeCompare(x);
+    };
+    switch (sortKey) {
+      case "produto":     return txt(a.produtos?.nome, b.produtos?.nome);
+      case "quantidade":  return sortDir === "asc" ? a.quantidade - b.quantidade : b.quantidade - a.quantidade;
+      case "est_ready":   return txt(a.est_ready, b.est_ready);
+      case "est_entrega": return txt(a.est_entrega, b.est_entrega);
+      case "numero_ordem": return txt(a.numero_ordem, b.numero_ordem);
+      case "status":      return txt(a.status, b.status);
+    }
+  };
+  const active = useMemo(
+    () => rows.filter((r) => r.status !== "delivered" && matches(r)).sort(cmp),
+    [rows, search, sortKey, sortDir]);
+  const received = useMemo(
+    () => rows.filter((r) => r.status === "delivered" && matches(r)),
+    [rows, search]);
 
   // Agrupa pela categoria REAL (id) e rotula com o caminho completo (Estado › ... › One Plus)
   // — categorias homônimas em estados diferentes ficavam misturadas num grupo só.
@@ -217,13 +269,24 @@ const ProducaoStatus = () => {
         <p className="text-sm text-muted-foreground">Active items in production. When you check in a received item it moves to the Received log below and is added to inventory.</p>
       </div>
 
+      <div className="relative mb-4 sm:w-96">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input placeholder="Search by product, SKU, order #, container or tracking..." className="pl-9"
+          value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+
       <Card className="p-0 overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Product</TableHead><TableHead>Qty</TableHead><TableHead>Est Ready</TableHead><TableHead>ETA</TableHead>
-              <TableHead>Order #</TableHead><TableHead className="min-w-[190px]">Tracking</TableHead>
-              <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
+              <SortHead k="produto" label="Product" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHead k="quantidade" label="Qty" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHead k="est_ready" label="Est Ready" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHead k="est_entrega" label="ETA" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHead k="numero_ordem" label="Order #" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <TableHead className="min-w-[190px]">Tracking</TableHead>
+              <SortHead k="status" label="Status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

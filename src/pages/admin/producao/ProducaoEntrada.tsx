@@ -103,7 +103,8 @@ const ProducaoEntrada = () => {
       // Container # é o rastreio na prática (frete marítimo): já nasce como tracking,
       // sem precisar redigitar na tela de Status.
       tracking: l.numero_container.trim() || null,
-      status: "solicitado",
+      // Regra: entrada JÁ com container = mercadoria embarcada → nasce "On the way".
+      status: l.numero_container.trim() ? "a_caminho" : "solicitado",
       created_by: user?.id ?? null,
     }));
     const { error } = await supabase.from("producao_pedidos").insert(rows as any);
@@ -116,6 +117,7 @@ const ProducaoEntrada = () => {
       log("created", "production", l.produto_id, `${p?.nome ?? "Item"} (qty ${l.quantidade})`, {
         sku: p?.sku ?? null, qty: parseInt(l.quantidade), est_ready: l.est_ready || null,
         eta: l.est_entrega || null, order_no: l.numero_ordem || null, container: l.numero_container || null,
+        status: l.numero_container.trim() ? "a_caminho" : "solicitado",
       });
     }
     toast.success(`${rows.length} production item(s) saved.`);

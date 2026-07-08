@@ -48,7 +48,11 @@ const ProducaoDashboard = () => {
       e.items.push(it); e.qty += it.quantidade;
       if (it.status === "a_caminho") e.onTheWay += 1;
     }
-    return [...map.values()].sort((a, b) => b.qty - a.qty);
+    // Ordem ALFABÉTICA (antes era por volume de unidades, o que parecia aleatório).
+    // Itens do drill-down também em ordem alfabética de produto.
+    const locs = [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+    locs.forEach((l) => l.items.sort((x, y) => (x.produtos?.nome ?? "").localeCompare(y.produtos?.nome ?? "")));
+    return locs;
   }, [items, categorias]);
 
   return (
