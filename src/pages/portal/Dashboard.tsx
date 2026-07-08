@@ -5,7 +5,8 @@ import { canonicalStatus, statusLabel, statusBadge } from "@/lib/orderStatuses";
 import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ShoppingCart, Package, ClipboardList, User, TrendingUp, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ShoppingCart, Package, ClipboardList, User, TrendingUp, Clock, Plus } from "lucide-react";
 
 type RecentOrder = {
   id: string;
@@ -55,13 +56,16 @@ const PortalDashboard = () => {
 
   return (
     <PortalLayout>
-      {/* Welcome */}
-      {clienteNome && (
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold">Welcome, {clienteNome}</h2>
+      {/* Welcome + atalho pra iniciar um pedido (vai pro catálogo) */}
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          {clienteNome && <h2 className="text-2xl font-bold">Welcome, {clienteNome}</h2>}
           <p className="text-sm text-muted-foreground">Here's a summary of your account.</p>
         </div>
-      )}
+        <Button asChild className="gap-1 shrink-0">
+          <Link to="/portal/catalogo"><Plus className="h-4 w-4" /> New order</Link>
+        </Button>
+      </div>
 
       {/* Stats */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-4 mb-6">
