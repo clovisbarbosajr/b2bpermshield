@@ -222,7 +222,7 @@ const ProducaoStatus = () => {
           <TableHeader>
             <TableRow>
               <TableHead>Product</TableHead><TableHead>Qty</TableHead><TableHead>Est Ready</TableHead><TableHead>ETA</TableHead>
-              <TableHead>Order # / Container</TableHead><TableHead className="min-w-[190px]">Tracking</TableHead>
+              <TableHead>Order #</TableHead><TableHead className="min-w-[190px]">Tracking</TableHead>
               <TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -239,7 +239,10 @@ const ProducaoStatus = () => {
                   <TableCell>{r.quantidade}</TableCell>
                   <TableCell>{r.est_ready ?? "—"}</TableCell>
                   <TableCell>{r.est_entrega ?? "—"}</TableCell>
-                  <TableCell className="text-sm">{r.numero_ordem ?? "—"}{r.numero_container ? ` / ${r.numero_container}` : ""}</TableCell>
+                  {/* Container saiu desta coluna (duplicava o Tracking, que agora sincroniza
+                      com o Container #). O dado continua no banco, no diálogo de edição e
+                      na tabela de Received. */}
+                  <TableCell className="text-sm">{r.numero_ordem ?? "—"}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       <Input className="h-8" placeholder="Tracking #" value={trackingEdit[r.id] ?? r.tracking ?? ""} onChange={(e) => setTrackingEdit((p) => ({ ...p, [r.id]: e.target.value }))} />
