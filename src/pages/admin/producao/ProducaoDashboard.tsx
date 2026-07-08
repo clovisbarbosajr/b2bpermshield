@@ -61,6 +61,20 @@ const ProducaoDashboard = () => {
     load();
   }, []);
 
+  // Categoria do produto SEM o topo (a localização já está no título do painel):
+  // ex. "Union NJ › One Plus › Blue Box" vira "One Plus › Blue Box".
+  const catLabel = useMemo(() => {
+    const byId = new Map(categorias.map((c) => [c.id, c]));
+    return (catId: string | null | undefined): string | null => {
+      const chain: string[] = [];
+      let cur = catId ? byId.get(catId) : undefined;
+      let guard = 0;
+      while (cur && guard++ < 12) { chain.unshift(cur.nome); cur = cur.parent_id ? byId.get(cur.parent_id) : undefined; }
+      if (chain.length <= 1) return null;      // só a localização → nada a mostrar
+      return chain.slice(1).join(" › ");
+    };
+  }, [categorias]);
+
   const locations = useMemo<Loc[]>(() => {
     const catById = new Map(categorias.map((c) => [c.id, c]));
     const topName = (catId: string | null): string => {
@@ -158,10 +172,18 @@ const ProducaoDashboard = () => {
               return (
                 <div key={it.id} className={`rounded-xl border p-4 flex items-center justify-between ${arriving ? "border-blue-300 bg-blue-50/40 dark:bg-blue-950/10" : "border-border"}`}>
                   <div>
-                    <p className="text-lg font-semibold">{it.produtos?.nome ?? "—"}</p>
+                    <p className="text-lg font-semibold">
+                      {it.produtos?.nome ?? "—"}
+                      {(catLabel(it.produtos?.categoria_id) || it.produtos?.sku) && (
+                        <span className="ml-2 text-sm font-normal text-muted-foreground">
+                          ({catLabel(it.produtos?.categoria_id) ?? it.produtos?.sku})
+                        </span>
+                      )}
+                    </p>
                     <p className="text-sm text-muted-foreground">
                       {it.numero_container ? `Container ${it.numero_container}` : "No container"}
-                      {it.tracking ? ` · ${it.tracking}` : ""}
+                      {/* tracking = container na maioria dos casos (sincronizado) — só mostra se for diferente */}
+                      {it.tracking && it.tracking !== it.numero_container ? ` · ${it.tracking}` : ""}
                       {it.est_entrega ? ` · est. ${it.est_entrega}` : ""}
                     </p>
                   </div>
