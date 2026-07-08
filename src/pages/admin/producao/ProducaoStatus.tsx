@@ -144,16 +144,27 @@ const ProducaoStatus = () => {
   const saveEdit = async () => {
     if (!editRow) return;
     if (!editForm.produto_id || !(parseInt(editForm.quantidade) > 0)) { toast.error("Product and quantity are required."); return; }
-    const { error } = await supabase.from("producao_pedidos").update({
+    const patch: any = {
       produto_id: editForm.produto_id, quantidade: parseInt(editForm.quantidade), status: editForm.status,
       est_ready: editForm.est_ready || null, est_entrega: editForm.est_entrega || null,
       numero_ordem: editForm.numero_ordem || null, numero_container: editForm.numero_container || null,
-    } as any).eq("id", editRow.id);
+    };
+    // Container # É o rastreio na prática (frete marítimo): preencher o container aqui
+    // também preenche o Tracking da lista — sem redigitar. Só NÃO sobrescreve um
+    // tracking digitado manualmente diferente do container antigo.
+    const newContainer = (editForm.numero_container || "").trim();
+    const curTracking = (editRow.tracking ?? "").trim();
+    const oldContainer = (editRow.numero_container ?? "").trim();
+    if (newContainer && (!curTracking || curTracking === oldContainer)) {
+      patch.tracking = newContainer;
+    }
+    const { error } = await supabase.from("producao_pedidos").update(patch).eq("id", editRow.id);
     if (error) { toast.error(error.message); return; }
     log("updated", "production", editRow.id, `${editRow.produtos?.nome ?? "Item"}`, {
       qty_before: editRow.quantidade, qty_after: parseInt(editForm.quantidade),
       status: editForm.status, est_ready: editForm.est_ready || null, eta: editForm.est_entrega || null,
       order_no: editForm.numero_ordem || null, container: editForm.numero_container || null,
+      ...(patch.tracking ? { tracking: patch.tracking } : {}),
     });
     toast.success("Updated"); setEditRow(null); load();
   };

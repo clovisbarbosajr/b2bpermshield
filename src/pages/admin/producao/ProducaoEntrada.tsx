@@ -100,6 +100,9 @@ const ProducaoEntrada = () => {
       est_entrega: l.est_entrega || null,
       numero_ordem: l.numero_ordem || null,
       numero_container: l.numero_container || null,
+      // Container # é o rastreio na prática (frete marítimo): já nasce como tracking,
+      // sem precisar redigitar na tela de Status.
+      tracking: l.numero_container.trim() || null,
       status: "solicitado",
       created_by: user?.id ?? null,
     }));
