@@ -47,7 +47,11 @@ const PortalDashboard = () => {
       const all = pedidos ?? [];
       setRecentOrders(all.slice(0, 5));
       setTotalOrders(all.length);
-      setTotalSpent(all.reduce((sum, p) => sum + (Number(p.total) || 0), 0));
+      // Total Spent = só do ANO corrente (pedido do dono).
+      const thisYear = new Date().getFullYear();
+      setTotalSpent(all
+        .filter((p) => new Date(p.created_at).getFullYear() === thisYear)
+        .reduce((sum, p) => sum + (Number(p.total) || 0), 0));
       setOpenOrders(all.filter((p) => { const s = canonicalStatus(p.status); return s !== "complete" && s !== "cancelled"; }).length);
       setLoading(false);
     };
@@ -71,7 +75,7 @@ const PortalDashboard = () => {
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 mb-6">
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Spent</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total Spent ({new Date().getFullYear()})</CardTitle>
             <TrendingUp className="h-4 w-4 text-accent" />
           </CardHeader>
           <CardContent>

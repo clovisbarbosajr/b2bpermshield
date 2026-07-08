@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Search, ShoppingCart, LayoutGrid, List, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -219,6 +220,15 @@ const Catalogo = () => {
   const isPreOrder = (p: Produto) => getStatusInfo(p).nome.toLowerCase() === "pre-order";
   // Estoque zerado (e não pré-venda) = SOLD OUT automático, independente do status salvo.
   const isSoldOut = (p: Produto) => !isPreOrder(p) && disponivel(p) <= 0;
+  // Pílula de status (padrão B2BWave): AVAILABLE / BACKORDER (verde) e SOLD OUT (vermelho).
+  const statusPill = (p: Produto): { label: string; cls: string } => {
+    const green = "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
+    const red = "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400";
+    if (isPreOrder(p)) return { label: "Backorder", cls: green };
+    if (isSoldOut(p)) return { label: "Sold Out", cls: red };
+    if (!canBuy(p)) return { label: getStatusLabel(p), cls: red };
+    return { label: "Available", cls: green };
+  };
 
   // Quantidade escolhida por produto no grid/lista (default = quantidade mínima).
   const [qtys, setQtys] = useState<Record<string, number>>({});
@@ -312,11 +322,11 @@ const Catalogo = () => {
             </SelectContent>
           </Select>
           <div className="flex gap-1">
-            <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("grid")}>
-              <LayoutGrid className="h-4 w-4" />
+            <Button variant={viewMode === "list" ? "default" : "outline"} size="sm" className="h-9 gap-1" onClick={() => setViewMode("list")}>
+              <List className="h-4 w-4" /> List
             </Button>
-            <Button variant={viewMode === "list" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("list")}>
-              <List className="h-4 w-4" />
+            <Button variant={viewMode === "grid" ? "default" : "outline"} size="sm" className="h-9 gap-1" onClick={() => setViewMode("grid")}>
+              <LayoutGrid className="h-4 w-4" /> Photos
             </Button>
           </div>
         </div>
@@ -378,46 +388,65 @@ const Catalogo = () => {
           ))}
         </div>
       ) : (
-        <Card>
-          <div className="divide-y">
-            {sorted.map((p) => (
-              <div key={p.id} className="flex items-center gap-4 p-4 cursor-pointer hover:bg-muted/30" onClick={() => navigate(`/portal/produto/${p.id}`)}>
-                <div className="h-16 w-16 flex-shrink-0 bg-muted rounded flex items-center justify-center overflow-hidden">
-                  {p.imagem_url ? (
-                    <img src={p.imagem_url} alt={p.nome} className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="text-lg font-bold text-muted-foreground/30">{p.nome.charAt(0)}</span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-semibold truncate">{p.nome}</h3>
-                  <p className="text-xs">
-                    <span className="text-muted-foreground">{p.sku ? `${p.sku} · ` : ""}</span>
-                    {isPreOrder(p)
-                      ? <span className="text-muted-foreground">Pre-order</span>
-                      : disponivel(p) > 0
-                        ? <span className="font-semibold text-green-600">Available: {disponivel(p)}</span>
-                        : <span className="font-semibold text-destructive">Sold Out</span>}
-                  </p>
-                </div>
-                <p className="text-lg font-bold text-accent">${getPrice(p).toFixed(2)}</p>
-                {isSoldOut(p) ? (
-                  <Badge variant="destructive" className="text-xs">Sold Out</Badge>
-                ) : !canBuy(p) ? (
-                  <Badge variant="destructive" className="text-xs">{getStatusLabel(p)}</Badge>
-                ) : null}
-                {canBuy(p) && !isViewer && !variantProductIds.has(p.id) && (
-                  <Input type="number" min={Math.max(p.quantidade_minima || 1, 1)} value={qtyOf(p)}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => setQty(p, parseInt(e.target.value))}
-                    className="h-9 w-20 shrink-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-                )}
-                <Button size="sm" className="gap-1" disabled={!canBuy(p) || isViewer} onClick={(e) => { e.stopPropagation(); handleAdd(p); }}>
-                  <ShoppingCart className="h-4 w-4" /> {getStatusInfo(p).nome.toLowerCase() === "pre-order" ? "Back Order" : "Add"}
-                </Button>
-              </div>
-            ))}
-          </div>
+        <Card className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Code</TableHead>
+                <TableHead>Product</TableHead>
+                <TableHead className="text-right">Price</TableHead>
+                <TableHead className="text-center">Min. Quantity</TableHead>
+                <TableHead className="text-center">Available Quantity</TableHead>
+                <TableHead className="text-center">Status</TableHead>
+                <TableHead className="text-center">Quantity</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sorted.map((p) => {
+                const st = statusPill(p);
+                return (
+                  <TableRow key={p.id} className="cursor-pointer" onClick={() => navigate(`/portal/produto/${p.id}`)}>
+                    <TableCell onClick={(e) => { e.stopPropagation(); navigate(`/portal/produto/${p.id}`); }}>
+                      <div className="flex items-center gap-3">
+                        <div className="h-12 w-12 flex-shrink-0 bg-muted rounded flex items-center justify-center overflow-hidden">
+                          {p.imagem_url ? (
+                            <img src={p.imagem_url} alt={p.nome} className="h-full w-full object-cover" />
+                          ) : (
+                            <span className="text-sm font-bold text-muted-foreground/30">{p.nome.charAt(0)}</span>
+                          )}
+                        </div>
+                        <span className="text-sm text-muted-foreground">{p.sku || "—"}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-medium">{p.nome}</TableCell>
+                    <TableCell className="text-right font-semibold text-accent">${getPrice(p).toFixed(2)}</TableCell>
+                    <TableCell className="text-center">{p.quantidade_minima || 0}</TableCell>
+                    <TableCell className="text-center">
+                      {isPreOrder(p)
+                        ? <span className="text-muted-foreground">—</span>
+                        : <span className={disponivel(p) > 0 ? "font-semibold text-green-600" : "font-semibold text-destructive"}>{Math.max(disponivel(p), 0)}</span>}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${st.cls}`}>{st.label}</span>
+                    </TableCell>
+                    <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
+                      {canBuy(p) && !isViewer && !variantProductIds.has(p.id) ? (
+                        <Input type="number" min={Math.max(p.quantidade_minima || 1, 1)} value={qtyOf(p)}
+                          onChange={(e) => setQty(p, parseInt(e.target.value))}
+                          className="h-9 w-20 mx-auto [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                      <Button size="sm" className="gap-1 whitespace-nowrap" disabled={!canBuy(p) || isViewer} onClick={() => handleAdd(p)}>
+                        <ShoppingCart className="h-4 w-4" /> {isPreOrder(p) ? "Back Order" : "Add to order"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </Card>
       )}
       <p className="mt-4 text-xs text-muted-foreground">
