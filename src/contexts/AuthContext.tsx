@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -70,6 +70,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [permissions, setPermissions] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [isDemo, setIsDemo] = useState(false);
+  // Último user.id já inicializado — evita re-inicializar (e desmontar o app) em
+  // TOKEN_REFRESHED/SIGNED_IN do mesmo usuário (ex.: ao voltar pra aba).
+  const initializedUserRef = useRef<string | null>(null);
   const [impersonatedCustomer, setImpersonatedCustomer] = useState<ViewAsCustomer | null>(null);
   const [canPlaceOrders, setCanPlaceOrders] = useState<boolean>(true);
   const [isSubUser, setIsSubUser] = useState<boolean>(false);
@@ -206,6 +209,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      // Voltar pra aba / renovação de token dispara SIGNED_IN|TOKEN_REFRESHED com o
+      // MESMO usuário. Re-inicializar aqui punha o app em "loading" → a página inteira
+      // desmontava e o usuário PERDIA o que estava digitando (ex.: popup de preços).
+      // Mesmo usuário já inicializado → só atualiza a sessão e segue.
+      if (nextSession?.user && initializedUserRef.current === nextSession.user.id) {
+        setSession(nextSession);
+        setUser(nextSession.user);
+        return;
+      }
+
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
       setImpersonatedCustomer(null);
@@ -214,11 +227,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsDemo(false);
 
       if (nextSession?.user) {
+        initializedUserRef.current = nextSession.user.id;
         setLoading(true);
         // Fire-and-forget: do NOT await inside onAuthStateChange
         // Awaiting causes signInWithPassword to hang in Supabase JS v2
         initUserSession(nextSession.user).finally(() => setLoading(false));
       } else {
+        initializedUserRef.current = null;
         setRole(null);
         setPermissions({});
         setLoading(false);
@@ -232,10 +247,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      // onAuthStateChange pode já ter inicializado este usuário — não repete.
+      if (nextSession?.user && initializedUserRef.current === nextSession.user.id) {
+        setSession(nextSession);
+        setUser(nextSession.user);
+        return;
+      }
+
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
 
       if (nextSession?.user) {
+        initializedUserRef.current = nextSession.user.id;
         setLoading(true);
         initUserSession(nextSession.user).finally(() => setLoading(false));
       } else {

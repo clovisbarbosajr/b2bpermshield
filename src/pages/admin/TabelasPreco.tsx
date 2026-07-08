@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,9 @@ const AdminTabelasPreco = () => {
   const [itens, setItens] = useState<ItemPreco[]>([]);
   const [itemSearch, setItemSearch] = useState("");
   const [editingPrices, setEditingPrices] = useState<Record<string, string>>({});
+  // Snapshot do que está SALVO — o Save único só habilita quando algo divergir.
+  const [origPrices, setOrigPrices] = useState<Record<string, string>>({});
+  const [savingPrices, setSavingPrices] = useState(false);
 
   const fetchData = async () => {
     const { data } = await supabase.from("tabelas_preco").select("*").order("nome");
@@ -83,28 +86,47 @@ const AdminTabelasPreco = () => {
     const prices: Record<string, string> = {};
     items.forEach((i) => { prices[i.produto_id] = String(i.preco); });
     setEditingPrices(prices);
+    setOrigPrices(prices);
     setItemsDialog(true);
   };
 
-  const handleSavePrice = async (produtoId: string) => {
-    if (!selectedTabela) return;
-    const preco = parseFloat(editingPrices[produtoId] ?? "0");
-    if (isNaN(preco) || preco <= 0) {
-      // Remove price entry
-      await supabase.from("tabela_preco_itens").delete().eq("tabela_preco_id", selectedTabela.id).eq("produto_id", produtoId);
-      const newPrices = { ...editingPrices };
-      delete newPrices[produtoId];
-      setEditingPrices(newPrices);
-      setItens(itens.filter((i) => i.produto_id !== produtoId));
-      toast.success("Price removed");
-      return;
+  // Preço "normalizado" pra comparar editado × salvo (vazio/inválido/<=0 = sem preço).
+  const normPrice = (s: string | undefined): string => {
+    const v = parseFloat(s ?? "");
+    return isNaN(v) || v <= 0 ? "" : String(v);
+  };
+  // Linhas com edição pendente — habilita o Save único.
+  const dirtyIds = useMemo(() => {
+    const ids = new Set([...Object.keys(editingPrices), ...Object.keys(origPrices)]);
+    return [...ids].filter((id) => normPrice(editingPrices[id]) !== normPrice(origPrices[id]));
+  }, [editingPrices, origPrices]);
+
+  // Save ÚNICO: aplica TODAS as edições do popup de uma vez (upsert em lote;
+  // preço apagado/zerado = remove o preço custom daquele produto).
+  const saveAllPrices = async () => {
+    if (!selectedTabela || dirtyIds.length === 0) return;
+    setSavingPrices(true);
+    const upserts: { tabela_preco_id: string; produto_id: string; preco: number }[] = [];
+    const removes: string[] = [];
+    for (const id of dirtyIds) {
+      const v = parseFloat(editingPrices[id] ?? "");
+      if (isNaN(v) || v <= 0) removes.push(id);
+      else upserts.push({ tabela_preco_id: selectedTabela.id, produto_id: id, preco: v });
     }
-    const { error } = await supabase.from("tabela_preco_itens").upsert(
-      { tabela_preco_id: selectedTabela.id, produto_id: produtoId, preco },
-      { onConflict: "tabela_preco_id,produto_id" }
-    );
+    let error = null as { message: string } | null;
+    if (upserts.length) {
+      const r = await supabase.from("tabela_preco_itens").upsert(upserts, { onConflict: "tabela_preco_id,produto_id" });
+      error = r.error;
+    }
+    if (!error && removes.length) {
+      const r = await supabase.from("tabela_preco_itens").delete()
+        .eq("tabela_preco_id", selectedTabela.id).in("produto_id", removes);
+      error = r.error;
+    }
+    setSavingPrices(false);
     if (error) { toast.error(error.message); return; }
-    toast.success("Price saved");
+    setOrigPrices({ ...editingPrices });
+    toast.success(`${dirtyIds.length} price(s) saved`);
   };
 
   const filteredProdutos = produtos.filter((p) =>
@@ -189,12 +211,11 @@ const AdminTabelasPreco = () => {
                   <TableHead>Product</TableHead>
                   <TableHead>Base Price</TableHead>
                   <TableHead>Custom Price</TableHead>
-                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredProdutos.map((p) => (
-                  <TableRow key={p.id}>
+                  <TableRow key={p.id} className={normPrice(editingPrices[p.id]) !== normPrice(origPrices[p.id]) ? "bg-primary/5" : ""}>
                     <TableCell className="font-mono text-xs">{p.sku}</TableCell>
                     <TableCell className="font-medium">{p.nome}</TableCell>
                     <TableCell className="text-muted-foreground">$ {Number(p.preco).toFixed(2)}</TableCell>
@@ -203,18 +224,24 @@ const AdminTabelasPreco = () => {
                         type="number"
                         step="0.01"
                         placeholder="—"
-                        className="h-8 w-28"
+                        className="h-8 w-28 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         value={editingPrices[p.id] ?? ""}
                         onChange={(e) => setEditingPrices({ ...editingPrices, [p.id]: e.target.value })}
                       />
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="outline" size="sm" onClick={() => handleSavePrice(p.id)}>Save</Button>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+          </div>
+          {/* Save ÚNICO: habilita ao editar qualquer linha e salva TODAS de uma vez. */}
+          <div className="flex items-center justify-between border-t pt-3">
+            <span className="text-xs text-muted-foreground">
+              {dirtyIds.length > 0 ? `${dirtyIds.length} unsaved change(s)` : "No pending changes"}
+            </span>
+            <Button onClick={saveAllPrices} disabled={savingPrices || dirtyIds.length === 0}>
+              {savingPrices ? "Saving..." : `Save${dirtyIds.length ? ` (${dirtyIds.length})` : ""}`}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
