@@ -671,8 +671,9 @@ Deno.serve(async (req) => {
       // Sanity: só roda se o feed veio "completo" (>=50% dos b2b locais vistos), pra um
       // fetch truncado (página curta) não desativar a base inteira.
       let deleted = 0;
+      // Casa por b2bwave_id (o sku deixou de ser chave). seenB2bIds = ids vistos no feed.
+      const seenB2bIds = new Set<string>((allProducts || []).map((p: any) => String(p.id)));
       const b2bLocal = (allProds || []).filter((p: any) => p.b2bwave_id);
-      const seenB2bIds = new Set<string>(allProducts.map((p: any) => String(p.id)));
       if (b2bLocal.length === 0 || seenB2bIds.size >= b2bLocal.length * 0.5) {
         for (const p of b2bLocal) {
           if (!seenB2bIds.has(String(p.b2bwave_id))) {
