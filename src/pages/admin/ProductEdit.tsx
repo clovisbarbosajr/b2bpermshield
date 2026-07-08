@@ -76,6 +76,10 @@ const ProductEdit = () => {
   const [discounts, setDiscounts] = useState<any[]>([]);
   const [customerPrices, setCustomerPrices] = useState<any[]>([]);
   const [relatedProducts, setRelatedProducts] = useState<any[]>([]);
+  // Busca de produtos p/ vincular relacionados (por NOME, não por ID cru).
+  const [allProducts, setAllProducts] = useState<{ id: string; nome: string; sku: string | null }[]>([]);
+  const [relOpenIdx, setRelOpenIdx] = useState<number | null>(null);
+  const [relQuery, setRelQuery] = useState("");
   const [assignedOptions, setAssignedOptions] = useState<any[]>([]);
   const [variants, setVariants] = useState<any[]>([]);
   const [statusRules, setStatusRules] = useState<any[]>([]);
@@ -91,13 +95,14 @@ const ProductEdit = () => {
   }, [id]);
 
   const fetchLookups = async () => {
-    const [c, b, tp, cl, po, pg] = await Promise.all([
+    const [c, b, tp, cl, po, pg, allp] = await Promise.all([
       supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("nome"),
       supabase.from("brands").select("id, nome").order("nome"),
       supabase.from("tabelas_preco").select("id, nome").order("nome"),
       supabase.from("clientes").select("id, nome, empresa").order("nome"),
       supabase.from("product_options").select("id, nome, tipo").order("nome"),
       supabase.from("privacy_groups").select("id, nome").eq("ativo", true).order("nome"),
+      supabase.from("produtos").select("id, nome, sku").eq("ativo", true).order("nome"),
     ]);
     setCategorias(c.data ?? []);
     setBrands(b.data ?? []);
@@ -105,6 +110,12 @@ const ProductEdit = () => {
     setClientes(cl.data ?? []);
     setProductOptions(po.data ?? []);
     setPrivacyGroups(pg.data ?? []);
+    setAllProducts((allp.data as any[]) ?? []);
+  };
+
+  const prodName = (pid: string) => {
+    const p = allProducts.find((x) => x.id === pid);
+    return p ? `${p.nome}${p.sku ? ` (${p.sku})` : ""}` : "";
   };
 
   const fetchProduct = async () => {
@@ -288,10 +299,11 @@ const ProductEdit = () => {
       await supabase.from("produto_precos_cliente").insert(customerPrices.map(cp => ({ ...cp, produto_id: pid, id: undefined })));
     }
 
-    // Related products
+    // Related products — ignora linhas sem produto escolhido (FK invalida).
     await supabase.from("produtos_relacionados").delete().eq("produto_id", pid);
-    if (relatedProducts.length > 0) {
-      await supabase.from("produtos_relacionados").insert(relatedProducts.map(rp => ({ ...rp, produto_id: pid, id: undefined })));
+    const relValid = relatedProducts.filter(rp => rp.produto_relacionado_id);
+    if (relValid.length > 0) {
+      await supabase.from("produtos_relacionados").insert(relValid.map(rp => ({ ...rp, produto_id: pid, id: undefined })));
     }
 
     // Assigned options
@@ -656,7 +668,35 @@ const ProductEdit = () => {
                 <div className="space-y-2">
                   {relatedProducts.map((rp, i) => (
                     <div key={i} className="flex items-center gap-3 rounded-lg border p-3">
-                      <Input placeholder="Product ID" value={rp.produto_relacionado_id} onChange={e => { const n = [...relatedProducts]; n[i].produto_relacionado_id = e.target.value; setRelatedProducts(n); }} className="flex-1" />
+                      <div className="relative flex-1">
+                        <Input
+                          placeholder="Search product by name or code..."
+                          value={relOpenIdx === i ? relQuery : prodName(rp.produto_relacionado_id)}
+                          onFocus={() => { setRelOpenIdx(i); setRelQuery(prodName(rp.produto_relacionado_id)); }}
+                          onChange={e => { setRelOpenIdx(i); setRelQuery(e.target.value); }}
+                        />
+                        {relOpenIdx === i && (
+                          <div className="absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-md border bg-popover shadow-md">
+                            {allProducts
+                              .filter(p => p.id !== id && `${p.nome} ${p.sku ?? ""}`.toLowerCase().includes(relQuery.toLowerCase()))
+                              .filter(p => !relatedProducts.some((r, ri) => ri !== i && r.produto_relacionado_id === p.id))
+                              .slice(0, 20)
+                              .map(p => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  className="block w-full text-left px-3 py-2 text-sm hover:bg-muted"
+                                  onClick={() => { const n = [...relatedProducts]; n[i].produto_relacionado_id = p.id; setRelatedProducts(n); setRelOpenIdx(null); setRelQuery(""); }}
+                                >
+                                  {p.nome}{p.sku && <span className="text-xs text-muted-foreground"> ({p.sku})</span>}
+                                </button>
+                              ))}
+                            {allProducts.filter(p => p.id !== id && `${p.nome} ${p.sku ?? ""}`.toLowerCase().includes(relQuery.toLowerCase())).length === 0 && (
+                              <p className="px-3 py-2 text-sm text-muted-foreground">No products found.</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2">
                         <Checkbox checked={rp.comprar_junto} onCheckedChange={v => { const n = [...relatedProducts]; n[i].comprar_junto = !!v; setRelatedProducts(n); }} />
                         <Label className="text-xs">Buy Together</Label>
