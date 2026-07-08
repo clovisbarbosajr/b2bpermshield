@@ -8,6 +8,18 @@
 
 export type CatNode = { id: string; nome: string; parent_id: string | null; ordem?: number | null };
 
+// Caminho completo da categoria, do topo (localização) até ela: "Union NJ › One Plus".
+// Usado onde precisa distinguir produtos homônimos (ex.: modal de adicionar produto).
+export function categoryPath(cats: CatNode[], id: string | null | undefined): string {
+  if (!id) return "";
+  const byId = new Map(cats.map((c) => [c.id, c]));
+  const chain: string[] = [];
+  let cur = byId.get(id);
+  let guard = 0;
+  while (cur && guard++ < 12) { chain.unshift(cur.nome); cur = cur.parent_id ? byId.get(cur.parent_id) : undefined; }
+  return chain.join(" › ");
+}
+
 export function categoryTreeOptions(cats: CatNode[]): { id: string; label: string }[] {
   const sorted = (list: CatNode[]) =>
     [...list].sort((a, b) => ((a.ordem ?? 0) - (b.ordem ?? 0)) || a.nome.localeCompare(b.nome));

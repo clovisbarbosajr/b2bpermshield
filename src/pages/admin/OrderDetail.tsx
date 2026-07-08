@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Pencil, Trash2, Plus, Save, Printer, FileText, Search, X as XIcon } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { useAuth } from "@/contexts/AuthContext";
+import { categoryPath } from "@/lib/categoryTree";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getProductPrice } from "@/lib/pricing";
 import { toast } from "sonner";
@@ -57,6 +58,7 @@ const OrderDetail = () => {
   const [addProductOpen, setAddProductOpen] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [products, setProducts] = useState<any[]>([]);
+  const [categorias, setCategorias] = useState<any[]>([]);
 
   const isNew = id === "new";
 
@@ -77,6 +79,9 @@ const OrderDetail = () => {
     setPaymentOptions(pay ?? []);
     setTabelasPreco(tabelas ?? []);
     setTaxGroups(taxG ?? []);
+    // Categorias p/ mostrar o caminho (localização › categoria) no modal de produtos.
+    const { data: cats } = await supabase.from("categorias").select("id, nome, parent_id");
+    setCategorias(cats ?? []);
     // Para criar pedido pelo admin precisamos da lista de clientes.
     if (isNew) {
       const { data: cls } = await supabase
@@ -173,7 +178,7 @@ const OrderDetail = () => {
     if (q.length < 2) { setProducts([]); return; }
     const { data } = await supabase
       .from("produtos")
-      .select("id, nome, sku, preco, estoque_total, estoque_reservado, imagem_url")
+      .select("id, nome, sku, preco, estoque_total, estoque_reservado, imagem_url, categoria_id")
       .or(`nome.ilike.%${q}%,sku.ilike.%${q}%`)
       .eq("ativo", true)
       .limit(20);
@@ -477,7 +482,12 @@ const OrderDetail = () => {
               {products.map((p) => (
                 <button key={p.id} className="w-full text-left px-2 py-2 hover:bg-muted/50 flex justify-between gap-2"
                   onClick={() => handleAddProductDraft(p)}>
-                  <span>{p.nome}{p.sku && <span className="text-xs text-muted-foreground"> ({p.sku})</span>}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate">{p.nome}{p.sku && <span className="text-xs text-muted-foreground"> ({p.sku})</span>}</span>
+                    {categoryPath(categorias, p.categoria_id) && (
+                      <span className="block text-xs text-muted-foreground truncate">{categoryPath(categorias, p.categoria_id)}</span>
+                    )}
+                  </span>
                   <span className="text-sm whitespace-nowrap">{fmt(Number(p.preco) || 0)}</span>
                 </button>
               ))}
@@ -940,7 +950,10 @@ const OrderDetail = () => {
                     )}
                     <div>
                       <p className="text-sm font-medium">{p.nome}</p>
-                      <p className="text-xs text-muted-foreground">{p.sku} · Stock: {(p.estoque_total ?? 0) - (p.estoque_reservado ?? 0)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {categoryPath(categorias, p.categoria_id) && <>{categoryPath(categorias, p.categoria_id)} · </>}
+                        {p.sku ? `${p.sku} · ` : ""}Stock: {(p.estoque_total ?? 0) - (p.estoque_reservado ?? 0)}
+                      </p>
                     </div>
                   </div>
                   <div className="text-sm font-bold">${Number(p.preco).toFixed(2)}</div>
