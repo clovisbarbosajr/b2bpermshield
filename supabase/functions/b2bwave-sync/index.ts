@@ -666,6 +666,42 @@ Deno.serve(async (req) => {
         if (!error) variantRows += vrows.length;
       }
 
+      // RELATED / BUNDLED PRODUCTS. Vêm no payload do produto (nomes de campo variam
+      // por versão da API). Cada item pode ser um ID solto OU objeto com id + flag de
+      // "buy together". Casa o ID do B2BWave -> produto local; ignora o que não existe.
+      // Sync é dona: apaga e reinsere por produto (idempotente).
+      let relatedRows = 0;
+      const relFields = ["related_products", "related_product_ids", "related", "bundled_products", "bundles", "product_bundles"];
+      for (const p of allProducts) {
+        const localProdId = b2bIdToProdId.get(String(p.id));
+        if (!localProdId) continue;
+        // Junta o primeiro campo de relacionados que vier preenchido.
+        let rawRel: any[] = [];
+        for (const f of relFields) { if (Array.isArray(p[f]) && p[f].length) { rawRel = p[f]; break; } }
+        if (rawRel.length === 0) continue;
+        const relRows: any[] = [];
+        const seenRel = new Set<string>();
+        for (const item of rawRel) {
+          // ID do produto relacionado no B2BWave (aceita id solto ou objeto).
+          const relB2b = typeof item === "object" && item
+            ? (item.related_product_id ?? item.product_id ?? item.related_id ?? item.id)
+            : item;
+          if (relB2b == null) continue;
+          const relLocal = b2bIdToProdId.get(String(relB2b));
+          if (!relLocal || relLocal === localProdId || seenRel.has(relLocal)) continue;
+          seenRel.add(relLocal);
+          const buyTogether = typeof item === "object" && item
+            ? !!(item.buy_together ?? item.bundle ?? item.is_bundle ?? item.together)
+            : false;
+          relRows.push({ produto_id: localProdId, produto_relacionado_id: relLocal, comprar_junto: buyTogether });
+        }
+        await adminClient.from("produtos_relacionados").delete().eq("produto_id", localProdId);
+        if (relRows.length) {
+          const { error } = await adminClient.from("produtos_relacionados").insert(relRows);
+          if (!error) relatedRows += relRows.length;
+        }
+      }
+
       // Stale products. SEGURANÇA: nunca DELETA (irreversível); apenas DESATIVA, e só
       // produtos que vieram do B2BWave (b2bwave_id) — produto nativo do app é preservado.
       // Sanity: só roda se o feed veio "completo" (>=50% dos b2b locais vistos), pra um
@@ -686,7 +722,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         success: true,
         samples: errorSamples,
-        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${variantRows} variants, ${errors} errors, ${deleted} stale deleted${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
+        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${deleted} stale deleted${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
       }), { headers: jsonHeaders });
     }
 

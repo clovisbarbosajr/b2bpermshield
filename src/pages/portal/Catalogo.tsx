@@ -215,6 +215,10 @@ const Catalogo = () => {
     return status.nome;
   };
 
+  const isPreOrder = (p: Produto) => getStatusInfo(p).nome.toLowerCase() === "pre-order";
+  // Estoque zerado (e não pré-venda) = SOLD OUT automático, independente do status salvo.
+  const isSoldOut = (p: Produto) => !isPreOrder(p) && disponivel(p) <= 0;
+
   // Quantidade escolhida por produto no grid/lista (default = quantidade mínima).
   const [qtys, setQtys] = useState<Record<string, number>>({});
   const qtyOf = (p: Produto) => qtys[p.id] ?? Math.max(p.quantidade_minima || 1, 1);
@@ -327,29 +331,34 @@ const Catalogo = () => {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {sorted.map((p) => (
             <Card key={p.id} className="overflow-hidden transition-all hover:shadow-md cursor-pointer" onClick={() => navigate(`/portal/produto/${p.id}`)}>
-              <div className="aspect-square bg-muted flex items-center justify-center">
+              <div className="h-40 bg-muted flex items-center justify-center">
                 {p.imagem_url ? (
                   <img src={p.imagem_url} alt={p.nome} className="h-full w-full object-cover" />
                 ) : (
                   <div className="text-4xl font-bold text-muted-foreground/30">{p.nome.charAt(0)}</div>
                 )}
               </div>
-              <CardContent className="p-4">
-                <h3 className="font-semibold line-clamp-2">{p.nome}</h3>
+              <CardContent className="p-3">
+                <h3 className="font-semibold text-sm line-clamp-2">{p.nome}</h3>
                 <div className="mt-2 flex items-center justify-between">
-                  <p className="text-lg font-bold text-accent">${getPrice(p).toFixed(2)}</p>
-                  {!canBuy(p) && (
+                  <p className="text-base font-bold text-accent">${getPrice(p).toFixed(2)}</p>
+                  {isSoldOut(p) ? (
+                    <Badge variant="destructive" className="text-xs">Sold Out</Badge>
+                  ) : !canBuy(p) ? (
                     <Badge variant="destructive" className="text-xs">{getStatusLabel(p)}</Badge>
-                  )}
-                  {canBuy(p) && getStatusInfo(p).nome.toLowerCase() === "pre-order" && (
+                  ) : isPreOrder(p) ? (
                     <Badge className="text-xs bg-blue-600">Pre-order</Badge>
+                  ) : (
+                    <Badge className="text-xs bg-green-600 hover:bg-green-600">In stock</Badge>
                   )}
                 </div>
-                {/* Estoque disponível */}
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {getStatusInfo(p).nome.toLowerCase() === "pre-order"
-                    ? "Pre-order"
-                    : <>Available: <span className={disponivel(p) > 0 ? "font-medium text-foreground" : "font-medium text-destructive"}>{Math.max(disponivel(p), 0)}</span> {p.unidade_venda}</>}
+                {/* Estoque disponível (verde quando tem, vermelho quando zerado) */}
+                <p className="mt-1 text-xs">
+                  {isPreOrder(p)
+                    ? <span className="text-muted-foreground">Pre-order</span>
+                    : disponivel(p) > 0
+                      ? <span className="text-muted-foreground">Available: <span className="font-semibold text-green-600">{disponivel(p)}</span> {p.unidade_venda}</span>
+                      : <span className="font-semibold text-destructive">Sold Out</span>}
                 </p>
                 {/* Quantidade + adicionar (produto com variante vai pra página do produto) */}
                 <div className="mt-3 flex gap-2" onClick={(e) => e.stopPropagation()}>
@@ -381,15 +390,21 @@ const Catalogo = () => {
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="font-semibold truncate">{p.nome}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    {p.sku ? `${p.sku} · ` : ""}
-                    {getStatusInfo(p).nome.toLowerCase() === "pre-order"
-                      ? "Pre-order"
-                      : <>Available: <span className={disponivel(p) > 0 ? "font-medium text-foreground" : "font-medium text-destructive"}>{Math.max(disponivel(p), 0)}</span></>}
+                  <p className="text-xs">
+                    <span className="text-muted-foreground">{p.sku ? `${p.sku} · ` : ""}</span>
+                    {isPreOrder(p)
+                      ? <span className="text-muted-foreground">Pre-order</span>
+                      : disponivel(p) > 0
+                        ? <span className="text-muted-foreground">Available: <span className="font-semibold text-green-600">{disponivel(p)}</span></span>
+                        : <span className="font-semibold text-destructive">Sold Out</span>}
                   </p>
                 </div>
                 <p className="text-lg font-bold text-accent">${getPrice(p).toFixed(2)}</p>
-                {!canBuy(p) && <Badge variant="destructive" className="text-xs">{getStatusLabel(p)}</Badge>}
+                {isSoldOut(p) ? (
+                  <Badge variant="destructive" className="text-xs">Sold Out</Badge>
+                ) : !canBuy(p) ? (
+                  <Badge variant="destructive" className="text-xs">{getStatusLabel(p)}</Badge>
+                ) : null}
                 {canBuy(p) && !isViewer && !variantProductIds.has(p.id) && (
                   <Input type="number" min={Math.max(p.quantidade_minima || 1, 1)} value={qtyOf(p)}
                     onClick={(e) => e.stopPropagation()}
