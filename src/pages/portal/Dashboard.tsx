@@ -148,7 +148,8 @@ const PortalDashboard = () => {
           <CardContent>
             <div className="space-y-2">
               {recentOrders.map((order) => (
-                <div key={order.id} className="flex items-center justify-between text-sm py-2 border-b border-border last:border-0">
+                <Link key={order.id} to={`/portal/pedidos/${order.id}`}
+                  className="flex items-center justify-between text-sm py-2 border-b border-border last:border-0 -mx-2 px-2 rounded hover:bg-muted/50 transition-colors">
                   <div>
                     <span className="font-medium">Order #{order.numero}</span>
                     <span className="ml-3 text-muted-foreground text-xs">
@@ -161,7 +162,7 @@ const PortalDashboard = () => {
                     </span>
                     <span className="font-bold">${Number(order.total).toFixed(2)}</span>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           </CardContent>
