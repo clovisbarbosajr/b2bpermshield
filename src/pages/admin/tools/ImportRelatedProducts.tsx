@@ -1,0 +1,175 @@
+import { useState, useRef } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import AdminLayout from "@/components/layouts/AdminLayout";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Upload, CheckCircle, XCircle, Link2 } from "lucide-react";
+import { toast } from "sonner";
+
+// IMPORTA RELATED PRODUCTS do export de produtos do B2BWave.
+// A API do B2BWave NÃO expõe related products (confirmado na documentação oficial),
+// mas o export (Products > Export no admin deles) inclui as colunas:
+//   - product_sku            (código do produto)
+//   - b2b_product_id         (id do produto no B2BWave — preferido p/ casar)
+//   - related_products       (códigos relacionados separados por vírgula: "SKU1,SKU2")
+// Esta tela lê esse arquivo e popula produtos_relacionados.
+
+// Parser CSV RFC-4180 (aspas, vírgula dentro de campo, quebra de linha em campo).
+// O parser "split por vírgula" dos outros importers quebraria com o export real.
+function parseCSV(text: string): Record<string, string>[] {
+  const rows: string[][] = [];
+  let field = "", row: string[] = [], inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ",") { row.push(field); field = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      if (row.some((c) => c.trim() !== "")) rows.push(row);
+      row = [];
+    } else field += ch;
+  }
+  row.push(field);
+  if (row.some((c) => c.trim() !== "")) rows.push(row);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((h) => h.trim().toLowerCase());
+  return rows.slice(1).map((vals) => {
+    const r: Record<string, string> = {};
+    headers.forEach((h, i) => { r[h] = (vals[i] ?? "").trim(); });
+    return r;
+  });
+}
+
+type Result = { row: number; product: string; status: "ok" | "skip" | "error"; message: string };
+
+const ImportRelatedProducts = () => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [results, setResults] = useState<Result[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const [summary, setSummary] = useState("");
+
+  const handleFile = async (file: File) => {
+    setFileName(file.name);
+    setResults([]);
+    setSummary("");
+    const text = await file.text();
+    const rows = parseCSV(text);
+    if (rows.length === 0) { toast.error("No data rows found"); return; }
+    if (!("related_products" in rows[0])) {
+      toast.error('Column "related_products" not found. Use the B2BWave product EXPORT file (Products > Export).');
+      return;
+    }
+
+    setImporting(true);
+    const res: Result[] = [];
+
+    // Mapas locais: por b2bwave_id (preferido) e por sku (código pode repetir — 1º vence).
+    const { data: produtos } = await supabase.from("produtos").select("id, sku, b2bwave_id");
+    const byB2bId = new Map<string, string>();
+    const bySku = new Map<string, string>();
+    for (const p of (produtos ?? []) as any[]) {
+      if (p.b2bwave_id) byB2bId.set(String(p.b2bwave_id), p.id);
+      if (p.sku && !bySku.has(p.sku.toLowerCase())) bySku.set(p.sku.toLowerCase(), p.id);
+    }
+
+    let linked = 0, cleared = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const label = r["product_name"] || r["product_sku"] || r["b2b_product_id"] || "—";
+      // Produto principal: b2b_product_id (exato) > product_sku (código).
+      const mainId = (r["b2b_product_id"] && byB2bId.get(r["b2b_product_id"]))
+        || (r["product_sku"] && bySku.get(r["product_sku"].toLowerCase()))
+        || null;
+      if (!mainId) {
+        res.push({ row: i + 2, product: label, status: "error", message: "Product not found locally" });
+        continue;
+      }
+      const relCodes = (r["related_products"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      // Sem relacionados no arquivo → garante lista vazia local (espelho fiel do B2BWave).
+      const relIds: string[] = [];
+      const missing: string[] = [];
+      for (const code of relCodes) {
+        const rid = bySku.get(code.toLowerCase());
+        if (rid && rid !== mainId && !relIds.includes(rid)) relIds.push(rid);
+        else if (!rid) missing.push(code);
+      }
+      await supabase.from("produtos_relacionados").delete().eq("produto_id", mainId);
+      if (relIds.length) {
+        const { error } = await supabase.from("produtos_relacionados").insert(
+          relIds.map((rid) => ({ produto_id: mainId, produto_relacionado_id: rid, comprar_junto: false })),
+        );
+        if (error) { res.push({ row: i + 2, product: label, status: "error", message: error.message }); continue; }
+        linked += relIds.length;
+        res.push({
+          row: i + 2, product: label, status: "ok",
+          message: `${relIds.length} linked${missing.length ? ` · not found: ${missing.join(", ")}` : ""}`,
+        });
+      } else if (relCodes.length) {
+        res.push({ row: i + 2, product: label, status: "error", message: `Related codes not found: ${missing.join(", ")}` });
+      } else {
+        cleared++;
+        res.push({ row: i + 2, product: label, status: "skip", message: "No related products in file" });
+      }
+    }
+
+    setResults(res);
+    setSummary(`${linked} link(s) created · ${res.filter((x) => x.status === "ok").length} product(s) with related · ${res.filter((x) => x.status === "error").length} error(s)`);
+    setImporting(false);
+    toast.success(`Import finished — ${linked} link(s) created`);
+  };
+
+  return (
+    <AdminLayout>
+      <div className="mb-6">
+        <h2 className="font-display text-2xl font-semibold flex items-center gap-2"><Link2 className="h-6 w-6" /> Import Related Products</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          The B2BWave API does not expose related products — but the product <strong>export file</strong> does.
+          In the B2BWave admin go to <strong>Products → Export</strong>, download the file (keep the
+          <code className="mx-1">related_products</code> column) and upload it here.
+        </p>
+      </div>
+
+      <Card className="p-6 mb-4">
+        <input ref={inputRef} type="file" accept=".csv,.txt" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+        <div className="flex items-center gap-3">
+          <Button onClick={() => inputRef.current?.click()} disabled={importing} className="gap-1">
+            <Upload className="h-4 w-4" /> {importing ? "Importing..." : "Upload B2BWave export (.csv)"}
+          </Button>
+          {fileName && <span className="text-sm text-muted-foreground">{fileName}</span>}
+        </div>
+        {summary && <p className="mt-3 text-sm font-medium">{summary}</p>}
+      </Card>
+
+      {results.length > 0 && (
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow><TableHead className="w-16">Row</TableHead><TableHead>Product</TableHead><TableHead className="w-20">Status</TableHead><TableHead>Details</TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {results.filter((r) => r.status !== "skip").map((r, i) => (
+                <TableRow key={i}>
+                  <TableCell className="text-xs text-muted-foreground">{r.row}</TableCell>
+                  <TableCell className="text-sm font-medium">{r.product}</TableCell>
+                  <TableCell>{r.status === "ok" ? <CheckCircle className="h-4 w-4 text-green-600" /> : <XCircle className="h-4 w-4 text-destructive" />}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{r.message}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+    </AdminLayout>
+  );
+};
+
+export default ImportRelatedProducts;

@@ -93,6 +93,7 @@ const adminNavEntries: NavEntry[] = [
     children: [
       { to: "/admin/tools/pdf-catalog", icon: FileDown, label: "PDF Catalog" },
       { to: "/admin/tools/import-product-discounts", icon: Percent, label: "Import Product Discounts" },
+      { to: "/admin/tools/import-related-products", icon: Package, label: "Import Related Products" },
       // OCULTOS (rotas/telas intactas — ver MENU_OCULTO.md):
       // { to: "/admin/tools/import-customer-prices", icon: DollarSign, label: "Import Customer Prices" },
       // { to: "/admin/tools/import-customers", icon: UserPlus, label: "Import Customers" },
