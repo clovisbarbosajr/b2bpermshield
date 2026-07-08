@@ -3,7 +3,7 @@ import AdminLayout from "@/components/layouts/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Factory, Truck, MapPin, ChevronRight, PackageCheck, X } from "lucide-react";
+import { Factory, Truck, MapPin, ChevronRight, PackageCheck, X, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 
 type Item = {
   id: string; quantidade: number; status: string; tracking: string | null;
@@ -13,11 +13,40 @@ type Item = {
 type Categoria = { id: string; nome: string; parent_id: string | null };
 type Loc = { name: string; items: Item[]; qty: number; onTheWay: number };
 
+// Botão de ordenação com seta (mesmo padrão da tela de Status).
+const SortBtn = ({ k, label, sortKey, sortDir, onSort }: {
+  k: string; label: string; sortKey: string; sortDir: "asc" | "desc"; onSort: (k: any) => void;
+}) => (
+  <button onClick={() => onSort(k)} className="inline-flex items-center gap-1 hover:text-foreground transition-colors select-none">
+    {label}
+    {sortKey === k
+      ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />)
+      : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+  </button>
+);
+
+const sortItems = (items: Item[], sortKey: string, sortDir: "asc" | "desc"): Item[] => {
+  const dir = sortDir === "asc" ? 1 : -1;
+  return [...items].sort((a, b) => {
+    if (sortKey === "quantidade") return (a.quantidade - b.quantidade) * dir;
+    if (sortKey === "status") return (a.status ?? "").localeCompare(b.status ?? "") * dir;
+    return (a.produtos?.nome ?? "").localeCompare(b.produtos?.nome ?? "") * dir;
+  });
+};
+
 const ProducaoDashboard = () => {
   const [items, setItems] = useState<Item[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   const [openLoc, setOpenLoc] = useState<Loc | null>(null);
+  // Ordenação do drill-down (setas, igual à tela de Status). Padrão: alfabético.
+  type SortKey = "nome" | "quantidade" | "status";
+  const [sortKey, setSortKey] = useState<SortKey>("nome");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const toggleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir("asc"); }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -115,8 +144,16 @@ const ProducaoDashboard = () => {
             <h3 className="flex items-center gap-2 text-2xl font-bold"><MapPin className="h-6 w-6 text-primary" /> {openLoc.name}</h3>
             <button onClick={() => setOpenLoc(null)} className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted transition-colors flex items-center gap-1"><X className="h-4 w-4" /> Close</button>
           </div>
+          {/* Cabeçalho de ordenação (setas, igual à tela de Status) */}
+          <div className="flex items-center justify-between px-4 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <SortBtn k="nome" label="Product" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+            <div className="flex items-center gap-4">
+              <SortBtn k="quantidade" label="Qty" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortBtn k="status" label="Status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+            </div>
+          </div>
           <div className="space-y-2">
-            {openLoc.items.map((it) => {
+            {sortItems(openLoc.items, sortKey, sortDir).map((it) => {
               const arriving = it.status === "a_caminho";
               return (
                 <div key={it.id} className={`rounded-xl border p-4 flex items-center justify-between ${arriving ? "border-blue-300 bg-blue-50/40 dark:bg-blue-950/10" : "border-border"}`}>
