@@ -672,9 +672,10 @@ Deno.serve(async (req) => {
       // fetch truncado (página curta) não desativar a base inteira.
       let deleted = 0;
       const b2bLocal = (allProds || []).filter((p: any) => p.b2bwave_id);
-      if (b2bLocal.length === 0 || seenSkus.size >= b2bLocal.length * 0.5) {
+      const seenB2bIds = new Set<string>(allProducts.map((p: any) => String(p.id)));
+      if (b2bLocal.length === 0 || seenB2bIds.size >= b2bLocal.length * 0.5) {
         for (const p of b2bLocal) {
-          if (!seenSkus.has(p.sku)) {
+          if (!seenB2bIds.has(String(p.b2bwave_id))) {
             await adminClient.from("produtos").update({ ativo: false }).eq("id", p.id);
             deleted++;
           }

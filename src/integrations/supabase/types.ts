@@ -1709,6 +1709,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           est_entrega: string | null
+          est_ready: string | null
           id: string
           notes: string | null
           numero_container: string | null
@@ -1726,6 +1727,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           est_entrega?: string | null
+          est_ready?: string | null
           id?: string
           notes?: string | null
           numero_container?: string | null
@@ -1743,6 +1745,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           est_entrega?: string | null
+          est_ready?: string | null
           id?: string
           notes?: string | null
           numero_container?: string | null
@@ -2221,7 +2224,7 @@ export type Database = {
           quantidade_minima: number
           quantidade_pacote: number | null
           rastrear_estoque: boolean | null
-          sku: string
+          sku: string | null
           status_produto: string | null
           tag_line: string | null
           unidade_medida_id: string | null
@@ -2263,7 +2266,7 @@ export type Database = {
           quantidade_minima?: number
           quantidade_pacote?: number | null
           rastrear_estoque?: boolean | null
-          sku: string
+          sku?: string | null
           status_produto?: string | null
           tag_line?: string | null
           unidade_medida_id?: string | null
@@ -2305,7 +2308,7 @@ export type Database = {
           quantidade_minima?: number
           quantidade_pacote?: number | null
           rastrear_estoque?: boolean | null
-          sku?: string
+          sku?: string | null
           status_produto?: string | null
           tag_line?: string | null
           unidade_medida_id?: string | null
@@ -2945,6 +2948,14 @@ export type Database = {
         Args: { _desc: string; _name: string; _value: string }
         Returns: undefined
       }
+      categoria_visivel_para: {
+        Args: { _cat_id: string; _cli_id: string }
+        Returns: boolean
+      }
+      categorias_visiveis_cliente: {
+        Args: { _cli_id: string }
+        Returns: string[]
+      }
       claim_customer_record: { Args: never; Returns: string }
       cliente_pode_ver_categoria: {
         Args: { _cat_id: string }
@@ -2993,6 +3004,14 @@ export type Database = {
       preco_autoritativo: {
         Args: { _cliente_id: string; _produto_id: string; _qtd: number }
         Returns: number
+      }
+      produto_visivel_para: {
+        Args: { _cli_id: string; _prod_id: string }
+        Returns: boolean
+      }
+      produtos_visiveis_cliente: {
+        Args: { _cli_id: string }
+        Returns: string[]
       }
       user_can_see_produto: { Args: { _produto_id: string }; Returns: boolean }
     }
