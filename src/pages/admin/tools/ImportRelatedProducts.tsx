@@ -82,8 +82,12 @@ const ImportRelatedProducts = () => {
     const isXlsx = /\.x(ls|lsx)$/i.test(file.name);
     const rows = isXlsx ? parseXlsx(await file.arrayBuffer()) : parseCSV(await file.text());
     if (rows.length === 0) { toast.error("No data rows found"); return; }
-    if (!("related_products" in rows[0])) {
-      toast.error('Column "related_products" not found. Use the B2BWave product EXPORT file (Products > Export).');
+    // A coluna de relacionados no export do B2BWave chama-se "related_products_buy_with"
+    // (versões antigas: "related_products"). Aceita as duas.
+    const relCol = "related_products_buy_with" in rows[0] ? "related_products_buy_with"
+      : "related_products" in rows[0] ? "related_products" : null;
+    if (!relCol) {
+      toast.error('Coluna de relacionados não encontrada. Use o EXPORT de produtos do B2BWave (Products > Export).');
       return;
     }
 
@@ -111,7 +115,8 @@ const ImportRelatedProducts = () => {
         res.push({ row: i + 2, product: label, status: "error", message: "Product not found locally" });
         continue;
       }
-      const relCodes = (r["related_products"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      // "-" é slot vazio no export do B2BWave — ignora. Códigos são product_sku de outros produtos.
+      const relCodes = (r[relCol] ?? "").split(",").map((s) => s.trim()).filter((s) => s && s !== "-");
       // Sem relacionados no arquivo → garante lista vazia local (espelho fiel do B2BWave).
       const relIds: string[] = [];
       const missing: string[] = [];
