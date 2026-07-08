@@ -28,7 +28,8 @@ const Catalogo = () => {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  // Abre em LISTA por padrão (pedido do dono).
+  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [sortBy, setSortBy] = useState("default");
   const { addItem } = useCart();
   const [searchParams] = useSearchParams();
@@ -357,7 +358,7 @@ const Catalogo = () => {
                   {isPreOrder(p)
                     ? <span className="text-muted-foreground">Pre-order</span>
                     : disponivel(p) > 0
-                      ? <span className="text-muted-foreground">Available: <span className="font-semibold text-green-600">{disponivel(p)}</span> {p.unidade_venda}</span>
+                      ? <span className="font-semibold text-green-600">Available: {disponivel(p)} {p.unidade_venda}</span>
                       : <span className="font-semibold text-destructive">Sold Out</span>}
                 </p>
                 {/* Quantidade + adicionar (produto com variante vai pra página do produto) */}
@@ -395,7 +396,7 @@ const Catalogo = () => {
                     {isPreOrder(p)
                       ? <span className="text-muted-foreground">Pre-order</span>
                       : disponivel(p) > 0
-                        ? <span className="text-muted-foreground">Available: <span className="font-semibold text-green-600">{disponivel(p)}</span></span>
+                        ? <span className="font-semibold text-green-600">Available: {disponivel(p)}</span>
                         : <span className="font-semibold text-destructive">Sold Out</span>}
                   </p>
                 </div>
