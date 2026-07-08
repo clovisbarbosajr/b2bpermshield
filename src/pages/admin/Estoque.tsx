@@ -59,7 +59,7 @@ const AdminEstoque = () => {
     });
     await supabase.from("produtos").update({ estoque_total: novaQtd }).eq("id", selected.id);
     // Também no Activity Logs (Settings → Activity Logs), com detalhes.
-    log("updated", "inventory", selected.id, `${selected.nome} (${selected.sku})`, {
+    log("updated", "inventory", selected.id, selected.sku ? `${selected.nome} (${selected.sku})` : selected.nome, {
       qty_before: selected.estoque_total, qty_after: novaQtd,
       difference: novaQtd - selected.estoque_total, memo: motivo || null,
     });
@@ -69,7 +69,7 @@ const AdminEstoque = () => {
     fetchData();
   };
 
-  const filtered = produtos.filter((p) => p.nome.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()));
+  const filtered = produtos.filter((p) => p.nome.toLowerCase().includes(search.toLowerCase()) || (p.sku ?? "").toLowerCase().includes(search.toLowerCase()));
   const disponivel = (p: any) => p.estoque_total - p.estoque_reservado;
 
   return (

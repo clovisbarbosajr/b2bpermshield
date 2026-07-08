@@ -108,7 +108,7 @@ const AdminTabelasPreco = () => {
   };
 
   const filteredProdutos = produtos.filter((p) =>
-    p.nome.toLowerCase().includes(itemSearch.toLowerCase()) || p.sku.toLowerCase().includes(itemSearch.toLowerCase())
+    p.nome.toLowerCase().includes(itemSearch.toLowerCase()) || (p.sku ?? "").toLowerCase().includes(itemSearch.toLowerCase())
   );
 
   return (

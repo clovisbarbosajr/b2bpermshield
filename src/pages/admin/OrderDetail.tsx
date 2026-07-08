@@ -187,7 +187,7 @@ const OrderDetail = () => {
       pedido_id: order.id,
       produto_id: product.id,
       nome_produto: product.nome,
-      sku: product.sku,
+      sku: product.sku ?? "",
       preco_unitario: product.preco,
       quantidade: qty,
       subtotal: product.preco * qty,
@@ -477,7 +477,7 @@ const OrderDetail = () => {
               {products.map((p) => (
                 <button key={p.id} className="w-full text-left px-2 py-2 hover:bg-muted/50 flex justify-between gap-2"
                   onClick={() => handleAddProductDraft(p)}>
-                  <span>{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></span>
+                  <span>{p.nome}{p.sku && <span className="text-xs text-muted-foreground"> ({p.sku})</span>}</span>
                   <span className="text-sm whitespace-nowrap">{fmt(Number(p.preco) || 0)}</span>
                 </button>
               ))}

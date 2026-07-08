@@ -179,7 +179,7 @@ const Catalogo = () => {
   const subCategories = categoryParam ? childrenOf(categoryParam) : rootCats;
 
   const filtered = produtos.filter((p) => {
-    const matchSearch = !search || p.nome.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = !search || p.nome.toLowerCase().includes(search.toLowerCase()) || (p.sku ?? "").toLowerCase().includes(search.toLowerCase());
     const matchCat = !categoryIds || (p.categoria_id && categoryIds.includes(p.categoria_id));
     return matchSearch && matchCat;
   });

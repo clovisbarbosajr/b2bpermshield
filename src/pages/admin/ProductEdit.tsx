@@ -206,11 +206,13 @@ const ProductEdit = () => {
   };
 
   const handleSave = async (goBack = false) => {
-    if (!form.nome || !form.sku) { toast.error("Name and Code are required"); return; }
+    // Code (sku) é OPCIONAL — igual ao B2BWave original. Vazio vira NULL no banco
+    // (string vazia colidiria na UNIQUE a partir do 2º produto sem código).
+    if (!form.nome) { toast.error("Name is required"); return; }
     setSaving(true);
 
     const payload: any = {
-      nome: form.nome, sku: form.sku, descricao: form.descricao || null, imagem_url: form.imagem_url || null,
+      nome: form.nome, sku: (form.sku as string)?.trim() || null, descricao: form.descricao || null, imagem_url: form.imagem_url || null,
       categoria_id: form.categoria_id || null, brand_id: form.brand_id || null,
       preco: form.preco, custo: form.custo, preco_msrp: form.preco_msrp,
       peso: form.peso, comprimento: form.comprimento, largura: form.largura, altura: form.altura,
@@ -411,7 +413,7 @@ const ProductEdit = () => {
                       <Input value={form.nome} onChange={e => f("nome", e.target.value)} />
                     </div>
                     <div>
-                      <Label>Code *</Label>
+                      <Label>Code</Label>
                       <Input value={form.sku} onChange={e => f("sku", e.target.value)} />
                     </div>
                     <div>

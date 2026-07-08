@@ -299,7 +299,7 @@ const ProducaoStatus = () => {
               const isReceiving = receivingId === r.id;
               return (
                 <TableRow key={r.id} className={r.status === "a_caminho" ? "bg-blue-50/40 dark:bg-blue-950/10" : ""}>
-                  <TableCell className="font-medium">{r.produtos?.nome ?? "—"} <span className="text-xs text-muted-foreground">({r.produtos?.sku ?? ""})</span></TableCell>
+                  <TableCell className="font-medium">{r.produtos?.nome ?? "—"}{r.produtos?.sku && <span className="text-xs text-muted-foreground"> ({r.produtos.sku})</span>}</TableCell>
                   <TableCell>{r.quantidade}</TableCell>
                   <TableCell>{r.est_ready ?? "—"}</TableCell>
                   <TableCell>{r.est_entrega ?? "—"}</TableCell>
@@ -359,7 +359,7 @@ const ProducaoStatus = () => {
                 <TableRow><TableCell colSpan={4} className="text-center py-6 text-muted-foreground">Nothing received yet.</TableCell></TableRow>
               ) : received.map((r) => (
                 <TableRow key={r.id} className="bg-green-50/30 dark:bg-green-950/10">
-                  <TableCell className="font-medium">{r.produtos?.nome ?? "—"} <span className="text-xs text-muted-foreground">({r.produtos?.sku ?? ""})</span></TableCell>
+                  <TableCell className="font-medium">{r.produtos?.nome ?? "—"}{r.produtos?.sku && <span className="text-xs text-muted-foreground"> ({r.produtos.sku})</span>}</TableCell>
                   <TableCell>{r.quantidade} → <b className={r.quantidade_recebida !== r.quantidade ? "text-amber-600" : "text-green-700"}>{r.quantidade_recebida ?? r.quantidade}</b></TableCell>
                   <TableCell className="text-sm">{r.numero_container ?? "—"}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{r.recebido_em ? fmtDT(r.recebido_em) : "—"}</TableCell>
@@ -383,7 +383,7 @@ const ProducaoStatus = () => {
                   {grouped.map((g) => (
                     <SelectGroup key={g.path}>
                       <SelectLabel className="text-primary font-bold text-sm uppercase bg-primary/10 px-2 py-1.5 my-1 rounded-sm">{g.path}</SelectLabel>
-                      {g.prods.map((p) => <SelectItem key={p.id} value={p.id} className="py-2 pl-4">{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></SelectItem>)}
+                      {g.prods.map((p) => <SelectItem key={p.id} value={p.id} className="py-2 pl-4">{p.nome}{p.sku && <span className="text-xs text-muted-foreground"> ({p.sku})</span>}</SelectItem>)}
                     </SelectGroup>
                   ))}
                 </SelectContent>

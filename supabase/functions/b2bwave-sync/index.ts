@@ -497,7 +497,7 @@ Deno.serve(async (req) => {
       // Load existing products for comparison
       const { data: existingProds } = await adminClient.from("produtos").select("id, sku, nome, preco, ativo, imagem_url, estoque_total, estoque_reservado, created_at");
       const existingMap = new Map<string, any>();
-      for (const p of existingProds || []) existingMap.set(p.sku.toLowerCase(), p);
+      for (const p of existingProds || []) existingMap.set((p.sku || "").toLowerCase(), p);
 
       const seenSkus = new Set<string>();
       const toUpsert: any[] = [];

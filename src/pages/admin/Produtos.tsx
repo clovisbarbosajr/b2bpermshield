@@ -92,7 +92,7 @@ const AdminProdutos = () => {
 
   const filtered = produtos.filter(p => {
     if (filters.name && !p.nome.toLowerCase().includes(filters.name.toLowerCase())) return false;
-    if (filters.code && !p.sku.toLowerCase().includes(filters.code.toLowerCase())) return false;
+    if (filters.code && !(p.sku ?? "").toLowerCase().includes(filters.code.toLowerCase())) return false;
     if (filters.category && p.categoria_id !== filters.category) return false;
     if (filters.isActive === "Active" && !p.ativo) return false;
     if (filters.isActive === "Inactive" && p.ativo) return false;
@@ -296,7 +296,7 @@ const AdminProdutos = () => {
                     )}
                   </TableCell>
                   <TableCell>
-                    <span className="inline-block rounded bg-primary/80 px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground mb-0.5">{p.sku}</span>
+                    {p.sku && <span className="inline-block rounded bg-primary/80 px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground mb-0.5">{p.sku}</span>}
                     <div className="text-primary hover:underline text-sm">{p.nome}</div>
                   </TableCell>
                   <TableCell className="text-sm">{getCategoryName(p.categoria_id)}</TableCell>

@@ -424,7 +424,7 @@ const Checkout = () => {
       produto_id: i.produto_id,
       // Inclui a variante (Size/Color) no nome da linha do pedido; sku = código da variante.
       nome_produto: (i as any).variante_label ? `${i.nome} (${(i as any).variante_label})` : i.nome,
-      sku: i.sku,
+      sku: i.sku ?? "",
       preco_unitario: i.preco,
       quantidade: i.quantidade,
       subtotal: i.preco * i.quantidade,
@@ -509,7 +509,7 @@ const Checkout = () => {
         // Notificações: AGUARDA antes de navegar — fire-and-forget + navigate cancelava
         // o fetch no unload (pedido sem email). allSettled não bloqueia por falha.
         const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerName };
-        const emailItems = recalculated.map(i => ({ sku: i.sku, nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
+        const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
         await Promise.allSettled([
           supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } }),
           supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } }),
@@ -535,7 +535,7 @@ const Checkout = () => {
 
     // Notificações: AGUARDA antes de navegar (mesmo motivo do caminho com cartão).
     const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerName };
-    const emailItems = recalculated.map(i => ({ sku: i.sku, nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
+    const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
     await Promise.allSettled([
       supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } }),
       supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } }),

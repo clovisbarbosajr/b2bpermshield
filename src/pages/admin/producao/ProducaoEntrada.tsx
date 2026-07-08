@@ -155,7 +155,7 @@ const ProducaoEntrada = () => {
                   <SelectTrigger className="h-11 text-base"><SelectValue placeholder={l.categoria_id ? "Choose product" : "Pick a category first"} /></SelectTrigger>
                   <SelectContent className="max-h-[460px] min-w-[300px]">
                     {prodsOfCat(l.categoria_id).map((p) => (
-                      <SelectItem key={p.id} value={p.id} className="text-base py-2.5">{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></SelectItem>
+                      <SelectItem key={p.id} value={p.id} className="text-base py-2.5">{p.nome}{p.sku && <span className="text-xs text-muted-foreground"> ({p.sku})</span>}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

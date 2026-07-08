@@ -82,7 +82,7 @@ const InventoryAdjustment = () => {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const base = !q ? produtos : produtos.filter((p) =>
-      p.nome.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || catPath(p.categoria_id).toLowerCase().includes(q));
+      p.nome.toLowerCase().includes(q) || (p.sku ?? "").toLowerCase().includes(q) || catPath(p.categoria_id).toLowerCase().includes(q));
     const dir = sortDir === "asc" ? 1 : -1;
     return [...base].sort((a, b) => {
       if (sortKey === "estoque") return (a.estoque_total - b.estoque_total) * dir;
@@ -119,7 +119,7 @@ const InventoryAdjustment = () => {
         usuario_id: user?.id ?? null,
       });
       // Log de atividade DETALHADO (Settings → Activity Logs).
-      await log("updated", "inventory", p.id, `${p.nome} (${p.sku})`, {
+      await log("updated", "inventory", p.id, p.sku ? `${p.nome} (${p.sku})` : p.nome, {
         category: catPath(p.categoria_id),
         qty_before: p.estoque_total, qty_after: q, difference: diff,
         reference: reference || null, memo: memo || null,
@@ -182,7 +182,7 @@ const InventoryAdjustment = () => {
                 const diff = q !== null && Number.isFinite(q) ? q - p.estoque_total : null;
                 return (
                   <TableRow key={p.id} className={diff !== null && diff !== 0 ? "bg-primary/5" : ""}>
-                    <TableCell className="font-medium">{p.nome} <span className="text-xs text-muted-foreground">({p.sku})</span></TableCell>
+                    <TableCell className="font-medium">{p.nome}{p.sku && <span className="text-xs text-muted-foreground"> ({p.sku})</span>}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{catPath(p.categoria_id)}</TableCell>
                     <TableCell className="text-right">{p.estoque_total}</TableCell>
                     <TableCell className="text-right">

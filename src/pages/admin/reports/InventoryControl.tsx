@@ -77,7 +77,7 @@ const InventoryControl = () => {
     return products.filter((p) => {
       if (appliedFilters.category !== "all" && p.categoria_id !== appliedFilters.category) return false;
       if (appliedFilters.name && !p.nome.toLowerCase().includes(appliedFilters.name.toLowerCase())) return false;
-      if (appliedFilters.code && !p.sku.toLowerCase().includes(appliedFilters.code.toLowerCase())) return false;
+      if (appliedFilters.code && !(p.sku ?? "").toLowerCase().includes(appliedFilters.code.toLowerCase())) return false;
       if (appliedFilters.lastModified) {
         const filterDate = new Date(appliedFilters.lastModified);
         const productDate = new Date(p.updated_at);

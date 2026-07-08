@@ -41,7 +41,7 @@ const ProductSales = () => {
     });
     return Object.entries(map)
       .map(([id, d]) => ({ id, ...d }))
-      .filter((d) => !nameFilter || d.nome.toLowerCase().includes(nameFilter.toLowerCase()) || d.sku.toLowerCase().includes(nameFilter.toLowerCase()))
+      .filter((d) => !nameFilter || d.nome.toLowerCase().includes(nameFilter.toLowerCase()) || (d.sku ?? "").toLowerCase().includes(nameFilter.toLowerCase()))
       .sort((a, b) => b.revenue - a.revenue);
   }, [items, cancelled, nameFilter]);
 
