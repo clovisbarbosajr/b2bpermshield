@@ -141,11 +141,33 @@ const Conta = () => {
             </Dialog>
           </CardHeader>
           <CardContent>
-            {enderecos.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No addresses registered.</p>
-            ) : (
-              <div className="space-y-3">
-                {enderecos.map((e) => (
+            {(() => {
+              // Endereço PRINCIPAL: vem do cadastro do cliente (aba "Customer details"
+              // no admin) — campos na tabela clientes. Antes o portal só lia a tabela
+              // `enderecos` e esse endereço não aparecia.
+              const c = cliente ?? {};
+              const hasPrimary = !!(c.endereco || c.cidade || c.estado || c.cep);
+              const line2 = [c.cidade, c.estado].filter(Boolean).join(", ");
+              const line3 = [c.pais, c.cep].filter(Boolean).join(" ");
+              if (!hasPrimary && enderecos.length === 0) {
+                return <p className="text-sm text-muted-foreground">No addresses registered.</p>;
+              }
+              return (
+                <div className="space-y-3">
+                  {hasPrimary && (
+                    <div className="flex items-start justify-between rounded-md border border-border/70 bg-background/40 p-3">
+                      <div className="flex gap-2">
+                        <MapPin className="mt-0.5 h-4 w-4 text-primary" />
+                        <div className="text-sm">
+                          <p className="font-medium">{c.endereco || "—"}{c.endereco2 ? `, ${c.endereco2}` : ""}</p>
+                          {line2 && <p className="text-muted-foreground">{line2}</p>}
+                          {line3 && <p className="text-muted-foreground">{line3}</p>}
+                        </div>
+                      </div>
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Primary</span>
+                    </div>
+                  )}
+                  {enderecos.map((e) => (
                   <div key={e.id} className="flex items-start justify-between rounded-md border border-border/70 bg-background/40 p-3">
                     <div className="flex gap-2">
                       <MapPin className="mt-0.5 h-4 w-4 text-muted-foreground" />
@@ -157,8 +179,9 @@ const Conta = () => {
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDeleteEndereco(e.id)}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 ))}
-              </div>
-            )}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       </div>
