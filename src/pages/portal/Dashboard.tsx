@@ -68,7 +68,7 @@ const PortalDashboard = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4 mb-6">
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 mb-6">
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium text-muted-foreground">Total Spent</CardTitle>
@@ -94,15 +94,6 @@ const PortalDashboard = () => {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">{openOrders}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Account</CardTitle>
-            <User className="h-4 w-4 text-accent" />
-          </CardHeader>
-          <CardContent>
-            <Link to="/portal/conta" className="text-sm text-accent hover:underline">View profile</Link>
           </CardContent>
         </Card>
       </div>

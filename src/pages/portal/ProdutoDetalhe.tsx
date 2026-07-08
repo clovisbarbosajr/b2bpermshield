@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice } from "@/lib/pricing";
+import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 type Produto = {
   id: string; nome: string; descricao: string | null; preco: number; sku: string;
@@ -320,11 +321,12 @@ const ProdutoDetalhe = () => {
           </div>
         </div>
 
-        {/* Description */}
+        {/* Description — HTML do B2BWave (sanitizado). Antes mostrava as tags cruas. */}
         {produto.descricao && (
           <div className="mt-8 border-t pt-6">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Description</p>
-            <div className="text-sm whitespace-pre-wrap">{produto.descricao}</div>
+            <div className="text-sm prose prose-sm max-w-none dark:prose-invert [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-accent [&_a]:underline"
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(produto.descricao) }} />
           </div>
         )}
       </Card>
