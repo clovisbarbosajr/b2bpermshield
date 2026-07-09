@@ -65,15 +65,16 @@ export default function Notificacoes() {
   const toggleEdit = (id: string, on: boolean) =>
     setEditing((prev) => { const n = new Set(prev); on ? n.add(id) : n.delete(id); return n; });
 
-  // Insere um emoji no template de e-mail do evento, na posição do cursor.
+  // Insere um emoji no template do evento (email/sms/whatsapp), na posição do cursor.
   const tplRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
-  const insertEmoji = (evId: string, emoji: string) => {
-    const ta = tplRefs.current[evId];
-    const cur = events.find((e) => e.id === evId)?.template_email ?? '';
+  const insertEmoji = (evId: string, field: 'email' | 'sms' | 'whatsapp', emoji: string) => {
+    const key = `${evId}:${field}`;
+    const col = `template_${field}` as const;
+    const ta = tplRefs.current[key];
+    const cur = (events.find((e) => e.id === evId) as any)?.[col] ?? '';
     const pos = ta ? (ta.selectionStart ?? cur.length) : cur.length;
     const next = cur.slice(0, pos) + emoji + cur.slice(pos);
-    setEvents(events.map((x) => (x.id === evId ? { ...x, template_email: next } : x)));
-    // Recoloca o cursor após o emoji.
+    setEvents(events.map((x) => (x.id === evId ? { ...x, [col]: next } : x)));
     requestAnimationFrame(() => { if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = pos + emoji.length; } });
   };
 
@@ -305,30 +306,39 @@ export default function Notificacoes() {
           ))}
         </TabsContent>
 
-        {/* TEMPLATES — edita o corpo do e-mail de cada evento num lugar só */}
+        {/* TEMPLATES — ÚNICO lugar pra escrever a mensagem de cada evento (email/SMS/WhatsApp).
+            A aba Events cuida só de LIGAR o evento e escolher canais/quem recebe. */}
         <TabsContent value="templates" className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Email body for each event. Available variables:&nbsp;
-            <code className="text-xs">{'{order_id} {status} {total} {date} {items} {customer_name} {customer_company} {customer_email} {customer_phone}'}</code>
+            Write the message sent for each event. This is the exact content that goes out.
+            Available variables:&nbsp;
+            <code className="text-xs">{'{order_id} {status} {total} {date} {items} {customer_name} {customer_company} {customer_email} {customer_phone} {product_name} {quantity}'}</code>
           </p>
           {events.map((ev) => (
-            <Card key={ev.id} className="p-4 space-y-2">
+            <Card key={ev.id} className="p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <p className="font-medium">{EVENT_LABELS[ev.id] ?? ev.id}</p>
                 <Button size="sm" disabled={saving} className="gap-1.5 shrink-0" onClick={() => saveEvent(ev)}>
                   <Save className="w-3.5 h-3.5" /> Save
                 </Button>
               </div>
-              <div className="flex flex-wrap gap-1">
-                {EMOJIS.map((em) => (
-                  <button key={em} type="button" title="Insert emoji"
-                    className="rounded border border-border px-1.5 py-0.5 text-base hover:bg-muted transition-colors"
-                    onClick={() => insertEmoji(ev.id, em)}>{em}</button>
-                ))}
-              </div>
-              <Textarea rows={5} ref={(el) => { tplRefs.current[ev.id] = el; }}
-                value={ev.template_email ?? ''} placeholder="Email body for this event..."
-                onChange={(e) => setEvents(events.map((x) => (x.id === ev.id ? { ...x, template_email: e.target.value } : x)))} />
+              {(['email', 'sms', 'whatsapp'] as const).map((field) => (
+                <div key={field} className="space-y-1.5">
+                  <Label className="text-xs capitalize">{field}</Label>
+                  <div className="flex flex-wrap gap-1">
+                    {EMOJIS.map((em) => (
+                      <button key={em} type="button" title="Insert emoji"
+                        className="rounded border border-border px-1.5 py-0.5 text-sm hover:bg-muted transition-colors"
+                        onClick={() => insertEmoji(ev.id, field, em)}>{em}</button>
+                    ))}
+                  </div>
+                  <Textarea rows={field === 'email' ? 5 : 3}
+                    ref={(el) => { tplRefs.current[`${ev.id}:${field}`] = el; }}
+                    value={(ev as any)[`template_${field}`] ?? ''}
+                    placeholder={`${field.toUpperCase()} message for this event...`}
+                    onChange={(e) => setEvents(events.map((x) => (x.id === ev.id ? { ...x, [`template_${field}`]: e.target.value } : x)))} />
+                </div>
+              ))}
             </Card>
           ))}
         </TabsContent>
@@ -365,19 +375,8 @@ export default function Notificacoes() {
                     onChange={(e) => setEvents(events.map((x) => x.id === ev.id ? { ...x, extra: { ...x.extra, low_stock_threshold: Number(e.target.value) } } : x))} />
                 </div>
               )}
-              <div className="grid gap-3 sm:grid-cols-3">
-                {(['email', 'sms', 'whatsapp'] as const).map((c) => (
-                  <div key={c} className="space-y-1">
-                    <Label className="text-xs capitalize">{c}</Label>
-                    <Textarea rows={4} className="text-xs" value={(ev as any)[`template_${c}`]}
-                      onChange={(e) => setEvents(events.map((x) => x.id === ev.id ? { ...x, [`template_${c}`]: e.target.value } : x))} />
-                  </div>
-                ))}
-              </div>
-              <p className="text-[11px] text-muted-foreground mt-2">
-                Variables: <code>{'{order_id} {status} {total} {date} {items} {customer_name} {customer_company} {customer_email} {customer_phone} {product_name} {quantity}'}</code>
-              </p>
-              <Button size="sm" className="mt-3 gap-1.5" disabled={saving} onClick={() => saveEvent(ev)}>
+              <p className="text-[11px] text-muted-foreground mb-3">Message content is edited in the <strong>Templates</strong> tab.</p>
+              <Button size="sm" className="gap-1.5" disabled={saving} onClick={() => saveEvent(ev)}>
                 <Save className="w-3.5 h-3.5" /> Save event
               </Button>
             </Card>
