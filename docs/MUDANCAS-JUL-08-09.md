@@ -117,6 +117,19 @@ produtos **apagava os 96 links importados manualmente**. Correção: o sync **n�
 `produtos_relacionados` (related é 100% via tela Import). Marcador `SYNC_VERSION:related-v4`
 confirma a versão sem-wipe. **Reimportar os relacionados SÓ DEPOIS do redeploy v4.**
 
+## BACKLOG / PRÓXIMOS UPDATES (não urgente)
+- **Opt-out de notificação por cliente** (pedido do dono, 2026-07-09): cada cliente poder
+  desabilitar SMS e/ou Email. Hoje NÃO existe (sem campo de preferência em `clientes`).
+  Precisa: (a) colunas em `clientes` (ex.: `notif_sms boolean default true`, `notif_email
+  boolean default true`); (b) toggle na UI (admin CustomerEdit e/ou portal My Account);
+  (c) `dispatch.ts`/`send-email` checarem a preferência do cliente antes de enviar a ELE
+  (não afeta admin). Antes de ligar SMS pro cliente em produção: o dono do sistema vai
+  validar/preparar o TEMPLATE de SMS (aba Notifications → Templates) — mensagem amigável.
+- **Toggle dedicado "SMS pro cliente on/off"** (separado do admin): hoje o canal SMS é
+  compartilhado admin+cliente no mesmo evento; não dá pra desligar só o do cliente sem
+  código. Pequeno enhancement se o dono quiser esse controle fino. Enquanto isso, pausar
+  SMS = Canais → SMS off (pausa admin+cliente).
+
 ## PENDÊNCIAS
 1. **Redeploy da edge function `b2bwave-sync`** (passo 1): há melhoria no repo não deployada
    (`d5e43fc`, related em lote) + marcador `SYNC_VERSION:related-v3`. Não bloqueia produção
