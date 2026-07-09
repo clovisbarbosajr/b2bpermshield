@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card } from '@/components/ui/card';
@@ -42,6 +42,9 @@ type Recipient = {
   whatsapp: string | null; active: boolean;
 };
 
+// Emojis comuns pra inserir nos templates (barra de atalho).
+const EMOJIS = ['✅', '✔️', '🎉', '📦', '🚚', '🛒', '💰', '⚠️', '❌', '👍', '📩', '⭐', '🔔', '⏳'];
+
 export default function Notificacoes() {
   const [loading, setLoading] = useState(true);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -61,6 +64,18 @@ export default function Notificacoes() {
   const [editing, setEditing] = useState<Set<string>>(new Set());
   const toggleEdit = (id: string, on: boolean) =>
     setEditing((prev) => { const n = new Set(prev); on ? n.add(id) : n.delete(id); return n; });
+
+  // Insere um emoji no template de e-mail do evento, na posição do cursor.
+  const tplRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+  const insertEmoji = (evId: string, emoji: string) => {
+    const ta = tplRefs.current[evId];
+    const cur = events.find((e) => e.id === evId)?.template_email ?? '';
+    const pos = ta ? (ta.selectionStart ?? cur.length) : cur.length;
+    const next = cur.slice(0, pos) + emoji + cur.slice(pos);
+    setEvents(events.map((x) => (x.id === evId ? { ...x, template_email: next } : x)));
+    // Recoloca o cursor após o emoji.
+    requestAnimationFrame(() => { if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = pos + emoji.length; } });
+  };
 
   useEffect(() => { load(); }, []);
 
@@ -304,7 +319,15 @@ export default function Notificacoes() {
                   <Save className="w-3.5 h-3.5" /> Save
                 </Button>
               </div>
-              <Textarea rows={5} value={ev.template_email ?? ''} placeholder="Email body for this event..."
+              <div className="flex flex-wrap gap-1">
+                {EMOJIS.map((em) => (
+                  <button key={em} type="button" title="Insert emoji"
+                    className="rounded border border-border px-1.5 py-0.5 text-base hover:bg-muted transition-colors"
+                    onClick={() => insertEmoji(ev.id, em)}>{em}</button>
+                ))}
+              </div>
+              <Textarea rows={5} ref={(el) => { tplRefs.current[ev.id] = el; }}
+                value={ev.template_email ?? ''} placeholder="Email body for this event..."
                 onChange={(e) => setEvents(events.map((x) => (x.id === ev.id ? { ...x, template_email: e.target.value } : x)))} />
             </Card>
           ))}
