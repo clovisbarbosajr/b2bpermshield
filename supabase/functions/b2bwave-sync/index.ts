@@ -1,4 +1,4 @@
-// Deployed b2bwave-sync (SYNC_VERSION:related-v2)
+// Deployed b2bwave-sync (SYNC_VERSION:related-v2) — redeploy from main @ 1216bbd
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
