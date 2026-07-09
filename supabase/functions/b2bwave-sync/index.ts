@@ -730,9 +730,9 @@ Deno.serve(async (req) => {
       // DIAGNÓSTICO (persistido em sync_log.samples p/ consulta via SQL): se não veio
       // nenhum relacionado, registra os campos que a API realmente manda no produto
       // (arrays + qualquer chave "relat/bundle/together") — revela se o dado existe
-      // no payload e com qual nome. Marcador "SYNC_VERSION:related-v2" confirma que
-      // esta versão (com o passo de related) está de fato deployada.
-      const diagSamples: string[] = ["SYNC_VERSION:related-v2"];
+      // no payload e com qual nome. O marcador "SYNC_VERSION:related-v3" confirma que
+      // esta versão (related em LOTE, commit d5e43fc+) está de fato deployada.
+      const diagSamples: string[] = ["SYNC_VERSION:related-v3"];
       if (relatedRows === 0 && allProducts.length) {
         const s = allProducts[0] as Record<string, any>;
         const arrays = Object.keys(s).filter((k) => Array.isArray(s[k]));

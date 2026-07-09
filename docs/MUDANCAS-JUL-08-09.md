@@ -1,0 +1,119 @@
+# Mudanças — batch 08–09/jul/2026 (go-live prep)
+
+> Registro técnico COMPLETO das alterações feitas nesta rodada. Cada item:
+> o que foi pedido, o que mudou (arquivo/commit), e como conferir.
+> Frontend faz deploy AUTOMÁTICO no Vercel a cada push no `main` (não é pelo
+> Lovable). Edge function `b2bwave-sync` é deploy separado (Lovable → Supabase).
+
+---
+
+## Como o deploy funciona (importante)
+- **Frontend (React/Vite):** hospedado no **Vercel**, conectado ao GitHub. **Todo push no
+  `main` gera deploy de produção automático** (~1–2 min). Por isso NÃO existe "publicar" no
+  Lovable pro frontend — e não precisa. URL: `b2bpermshield.vercel.app`.
+- **Edge function `b2bwave-sync`:** roda no Supabase (Lovable Cloud). **Não** sobe no push;
+  precisa de redeploy explícito pelo Lovable (que gera um commit "Deployed b2bwave-sync").
+- **Banco (migrations):** aplicadas manualmente no SQL editor.
+
+---
+
+## PRODUÇÃO — Status/Entrada/Dashboard
+
+| Pedido | Implementação | Commit |
+|--------|---------------|--------|
+| Container # sincroniza o Tracking | Ao salvar com Container # (edição ou New Entry), o Tracking recebe o mesmo valor; não sobrescreve tracking manual diferente | `0c450e8` |
+| Tirar container duplicado da lista | Coluna "Order # / Container" virou só "Order #" (container seguia no diálogo/Received) | `f6bad41` |
+| Busca na Production Status | Barra de busca (produto/SKU/order/container/tracking) filtra lista ativa + Received | `3e001e0` |
+| Container na New Entry = "On the way" | Linha com Container # nasce `status='a_caminho'` | `3e001e0` |
+| Ordenação por setas (Status) | Cabeçalhos clicáveis (Product/Qty/Est Ready/ETA/Order/Status); padrão ETA (vazios no fim) | `3e001e0`, `9441f0a` |
+| Setas no Dashboard (drill-down) | Product/ETA/Qty/Status clicáveis; padrão ETA | `ea56841`, `9441f0a` |
+| Categoria ao lado do nome (Dashboard) | "Silver Grey (One Plus › Blue Box)"; tira tracking duplicado da linha | `bb0c7ac` |
+| Inventory Adjustment (estilo QuickBooks) | Nova tela `/admin/estoque/adjustment`: todos os produtos c/ categoria, Qty on Hand, New Quantity, diff; grava estoque_log + activity_logs | `3202e8f` |
+| Produção loga tudo no Activity Logs | criar/editar/deletar/duplicar/receber/status/tracking (entity_type `production`) | `3202e8f` |
+
+## ACTIVITY LOGS
+- Filtro "User" virou **dropdown de usuários** (nome+email); tipos Inventory/Production;
+  linha de detalhes legível (Qty antes→depois, categoria, ref, memo). Commit `3202e8f`.
+
+## PRODUTOS / CÓDIGO (sku)
+| Pedido | Implementação | Commit |
+|--------|---------------|--------|
+| Code (sku) OPCIONAL + sem números automáticos | Só Name obrigatório; vazio→NULL; sync grava código real (sem sufixo) e casa por `b2bwave_id` | `8de1bbb`, `129791c` |
+| Restaurar códigos zerados por engano | Sync repõe o código real do B2BWave (313 restaurados) | `129791c` |
+| Códigos podem repetir (igual B2BWave) | DROP das UNIQUE de `produtos.sku`; UNIQUE passa a ser `b2bwave_id` | `b5ccc60`, `129791c` |
+| Categorias em ÁRVORE nos dropdowns | Raiz, "- filho", "-- neto" por `ordem`+nome; helper `lib/categoryTree.ts` (Products/ProductEdit/Orders) | `129791c` |
+| Related Products busca por NOME | Combobox (era campo de ID cru) | `1d60b0c` |
+
+## VIEW AS / PRIVACIDADE
+| Pedido | Implementação | Commit |
+|--------|---------------|--------|
+| Banner "Return to" ia sempre pra Customers | Dashboard→/admin, Orders→/admin/orders, Customers→/admin/customers (`clearViewAs(dest)`) | `0920e30` |
+| Sessão errada no view-as (Nextgen) | Guarda: view-as só ativa se a sessão REAL for STAFF; senão limpa a chave e reinicia | `0920e30` |
+| Filtros de Orders com buracos | 3 grids esburacados → 1 grid de 4 colunas | `0920e30` |
+
+## PORTAL (cliente)
+| Pedido | Implementação | Commit |
+|--------|---------------|--------|
+| Descrição do produto renderiza HTML | Sanitizado via `lib/sanitizeHtml.ts` (whitelist, sem script/on*/urls perigosas) | `e981a73` |
+| Remover "Account" duplicado no dashboard | Ficou só "My Account"; stats em 3 colunas | `e981a73` |
+| Recent Orders clicável | Cada linha → `/portal/pedidos/:id` | `2549ad4` |
+| Total Spent só do ano | Soma pedidos do ano corrente; rótulo mostra o ano | `0ad8e21` |
+| Catálogo em LISTA (tabela B2BWave) | Colunas Code/Product/Price/Min Qty/Available Qty/Status/Quantity/Add; toggle List/Photos | `0ad8e21` |
+| Quantidade + estoque no card | Campo qty (grid+lista); "Available: N" negrito VERDE; "Sold Out" VERMELHO automático em estoque 0; abre em lista | `7a03831`, `e188180`, `9d7f71b` |
+| My Account mostra endereço principal | Endereço do cadastro (tabela clientes) aparece com badge "Primary" | `1577dca` |
+| Botão "New order" | Atalho no dashboard → catálogo | `6ab478a` |
+| Modal add product mostra categoria | Caminho completo (localização › categoria) p/ distinguir homônimos | `6931b2b` |
+
+## PRICE LISTS
+| Pedido | Implementação | Commit |
+|--------|---------------|--------|
+| App remontava ao voltar pra aba (perdia edição) | `AuthContext`: TOKEN_REFRESHED/SIGNED_IN do MESMO user só atualiza sessão (ref `initializedUserRef`) | `842d5bd` |
+| Save único no popup de preços | Save no rodapé salva TUDO em lote; linhas editadas destacadas; sai o save por linha | `842d5bd` |
+| Input de preço sem setas | `appearance:textfield` | `842d5bd` |
+| Duplicar price list | Botão ⧉ copia lista "(copy)" + todos os preços | `b5ccc60` |
+
+## RELATED PRODUCTS (importação)
+- **A API do B2BWave NÃO expõe related products** (confirmado na doc oficial). Vêm só no
+  **export de produtos** (Products → Export), coluna **`related_products_buy_with`**
+  (não "related_products"), com `-` como slot vazio, referenciando outros produtos por `product_sku`.
+- Nova tela **Tools → Import Related Products** (`/admin/tools/import-related-products`):
+  upload do `.xlsx`/`.csv`, casa produto principal por `b2b_product_id` (fallback sku),
+  relacionados por `product_sku`, popula `produtos_relacionados`. Parser CSV RFC-4180 próprio +
+  leitura `.xlsx` via SheetJS. Commits `551878f`, `1d60b0c`, `21dec50`, `f4564f7`.
+- **Resultado do import real (09/jul):** 96 links, 19 produtos, 0 erros.
+- Dependência nova: `xlsx` (SheetJS 0.18.5).
+
+---
+
+## MIGRAÇÕES SQL (todas já aplicadas — confirmado por diagnóstico)
+| Arquivo | O que faz |
+|---------|-----------|
+| `20260706120000_estoque_log_staff.sql` | estoque_log: staff (admin/manager/warehouse) grava+lê |
+| `20260708120000_produto_sku_opcional.sql` | `produtos.sku` DROP NOT NULL |
+| `20260708130000_produtos_b2bwave_id_unique.sql` | índice único `produtos_b2bwave_id_uidx` (chave do sync) |
+| `20260708140000_sku_repetivel_restaura.sql` | DROP das UNIQUE de sku (código pode repetir) |
+
+Diagnóstico (08/jul) confirmou: sku_nullable=YES, sku_unique_restantes=0, b2bwave_id_uidx=1,
+est_ready=1, estoque_log_staff=2, funcs_privacidade=4, cat_exec_authenticated=false (Bug 3 fechado),
+prod_exec_anon=false. **Nada de SQL pendente.**
+
+---
+
+## VERIFICAÇÕES DE GO-LIVE (com dado real, não suposição)
+- **Frontend:** Vercel API confirmou deploy de produção do último commit = READY.
+- **Privacidade "view as":** SQL `categoria_visivel_para` p/ cliente K&G Design (grupo BELOCORE FL)
+  retornou MIX correto de true/false (escopa por cliente).
+- **Pedidos + total:** pedidos 2599/2601 com `total = subtotal − desconto + tax + shipping` (trigger ok);
+  2600 = $0 (pedido de cotação, recurso "add sem preço").
+- **Related products:** 96 links importados, 0 erros.
+
+---
+
+## PENDÊNCIAS
+1. **Redeploy da edge function `b2bwave-sync`** (passo 1): há melhoria no repo não deployada
+   (`d5e43fc`, related em lote) + marcador `SYNC_VERSION:related-v3`. Não bloqueia produção
+   (related vem pela tela de import; sync de produtos funciona na versão atual). Só realinha
+   repo↔servidor. Confirmar por: rodar Products→Sync Now e checar `sync_log.samples` conter
+   `SYNC_VERSION:related-v3`.
+2. **Pré-desligamento do B2BWave** (semana que vem): sync diferencial final + limpar dados de teste.
+   Fazer com cuidado, junto.
