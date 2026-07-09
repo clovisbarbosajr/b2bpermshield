@@ -109,6 +109,14 @@ prod_exec_anon=false. **Nada de SQL pendente.**
 
 ---
 
+## BUG CORRIGIDO (09/jul, pós-import) — sync WIPAVA os relacionados importados
+O passo de related do sync (adicionado por engano) DELETAVA os relacionados de todos os
+produtos b2b e reinseria só o que a API trouxesse — como a API do B2BWave NÃO traz related
+(confirmado: arrays sem campo related; único "relish"=is_bundle, uma flag), rodar o sync de
+produtos **apagava os 96 links importados manualmente**. Correção: o sync **não toca mais** em
+`produtos_relacionados` (related é 100% via tela Import). Marcador `SYNC_VERSION:related-v4`
+confirma a versão sem-wipe. **Reimportar os relacionados SÓ DEPOIS do redeploy v4.**
+
 ## PENDÊNCIAS
 1. **Redeploy da edge function `b2bwave-sync`** (passo 1): há melhoria no repo não deployada
    (`d5e43fc`, related em lote) + marcador `SYNC_VERSION:related-v3`. Não bloqueia produção

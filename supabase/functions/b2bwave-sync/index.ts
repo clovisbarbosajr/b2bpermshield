@@ -667,49 +667,16 @@ Deno.serve(async (req) => {
         if (!error) variantRows += vrows.length;
       }
 
-      // RELATED / BUNDLED PRODUCTS. Vêm no payload do produto (nomes de campo variam
-      // por versão da API). Cada item pode ser um ID solto OU objeto com id + flag de
-      // "buy together". Casa o ID do B2BWave -> produto local; ignora o que não existe.
-      // Sync é dona: apaga e reinsere por produto (idempotente).
-      // EM LOTE (antes era delete+insert por produto = ~626 idas ao banco em série,
-      // que estourava o tempo da edge function e o sync nem logava). Agora: coleta
-      // tudo em memória, deleta os relacionados dos produtos b2b em poucos chunks e
-      // insere tudo em poucos chunks. Envolto em try/catch pra nunca derrubar o sync.
-      let relatedRows = 0;
-      try {
-        const relFields = ["related_products", "related_product_ids", "related", "bundled_products", "bundles", "product_bundles"];
-        const relAll: any[] = [];
-        for (const p of allProducts) {
-          const localProdId = b2bIdToProdId.get(String(p.id));
-          if (!localProdId) continue;
-          let rawRel: any[] = [];
-          for (const f of relFields) { if (Array.isArray(p[f]) && p[f].length) { rawRel = p[f]; break; } }
-          if (rawRel.length === 0) continue;
-          const seenRel = new Set<string>();
-          for (const item of rawRel) {
-            const relB2b = typeof item === "object" && item
-              ? (item.related_product_id ?? item.product_id ?? item.related_id ?? item.id)
-              : item;
-            if (relB2b == null) continue;
-            const relLocal = b2bIdToProdId.get(String(relB2b));
-            if (!relLocal || relLocal === localProdId || seenRel.has(relLocal)) continue;
-            seenRel.add(relLocal);
-            const buyTogether = typeof item === "object" && item
-              ? !!(item.buy_together ?? item.bundle ?? item.is_bundle ?? item.together)
-              : false;
-            relAll.push({ produto_id: localProdId, produto_relacionado_id: relLocal, comprar_junto: buyTogether });
-          }
-        }
-        // Sync é dona dos relacionados dos produtos b2b: apaga em lote e reinsere.
-        const b2bLocalIds = [...b2bIdToProdId.values()];
-        for (let i = 0; i < b2bLocalIds.length; i += 200) {
-          await adminClient.from("produtos_relacionados").delete().in("produto_id", b2bLocalIds.slice(i, i + 200));
-        }
-        for (let i = 0; i < relAll.length; i += 500) {
-          const { error } = await adminClient.from("produtos_relacionados").insert(relAll.slice(i, i + 500));
-          if (!error) relatedRows += relAll.slice(i, i + 500).length;
-        }
-      } catch (_) { /* related nunca derruba o sync */ }
+      // RELATED / BUNDLED PRODUCTS: o sync NÃO gerencia mais isto.
+      // Confirmado empiricamente (diag related-v3) que a API do B2BWave NÃO traz
+      // related products no payload (arrays = gallery/variants/categories/...; único
+      // campo "relish" = is_bundle, que é flag, não lista). Os relacionados vêm
+      // EXCLUSIVAMENTE da tela Tools → Import Related Products (arquivo de export).
+      // ATENÇÃO: a versão anterior deste passo APAGAVA os relacionados de todos os
+      // produtos b2b e não reinseria nada (API vazia) — o que WIPAVA os links
+      // importados manualmente. Por isso foi removido: o sync não toca em
+      // produtos_relacionados. (Ver docs/MUDANCAS-JUL-08-09.md.)
+      const relatedRows = 0;
 
       // Stale products. SEGURANÇA: nunca DELETA (irreversível); apenas DESATIVA, e só
       // produtos que vieram do B2BWave (b2bwave_id) — produto nativo do app é preservado.
@@ -730,9 +697,10 @@ Deno.serve(async (req) => {
       // DIAGNÓSTICO (persistido em sync_log.samples p/ consulta via SQL): se não veio
       // nenhum relacionado, registra os campos que a API realmente manda no produto
       // (arrays + qualquer chave "relat/bundle/together") — revela se o dado existe
-      // no payload e com qual nome. O marcador "SYNC_VERSION:related-v3" confirma que
-      // esta versão (related em LOTE, commit d5e43fc+) está de fato deployada.
-      const diagSamples: string[] = ["SYNC_VERSION:related-v3"];
+      // no payload e com qual nome. O marcador "SYNC_VERSION:related-v4" confirma que
+      // esta versão (sync NÃO toca em produtos_relacionados — não wipa os importados)
+      // está de fato deployada.
+      const diagSamples: string[] = ["SYNC_VERSION:related-v4"];
       if (relatedRows === 0 && allProducts.length) {
         const s = allProducts[0] as Record<string, any>;
         const arrays = Object.keys(s).filter((k) => Array.isArray(s[k]));
