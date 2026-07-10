@@ -259,7 +259,7 @@ const ProductEdit = () => {
       await saveSubData(productId!);
     } catch (e: any) {
       setSaving(false);
-      toast.error(e?.message || "Erro ao salvar dados do produto. Tente salvar de novo.");
+      toast.error(e?.message || "Error saving product data. Please try saving again.");
       return;
     }
 
@@ -341,7 +341,7 @@ const ProductEdit = () => {
           grupo_nome: privacyGroups.find((p) => p.id === gid)?.nome ?? null,
         })) as any,
       );
-      if (accErr) throw new Error("Falha ao salvar grupos de acesso (privacidade): " + accErr.message);
+      if (accErr) throw new Error("Failed to save access groups (privacy): " + accErr.message);
     }
     await (supabase as any).from("produto_cliente_acesso").delete().eq("produto_id", pid);
     const cliRows = form.is_private
@@ -352,7 +352,7 @@ const ProductEdit = () => {
       : [];
     if (cliRows.length > 0) {
       const { error: cliErr } = await (supabase as any).from("produto_cliente_acesso").insert(cliRows);
-      if (cliErr) throw new Error("Falha ao salvar acesso por cliente (privacidade): " + cliErr.message);
+      if (cliErr) throw new Error("Failed to save per-customer access (privacy): " + cliErr.message);
     }
   };
 

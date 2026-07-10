@@ -84,9 +84,12 @@ export async function dispatchEvent(db: Db, event: string, vars: Record<string, 
   const failures: string[] = [];
   for (const t of targets) {
     if (!ch[t.channel]?.enabled) {
-      await logRow(db, event, t.channel, t.to, { ok: false, error: "canal desligado" }, vars);
+      // Canal desligado DE PROPÓSITO (interruptor mestre na UI) = SKIP, não falha.
+      // Antes era failure → alertAdmin mandava UM EMAIL POR EVENTO avisando
+      // "canal desligado" — exatamente o que o admin quis silenciar ao desligar.
+      // (O loop de skips abaixo já registra no notification_log.)
       results.push({ ...t, ok: false, error: "channel disabled" });
-      failures.push(`${t.channel} → ${t.to}: canal desligado`);
+      skips.push({ channel: t.channel, who: t.to, reason: "channel disabled" });
       continue;
     }
     const template = t.channel === "email" ? evt.template_email
@@ -102,8 +105,9 @@ export async function dispatchEvent(db: Db, event: string, vars: Record<string, 
     await logRow(db, event, s.channel, `(${s.who})`, { ok: false, error: `skip: ${s.reason}` }, vars);
   }
 
-  // Só FALHA real (provider com erro / canal desligado) alerta o admin por email —
-  // "cliente sem telefone" fica só no log (senão spamaria a cada pedido).
+  // Só FALHA real de provider (ex.: Twilio/Resend com erro) alerta o admin por email.
+  // "Cliente sem telefone" e "canal desligado de propósito" ficam só no log
+  // (senão spamaria a cada pedido / anularia o interruptor mestre).
   if (failures.length > 0) {
     try { await alertAdmin(db, event, vars, failures); } catch (_e) { /* alerta nunca derruba o fluxo */ }
   }

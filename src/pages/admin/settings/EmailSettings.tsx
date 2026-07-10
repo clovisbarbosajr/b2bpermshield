@@ -190,7 +190,7 @@ const EmailSettings = () => {
       return;
     }
 
-    toast.success("Configurações salvas com sucesso.");
+    toast.success("Settings saved successfully.");
     await fetchData();
     setSaving(false);
   };

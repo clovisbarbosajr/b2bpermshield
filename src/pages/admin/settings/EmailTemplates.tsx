@@ -165,13 +165,13 @@ const EmailTemplates = () => {
 
   // ── PDF template ──
   const handlePdfSave = async () => {
-    if (!configId) { toast.error("Configuração não encontrada"); return; }
+    if (!configId) { toast.error("Configuration not found"); return; }
     setPdfSaving(true);
     const { error } = await (supabase.from("configuracoes") as any)
       .update({ pdf_order_template: pdfTemplate || null })
       .eq("id", configId);
     if (error) {
-      toast.error("Erro ao salvar: " + error.message);
+      toast.error("Error saving: " + error.message);
     } else {
       setPdfOriginal(pdfTemplate);
       toast.success("PDF template saved");
