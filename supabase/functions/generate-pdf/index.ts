@@ -39,13 +39,24 @@ function buildDefaultTemplate(data: {
   tax: string;
   grossTotal: string;
   notes: string;
+  logoUrl?: string;
+  logoPosition?: string;
 }): string {
   const {
     orderNumber, orderDate, poNumber, deliveryDate,
     customerName, customerEmail, customerAddress,
     companyName, companyAddress, companyEmail, companyWebsite,
     itemsRows, subtotal, discount, tax, grossTotal, notes,
+    logoUrl, logoPosition,
   } = data;
+
+  // Logo do admin (Notifications → Email) quando existir; senão o nome da
+  // empresa em texto — SEM branding hardcoded (o "PermShield" laranja antigo
+  // não era a logo do cliente e parecia "logo com cor errada").
+  const logoAlign = logoPosition === "center" ? "center" : logoPosition === "right" ? "right" : "left";
+  const headerBrand = logoUrl
+    ? `<div style="flex:1;text-align:${logoAlign};"><img src="${logoUrl}" alt="${companyName}" style="max-height:48px;max-width:200px;"/></div>`
+    : `<div style="flex:1;"><div class="logo-text">${companyName}</div></div>`;
 
   return `<!DOCTYPE html>
 <html>
@@ -108,10 +119,7 @@ function buildDefaultTemplate(data: {
 
 <!-- Header -->
 <div class="hdr">
-  <div>
-    <div class="logo-text">Perm<span>Shield</span></div>
-    <div class="logo-sub">B2B Portal — Flooring</div>
-  </div>
+  ${headerBrand}
   <div class="doc-info">
     <div class="doc-title">ORDER</div>
     <div class="doc-num">#${orderNumber}</div>
@@ -182,7 +190,7 @@ ${notes ? `<div class="notes-box"><strong>Notes:</strong> ${notes}</div>` : ""}
     ${companyAddress ? companyAddress + "<br>" : ""}
     ${companyEmail ? `E-mail: ${companyEmail}` : ""}
   </div>
-  <div class="footer-brand">Perm<span>Shield</span></div>
+  ${logoUrl ? `<div><img src="${logoUrl}" alt="${companyName}" style="max-height:28px;max-width:120px;"/></div>` : ""}
 </div>
 
 </body>
@@ -250,6 +258,15 @@ Deno.serve(async (req) => {
         .limit(1)
         .maybeSingle(),
     ]);
+
+    // Logo do email/PDF — query separada e tolerante (colunas novas; se o
+    // PostgREST ainda não as enxergar, o PDF sai sem logo em vez de quebrar).
+    let logoCfg: { email_logo_url?: string | null; email_logo_position?: string | null } = {};
+    try {
+      const { data: lc } = await supabase.from("configuracoes")
+        .select("email_logo_url, email_logo_position").limit(1).maybeSingle();
+      if (lc) logoCfg = lc;
+    } catch (_e) { /* sem logo */ }
 
     if (pedidoErr || !pedido) {
       return new Response(JSON.stringify({ error: "Order not found" }), {
@@ -323,6 +340,12 @@ Deno.serve(async (req) => {
       tax:             fmtUSD(pedido.sales_tax),
       grossTotal:      fmtUSD(pedido.total),
       notes:           pedido.observacoes || "",
+      logoUrl:         logoCfg.email_logo_url || "",
+      logoPosition:    logoCfg.email_logo_position || "left",
+      // {{logo}} disponível também no template customizado
+      logo:            logoCfg.email_logo_url
+        ? `<img src="${logoCfg.email_logo_url}" alt="logo" style="max-height:48px;max-width:200px;"/>`
+        : "",
     };
 
     // Use custom template from DB or build default

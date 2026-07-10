@@ -122,7 +122,14 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
   y = Math.min(ly, ry) - 16;
 
   // ── Tabela de itens ──
-  const colCode = leftX, colName = leftX + 70, colQty = PAGE_W - MARGIN - 150, colPrice = PAGE_W - MARGIN - 100, colTotal = PAGE_W - MARGIN;
+  // CODE precisa de largura real: os códigos do B2BWave são longos
+  // ("72 Black Rolls - Crate") e 70pt fazia o código invadir o nome.
+  const colCode = leftX, colName = leftX + 140, colQty = PAGE_W - MARGIN - 150, colPrice = PAGE_W - MARGIN - 100, colTotal = PAGE_W - MARGIN;
+  const fitText = (t: string, maxWidth: number, size: number) => {
+    let s = t || "";
+    while (s.length > 1 && regular.widthOfTextAtSize(s, size) > maxWidth) s = s.slice(0, -1);
+    return s === (t || "") ? s : s.slice(0, -1) + "…";
+  };
   const drawTableHeader = () => {
     page.drawRectangle({ x: MARGIN, y: y - 4, width: PAGE_W - MARGIN * 2, height: 18, color: NAVY });
     text("CODE", colCode + 4, y, { font: bold, size: 8, color: rgb(1, 1, 1) });
@@ -137,8 +144,8 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
   data.items.forEach((it, idx) => {
     if (y < 130) { newPage(); drawTableHeader(); }
     if (idx % 2 === 1) page.drawRectangle({ x: MARGIN, y: y - 4, width: PAGE_W - MARGIN * 2, height: 16, color: LIGHT });
-    text(it.sku || "—", colCode + 4, y, { size: 9, color: NAVY });
-    text((it.name || "").slice(0, 48), colName, y, { size: 9 });
+    text(fitText(it.sku || "—", colName - colCode - 12, 9), colCode + 4, y, { size: 9, color: NAVY });
+    text(fitText(it.name || "", colQty - colName - 8, 9), colName, y, { size: 9 });
     rightText(String(it.qty), colQty + 30, y, { size: 9 });
     rightText(fmtUSD(it.price), colPrice + 40, y, { size: 9 });
     rightText(fmtUSD(it.total), colTotal, y, { size: 9, font: bold });
@@ -172,11 +179,10 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
     y -= 40;
   }
 
-  // ── Rodapé ──
+  // ── Rodapé ── (sem branding hardcoded — só os dados reais da empresa)
   const footerY = 36;
   text(data.companyName || "", MARGIN, footerY, { font: bold, size: 9, color: NAVY });
   if (data.companyEmail) text(data.companyEmail, MARGIN, footerY - 12, { size: 8, color: GRAY });
-  rightText("PermShield", PAGE_W - MARGIN, footerY, { font: bold, size: 11, color: NAVY });
 
   return await pdfDoc.save();
 }
