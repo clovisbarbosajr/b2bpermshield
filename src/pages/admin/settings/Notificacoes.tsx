@@ -10,8 +10,13 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { PhoneInput, isCompletePhone } from '@/components/PhoneInput';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RichTextEditor } from '@/components/RichTextEditor';
 import { toast } from 'sonner';
-import { Mail, MessageSquare, Phone, Loader2, Save, Send, Trash2, Plus, Bell, Pencil, X } from 'lucide-react';
+import {
+  Mail, MessageSquare, Phone, Loader2, Save, Send, Trash2, Plus, Bell, Pencil, X,
+  Image as ImageIcon, Eye, RefreshCw, FileText,
+} from 'lucide-react';
 
 // Tabelas novas (ainda não nos types gerados) -> client sem tipo aqui.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,6 +50,85 @@ type Recipient = {
 // Emojis comuns pra inserir nos templates (barra de atalho).
 const EMOJIS = ['✅', '✔️', '🎉', '📦', '🚚', '🛒', '💰', '⚠️', '❌', '👍', '📩', '⭐', '🔔', '⏳'];
 
+// ─── Order Confirmation Email — variáveis disponíveis ────────────────────────
+const EMAIL_ORDER_VARIABLES = [
+  { var: '{{companyName}}',     desc: 'Your company name' },
+  { var: '{{companyAddress}}',  desc: 'Your company address' },
+  { var: '{{companyEmail}}',    desc: 'Your company email' },
+  { var: '{{orderNumber}}',     desc: 'Order number' },
+  { var: '{{orderDate}}',       desc: 'Order date' },
+  { var: '{{poNumber}}',        desc: 'PO Number' },
+  { var: '{{deliveryDate}}',    desc: 'Requested delivery date' },
+  { var: '{{customerCompany}}', desc: 'Customer company name' },
+  { var: '{{customerName}}',    desc: 'Customer contact name' },
+  { var: '{{customerEmail}}',   desc: 'Customer email' },
+  { var: '{{customerAddress}}', desc: 'Delivery address' },
+  { var: '{{itemsTable}}',      desc: 'HTML table of order items (auto-generated)' },
+  { var: '{{subtotal}}',        desc: 'Order subtotal' },
+  { var: '{{discount}}',        desc: 'Discount amount' },
+  { var: '{{shippingCosts}}',   desc: 'Shipping costs' },
+  { var: '{{salesTax}}',        desc: 'Sales tax' },
+  { var: '{{grossTotal}}',      desc: 'Gross total' },
+  { var: '{{notes}}',           desc: 'Order notes / comments' },
+];
+
+const DEFAULT_ORDER_EMAIL_TEMPLATE = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+  <h2 style="color: #1a3a6b;">Order Confirmation — #{{orderNumber}}</h2>
+  <p>Dear {{customerName}},</p>
+  <p>Thank you for your order! Below are your order details:</p>
+
+  <table style="width:100%; border-collapse: collapse; margin: 16px 0;">
+    <tr><td style="padding: 4px 8px; font-weight: bold;">Order #:</td><td style="padding: 4px 8px;">{{orderNumber}}</td></tr>
+    <tr><td style="padding: 4px 8px; font-weight: bold;">Order Date:</td><td style="padding: 4px 8px;">{{orderDate}}</td></tr>
+    <tr><td style="padding: 4px 8px; font-weight: bold;">PO Number:</td><td style="padding: 4px 8px;">{{poNumber}}</td></tr>
+    <tr><td style="padding: 4px 8px; font-weight: bold;">Delivery Date:</td><td style="padding: 4px 8px;">{{deliveryDate}}</td></tr>
+  </table>
+
+  <h3>Items Ordered</h3>
+  {{itemsTable}}
+
+  <table style="width:100%; border-collapse: collapse; margin-top: 16px;">
+    <tr><td style="padding: 4px 8px; text-align: right; font-weight: bold;">Subtotal:</td><td style="padding: 4px 8px; text-align: right; width: 120px;">{{subtotal}}</td></tr>
+    <tr><td style="padding: 4px 8px; text-align: right; font-weight: bold;">Discount:</td><td style="padding: 4px 8px; text-align: right;">{{discount}}</td></tr>
+    <tr><td style="padding: 4px 8px; text-align: right; font-weight: bold;">Shipping:</td><td style="padding: 4px 8px; text-align: right;">{{shippingCosts}}</td></tr>
+    <tr><td style="padding: 4px 8px; text-align: right; font-weight: bold;">Sales Tax:</td><td style="padding: 4px 8px; text-align: right;">{{salesTax}}</td></tr>
+    <tr style="border-top: 2px solid #333;"><td style="padding: 8px; text-align: right; font-weight: bold; font-size: 1.1em;">Gross Total:</td><td style="padding: 8px; text-align: right; font-weight: bold; font-size: 1.1em;">{{grossTotal}}</td></tr>
+  </table>
+
+  <p style="margin-top: 24px; color: #555;">{{notes}}</p>
+
+  <hr style="margin: 24px 0; border: none; border-top: 1px solid #eee;" />
+  <p style="font-size: 12px; color: #888;">{{companyName}} | {{companyAddress}} | {{companyEmail}}</p>
+</div>`;
+
+// ─── Order PDF — variáveis disponíveis ────────────────────────────────────────
+const PDF_VARIABLES = [
+  { var: '{{orderNumber}}',     desc: 'Order number' },
+  { var: '{{orderDate}}',       desc: 'Order date' },
+  { var: '{{poNumber}}',        desc: 'PO Number' },
+  { var: '{{deliveryDate}}',    desc: 'Requested delivery date' },
+  { var: '{{customerName}}',    desc: 'Customer company name' },
+  { var: '{{customerEmail}}',   desc: 'Customer email' },
+  { var: '{{customerAddress}}', desc: 'Delivery address' },
+  { var: '{{companyName}}',     desc: 'Your company name' },
+  { var: '{{companyAddress}}',  desc: 'Your company address' },
+  { var: '{{companyEmail}}',    desc: 'Your company email' },
+  { var: '{{itemsRows}}',       desc: 'HTML table rows for items (auto-generated)' },
+  { var: '{{subtotal}}',        desc: 'Order subtotal' },
+  { var: '{{discount}}',        desc: 'Discount amount' },
+  { var: '{{tax}}',             desc: 'Sales tax' },
+  { var: '{{grossTotal}}',      desc: 'Gross total' },
+  { var: '{{notes}}',           desc: 'Order notes / comments' },
+];
+
+// Só o low_stock realmente sai por email pelo notify-dispatch hoje (os outros 4
+// eventos tiveram o canal 'email' removido na dedup — quem manda email de verdade
+// pra new_order/order_status/new_customer/account_approved é o send-email, com o
+// template da aba Email acima). Mantido aqui só pra não confundir quem for editar.
+const EMAIL_CHANNEL_LIVE: Record<string, boolean> = {
+  new_order: false, order_status: false, new_customer: false, account_approved: false, low_stock: true,
+};
+
 export default function Notificacoes() {
   const [loading, setLoading] = useState(true);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -65,6 +149,24 @@ export default function Notificacoes() {
   const toggleEdit = (id: string, on: boolean) =>
     setEditing((prev) => { const n = new Set(prev); on ? n.add(id) : n.delete(id); return n; });
 
+  // ── Aba Email: logo, template do email de pedido, template do PDF ──
+  const [configId, setConfigId] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState('');
+  const [logoPosition, setLogoPosition] = useState<'left' | 'center' | 'right'>('left');
+  const [logoSaving, setLogoSaving] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [emailOrderTemplate, setEmailOrderTemplate] = useState('');
+  const [emailOrderOriginal, setEmailOrderOriginal] = useState('');
+  const [emailOrderSaving, setEmailOrderSaving] = useState(false);
+  const [emailOrderPreviewHtml, setEmailOrderPreviewHtml] = useState('');
+  const [emailOrderPreviewing, setEmailOrderPreviewing] = useState(false);
+  const [showHtmlSource, setShowHtmlSource] = useState(false);
+  const [pdfTemplate, setPdfTemplate] = useState('');
+  const [pdfOriginal, setPdfOriginal] = useState('');
+  const [pdfSaving, setPdfSaving] = useState(false);
+  const [pdfPreviewHtml, setPdfPreviewHtml] = useState('');
+  const [pdfPreviewing, setPdfPreviewing] = useState(false);
+
   // Insere um emoji no template do evento (email/sms/whatsapp), na posição do cursor.
   const tplRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const insertEmoji = (evId: string, field: 'email' | 'sms' | 'whatsapp', emoji: string) => {
@@ -82,14 +184,24 @@ export default function Notificacoes() {
 
   async function load() {
     setLoading(true);
-    const [c, e, r] = await Promise.all([
+    const [c, e, r, cfg] = await Promise.all([
       sb.from('notification_channels').select('*').order('id'),
       sb.from('notification_events').select('*').order('id'),
       sb.from('notification_recipients').select('*').order('created_at'),
+      sb.from('configuracoes')
+        .select('id, email_order_template, pdf_order_template, email_logo_url, email_logo_position')
+        .limit(1).maybeSingle(),
     ]);
     setChannels((c.data as Channel[]) ?? []);
     setEvents((e.data as EventRow[]) ?? []);
     setRecipients((r.data as Recipient[]) ?? []);
+    setConfigId(cfg.data?.id ?? null);
+    setEmailOrderTemplate(cfg.data?.email_order_template ?? '');
+    setEmailOrderOriginal(cfg.data?.email_order_template ?? '');
+    setPdfTemplate(cfg.data?.pdf_order_template ?? '');
+    setPdfOriginal(cfg.data?.pdf_order_template ?? '');
+    setLogoUrl(cfg.data?.email_logo_url ?? '');
+    setLogoPosition((cfg.data?.email_logo_position ?? 'left') as 'left' | 'center' | 'right');
     setLoading(false);
   }
 
@@ -168,6 +280,107 @@ export default function Notificacoes() {
     toast[error ? 'error' : 'success'](error ? error.message : `Event "${EVENT_LABELS[ev.id]}" saved`);
   }
 
+  // ── Logo do cabeçalho do email ──
+  const buildLogoHeaderHtml = () => {
+    if (!logoUrl) return '';
+    const justify = logoPosition === 'center' ? 'center' : logoPosition === 'right' ? 'flex-end' : 'flex-start';
+    return `<div style="display:flex;justify-content:${justify};margin-bottom:16px;"><img src="${logoUrl}" alt="Logo" style="max-height:64px;max-width:280px;" /></div>`;
+  };
+
+  async function handleLogoUpload(file: File) {
+    setLogoUploading(true);
+    const ext = file.name.split('.').pop();
+    const path = `settings/email-logo-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('product-images').upload(path, file);
+    if (error) { toast.error('Upload failed: ' + error.message); setLogoUploading(false); return; }
+    const { data: { publicUrl } } = supabase.storage.from('product-images').getPublicUrl(path);
+    setLogoUrl(publicUrl);
+    setLogoUploading(false);
+  }
+
+  async function handleLogoSave() {
+    if (!configId) { toast.error('Configuration not found'); return; }
+    setLogoSaving(true);
+    const { error } = await sb.from('configuracoes')
+      .update({ email_logo_url: logoUrl || null, email_logo_position: logoPosition }).eq('id', configId);
+    toast[error ? 'error' : 'success'](error ? error.message : 'Logo saved');
+    setLogoSaving(false);
+  }
+
+  const handleLogoRemove = () => setLogoUrl('');
+
+  // ── Template do email de confirmação de pedido (cliente) ──
+  async function handleEmailOrderSave() {
+    if (!configId) { toast.error('Configuration not found'); return; }
+    setEmailOrderSaving(true);
+    const { error } = await sb.from('configuracoes')
+      .update({ email_order_template: emailOrderTemplate || null }).eq('id', configId);
+    if (error) toast.error('Error saving: ' + error.message);
+    else { setEmailOrderOriginal(emailOrderTemplate); toast.success('Email template saved'); }
+    setEmailOrderSaving(false);
+  }
+
+  const handleEmailOrderReset = () => {
+    if (!confirm('Reset to the system default email template?')) return;
+    setEmailOrderTemplate('');
+  };
+
+  async function handleEmailOrderPreview() {
+    setEmailOrderPreviewing(true);
+    const { data: pedido } = await sb.from('pedidos').select('*, pedido_itens(*)')
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (!pedido) { toast.error('No orders found to preview. Place a test order first.'); setEmailOrderPreviewing(false); return; }
+    const { data: cliente } = await sb.from('clientes').select('*').eq('id', pedido.cliente_id).maybeSingle();
+    const { data: cfg } = await sb.from('configuracoes').select('nome_empresa, endereco, email_contato').limit(1).maybeSingle();
+
+    const tpl = emailOrderTemplate || DEFAULT_ORDER_EMAIL_TEMPLATE;
+    const itemsRows = (pedido.pedido_itens ?? []).map((it: any) =>
+      `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">${it.sku ?? ''}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${it.nome_produto}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(it.preco_unitario).toFixed(2)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">${it.quantidade}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(it.subtotal).toFixed(2)}</td></tr>`
+    ).join('');
+    const itemsTable = `<table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Price</th><th style="padding:6px 8px;text-align:right;">Qty</th><th style="padding:6px 8px;text-align:right;">Total</th></tr></thead><tbody>${itemsRows}</tbody></table>`;
+    const fmt = (d: string) => d ? new Date(d).toLocaleDateString('en-US') : '-';
+    const vars: Record<string, string> = {
+      companyName: cfg?.nome_empresa ?? '', companyAddress: cfg?.endereco ?? '', companyEmail: cfg?.email_contato ?? '',
+      orderNumber: String(pedido.numero ?? ''), orderDate: fmt(pedido.created_at), poNumber: pedido.po_number ?? '',
+      deliveryDate: pedido.delivery_date ? fmt(pedido.delivery_date) : '-',
+      customerCompany: cliente?.empresa ?? '', customerName: cliente?.nome ?? '', customerEmail: cliente?.email ?? '',
+      customerAddress: [cliente?.endereco, cliente?.cidade, cliente?.estado].filter(Boolean).join(', '),
+      itemsTable, subtotal: `$${Number(pedido.subtotal ?? 0).toFixed(2)}`,
+      discount: pedido.desconto ? `-$${Number(pedido.desconto).toFixed(2)}` : '$0.00',
+      shippingCosts: pedido.shipping_costs ? `$${Number(pedido.shipping_costs).toFixed(2)}` : '$0.00',
+      salesTax: pedido.sales_tax ? `$${Number(pedido.sales_tax).toFixed(2)}` : '$0.00',
+      grossTotal: `$${Number(pedido.total ?? 0).toFixed(2)}`, notes: pedido.observacoes ?? '',
+    };
+    const rendered = Object.entries(vars).reduce((html, [key, val]) => html.split(`{{${key}}}`).join(val), tpl);
+    setEmailOrderPreviewHtml(buildLogoHeaderHtml() + rendered);
+    setEmailOrderPreviewing(false);
+  }
+
+  // ── Template do PDF do pedido ──
+  async function handlePdfSave() {
+    if (!configId) { toast.error('Configuration not found'); return; }
+    setPdfSaving(true);
+    const { error } = await sb.from('configuracoes').update({ pdf_order_template: pdfTemplate || null }).eq('id', configId);
+    if (error) toast.error('Error saving: ' + error.message);
+    else { setPdfOriginal(pdfTemplate); toast.success('PDF template saved'); }
+    setPdfSaving(false);
+  }
+
+  const handlePdfReset = () => {
+    if (!confirm('Reset to the system default PDF template? Your custom template will be cleared.')) return;
+    setPdfTemplate('');
+  };
+
+  async function handlePdfPreview() {
+    setPdfPreviewing(true);
+    const { data: pedido } = await sb.from('pedidos').select('id').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (!pedido?.id) { toast.error('No orders found to preview. Place a test order first.'); setPdfPreviewing(false); return; }
+    const { data, error } = await sb.functions.invoke('generate-pdf', { body: { pedido_id: pedido.id } });
+    if (error || !data?.html) toast.error('Failed to generate preview: ' + (error?.message || 'unknown error'));
+    else setPdfPreviewHtml(data.html);
+    setPdfPreviewing(false);
+  }
+
   async function addRecipient() {
     const { data, error } = await sb.from('notification_recipients')
       .insert({ label: 'New recipient', active: true }).select().single();
@@ -207,6 +420,7 @@ export default function Notificacoes() {
           <TabsTrigger value="channels">Channels</TabsTrigger>
           <TabsTrigger value="events">Events</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
+          <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="recipients">Recipients</TabsTrigger>
           <TabsTrigger value="tests">Tests</TabsTrigger>
         </TabsList>
@@ -310,8 +524,8 @@ export default function Notificacoes() {
             A aba Events cuida só de LIGAR o evento e escolher canais/quem recebe. */}
         <TabsContent value="templates" className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Write the message sent for each event. This is the exact content that goes out.
-            Available variables:&nbsp;
+            Write the SMS / WhatsApp message sent for each event. Email content moved to the
+            dedicated <strong>Email</strong> tab. Available variables:&nbsp;
             <code className="text-xs">{'{order_id} {status} {total} {date} {items} {customer_name} {customer_company} {customer_email} {customer_phone} {product_name} {quantity}'}</code>
           </p>
           {events.map((ev) => (
@@ -322,7 +536,7 @@ export default function Notificacoes() {
                   <Save className="w-3.5 h-3.5" /> Save
                 </Button>
               </div>
-              {(['email', 'sms', 'whatsapp'] as const).map((field) => (
+              {(['sms', 'whatsapp'] as const).map((field) => (
                 <div key={field} className="space-y-1.5">
                   <Label className="text-xs capitalize">{field}</Label>
                   <div className="flex flex-wrap gap-1">
@@ -341,6 +555,185 @@ export default function Notificacoes() {
               ))}
             </Card>
           ))}
+        </TabsContent>
+
+        {/* EMAIL — logo, template do email de pedido (cliente), template do PDF,
+            e os textos por-evento que antes ficavam na aba Templates. Consolidado
+            aqui (2026-07-10): antes existia uma página separada (Email Templates,
+            fora do menu) desconectada do envio real — ver docs/EMAIL-CONSOLIDACAO.md. */}
+        <TabsContent value="email" className="space-y-4">
+          {/* Logo */}
+          <Card className="p-4 space-y-3">
+            <p className="font-medium flex items-center gap-2"><ImageIcon className="w-4 h-4" /> Email Logo</p>
+            <p className="text-xs text-muted-foreground">
+              Appears at the top of the order confirmation email. Choose where it aligns.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              {logoUrl && (
+                <img src={logoUrl} alt="Logo preview" className="h-14 max-w-[200px] rounded border border-border bg-white object-contain p-1" />
+              )}
+              <Input type="file" accept="image/*" className="max-w-xs" disabled={logoUploading}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLogoUpload(f); }} />
+              {logoUrl && (
+                <Button variant="ghost" size="icon" className="text-destructive" onClick={handleLogoRemove} title="Remove logo">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+              <Select value={logoPosition} onValueChange={(v) => setLogoPosition(v as 'left' | 'center' | 'right')}>
+                <SelectTrigger className="w-[140px]"><SelectValue placeholder="Position" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="left">Left</SelectItem>
+                  <SelectItem value="center">Center</SelectItem>
+                  <SelectItem value="right">Right</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button size="sm" className="gap-1.5" onClick={handleLogoSave} disabled={logoSaving || logoUploading}>
+                <Save className="w-3.5 h-3.5" /> {logoSaving ? 'Saving...' : 'Save Logo'}
+              </Button>
+            </div>
+          </Card>
+
+          {/* Order Confirmation Email (customer) */}
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <p className="font-medium flex items-center gap-2"><Mail className="w-4 h-4" /> Order Confirmation Email (Customer)</p>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setShowHtmlSource((s) => !s)}>
+                  {showHtmlSource ? 'Visual editor' : 'Edit HTML source'}
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={handleEmailOrderPreview} disabled={emailOrderPreviewing}>
+                  <Eye className="w-3.5 h-3.5" /> {emailOrderPreviewing ? 'Loading...' : 'Preview'}
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1.5 text-destructive" onClick={handleEmailOrderReset}>
+                  <RefreshCw className="w-3.5 h-3.5" /> Reset to default
+                </Button>
+                <Button size="sm" className="gap-1.5" onClick={handleEmailOrderSave} disabled={emailOrderSaving}>
+                  <Save className="w-3.5 h-3.5" /> {emailOrderSaving ? 'Saving...' : 'Save Template'}
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              This is the email sent when a customer places an order. Leave blank to use the system
+              default. Use <code>{'{{variable}}'}</code> placeholders below.
+            </p>
+            {showHtmlSource ? (
+              <textarea
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[360px]"
+                value={emailOrderTemplate} onChange={(e) => setEmailOrderTemplate(e.target.value)} spellCheck={false}
+                placeholder="Leave blank to use the system default template. Paste full HTML here to customize..."
+              />
+            ) : (
+              <RichTextEditor value={emailOrderTemplate || DEFAULT_ORDER_EMAIL_TEMPLATE} onChange={setEmailOrderTemplate} minHeight={360} />
+            )}
+            {emailOrderTemplate !== emailOrderOriginal && (
+              <p className="text-xs text-amber-600">Unsaved changes — click Save Template to apply.</p>
+            )}
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none">Available variables</summary>
+              <div className="grid gap-1 sm:grid-cols-2 mt-2">
+                {EMAIL_ORDER_VARIABLES.map((v) => (
+                  <div key={v.var} className="flex items-center gap-2">
+                    <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">{v.var}</code>
+                    <span>{v.desc}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+            {emailOrderPreviewHtml && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium">Preview (most recent order)</p>
+                  <Button variant="ghost" size="sm" onClick={() => setEmailOrderPreviewHtml('')}>Close</Button>
+                </div>
+                <iframe srcDoc={emailOrderPreviewHtml} className="w-full rounded border border-border bg-white" style={{ height: 500 }} title="Email Preview" />
+              </div>
+            )}
+          </Card>
+
+          {/* Order PDF Template */}
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <p className="font-medium flex items-center gap-2"><FileText className="w-4 h-4" /> Order PDF Template</p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={handlePdfPreview} disabled={pdfPreviewing}>
+                  <Eye className="w-3.5 h-3.5" /> {pdfPreviewing ? 'Loading...' : 'Preview'}
+                </Button>
+                <Button variant="outline" size="sm" className="gap-1.5 text-destructive" onClick={handlePdfReset}>
+                  <RefreshCw className="w-3.5 h-3.5" /> Reset to default
+                </Button>
+                <Button size="sm" className="gap-1.5" onClick={handlePdfSave} disabled={pdfSaving}>
+                  <Save className="w-3.5 h-3.5" /> {pdfSaving ? 'Saving...' : 'Save PDF Template'}
+                </Button>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              HTML layout used for the order PDF (currently the admin's print/preview — not yet attached
+              to the customer email automatically). Leave blank to use the system default.
+            </p>
+            <textarea
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[300px]"
+              value={pdfTemplate} onChange={(e) => setPdfTemplate(e.target.value)} spellCheck={false}
+              placeholder="Leave blank to use the system default template. Paste full HTML here to customize..."
+            />
+            {pdfTemplate !== pdfOriginal && (
+              <p className="text-xs text-amber-600">Unsaved changes — click Save PDF Template to apply.</p>
+            )}
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none">Available variables</summary>
+              <div className="grid gap-1 sm:grid-cols-2 mt-2">
+                {PDF_VARIABLES.map((v) => (
+                  <div key={v.var} className="flex items-center gap-2">
+                    <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">{v.var}</code>
+                    <span>{v.desc}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+            {pdfPreviewHtml && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium">Preview (most recent order)</p>
+                  <Button variant="ghost" size="sm" onClick={() => setPdfPreviewHtml('')}>Close</Button>
+                </div>
+                <iframe srcDoc={pdfPreviewHtml} className="w-full rounded border border-border" style={{ height: 600 }} title="PDF Preview" />
+              </div>
+            )}
+          </Card>
+
+          {/* Per-event plain-text email messages — relocated from the old Templates tab */}
+          <div className="space-y-3">
+            <p className="text-sm font-medium">Per-event email messages (plain text)</p>
+            <p className="text-xs text-muted-foreground">
+              Only <strong>Low stock</strong> actually sends email through this text today — the other
+              4 events' customer/admin emails go through the Order Confirmation template above (or a
+              fixed template in code, not yet editable here). Kept editable for when those get wired up.
+            </p>
+            {events.map((ev) => (
+              <Card key={ev.id} className="p-4 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium flex items-center gap-2">
+                    {EVENT_LABELS[ev.id] ?? ev.id}
+                    {!EMAIL_CHANNEL_LIVE[ev.id] && <Badge variant="secondary" className="text-[10px]">not live yet</Badge>}
+                  </p>
+                  <Button size="sm" variant="outline" disabled={saving} className="gap-1.5" onClick={() => saveEvent(ev)}>
+                    <Save className="w-3.5 h-3.5" /> Save
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {EMOJIS.map((em) => (
+                    <button key={em} type="button" title="Insert emoji"
+                      className="rounded border border-border px-1.5 py-0.5 text-sm hover:bg-muted transition-colors"
+                      onClick={() => insertEmoji(ev.id, 'email', em)}>{em}</button>
+                  ))}
+                </div>
+                <Textarea rows={4}
+                  ref={(el) => { tplRefs.current[`${ev.id}:email`] = el; }}
+                  value={ev.template_email ?? ''}
+                  placeholder="EMAIL message for this event..."
+                  onChange={(e) => setEvents(events.map((x) => (x.id === ev.id ? { ...x, template_email: e.target.value } : x)))} />
+              </Card>
+            ))}
+          </div>
         </TabsContent>
 
         {/* EVENTS */}

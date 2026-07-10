@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Outlet } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Outlet, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -102,7 +102,6 @@ import CompanyActivities from "./pages/admin/settings/CompanyActivities";
 import UsersManagement from "./pages/admin/settings/UsersManagement";
 import ActivityLogs from "./pages/admin/settings/ActivityLogs";
 import WarehouseSettings from "./pages/admin/settings/WarehouseSettings";
-import EmailTemplates from "./pages/admin/settings/EmailTemplates";
 import EmailSettings from "./pages/admin/settings/EmailSettings";
 import Notificacoes from "./pages/admin/settings/Notificacoes";
 import NotificacoesLog from "./pages/admin/settings/NotificacoesLog";
@@ -240,7 +239,8 @@ const App = () => (
               <Route path="/admin/settings/edit-password" element={<S><EditPassword /></S>} />
               <Route path="/admin/settings/profile" element={<SP perm="view_profile_settings"><SettingsProfile /></SP>} />
               <Route path="/admin/settings/email" element={<SP perm="view_email_settings"><EmailSettings /></SP>} />
-              <Route path="/admin/settings/email-templates" element={<SP perm="view_email_templates"><EmailTemplates /></SP>} />
+              {/* Consolidado na aba "Email" de Notifications (2026-07-10) — ver docs/EMAIL-CONSOLIDACAO.md */}
+              <Route path="/admin/settings/email-templates" element={<Navigate to="/admin/settings/notifications" replace />} />
               <Route path="/admin/settings/notifications" element={<A><Notificacoes /></A>} />
               <Route path="/admin/settings/notifications-log" element={<A><NotificacoesLog /></A>} />
               <Route path="/admin/settings/users" element={<SP perm="view_users_management"><UsersManagement /></SP>} />
