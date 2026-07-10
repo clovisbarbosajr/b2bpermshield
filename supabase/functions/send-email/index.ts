@@ -521,6 +521,37 @@ Deno.serve(async (req) => {
       if (data) customTemplateCfg = data;
     } catch (_e) { /* fica no fallback fixo */ }
 
+    // Templates customizados POR TIPO (aba Notifications → Email → All email
+    // templates; tabela email_templates). corpo vazio/inexistente → fallback
+    // fixo em código. Query tolerante: sem tabela/erro, tudo cai no fallback.
+    const customTemplates: Record<string, { assunto: string | null; corpo: string | null }> = {};
+    try {
+      const { data: tpls } = await adminClient.from("email_templates").select("tipo, assunto, corpo, ativo");
+      for (const t of tpls ?? []) {
+        if (t?.tipo && t.ativo !== false) customTemplates[t.tipo] = { assunto: t.assunto, corpo: t.corpo };
+      }
+    } catch (_e) { /* fallback fixo */ }
+
+    const renderVars = (tpl: string, vars: Record<string, string>) =>
+      Object.entries(vars).reduce((h, [k, v]) => h.split(`{{${k}}}`).join(v), tpl);
+
+    const logoHeaderHtml = customTemplateCfg.email_logo_url
+      ? `<div style="display:flex;justify-content:${customTemplateCfg.email_logo_position === "center" ? "center" : customTemplateCfg.email_logo_position === "right" ? "flex-end" : "flex-start"};margin-bottom:16px;"><img src="${customTemplateCfg.email_logo_url}" alt="Logo" style="max-height:64px;max-width:280px;" /></div>`
+      : "";
+
+    // Usa o template customizado do tipo quando houver corpo; senão o fallback.
+    // (A logo é prependada CENTRALMENTE antes do envio — não aqui.)
+    const customOr = (tipo: string, vars: Record<string, string>, fallbackSubject: string, fallbackHtml: string) => {
+      const t = customTemplates[tipo];
+      if (t?.corpo) {
+        return {
+          subject: t.assunto ? renderVars(t.assunto, vars) : fallbackSubject,
+          html: renderVars(t.corpo, vars),
+        };
+      }
+      return { subject: fallbackSubject, html: fallbackHtml };
+    };
+
     const provider = config?.email_provider || "";
     const apiKey = config?.email_api_key || "";
     const fromEmail = config?.email_from || "noreply@permshield.com";
@@ -587,14 +618,19 @@ Deno.serve(async (req) => {
       }
       const { customerEmail, customerName, loginUrl } = body;
       to = customerEmail;
-      subject = "Your account has been approved!";
-      html = templateApproval(customerName, loginUrl || `${COMPANY_SITE}customers-login`);
+      ({ subject, html } = customOr("approval", {
+        customerName: esc(customerName ?? ""), customerEmail: esc(customerEmail ?? ""),
+        loginUrl: loginUrl || `${COMPANY_SITE}customers-login`,
+        companyName: config?.nome_empresa || COMPANY_NAME, companyEmail: config?.email_contato || COMPANY_EMAIL,
+      }, "Your account has been approved!", templateApproval(customerName, loginUrl || `${COMPANY_SITE}customers-login`)));
     } else if (type === "waiting_approval") {
       // New customer signup — notify customer
       const { customerEmail } = body;
       to = customerEmail;
-      subject = "Thank you for your application!";
-      html = templateWaitingApproval(customerEmail);
+      ({ subject, html } = customOr("waiting_approval", {
+        customerEmail: esc(customerEmail ?? ""),
+        companyName: config?.nome_empresa || COMPANY_NAME, companyEmail: config?.email_contato || COMPANY_EMAIL,
+      }, "Thank you for your application!", templateWaitingApproval(customerEmail)));
     } else if (type === "new_order_admin") {
       // New order — notify admin(s)
       if (config?.email_on_new_order === false) {
@@ -606,8 +642,17 @@ Deno.serve(async (req) => {
       // email_new_orders = comma-separated admin notification emails; fallback to single adminEmail / email_contato
       const adminEmails = parseEmails(config?.email_new_orders) || [];
       to = adminEmails.length ? adminEmails : adminEmail || config?.email_contato || COMPANY_EMAIL;
-      subject = `New Order #${order.numero || order.id} from ${customer.empresa || customer.nome}`;
-      html = templateNewOrderAdmin(order, customer, items || []);
+      const adminItemsTable = `<table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Price</th><th style="padding:6px 8px;text-align:right;">Qty</th><th style="padding:6px 8px;text-align:right;">Total</th></tr></thead><tbody>${
+        (items || []).map((i: any) => `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.sku ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto ?? i.name ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario).toFixed(2)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">${i.quantidade}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal).toFixed(2)}</td></tr>`).join("")
+      }</tbody></table>`;
+      ({ subject, html } = customOr("new_order_admin", {
+        orderNumber: String(order.numero || order.id || ""),
+        customerCompany: esc(customer.empresa ?? ""), customerName: esc(customer.nome ?? ""), customerEmail: esc(customer.email ?? ""),
+        grossTotal: `$${Number(order.total ?? 0).toFixed(2)}`, subtotal: `$${Number(order.subtotal ?? 0).toFixed(2)}`,
+        itemsTable: adminItemsTable, notes: esc(order.observacoes ?? ""),
+        companyName: config?.nome_empresa || COMPANY_NAME,
+      }, `New Order #${order.numero || order.id} from ${customer.empresa || customer.nome}`,
+        templateNewOrderAdmin(order, customer, items || [])));
     } else if (type === "new_order_customer") {
       // New order — confirm to customer (+ BCC to configured addresses)
       if (config?.email_on_new_order === false) {
@@ -647,11 +692,8 @@ Deno.serve(async (req) => {
           salesTax: order.sales_tax ? `$${Number(order.sales_tax).toFixed(2)}` : "$0.00",
           grossTotal: `$${Number(order.total ?? 0).toFixed(2)}`, notes: order.observacoes ?? "",
         };
-        const rendered = Object.entries(vars).reduce((h, [k, v]) => h.split(`{{${k}}}`).join(v), customTemplateCfg.email_order_template);
-        const logoHtml = customTemplateCfg.email_logo_url
-          ? `<div style="display:flex;justify-content:${customTemplateCfg.email_logo_position === "center" ? "center" : customTemplateCfg.email_logo_position === "right" ? "flex-end" : "flex-start"};margin-bottom:16px;"><img src="${customTemplateCfg.email_logo_url}" alt="Logo" style="max-height:64px;max-width:280px;" /></div>`
-          : "";
-        html = logoHtml + rendered;
+        // (logo prependada centralmente antes do envio — igual aos outros tipos)
+        html = renderVars(customTemplateCfg.email_order_template, vars);
       } else {
         html = templateNewOrderCustomer(order, customer, items || [], companyData);
       }
@@ -691,8 +733,17 @@ Deno.serve(async (req) => {
       }
       const { order, customer, newStatus } = body;
       to = customer.email;
-      subject = `Order #${order.numero || order.id} status update – ${COMPANY_NAME}`;
-      html = templateOrderStatusChange(order, customer, newStatus);
+      const statusLabels: Record<string, string> = {
+        recebido: "Submitted", processando: "Processing", enviado: "Shipped",
+        concluido: "Complete", cancelado: "Cancelled",
+      };
+      ({ subject, html } = customOr("order_status_change", {
+        orderNumber: String(order.numero || order.id || ""),
+        newStatus: statusLabels[newStatus] || esc(newStatus ?? ""),
+        customerName: esc(customer.nome ?? customer.empresa ?? ""),
+        companyName: config?.nome_empresa || COMPANY_NAME,
+      }, `Order #${order.numero || order.id} status update – ${config?.nome_empresa || COMPANY_NAME}`,
+        templateOrderStatusChange(order, customer, newStatus)));
     } else if (type === "rejection") {
       // Customer rejected — notify customer
       if (config?.email_on_rejection === false) {
@@ -702,8 +753,10 @@ Deno.serve(async (req) => {
       }
       const { customerEmail, customerName } = body;
       to = customerEmail;
-      subject = `Application Update — ${COMPANY_NAME}`;
-      html = templateRejection(customerName);
+      ({ subject, html } = customOr("rejection", {
+        customerName: esc(customerName ?? ""),
+        companyName: config?.nome_empresa || COMPANY_NAME, companyEmail: config?.email_contato || COMPANY_EMAIL,
+      }, `Application Update — ${config?.nome_empresa || COMPANY_NAME}`, templateRejection(customerName)));
     } else if (type === "new_registration_admin") {
       // New customer registered — notify admin(s)
       if (config?.email_on_new_registration === false) {
@@ -715,8 +768,12 @@ Deno.serve(async (req) => {
       // email_new_customer = comma-separated emails for new customer alerts
       const customerAdminEmails = parseEmails(config?.email_new_customer) || [];
       to = customerAdminEmails.length ? customerAdminEmails : adminEmail || config?.email_contato || COMPANY_EMAIL;
-      subject = `New Customer Registration: ${empresa || customerName}`;
-      html = templateNewRegistrationAdmin(customerName, customerEmail, empresa);
+      ({ subject, html } = customOr("new_registration_admin", {
+        customerName: esc(customerName ?? ""), customerEmail: esc(customerEmail ?? ""),
+        customerCompany: esc(empresa ?? ""),
+        companyName: config?.nome_empresa || COMPANY_NAME,
+      }, `New Customer Registration: ${empresa || customerName}`,
+        templateNewRegistrationAdmin(customerName, customerEmail, empresa)));
     } else if (type === "set_password") {
       // New contact/user created — send set password link
       const { customerEmail, customerName, resetLink } = body;
@@ -812,6 +869,15 @@ Deno.serve(async (req) => {
       "password_reset",
     ];
     const bcc = CUSTOMER_TYPES.includes(type) ? config?.bcc_outgoing_emails || "" : "";
+
+    // Logo no topo de TODO email com cara de marca (cliente E avisos de admin) —
+    // central, uma vez só. Fora: raw e admin_alert (internos/arbitrários).
+    const LOGO_TYPES = new Set([
+      ...CUSTOMER_TYPES, "new_order_admin", "new_registration_admin",
+    ]);
+    if (logoHeaderHtml && LOGO_TYPES.has(type)) {
+      html = logoHeaderHtml + html;
+    }
 
     const result = await sendEmailResilient(
       config, fromEmail, to, subject, html, replyTo || undefined, bcc || undefined,

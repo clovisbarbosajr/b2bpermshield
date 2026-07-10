@@ -121,13 +121,67 @@ const PDF_VARIABLES = [
   { var: '{{notes}}',           desc: 'Order notes / comments' },
 ];
 
-// Só o low_stock realmente sai por email pelo notify-dispatch hoje (os outros 4
-// eventos tiveram o canal 'email' removido na dedup — quem manda email de verdade
-// pra new_order/order_status/new_customer/account_approved é o send-email, com o
-// template da aba Email acima). Mantido aqui só pra não confundir quem for editar.
-const EMAIL_CHANNEL_LIVE: Record<string, boolean> = {
-  new_order: false, order_status: false, new_customer: false, account_approved: false, low_stock: true,
-};
+// ─── Templates de email por TIPO (tabela email_templates; send-email usa
+// quando corpo estiver preenchido, senão cai no template fixo do código).
+// As vars de exemplo alimentam o Preview.
+const EMAIL_TYPE_DEFS: Array<{ tipo: string; label: string; vars: Array<{ v: string; d: string }>; sample: Record<string, string> }> = [
+  {
+    tipo: 'new_order_admin', label: 'New order (sent to ADMIN)',
+    vars: [
+      { v: '{{orderNumber}}', d: 'Order number' }, { v: '{{customerCompany}}', d: 'Customer company' },
+      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{customerEmail}}', d: 'Customer email' },
+      { v: '{{grossTotal}}', d: 'Gross total' }, { v: '{{subtotal}}', d: 'Subtotal' },
+      { v: '{{itemsTable}}', d: 'Items table (auto)' }, { v: '{{notes}}', d: 'Order notes' },
+      { v: '{{companyName}}', d: 'Your company' },
+    ],
+    sample: {
+      orderNumber: '2611', customerCompany: 'TRD Floor Supplies', customerName: 'Account manager',
+      customerEmail: 'sales@trdfloorsupplies.com', grossTotal: '$396.02', subtotal: '$359.45',
+      itemsTable: '<table style="width:100%;border-collapse:collapse;"><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Total</th></tr><tr><td style="padding:4px 8px;">72 Black Rolls - Crate</td><td style="padding:4px 8px;">Moisture Barrier 6mil</td><td style="padding:4px 8px;text-align:right;">$91.00</td></tr></table>',
+      notes: 'Deliver to dock B.', companyName: 'Zap Supplies, LLC',
+    },
+  },
+  {
+    tipo: 'order_status_change', label: 'Order status update (sent to customer)',
+    vars: [
+      { v: '{{orderNumber}}', d: 'Order number' }, { v: '{{newStatus}}', d: 'New status' },
+      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{companyName}}', d: 'Your company' },
+    ],
+    sample: { orderNumber: '2611', newStatus: 'Shipped', customerName: 'TRD Floor Supplies', companyName: 'Zap Supplies, LLC' },
+  },
+  {
+    tipo: 'new_registration_admin', label: 'New customer registration (sent to ADMIN)',
+    vars: [
+      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{customerEmail}}', d: 'Customer email' },
+      { v: '{{customerCompany}}', d: 'Customer company' }, { v: '{{companyName}}', d: 'Your company' },
+    ],
+    sample: { customerName: 'John Doe', customerEmail: 'john@company.com', customerCompany: 'Doe Flooring', companyName: 'Zap Supplies, LLC' },
+  },
+  {
+    tipo: 'waiting_approval', label: 'Registration received (sent to customer)',
+    vars: [
+      { v: '{{customerEmail}}', d: 'Customer email (username)' }, { v: '{{companyName}}', d: 'Your company' },
+      { v: '{{companyEmail}}', d: 'Your contact email' },
+    ],
+    sample: { customerEmail: 'john@company.com', companyName: 'Zap Supplies, LLC', companyEmail: 'jess@zapsupplies.com' },
+  },
+  {
+    tipo: 'approval', label: 'Account approved (sent to customer)',
+    vars: [
+      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{customerEmail}}', d: 'Customer email' },
+      { v: '{{loginUrl}}', d: 'Login link' }, { v: '{{companyName}}', d: 'Your company' },
+    ],
+    sample: { customerName: 'John Doe', customerEmail: 'john@company.com', loginUrl: 'https://example.com/customers-login', companyName: 'Zap Supplies, LLC' },
+  },
+  {
+    tipo: 'rejection', label: 'Application rejected (sent to customer)',
+    vars: [
+      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{companyName}}', d: 'Your company' },
+      { v: '{{companyEmail}}', d: 'Your contact email' },
+    ],
+    sample: { customerName: 'John Doe', companyName: 'Zap Supplies, LLC', companyEmail: 'jess@zapsupplies.com' },
+  },
+];
 
 export default function Notificacoes() {
   const [loading, setLoading] = useState(true);
@@ -166,6 +220,13 @@ export default function Notificacoes() {
   const [pdfSaving, setPdfSaving] = useState(false);
   const [pdfPreviewHtml, setPdfPreviewHtml] = useState('');
   const [pdfPreviewing, setPdfPreviewing] = useState(false);
+
+  // Templates por tipo (email_templates) — corpo vazio = usa o padrão do sistema
+  const [typeTpls, setTypeTpls] = useState<Record<string, { id?: string; assunto: string; corpo: string }>>({});
+  const [typeTplSaving, setTypeTplSaving] = useState<string | null>(null);
+  const [typeTplPreview, setTypeTplPreview] = useState<{ tipo: string; html: string } | null>(null);
+  const setTypeTpl = (tipo: string, patch: Partial<{ assunto: string; corpo: string }>) =>
+    setTypeTpls((prev) => ({ ...prev, [tipo]: { ...(prev[tipo] ?? { assunto: '', corpo: '' }), ...patch } }));
 
   // Insere um emoji no template do evento (email/sms/whatsapp), na posição do cursor.
   const tplRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
@@ -239,6 +300,13 @@ export default function Notificacoes() {
       setLogoUrl(logo.data?.email_logo_url ?? '');
       setLogoPosition((logo.data?.email_logo_position ?? 'left') as 'left' | 'center' | 'right');
     }
+
+    // Templates por tipo (email_templates) — só os tipos que a aba edita.
+    const tipos = EMAIL_TYPE_DEFS.map((d) => d.tipo);
+    const { data: tplRows } = await sb.from('email_templates').select('id, tipo, assunto, corpo').in('tipo', tipos);
+    const byTipo: Record<string, { id?: string; assunto: string; corpo: string }> = {};
+    for (const row of tplRows ?? []) byTipo[row.tipo] = { id: row.id, assunto: row.assunto ?? '', corpo: row.corpo ?? '' };
+    setTypeTpls(byTipo);
     setLoading(false);
   }
 
@@ -473,6 +541,34 @@ export default function Notificacoes() {
   }
 
   // ── Template do PDF do pedido ──
+  // ── Templates por tipo (email_templates) ──
+  async function saveTypeTemplate(tipo: string, label: string) {
+    const t = typeTpls[tipo] ?? { assunto: '', corpo: '' };
+    setTypeTplSaving(tipo);
+    let error;
+    if (t.id) {
+      ({ error } = await sb.from('email_templates')
+        .update({ assunto: t.assunto || '', corpo: t.corpo || '' }).eq('id', t.id));
+    } else {
+      const ins = await sb.from('email_templates')
+        .insert({ nome: label, tipo, assunto: t.assunto || '', corpo: t.corpo || '', ativo: true })
+        .select('id').single();
+      error = ins.error;
+      if (ins.data?.id) {
+        setTypeTpls((prev) => ({ ...prev, [tipo]: { ...(prev[tipo] ?? { assunto: '', corpo: '' }), id: ins.data.id } }));
+      }
+    }
+    toast[error ? 'error' : 'success'](error ? error.message : `"${label}" template saved`);
+    setTypeTplSaving(null);
+  }
+
+  function previewTypeTemplate(def: (typeof EMAIL_TYPE_DEFS)[number]) {
+    const t = typeTpls[def.tipo];
+    if (!t?.corpo) { toast.error('Write the template first (empty = system default is used).'); return; }
+    const rendered = Object.entries(def.sample).reduce((h, [k, v]) => h.split(`{{${k}}}`).join(v), t.corpo);
+    setTypeTplPreview({ tipo: def.tipo, html: buildLogoHeaderHtml() + rendered });
+  }
+
   async function handlePdfSave() {
     const id = await ensureConfigId();
     if (!id) { toast.error('Configuration not found'); return; }
@@ -837,40 +933,91 @@ export default function Notificacoes() {
             )}
           </Card>
 
-          {/* Per-event plain-text email messages — relocated from the old Templates tab */}
+          {/* Todos os outros emails do sistema — editor rico + assunto + preview por tipo.
+              Corpo vazio = send-email usa o template padrão fixo. A logo entra
+              automaticamente no topo de todos (posição do card Logo acima). */}
           <div className="space-y-3">
-            <p className="text-sm font-medium">Per-event email messages (plain text)</p>
+            <p className="text-sm font-medium">All email templates</p>
             <p className="text-xs text-muted-foreground">
-              Only <strong>Low stock</strong> actually sends email through this text today — the other
-              4 events' customer/admin emails go through the Order Confirmation template above (or a
-              fixed template in code, not yet editable here). Kept editable for when those get wired up.
+              Customize every email the system sends. Leave a body <strong>empty</strong> to keep the
+              system default. The logo above is added automatically to all of them.
             </p>
-            {events.map((ev) => (
-              <Card key={ev.id} className="p-4 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium flex items-center gap-2">
-                    {EVENT_LABELS[ev.id] ?? ev.id}
-                    {!EMAIL_CHANNEL_LIVE[ev.id] && <Badge variant="secondary" className="text-[10px]">not live yet</Badge>}
+            {EMAIL_TYPE_DEFS.map((def) => {
+              const t = typeTpls[def.tipo] ?? { assunto: '', corpo: '' };
+              return (
+                <Card key={def.tipo} className="p-4 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="text-sm font-medium flex items-center gap-2">
+                      {def.label}
+                      {!t.corpo && <Badge variant="secondary" className="text-[10px]">using system default</Badge>}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="gap-1.5" onClick={() => previewTypeTemplate(def)}>
+                        <Eye className="w-3.5 h-3.5" /> Preview
+                      </Button>
+                      <Button size="sm" className="gap-1.5" disabled={typeTplSaving === def.tipo}
+                        onClick={() => saveTypeTemplate(def.tipo, def.label)}>
+                        <Save className="w-3.5 h-3.5" /> {typeTplSaving === def.tipo ? 'Saving...' : 'Save'}
+                      </Button>
+                    </div>
                   </div>
-                  <Button size="sm" variant="outline" disabled={saving} className="gap-1.5" onClick={() => saveEvent(ev)}>
-                    <Save className="w-3.5 h-3.5" /> Save
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {EMOJIS.map((em) => (
-                    <button key={em} type="button" title="Insert emoji"
-                      className="rounded border border-border px-1.5 py-0.5 text-sm hover:bg-muted transition-colors"
-                      onClick={() => insertEmoji(ev.id, 'email', em)}>{em}</button>
-                  ))}
-                </div>
-                <Textarea rows={4}
-                  ref={(el) => { tplRefs.current[`${ev.id}:email`] = el; }}
-                  value={ev.template_email ?? ''}
-                  placeholder="EMAIL message for this event..."
-                  onChange={(e) => setEvents(events.map((x) => (x.id === ev.id ? { ...x, template_email: e.target.value } : x)))} />
-              </Card>
-            ))}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Subject (empty = default)</Label>
+                    <Input value={t.assunto} placeholder="Email subject..."
+                      onChange={(e) => setTypeTpl(def.tipo, { assunto: e.target.value })} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Body (empty = system default)</Label>
+                    <RichTextEditor value={t.corpo} onChange={(html) => setTypeTpl(def.tipo, { corpo: html })} minHeight={140} />
+                  </div>
+                  <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer select-none">Available variables</summary>
+                    <div className="grid gap-1 sm:grid-cols-2 mt-2">
+                      {def.vars.map((v) => (
+                        <div key={v.v} className="flex items-center gap-2">
+                          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">{v.v}</code>
+                          <span>{v.d}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                  {typeTplPreview?.tipo === def.tipo && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium">Preview (sample data)</p>
+                        <Button variant="ghost" size="sm" onClick={() => setTypeTplPreview(null)}>Close</Button>
+                      </div>
+                      <iframe srcDoc={typeTplPreview.html} className="w-full rounded border border-border bg-white" style={{ height: 380 }} title="Template Preview" />
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
           </div>
+
+          {/* Low stock — o único evento cujo email real é o texto do notify-dispatch */}
+          {events.filter((ev) => ev.id === 'low_stock').map((ev) => (
+            <Card key={ev.id} className="p-4 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium">{EVENT_LABELS[ev.id] ?? ev.id} (plain text)</div>
+                <Button size="sm" variant="outline" disabled={saving} className="gap-1.5" onClick={() => saveEvent(ev)}>
+                  <Save className="w-3.5 h-3.5" /> Save
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {EMOJIS.map((em) => (
+                  <button key={em} type="button" title="Insert emoji"
+                    className="rounded border border-border px-1.5 py-0.5 text-sm hover:bg-muted transition-colors"
+                    onClick={() => insertEmoji(ev.id, 'email', em)}>{em}</button>
+                ))}
+              </div>
+              <Textarea rows={4}
+                ref={(el) => { tplRefs.current[`${ev.id}:email`] = el; }}
+                value={ev.template_email ?? ''}
+                placeholder="EMAIL message for this event..."
+                onChange={(e) => setEvents(events.map((x) => (x.id === ev.id ? { ...x, template_email: e.target.value } : x)))} />
+            </Card>
+          ))}
         </TabsContent>
 
         {/* EVENTS */}
