@@ -214,14 +214,14 @@ async function upsertOrder(
   if (opts.notify && CRON_SECRET) {
     const ageMs = Date.now() - new Date(submittedAt).getTime();
     if (ageMs < 2 * 24 * 60 * 60 * 1000) {
-      await fireNewOrderNotification(db, numero, total, clienteId).catch(() => {});
+      await fireNewOrderNotification(db, numero, total, clienteId, orderId).catch(() => {});
     }
   }
   return "created";
 }
 
-async function fireNewOrderNotification(db: any, numero: number, total: number, clienteId: string) {
-  const { data: cli } = await db.from("clientes").select("nome, empresa, email, telefone").eq("id", clienteId).maybeSingle();
+async function fireNewOrderNotification(db: any, numero: number, total: number, clienteId: string, orderId?: string) {
+  const { data: cli } = await db.from("clientes").select("nome, empresa, email, telefone, endereco, cidade, estado").eq("id", clienteId).maybeSingle();
   await fetch(`${SB_URL}/functions/v1/notify-dispatch`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-cron-secret": CRON_SECRET, "apikey": ANON_KEY, "Authorization": `Bearer ${ANON_KEY}` },
@@ -235,6 +235,26 @@ async function fireNewOrderNotification(db: any, numero: number, total: number, 
       customer: { email: cli?.email, phone: cli?.telefone, whatsapp: cli?.telefone },
     }),
   });
+
+  // Email RICO pro admin (template customizado + logo + PDF anexado), o mesmo
+  // que um pedido do portal dispara — pra pedido importado do B2BWave chegar
+  // igual. (O cliente já recebe a confirmação do próprio B2BWave; após o corte
+  // o checkout do portal cuida do email do cliente.)
+  if (orderId) {
+    try {
+      const { data: pedido } = await db.from("pedidos").select("*").eq("id", orderId).maybeSingle();
+      const { data: itens } = await db.from("pedido_itens").select("sku, nome_produto, preco_unitario, quantidade, subtotal").eq("pedido_id", orderId);
+      if (pedido) {
+        await fetch(`${SB_URL}/functions/v1/send-email`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "apikey": ANON_KEY, "Authorization": `Bearer ${ANON_KEY}` },
+          body: JSON.stringify({ type: "new_order_admin", order: pedido, customer: cli ?? {}, items: itens ?? [] }),
+        });
+      }
+    } catch (e) {
+      console.error("[sync] rich admin email failed (non-fatal):", e instanceof Error ? e.message : e);
+    }
+  }
 }
 
 async function getOrdersCursor(db: any): Promise<number> {

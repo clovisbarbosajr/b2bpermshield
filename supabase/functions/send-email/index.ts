@@ -609,6 +609,38 @@ Deno.serve(async (req) => {
     let html = "";
     let orderPdfAttachment: EmailAttachment | undefined;
 
+    // Gera o PDF do pedido (anexado no email do CLIENTE e no do ADMIN).
+    // Import dinâmico + try/catch: falha de PDF nunca derruba o email.
+    const buildOrderPdf = async (order: any, customer: any, items: any[]) => {
+      try {
+        const { generateOrderPdf } = await import("../_shared/pdfGenerator.ts");
+        const pdfItems: PdfOrderItem[] = (items || []).map((i: any) => ({
+          sku: i.sku ?? "", name: i.nome_produto ?? i.name ?? "",
+          qty: Number(i.quantidade ?? 0), price: Number(i.preco_unitario ?? 0), total: Number(i.subtotal ?? 0),
+        }));
+        const pdfBytes = await generateOrderPdf({
+          orderNumber: String(order.numero ?? order.id ?? ""),
+          orderDate: order.created_at ? new Date(order.created_at).toLocaleDateString("en-US") : "",
+          poNumber: order.po_number ?? "", deliveryDate: order.delivery_date ? new Date(order.delivery_date).toLocaleDateString("en-US") : "",
+          customerName: customer.empresa || customer.nome || "", customerEmail: customer.email ?? "",
+          customerAddress: [customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", "),
+          companyName: config?.nome_empresa || COMPANY_NAME,
+          companyAddress: config?.endereco || "",
+          companyEmail: config?.email_contato || COMPANY_EMAIL,
+          logoUrl: customTemplateCfg.email_logo_url ?? undefined,
+          logoPosition: (customTemplateCfg.email_logo_position as "left" | "center" | "right") ?? "left",
+          items: pdfItems,
+          subtotal: Number(order.subtotal ?? 0), discount: Number(order.desconto ?? 0),
+          shipping: Number(order.shipping_costs ?? 0), tax: Number(order.sales_tax ?? 0),
+          grossTotal: Number(order.total ?? 0), notes: order.observacoes ?? "",
+        });
+        return { filename: `order-${order.numero ?? order.id ?? "confirmation"}.pdf`, content: pdfBytes } as EmailAttachment;
+      } catch (pdfErr: any) {
+        console.error("[send-email] PDF generation failed:", pdfErr?.message ?? pdfErr);
+        return undefined;
+      }
+    };
+
     if (type === "approval") {
       // Customer approved
       if (config?.email_on_approval === false) {
@@ -653,6 +685,8 @@ Deno.serve(async (req) => {
         companyName: config?.nome_empresa || COMPANY_NAME,
       }, `New Order #${order.numero || order.id} from ${customer.empresa || customer.nome}`,
         templateNewOrderAdmin(order, customer, items || [])));
+      // Admin também recebe o PDF do pedido anexado.
+      orderPdfAttachment = await buildOrderPdf(order, customer, items || []);
     } else if (type === "new_order_customer") {
       // New order — confirm to customer (+ BCC to configured addresses)
       if (config?.email_on_new_order === false) {
@@ -698,32 +732,8 @@ Deno.serve(async (req) => {
         html = templateNewOrderCustomer(order, customer, items || [], companyData);
       }
 
-      // PDF de verdade anexado — mesmos dados do email acima (pdf-lib, sem headless browser).
-      try {
-        const { generateOrderPdf } = await import("../_shared/pdfGenerator.ts");
-        const pdfItems: PdfOrderItem[] = orderItems.map((i) => ({
-          sku: i.sku ?? "", name: i.nome_produto ?? i.name ?? "",
-          qty: Number(i.quantidade ?? 0), price: Number(i.preco_unitario ?? 0), total: Number(i.subtotal ?? 0),
-        }));
-        const pdfBytes = await generateOrderPdf({
-          orderNumber: String(order.numero ?? order.id ?? ""),
-          orderDate: order.created_at ? new Date(order.created_at).toLocaleDateString("en-US") : "",
-          poNumber: order.po_number ?? "", deliveryDate: order.delivery_date ? new Date(order.delivery_date).toLocaleDateString("en-US") : "",
-          customerName: customer.empresa || customer.nome || "", customerEmail: customer.email ?? "",
-          customerAddress: [customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", "),
-          companyName, companyAddress, companyEmail: companyEmailAddr,
-          logoUrl: customTemplateCfg.email_logo_url ?? undefined,
-          logoPosition: (customTemplateCfg.email_logo_position as "left" | "center" | "right") ?? "left",
-          items: pdfItems,
-          subtotal: Number(order.subtotal ?? 0), discount: Number(order.desconto ?? 0),
-          shipping: Number(order.shipping_costs ?? 0), tax: Number(order.sales_tax ?? 0),
-          grossTotal: Number(order.total ?? 0), notes: order.observacoes ?? "",
-        });
-        orderPdfAttachment = { filename: `order-${order.numero ?? order.id ?? "confirmation"}.pdf`, content: pdfBytes };
-      } catch (pdfErr: any) {
-        // PDF é um extra — se falhar, o email ainda deve sair (não derruba o pedido).
-        console.error("[send-email] PDF generation failed:", pdfErr?.message ?? pdfErr);
-      }
+      // PDF de verdade anexado — mesmos dados do email acima.
+      orderPdfAttachment = await buildOrderPdf(order, customer, orderItems);
     } else if (type === "order_status_change") {
       // Order status updated — notify customer
       if (config?.email_on_order_status === false) {
