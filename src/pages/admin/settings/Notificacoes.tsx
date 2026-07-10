@@ -474,12 +474,12 @@ export default function Notificacoes() {
                   <div className="flex items-center gap-3">
                     <Icon className="w-5 h-5 text-primary" />
                     <div>
-                      <p className="font-medium flex items-center gap-2">
+                      <div className="font-medium flex items-center gap-2">
                         {meta.label}
                         <Badge variant={ch.enabled ? 'default' : 'secondary'} className={ch.enabled ? 'bg-green-600 hover:bg-green-600' : ''}>
                           {ch.enabled ? 'ON' : 'OFF'}
                         </Badge>
-                      </p>
+                      </div>
                       <p className="text-xs text-muted-foreground">via {meta.provider}</p>
                     </div>
                   </div>
@@ -594,7 +594,7 @@ export default function Notificacoes() {
                         onClick={() => insertEmoji(ev.id, field, em)}>{em}</button>
                     ))}
                   </div>
-                  <Textarea rows={field === 'email' ? 5 : 3}
+                  <Textarea rows={3}
                     ref={(el) => { tplRefs.current[`${ev.id}:${field}`] = el; }}
                     value={(ev as any)[`template_${field}`] ?? ''}
                     placeholder={`${field.toUpperCase()} message for this event...`}
@@ -759,10 +759,10 @@ export default function Notificacoes() {
             {events.map((ev) => (
               <Card key={ev.id} className="p-4 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium flex items-center gap-2">
+                  <div className="text-sm font-medium flex items-center gap-2">
                     {EVENT_LABELS[ev.id] ?? ev.id}
                     {!EMAIL_CHANNEL_LIVE[ev.id] && <Badge variant="secondary" className="text-[10px]">not live yet</Badge>}
-                  </p>
+                  </div>
                   <Button size="sm" variant="outline" disabled={saving} className="gap-1.5" onClick={() => saveEvent(ev)}>
                     <Save className="w-3.5 h-3.5" /> Save
                   </Button>
@@ -826,9 +826,9 @@ export default function Notificacoes() {
 
         {/* RECIPIENTS */}
         <TabsContent value="recipients" className="space-y-4">
-          <p className="text-sm text-muted-foreground">
+          <div className="text-sm text-muted-foreground">
             Who receives the <Badge variant="secondary">admin</Badge> notifications. Customer ones use the order/registration's own data.
-          </p>
+          </div>
           {recipients.map((r) => (
             <Card key={r.id} className="p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
