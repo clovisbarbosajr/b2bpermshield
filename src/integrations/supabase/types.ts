@@ -583,6 +583,8 @@ export type Database = {
           email_api_key: string | null
           email_contato: string | null
           email_from: string | null
+          email_logo_position: string
+          email_logo_url: string | null
           email_new_customer: string | null
           email_new_orders: string | null
           email_on_approval: boolean | null
@@ -692,6 +694,8 @@ export type Database = {
           email_api_key?: string | null
           email_contato?: string | null
           email_from?: string | null
+          email_logo_position?: string
+          email_logo_url?: string | null
           email_new_customer?: string | null
           email_new_orders?: string | null
           email_on_approval?: boolean | null
@@ -801,6 +805,8 @@ export type Database = {
           email_api_key?: string | null
           email_contato?: string | null
           email_from?: string | null
+          email_logo_position?: string
+          email_logo_url?: string | null
           email_new_customer?: string | null
           email_new_orders?: string | null
           email_on_approval?: boolean | null
