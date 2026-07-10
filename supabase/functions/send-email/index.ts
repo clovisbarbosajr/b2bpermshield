@@ -1,7 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import nodemailer from "npm:nodemailer@6.9.8";
 import { Buffer } from "node:buffer";
-import { generateOrderPdf, type PdfOrderItem } from "../_shared/pdfGenerator.ts";
+// NOTA: o gerador de PDF (pdf-lib) é importado DINAMICAMENTE dentro do try do
+// new_order_customer — se o npm resolver falhar no boot, o email inteiro
+// morreria junto. Import estático só do TIPO (apagado na compilação).
+import type { PdfOrderItem } from "../_shared/pdfGenerator.ts";
 
 // Deno edge runtime may require an npm install hint when resolving Node packages locally.
 
@@ -655,6 +658,7 @@ Deno.serve(async (req) => {
 
       // PDF de verdade anexado — mesmos dados do email acima (pdf-lib, sem headless browser).
       try {
+        const { generateOrderPdf } = await import("../_shared/pdfGenerator.ts");
         const pdfItems: PdfOrderItem[] = orderItems.map((i) => ({
           sku: i.sku ?? "", name: i.nome_produto ?? i.name ?? "",
           qty: Number(i.quantidade ?? 0), price: Number(i.preco_unitario ?? 0), total: Number(i.subtotal ?? 0),
