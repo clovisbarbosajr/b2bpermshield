@@ -1,5 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import nodemailer from "npm:nodemailer@6.9.8";
+import { Buffer } from "node:buffer";
+import { generateOrderPdf, type PdfOrderItem } from "../_shared/pdfGenerator.ts";
 
 // Deno edge runtime may require an npm install hint when resolving Node packages locally.
 
@@ -352,6 +354,9 @@ function parseEmails(raw: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
+// Anexo em memória (bytes) — convertido pro formato de cada provedor na hora de enviar.
+export interface EmailAttachment { filename: string; content: Uint8Array }
+
 // ─── Send via provider ────────────────────────────────────────────────────────
 // `to` and `bcc` accept comma-separated strings or arrays
 async function sendViaProvider(
@@ -363,11 +368,18 @@ async function sendViaProvider(
   html: string,
   replyTo?: string,
   bcc?: string | string[],
+  attachments?: EmailAttachment[],
 ) {
   const toStr = Array.isArray(to) ? to.join(", ") : to;
   const bccStr = Array.isArray(bcc) ? bcc.join(", ") : bcc || "";
   const toArr = Array.isArray(to) ? to : parseEmails(to);
   const bccArr = Array.isArray(bcc) ? bcc : parseEmails(bcc);
+  // base64 sem depender de Buffer (disponível no Deno runtime, mas evitamos a dependência)
+  const toBase64 = (bytes: Uint8Array) => {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  };
 
   // ── SMTP (Office 365 / any SMTP server) ──────────────────────────────────
   // All SMTP credentials come from Supabase Secrets — NEVER from the database.
@@ -392,6 +404,9 @@ async function sendViaProvider(
     const mailOptions: any = { from: fromEmail, to: toStr, subject, html };
     if (replyTo) mailOptions.replyTo = replyTo;
     if (bccStr) mailOptions.bcc = bccStr;
+    if (attachments?.length) {
+      mailOptions.attachments = attachments.map((a) => ({ filename: a.filename, content: Buffer.from(a.content) }));
+    }
 
     await transporter.sendMail(mailOptions);
     return true;
@@ -402,6 +417,9 @@ async function sendViaProvider(
     const payload: any = { from: fromEmail, to: toArr, subject, html };
     if (replyTo) payload.reply_to = replyTo;
     if (bccArr.length) payload.bcc = bccArr;
+    if (attachments?.length) {
+      payload.attachments = attachments.map((a) => ({ filename: a.filename, content: toBase64(a.content) }));
+    }
     response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -415,6 +433,9 @@ async function sendViaProvider(
     };
     if (replyTo) sgPayload.reply_to = { email: replyTo };
     if (bccArr.length) sgPayload.personalizations[0].bcc = bccArr.map((e) => ({ email: e }));
+    if (attachments?.length) {
+      sgPayload.attachments = attachments.map((a) => ({ filename: a.filename, content: toBase64(a.content), type: "application/pdf", disposition: "attachment" }));
+    }
     response = await fetch("https://api.sendgrid.com/v3/mail/send", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -436,7 +457,7 @@ async function sendViaProvider(
 // nunca há duplicidade. SendGrid fica como última tentativa se for o provider setado.
 async function sendEmailResilient(
   config: any, fromEmail: string, to: string | string[], subject: string,
-  html: string, replyTo?: string, bcc?: string | string[],
+  html: string, replyTo?: string, bcc?: string | string[], attachments?: EmailAttachment[],
 ): Promise<{ ok: boolean; provider?: string; fallback?: boolean; error?: string; resendError?: string }> {
   const resendKey =
     (config?.email_provider === "resend" ? (config?.email_api_key || "") : "") ||
@@ -449,21 +470,21 @@ async function sendEmailResilient(
   // está configurado e o Office365 assume; nesse caso não alertamos o admin.)
   if (resendKey) {
     try {
-      await sendViaProvider("resend", resendKey, fromEmail, to, subject, html, replyTo, bcc);
+      await sendViaProvider("resend", resendKey, fromEmail, to, subject, html, replyTo, bcc, attachments);
       return { ok: true, provider: "resend" };
     } catch (e: any) { resendError = e.message; errors.push(`resend: ${e.message}`); }
   }
   // 2) FALLBACK silencioso: Office365 / SMTP (mesmo template/from)
   if (smtpAvailable) {
     try {
-      await sendViaProvider("smtp", "", fromEmail, to, subject, html, replyTo, bcc);
+      await sendViaProvider("smtp", "", fromEmail, to, subject, html, replyTo, bcc, attachments);
       return { ok: true, provider: "smtp", fallback: true, resendError };
     } catch (e: any) { errors.push(`smtp(office365): ${e.message}`); }
   }
   // 3) Último recurso: SendGrid (se for o provider configurado)
   if (config?.email_provider === "sendgrid" && config?.email_api_key) {
     try {
-      await sendViaProvider("sendgrid", config.email_api_key, fromEmail, to, subject, html, replyTo, bcc);
+      await sendViaProvider("sendgrid", config.email_api_key, fromEmail, to, subject, html, replyTo, bcc, attachments);
       return { ok: true, provider: "sendgrid", resendError };
     } catch (e: any) { errors.push(`sendgrid: ${e.message}`); }
   }
@@ -482,10 +503,20 @@ Deno.serve(async (req) => {
     const { data: config } = await adminClient
       .from("configuracoes")
       .select(
-        "email_provider, email_api_key, email_from, email_reply_to, email_on_approval, email_on_new_order, email_on_order_status, email_on_new_registration, email_on_rejection, email_contato, email_new_orders, email_new_customer, bcc_outgoing_emails",
+        "email_provider, email_api_key, email_from, email_reply_to, email_on_approval, email_on_new_order, email_on_order_status, email_on_new_registration, email_on_rejection, email_contato, email_new_orders, email_new_customer, bcc_outgoing_emails, nome_empresa, endereco",
       )
       .limit(1)
       .maybeSingle();
+
+    // Colunas do template/logo customizados — select separado: foram criadas via SQL
+    // direto e o PostgREST pode não ter recarregado o schema cache ainda; se essa
+    // query falhar, cai pro template fixo (fallback já existente), sem derrubar o envio.
+    let customTemplateCfg: { email_order_template?: string | null; email_logo_url?: string | null; email_logo_position?: string | null } = {};
+    try {
+      const { data } = await adminClient.from("configuracoes")
+        .select("email_order_template, email_logo_url, email_logo_position").limit(1).maybeSingle();
+      if (data) customTemplateCfg = data;
+    } catch (_e) { /* fica no fallback fixo */ }
 
     const provider = config?.email_provider || "";
     const apiKey = config?.email_api_key || "";
@@ -542,6 +573,7 @@ Deno.serve(async (req) => {
     let to = "";
     let subject = "";
     let html = "";
+    let orderPdfAttachment: EmailAttachment | undefined;
 
     if (type === "approval") {
       // Customer approved
@@ -587,9 +619,65 @@ Deno.serve(async (req) => {
         .select("company_name, company_address, company_city, company_state, company_zip, email_from")
         .limit(1)
         .maybeSingle();
+      const orderItems: any[] = items || [];
+      const companyName = config?.nome_empresa || companyData?.company_name || COMPANY_NAME;
+      const companyAddress = config?.endereco || companyData?.company_address || "";
+      const companyEmailAddr = config?.email_contato || COMPANY_EMAIL;
       to = customer.email;
-      subject = `Order #${order.numero || order.id} received – ${companyData?.company_name || COMPANY_NAME}`;
-      html = templateNewOrderCustomer(order, customer, items || [], companyData);
+      subject = `Order #${order.numero || order.id} received – ${companyName}`;
+
+      if (customTemplateCfg.email_order_template) {
+        // Template customizado (aba Notifications → Email) — mesma renderização do preview do admin.
+        const itemsTable = `<table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Price</th><th style="padding:6px 8px;text-align:right;">Qty</th><th style="padding:6px 8px;text-align:right;">Total</th></tr></thead><tbody>${
+          orderItems.map((i) => `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.sku ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto ?? i.name ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario).toFixed(2)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">${i.quantidade}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal).toFixed(2)}</td></tr>`).join("")
+        }</tbody></table>`;
+        const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-US") : "-";
+        const vars: Record<string, string> = {
+          companyName, companyAddress, companyEmail: companyEmailAddr,
+          orderNumber: String(order.numero ?? order.id ?? ""), orderDate: fmtDate(order.created_at),
+          poNumber: order.po_number ?? "", deliveryDate: order.delivery_date ? fmtDate(order.delivery_date) : "-",
+          customerCompany: customer.empresa ?? "", customerName: customer.nome ?? "", customerEmail: customer.email ?? "",
+          customerAddress: [customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", "),
+          itemsTable, subtotal: `$${Number(order.subtotal ?? 0).toFixed(2)}`,
+          discount: order.desconto ? `-$${Number(order.desconto).toFixed(2)}` : "$0.00",
+          shippingCosts: order.shipping_costs ? `$${Number(order.shipping_costs).toFixed(2)}` : "$0.00",
+          salesTax: order.sales_tax ? `$${Number(order.sales_tax).toFixed(2)}` : "$0.00",
+          grossTotal: `$${Number(order.total ?? 0).toFixed(2)}`, notes: order.observacoes ?? "",
+        };
+        const rendered = Object.entries(vars).reduce((h, [k, v]) => h.split(`{{${k}}}`).join(v), customTemplateCfg.email_order_template);
+        const logoHtml = customTemplateCfg.email_logo_url
+          ? `<div style="display:flex;justify-content:${customTemplateCfg.email_logo_position === "center" ? "center" : customTemplateCfg.email_logo_position === "right" ? "flex-end" : "flex-start"};margin-bottom:16px;"><img src="${customTemplateCfg.email_logo_url}" alt="Logo" style="max-height:64px;max-width:280px;" /></div>`
+          : "";
+        html = logoHtml + rendered;
+      } else {
+        html = templateNewOrderCustomer(order, customer, items || [], companyData);
+      }
+
+      // PDF de verdade anexado — mesmos dados do email acima (pdf-lib, sem headless browser).
+      try {
+        const pdfItems: PdfOrderItem[] = orderItems.map((i) => ({
+          sku: i.sku ?? "", name: i.nome_produto ?? i.name ?? "",
+          qty: Number(i.quantidade ?? 0), price: Number(i.preco_unitario ?? 0), total: Number(i.subtotal ?? 0),
+        }));
+        const pdfBytes = await generateOrderPdf({
+          orderNumber: String(order.numero ?? order.id ?? ""),
+          orderDate: order.created_at ? new Date(order.created_at).toLocaleDateString("en-US") : "",
+          poNumber: order.po_number ?? "", deliveryDate: order.delivery_date ? new Date(order.delivery_date).toLocaleDateString("en-US") : "",
+          customerName: customer.empresa || customer.nome || "", customerEmail: customer.email ?? "",
+          customerAddress: [customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", "),
+          companyName, companyAddress, companyEmail: companyEmailAddr,
+          logoUrl: customTemplateCfg.email_logo_url ?? undefined,
+          logoPosition: (customTemplateCfg.email_logo_position as "left" | "center" | "right") ?? "left",
+          items: pdfItems,
+          subtotal: Number(order.subtotal ?? 0), discount: Number(order.desconto ?? 0),
+          shipping: Number(order.shipping_costs ?? 0), tax: Number(order.sales_tax ?? 0),
+          grossTotal: Number(order.total ?? 0), notes: order.observacoes ?? "",
+        });
+        orderPdfAttachment = { filename: `order-${order.numero ?? order.id ?? "confirmation"}.pdf`, content: pdfBytes };
+      } catch (pdfErr: any) {
+        // PDF é um extra — se falhar, o email ainda deve sair (não derruba o pedido).
+        console.error("[send-email] PDF generation failed:", pdfErr?.message ?? pdfErr);
+      }
     } else if (type === "order_status_change") {
       // Order status updated — notify customer
       if (config?.email_on_order_status === false) {
@@ -721,7 +809,10 @@ Deno.serve(async (req) => {
     ];
     const bcc = CUSTOMER_TYPES.includes(type) ? config?.bcc_outgoing_emails || "" : "";
 
-    const result = await sendEmailResilient(config, fromEmail, to, subject, html, replyTo || undefined, bcc || undefined);
+    const result = await sendEmailResilient(
+      config, fromEmail, to, subject, html, replyTo || undefined, bcc || undefined,
+      orderPdfAttachment ? [orderPdfAttachment] : undefined,
+    );
     const toDisplay = Array.isArray(to) ? to.join(", ") : to;
 
     // Registra TODO envio (sucesso / fallback / falha) no notification_log — nada silencioso.
