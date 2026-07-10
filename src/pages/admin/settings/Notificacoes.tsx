@@ -180,6 +180,26 @@ export default function Notificacoes() {
     requestAnimationFrame(() => { if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = pos + emoji.length; } });
   };
 
+  // Envolve o texto SELECIONADO do campo WhatsApp com a marcação do próprio app
+  // (*negrito*, _itálico_, ~tachado~) — é o único "rich text" que o WhatsApp
+  // entende; SMS não suporta formatação nenhuma, por isso não existe pro SMS.
+  const wrapWhatsappSelection = (evId: string, marker: string) => {
+    const key = `${evId}:whatsapp`;
+    const ta = tplRefs.current[key];
+    const cur = events.find((e) => e.id === evId)?.template_whatsapp ?? '';
+    const start = ta?.selectionStart ?? cur.length;
+    const end = ta?.selectionEnd ?? cur.length;
+    const selected = cur.slice(start, end) || 'text';
+    const next = cur.slice(0, start) + marker + selected + marker + cur.slice(end);
+    setEvents(events.map((x) => (x.id === evId ? { ...x, template_whatsapp: next } : x)));
+    requestAnimationFrame(() => {
+      if (!ta) return;
+      ta.focus();
+      ta.selectionStart = start + marker.length;
+      ta.selectionEnd = start + marker.length + selected.length;
+    });
+  };
+
   useEffect(() => { load(); }, []);
 
   async function load() {
@@ -539,6 +559,22 @@ export default function Notificacoes() {
               {(['sms', 'whatsapp'] as const).map((field) => (
                 <div key={field} className="space-y-1.5">
                   <Label className="text-xs capitalize">{field}</Label>
+                  {field === 'whatsapp' && (
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" title="Bold (*text*)"
+                        className="rounded border border-border px-2 py-0.5 text-xs font-bold hover:bg-muted transition-colors"
+                        onClick={() => wrapWhatsappSelection(ev.id, '*')}>B</button>
+                      <button type="button" title="Italic (_text_)"
+                        className="rounded border border-border px-2 py-0.5 text-xs italic hover:bg-muted transition-colors"
+                        onClick={() => wrapWhatsappSelection(ev.id, '_')}>I</button>
+                      <button type="button" title="Strikethrough (~text~)"
+                        className="rounded border border-border px-2 py-0.5 text-xs line-through hover:bg-muted transition-colors"
+                        onClick={() => wrapWhatsappSelection(ev.id, '~')}>S</button>
+                      <span className="text-[10px] text-muted-foreground self-center ml-1">
+                        Select text first — WhatsApp's own markup, no size/color available.
+                      </span>
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-1">
                     {EMOJIS.map((em) => (
                       <button key={em} type="button" title="Insert emoji"
