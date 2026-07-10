@@ -130,6 +130,31 @@ confirma a versão sem-wipe. **Reimportar os relacionados SÓ DEPOIS do redeploy
   código. Pequeno enhancement se o dono quiser esse controle fino. Enquanto isso, pausar
   SMS = Canais → SMS off (pausa admin+cliente).
 
+## PASSADA FINAL DE AUDITORIA (09/jul, noite) — achados e correções
+Auditoria final focada no código alterado no dia. **1 bug real + 4 acertos menores:**
+
+1. **BUG (interruptor mestre × alerta):** canal desligado era tratado como FALHA no
+   `_shared/dispatch.ts` → o `alertAdmin` mandava UM EMAIL POR EVENTO avisando "canal
+   desligado" — anulava o propósito de desligar. Corrigido: desligado de propósito = SKIP
+   (só registra no Notifications Log como `skip: channel disabled`); falha REAL de provider
+   (Twilio/Resend com erro) continua alertando. **Requer redeploy do `notify-dispatch`.**
+2. **i18n dos emails enviados:** SUBJECTS do dispatch estavam em PT ("Novo pedido recebido"...)
+   — são os assuntos que o CLIENTE FINAL vê. Traduzidos + corpo/assunto do alerta de falha +
+   motivos de skip no log + strings de teste do notify-dispatch. (Mesmo redeploy acima.)
+3. **i18n frontend final:** últimos toasts/erros em PT traduzidos (ProductEdit privacidade,
+   EmailSettings, EmailTemplates, toast do import de related).
+4. **sanitizeHtml endurecido:** `<script>/<style>/<iframe>/...` agora são descartados COM o
+   conteúdo (antes o texto interno — CSS/JS — viraria texto visível na descrição).
+5. **Import related — BOM:** CSV do Excel vem com BOM; o 1º cabeçalho (`product_sku`) não
+   casaria. Strip explícito `﻿` no parseCSV.
+6. **Total Spent (portal) sem cancelados:** o card somava pedidos cancelados no total gasto
+   do ano — número errado pro cliente. Agora exclui `cancelled`.
+
+Verificado sem defeito nesta passada: import related (fluxo), sync v4 (não toca related),
+catálogo tabela/qty/status, master switch (UI/flags), AuthContext (ref de sessão),
+price lists (save único/duplicar), teste de canal com canal OFF (funciona por design —
+teste é explícito do admin e bypassa o toggle).
+
 ## PENDÊNCIAS
 1. **Redeploy da edge function `b2bwave-sync`** (passo 1): há melhoria no repo não deployada
    (`d5e43fc`, related em lote) + marcador `SYNC_VERSION:related-v3`. Não bloqueia produção

@@ -46,8 +46,8 @@ Deno.serve(async (req) => {
       const ch = Object.fromEntries((channels ?? []).map((c) => [c.id, c]));
       const result = await dispatchOne(
         test.channel, test.to,
-        SUBJECTS[event] ?? "Teste de notificação",
-        render(String(test.message ?? "Mensagem de teste."), vars), ch,
+        SUBJECTS[event] ?? "Test notification",
+        render(String(test.message ?? "Test message."), vars), ch,
       );
       await db.from("notification_log").insert({
         event: event ?? "test", channel: test.channel, recipient: test.to,

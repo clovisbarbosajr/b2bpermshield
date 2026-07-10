@@ -23,7 +23,13 @@ export function sanitizeHtml(dirty: string | null | undefined): string {
       if (child.nodeType === Node.ELEMENT_NODE) {
         const el = child as Element;
         if (!ALLOWED_TAGS.has(el.tagName)) {
-          // Tag não permitida: preserva o TEXTO (desembrulha), descarta a tag.
+          // script/style/iframe etc.: descarta INCLUSIVE o conteúdo (senão o CSS/JS
+          // interno apareceria como texto na descrição). Demais tags não permitidas:
+          // preserva o TEXTO (desembrulha), descarta só a tag.
+          if (["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "TEMPLATE", "NOSCRIPT"].includes(el.tagName)) {
+            el.remove();
+            continue;
+          }
           const text = doc.createTextNode(el.textContent ?? "");
           el.replaceWith(text);
           continue;

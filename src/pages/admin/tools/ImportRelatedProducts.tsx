@@ -19,6 +19,8 @@ import * as XLSX from "xlsx";
 // Parser CSV RFC-4180 (aspas, vírgula dentro de campo, quebra de linha em campo).
 // O parser "split por vírgula" dos outros importers quebraria com o export real.
 function parseCSV(text: string): Record<string, string>[] {
+  // Excel salva CSV com BOM — sem strip, o 1º cabeçalho vira "﻿product_sku" e não casa.
+  text = text.replace(/^﻿/, "");
   const rows: string[][] = [];
   let field = "", row: string[] = [], inQuotes = false;
   for (let i = 0; i < text.length; i++) {
@@ -87,7 +89,7 @@ const ImportRelatedProducts = () => {
     const relCol = "related_products_buy_with" in rows[0] ? "related_products_buy_with"
       : "related_products" in rows[0] ? "related_products" : null;
     if (!relCol) {
-      toast.error('Coluna de relacionados não encontrada. Use o EXPORT de produtos do B2BWave (Products > Export).');
+      toast.error('Related products column not found. Use the B2BWave product EXPORT file (Products > Export).');
       return;
     }
 

@@ -47,10 +47,12 @@ const PortalDashboard = () => {
       const all = pedidos ?? [];
       setRecentOrders(all.slice(0, 5));
       setTotalOrders(all.length);
-      // Total Spent = só do ANO corrente (pedido do dono).
+      // Total Spent = só do ANO corrente (pedido do dono) e SEM cancelados
+      // (pedido cancelado não é dinheiro gasto).
       const thisYear = new Date().getFullYear();
       setTotalSpent(all
-        .filter((p) => new Date(p.created_at).getFullYear() === thisYear)
+        .filter((p) => new Date(p.created_at).getFullYear() === thisYear
+          && canonicalStatus(p.status) !== "cancelled")
         .reduce((sum, p) => sum + (Number(p.total) || 0), 0));
       setOpenOrders(all.filter((p) => { const s = canonicalStatus(p.status); return s !== "complete" && s !== "cancelled"; }).length);
       setLoading(false);
