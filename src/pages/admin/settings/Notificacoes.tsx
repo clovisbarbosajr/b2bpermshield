@@ -303,10 +303,55 @@ export default function Notificacoes() {
     } else { toast.success('Test sent'); }
   }
 
-  // Testa o template de e-mail de um evento, enviando pelo Resend (notify-dispatch).
+  // Testa o email REAL de produção de cada evento — mesmo template/logo/PDF que
+  // o cliente recebe (send-email), enviado pro destinatário de teste. Antes o
+  // teste ia pelo notify-dispatch com o texto cru do evento (chegava "em branco"
+  // pros eventos cujo email real vive no send-email).
   async function sendEventTest(ev: EventRow) {
     const to = testRecipient.trim();
     if (!to || !to.includes('@')) { toast.error('Enter a valid destination email.'); return; }
+
+    const handleResp = (data: any, error: any, extra = '') => {
+      if (data?.skipped) { toast.error(`Not sent — ${data.reason}. Enable the Email channel first.`); return; }
+      if (error || data?.error) { toast.error(`Failed: ${data?.error || error?.message || 'unknown error'}`); return; }
+      toast.success(`Real "${EVENT_LABELS[ev.id] ?? ev.id}" email sent to ${to}${extra}`);
+    };
+
+    if (ev.id === 'new_order' || ev.id === 'order_status') {
+      // Usa o pedido mais recente como dado real (igual ao Preview).
+      const { data: pedido } = await sb.from('pedidos').select('*, pedido_itens(*)')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (!pedido) { toast.error('No orders found — place an order first.'); return; }
+      const { data: cliente } = await sb.from('clientes').select('*').eq('id', pedido.cliente_id).maybeSingle();
+      const customer = { ...(cliente ?? {}), email: to };
+      if (ev.id === 'new_order') {
+        const items = (pedido.pedido_itens ?? []).map((it: any) => ({
+          sku: it.sku ?? '', nome_produto: it.nome_produto, preco_unitario: it.preco_unitario,
+          quantidade: it.quantidade, subtotal: it.subtotal,
+        }));
+        const { data, error } = await sb.functions.invoke('send-email', {
+          body: { type: 'new_order_customer', order: pedido, customer, items },
+        });
+        handleResp(data, error, ' (with PDF attached)');
+      } else {
+        const { data, error } = await sb.functions.invoke('send-email', {
+          body: { type: 'order_status_change', order: pedido, customer, newStatus: pedido.status },
+        });
+        handleResp(data, error);
+      }
+      return;
+    }
+
+    if (ev.id === 'account_approved' || ev.id === 'new_customer') {
+      const type = ev.id === 'account_approved' ? 'approval' : 'waiting_approval';
+      const { data, error } = await sb.functions.invoke('send-email', {
+        body: { type, customerEmail: to, customerName: 'Test Customer', loginUrl: `${window.location.origin}/customers-login` },
+      });
+      handleResp(data, error);
+      return;
+    }
+
+    // low_stock e demais: o caminho real é o texto do notify-dispatch mesmo.
     const { data, error } = await sb.functions.invoke('notify-dispatch', {
       body: { event: ev.id, test: { channel: 'email', to, message: ev.template_email || `Test of event ${EVENT_LABELS[ev.id] ?? ev.id}` } },
     });
@@ -577,7 +622,11 @@ export default function Notificacoes() {
             <Label className="text-xs">Recipient (for all tests)</Label>
             <Input type="email" className="mt-1 max-w-sm" placeholder="you@company.com" value={testRecipient}
               onChange={(e) => { setTestRecipient(e.target.value); localStorage.setItem('notif_test_email', e.target.value); }} />
-            <p className="text-xs text-muted-foreground mt-1">All test emails go to this address, sent via <strong>Resend</strong>.</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              All test emails go to this address. Order/status/approval/registration tests send the
+              <strong> real production email</strong> (template, logo — and the PDF for orders), using the
+              most recent order's data. Requires the Email channel ON.
+            </p>
           </Card>
           {events.map((ev) => (
             <Card key={ev.id} className="p-4 flex items-center justify-between gap-3">
