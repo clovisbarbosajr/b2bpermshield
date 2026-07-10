@@ -623,6 +623,7 @@ export type Database = {
           mobile_app_enabled: boolean | null
           moeda: string
           nome_empresa: string
+          pdf_order_template: string | null
           pedido_minimo: number
           permite_cadastro_aberto: boolean
           pinterest_url: string | null
@@ -734,6 +735,7 @@ export type Database = {
           mobile_app_enabled?: boolean | null
           moeda?: string
           nome_empresa?: string
+          pdf_order_template?: string | null
           pedido_minimo?: number
           permite_cadastro_aberto?: boolean
           pinterest_url?: string | null
@@ -845,6 +847,7 @@ export type Database = {
           mobile_app_enabled?: boolean | null
           moeda?: string
           nome_empresa?: string
+          pdf_order_template?: string | null
           pedido_minimo?: number
           permite_cadastro_aberto?: boolean
           pinterest_url?: string | null
