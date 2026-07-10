@@ -213,18 +213,23 @@ export default function Notificacoes() {
     setEvents((e.data as EventRow[]) ?? []);
     setRecipients((r.data as Recipient[]) ?? []);
 
-    // Colunas do logo (email_logo_url/position) foram criadas via SQL direto —
-    // o PostgREST às vezes não recarrega o schema cache na hora, e um select
-    // pedindo colunas que ele ainda não "viu" falha por INTEIRO (perde até o
-    // id). Por isso primeiro pega o id sozinho (sempre existe) e só DEPOIS
-    // tenta as colunas novas — assim Save nunca fica travado por causa delas.
-    const base = await sb.from('configuracoes')
-      .select('id, email_order_template, pdf_order_template').limit(1).maybeSingle();
-    setConfigId(base.data?.id ?? null);
-    setEmailOrderTemplate(base.data?.email_order_template ?? '');
-    setEmailOrderOriginal(base.data?.email_order_template ?? '');
-    setPdfTemplate(base.data?.pdf_order_template ?? '');
-    setPdfOriginal(base.data?.pdf_order_template ?? '');
+    // O id vem SOZINHO (select que nunca falha). Cada grupo de colunas opcionais
+    // vem em query separada e tolerante: se alguma coluna não existir / não
+    // estiver no schema cache do PostgREST, um select combinado falharia POR
+    // INTEIRO e perderia até o id (causa raiz do "Configuration not found").
+    const idQ = await sb.from('configuracoes').select('id').limit(1).maybeSingle();
+    setConfigId(idQ.data?.id ?? null);
+
+    const tpl = await sb.from('configuracoes')
+      .select('email_order_template, pdf_order_template').limit(1).maybeSingle();
+    if (tpl.error) {
+      console.error('[Notificacoes] template columns not readable:', tpl.error.message);
+    } else {
+      setEmailOrderTemplate(tpl.data?.email_order_template ?? '');
+      setEmailOrderOriginal(tpl.data?.email_order_template ?? '');
+      setPdfTemplate(tpl.data?.pdf_order_template ?? '');
+      setPdfOriginal(tpl.data?.pdf_order_template ?? '');
+    }
 
     const logo = await sb.from('configuracoes')
       .select('email_logo_url, email_logo_position').limit(1).maybeSingle();
@@ -235,6 +240,15 @@ export default function Notificacoes() {
       setLogoPosition((logo.data?.email_logo_position ?? 'left') as 'left' | 'center' | 'right');
     }
     setLoading(false);
+  }
+
+  // Se o load falhou em pegar o id (ex.: schema cache), tenta de novo NA HORA
+  // do save — o Save nunca deve morrer por estado velho da página.
+  async function ensureConfigId(): Promise<string | null> {
+    if (configId) return configId;
+    const { data } = await sb.from('configuracoes').select('id').limit(1).maybeSingle();
+    if (data?.id) setConfigId(data.id);
+    return data?.id ?? null;
   }
 
   // MASTER SWITCH: liga/desliga o canal e PERSISTE na hora. O toggle de EMAIL também
@@ -319,11 +333,34 @@ export default function Notificacoes() {
     return `<div style="display:flex;justify-content:${justify};margin-bottom:16px;"><img src="${logoUrl}" alt="Logo" style="max-height:64px;max-width:280px;" /></div>`;
   };
 
+  // Re-encoda a imagem via canvas pra um PNG 8-bit sRGB padrão. PNGs com perfil
+  // ICC / entrelaçado / 16-bit / paleta saem com CORES ERRADAS no pdf-lib (que
+  // ignora perfil de cor ao embutir). O canvas rasteriza no espaço sRGB e o
+  // toBlob gera um PNG "normal" que o PDF renderiza fiel. Se falhar, usa o
+  // arquivo original (email continua ok; só o PDF arriscaria variar).
+  async function normalizeLogoPng(file: File): Promise<Blob> {
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = url; });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext('2d')!.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+      return blob ?? file;
+    } catch {
+      return file;
+    }
+  }
+
   async function handleLogoUpload(file: File) {
     setLogoUploading(true);
-    const ext = file.name.split('.').pop();
-    const path = `settings/email-logo-${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('product-images').upload(path, file);
+    const png = await normalizeLogoPng(file);
+    const path = `settings/email-logo-${Date.now()}.png`;
+    const { error } = await supabase.storage.from('product-images')
+      .upload(path, png, { contentType: 'image/png' });
     if (error) { toast.error('Upload failed: ' + error.message); setLogoUploading(false); return; }
     const { data: { publicUrl } } = supabase.storage.from('product-images').getPublicUrl(path);
     setLogoUrl(publicUrl);
@@ -331,10 +368,11 @@ export default function Notificacoes() {
   }
 
   async function handleLogoSave() {
-    if (!configId) { toast.error('Configuration not found'); return; }
+    const id = await ensureConfigId();
+    if (!id) { toast.error('Configuration not found'); return; }
     setLogoSaving(true);
     const { error } = await sb.from('configuracoes')
-      .update({ email_logo_url: logoUrl || null, email_logo_position: logoPosition }).eq('id', configId);
+      .update({ email_logo_url: logoUrl || null, email_logo_position: logoPosition }).eq('id', id);
     toast[error ? 'error' : 'success'](error ? error.message : 'Logo saved');
     setLogoSaving(false);
   }
@@ -343,10 +381,11 @@ export default function Notificacoes() {
 
   // ── Template do email de confirmação de pedido (cliente) ──
   async function handleEmailOrderSave() {
-    if (!configId) { toast.error('Configuration not found'); return; }
+    const id = await ensureConfigId();
+    if (!id) { toast.error('Configuration not found'); return; }
     setEmailOrderSaving(true);
     const { error } = await sb.from('configuracoes')
-      .update({ email_order_template: emailOrderTemplate || null }).eq('id', configId);
+      .update({ email_order_template: emailOrderTemplate || null }).eq('id', id);
     if (error) toast.error('Error saving: ' + error.message);
     else { setEmailOrderOriginal(emailOrderTemplate); toast.success('Email template saved'); }
     setEmailOrderSaving(false);
@@ -390,9 +429,10 @@ export default function Notificacoes() {
 
   // ── Template do PDF do pedido ──
   async function handlePdfSave() {
-    if (!configId) { toast.error('Configuration not found'); return; }
+    const id = await ensureConfigId();
+    if (!id) { toast.error('Configuration not found'); return; }
     setPdfSaving(true);
-    const { error } = await sb.from('configuracoes').update({ pdf_order_template: pdfTemplate || null }).eq('id', configId);
+    const { error } = await sb.from('configuracoes').update({ pdf_order_template: pdfTemplate || null }).eq('id', id);
     if (error) toast.error('Error saving: ' + error.message);
     else { setPdfOriginal(pdfTemplate); toast.success('PDF template saved'); }
     setPdfSaving(false);
