@@ -155,6 +155,23 @@ catálogo tabela/qty/status, master switch (UI/flags), AuthContext (ref de sess�
 price lists (save único/duplicar), teste de canal com canal OFF (funciona por design —
 teste é explícito do admin e bypassa o toggle).
 
+## CASO ABERTO (10/jul) — send-email DEPLOYADA É VELHA (email vazando pro dev)
+**Sintoma:** email de novo pedido chegando em `junior@wiseitsolutions.us` (email do dev, já
+removido de todo o banco) MESMO com notificações desligadas. SMS corretamente não saiu (skip ok).
+**Evidência da causa:** email do pedido #2609 veio com assunto/template PT ("Novo pedido
+recebido") e remetente noreply@inwisepro.com, sem registro no notification_log — enquanto o teste
+da aba Tests sai "New order received" (inglês). Banco limpo (recipients=só jess, configs NULL,
+sem trigger/função com o email). Conclusão: **a edge function `send-email` nunca foi redeployada**
+— a versão no ar é antiga (recipient velho, templates PT, sem checks email_on_*).
+**Fix:** redeploy da `send-email` pelo Lovable (main atual) + listar TODAS as edge functions
+deployadas com data (caçar outras órfãs).
+**Verificação:** pedido teste com notificações OFF → zero emails; ON → admin só jess, em inglês.
+
+## EMOJIS DOS TEMPLATES — sumiram (causa + solução)
+O SQL `20260709160000` (templates em inglês) sobrescreveu os templates INTEIROS, apagando os
+emojis adicionados pelo dono. Irrecuperável (overwrite no banco). Solução: recolocar na aba
+Templates — nada regrava templates automaticamente; NÃO rodar aquele SQL de novo.
+
 ## PENDÊNCIAS
 1. **Redeploy da edge function `b2bwave-sync`** (passo 1): há melhoria no repo não deployada
    (`d5e43fc`, related em lote) + marcador `SYNC_VERSION:related-v3`. Não bloqueia produção
