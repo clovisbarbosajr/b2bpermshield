@@ -8,8 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Pencil, Check, X, Save, Eye, RefreshCw, Mail } from "lucide-react";
+import { Pencil, Check, X, Save, Eye, RefreshCw, Mail, Image as ImageIcon, Trash2 } from "lucide-react";
+import { RichTextEditor } from "@/components/RichTextEditor";
 
 // ─── Email template rows ──────────────────────────────────────────────────────
 const DEFAULT_TEMPLATES = [
@@ -118,11 +120,20 @@ const EmailTemplates = () => {
   const [emailOrderPreviewHtml, setEmailOrderPreviewHtml] = useState("");
   const [emailOrderPreviewing, setEmailOrderPreviewing] = useState(false);
 
+  // Logo do email (header): upload + posição
+  const [logoUrl, setLogoUrl] = useState("");
+  const [logoPosition, setLogoPosition] = useState<"left" | "center" | "right">("left");
+  const [logoSaving, setLogoSaving] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [showHtmlSource, setShowHtmlSource] = useState(false);
+
   // ── Email templates ──
   const fetchData = async () => {
     const [{ data: tmpl }, { data: cfg }] = await Promise.all([
       supabase.from("email_templates").select("*").order("nome"),
-      (supabase.from("configuracoes") as any).select("id, pdf_order_template, email_order_template").limit(1).maybeSingle(),
+      (supabase.from("configuracoes") as any)
+        .select("id, pdf_order_template, email_order_template, email_logo_url, email_logo_position")
+        .limit(1).maybeSingle(),
     ]);
     setTemplates(tmpl ?? []);
     setConfigId(cfg?.id ?? null);
@@ -132,6 +143,8 @@ const EmailTemplates = () => {
     const et = (cfg as any)?.email_order_template ?? "";
     setEmailOrderTemplate(et);
     setEmailOrderOriginal(et);
+    setLogoUrl((cfg as any)?.email_logo_url ?? "");
+    setLogoPosition(((cfg as any)?.email_logo_position ?? "left") as "left" | "center" | "right");
     setLoading(false);
   };
 
@@ -212,6 +225,41 @@ const EmailTemplates = () => {
     setPdfPreviewing(false);
   };
 
+  // ── Logo (header do email) ──
+  const buildLogoHeaderHtml = () => {
+    if (!logoUrl) return "";
+    const justify = logoPosition === "center" ? "center" : logoPosition === "right" ? "flex-end" : "flex-start";
+    return `<div style="display:flex;justify-content:${justify};margin-bottom:16px;"><img src="${logoUrl}" alt="Logo" style="max-height:64px;max-width:280px;" /></div>`;
+  };
+
+  const handleLogoUpload = async (file: File) => {
+    setLogoUploading(true);
+    const ext = file.name.split(".").pop();
+    const path = `settings/email-logo-${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("product-images").upload(path, file);
+    if (error) {
+      toast.error("Upload failed: " + error.message);
+      setLogoUploading(false);
+      return;
+    }
+    const { data: { publicUrl } } = supabase.storage.from("product-images").getPublicUrl(path);
+    setLogoUrl(publicUrl);
+    setLogoUploading(false);
+  };
+
+  const handleLogoSave = async () => {
+    if (!configId) { toast.error("Configuration not found"); return; }
+    setLogoSaving(true);
+    const { error } = await (supabase.from("configuracoes") as any)
+      .update({ email_logo_url: logoUrl || null, email_logo_position: logoPosition })
+      .eq("id", configId);
+    if (error) toast.error("Error saving: " + error.message);
+    else toast.success("Logo saved");
+    setLogoSaving(false);
+  };
+
+  const handleLogoRemove = () => setLogoUrl("");
+
   // ── Order confirmation email template ──
   const handleEmailOrderSave = async () => {
     if (!configId) { toast.error("Configuration not found"); return; }
@@ -284,7 +332,7 @@ const EmailTemplates = () => {
       (html, [key, val]) => html.split(`{{${key}}}`).join(val),
       tpl
     );
-    setEmailOrderPreviewHtml(rendered);
+    setEmailOrderPreviewHtml(buildLogoHeaderHtml() + rendered);
     setEmailOrderPreviewing(false);
   };
 
@@ -384,13 +432,59 @@ const EmailTemplates = () => {
         {/* ── Order Confirmation Email tab ── */}
         <TabsContent value="order_email">
           <div className="space-y-4">
+            {/* Logo card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <ImageIcon className="h-4 w-4" /> Email Logo
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Appears at the top of the order confirmation email. Choose where it aligns.
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  {logoUrl && (
+                    <img src={logoUrl} alt="Logo preview" className="h-14 max-w-[200px] rounded border border-border bg-white object-contain p-1" />
+                  )}
+                  <Input
+                    type="file" accept="image/*" className="max-w-xs"
+                    disabled={logoUploading}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLogoUpload(f); }}
+                  />
+                  {logoUrl && (
+                    <Button variant="ghost" size="icon" className="text-destructive" onClick={handleLogoRemove} title="Remove logo">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <Select value={logoPosition} onValueChange={(v) => setLogoPosition(v as "left" | "center" | "right")}>
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue placeholder="Position" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left">Left</SelectItem>
+                      <SelectItem value="center">Center</SelectItem>
+                      <SelectItem value="right">Right</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" className="gap-1" onClick={handleLogoSave} disabled={logoSaving || logoUploading}>
+                    <Save className="h-3 w-3" />
+                    {logoSaving ? "Saving..." : "Save Logo"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Mail className="h-4 w-4" /> Order Confirmation Email Template (HTML)
+                    <Mail className="h-4 w-4" /> Order Confirmation Email Template
                   </CardTitle>
                   <div className="flex gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => setShowHtmlSource((s) => !s)}>
+                      {showHtmlSource ? "Visual editor" : "Edit HTML source"}
+                    </Button>
                     <Button variant="outline" size="sm" className="gap-1" onClick={handleEmailOrderPreview} disabled={emailOrderPreviewing}>
                       <Eye className="h-3 w-3" />
                       {emailOrderPreviewing ? "Loading..." : "Preview"}
@@ -408,16 +502,20 @@ const EmailTemplates = () => {
               </CardHeader>
               <CardContent className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Customize the HTML email sent to customers when they place an order.
+                  Customize the email sent to customers when they place an order.
                   Leave blank to use the system default. Use <code>{"{{variable}}"}</code> placeholders below.
                 </p>
-                <textarea
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[400px]"
-                  value={emailOrderTemplate}
-                  onChange={e => setEmailOrderTemplate(e.target.value)}
-                  placeholder="Leave blank to use the system default template. Paste full HTML here to customize..."
-                  spellCheck={false}
-                />
+                {showHtmlSource ? (
+                  <textarea
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[400px]"
+                    value={emailOrderTemplate}
+                    onChange={e => setEmailOrderTemplate(e.target.value)}
+                    placeholder="Leave blank to use the system default template. Paste full HTML here to customize..."
+                    spellCheck={false}
+                  />
+                ) : (
+                  <RichTextEditor value={emailOrderTemplate || DEFAULT_ORDER_EMAIL_TEMPLATE} onChange={setEmailOrderTemplate} minHeight={400} />
+                )}
                 {emailOrderTemplate !== emailOrderOriginal && (
                   <p className="text-xs text-amber-600">Unsaved changes — click Save Template to apply.</p>
                 )}

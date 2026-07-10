@@ -7,6 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { CartProvider } from "@/contexts/CartContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminLayout from "@/components/layouts/AdminLayout";
+import ScrollToTop from "@/components/ScrollToTop";
 
 import Index from "./pages/Index";
 import LoginLanding from "./pages/LoginLanding";
@@ -139,6 +140,7 @@ const App = () => (
       <BrowserRouter>
         <AuthProvider>
           <CartProvider>
+            <ScrollToTop />
             <Routes>
               <Route path="/" element={<LoginLanding />} />
               <Route path="/login" element={<CustomerLogin />} />
