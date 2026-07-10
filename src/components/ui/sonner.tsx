@@ -9,6 +9,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       theme={theme as ToasterProps["theme"]}
+      // Canto SUPERIOR direito + mais tempo + botão de fechar: no rodapé o aviso
+      // passava despercebido com a janela pequena (pedido do dono).
+      position="top-right"
+      duration={6000}
+      closeButton
       className="toaster group"
       toastOptions={{
         classNames: {
