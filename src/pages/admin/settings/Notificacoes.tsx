@@ -204,24 +204,36 @@ export default function Notificacoes() {
 
   async function load() {
     setLoading(true);
-    const [c, e, r, cfg] = await Promise.all([
+    const [c, e, r] = await Promise.all([
       sb.from('notification_channels').select('*').order('id'),
       sb.from('notification_events').select('*').order('id'),
       sb.from('notification_recipients').select('*').order('created_at'),
-      sb.from('configuracoes')
-        .select('id, email_order_template, pdf_order_template, email_logo_url, email_logo_position')
-        .limit(1).maybeSingle(),
     ]);
     setChannels((c.data as Channel[]) ?? []);
     setEvents((e.data as EventRow[]) ?? []);
     setRecipients((r.data as Recipient[]) ?? []);
-    setConfigId(cfg.data?.id ?? null);
-    setEmailOrderTemplate(cfg.data?.email_order_template ?? '');
-    setEmailOrderOriginal(cfg.data?.email_order_template ?? '');
-    setPdfTemplate(cfg.data?.pdf_order_template ?? '');
-    setPdfOriginal(cfg.data?.pdf_order_template ?? '');
-    setLogoUrl(cfg.data?.email_logo_url ?? '');
-    setLogoPosition((cfg.data?.email_logo_position ?? 'left') as 'left' | 'center' | 'right');
+
+    // Colunas do logo (email_logo_url/position) foram criadas via SQL direto —
+    // o PostgREST às vezes não recarrega o schema cache na hora, e um select
+    // pedindo colunas que ele ainda não "viu" falha por INTEIRO (perde até o
+    // id). Por isso primeiro pega o id sozinho (sempre existe) e só DEPOIS
+    // tenta as colunas novas — assim Save nunca fica travado por causa delas.
+    const base = await sb.from('configuracoes')
+      .select('id, email_order_template, pdf_order_template').limit(1).maybeSingle();
+    setConfigId(base.data?.id ?? null);
+    setEmailOrderTemplate(base.data?.email_order_template ?? '');
+    setEmailOrderOriginal(base.data?.email_order_template ?? '');
+    setPdfTemplate(base.data?.pdf_order_template ?? '');
+    setPdfOriginal(base.data?.pdf_order_template ?? '');
+
+    const logo = await sb.from('configuracoes')
+      .select('email_logo_url, email_logo_position').limit(1).maybeSingle();
+    if (logo.error) {
+      console.error('[Notificacoes] email_logo_url/position not readable yet:', logo.error.message);
+    } else {
+      setLogoUrl(logo.data?.email_logo_url ?? '');
+      setLogoPosition((logo.data?.email_logo_position ?? 'left') as 'left' | 'center' | 'right');
+    }
     setLoading(false);
   }
 
