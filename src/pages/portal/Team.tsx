@@ -19,18 +19,26 @@ type Member = {
 };
 
 const Team = () => {
-  const { isSubUser } = useAuth();
+  const { isSubUser, user } = useAuth();
   const canManage = !isSubUser; // só o dono da conta gerencia a equipe
 
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [companyName, setCompanyName] = useState("");
   const [form, setForm] = useState({ nome: "", email: "", can_confirm_order: false, can_view_full_history: false });
 
   const load = async () => {
     const { data, error } = await supabase.functions.invoke("company-member", { body: { action: "list" } });
     if (error) toast.error(error.message);
     else setMembers(data?.members ?? []);
+    // Nome da EMPRESA DA CONTA logada no título — o header mostra a marca da LOJA,
+    // o que já fez funcionário ser adicionado no time da empresa errada por engano.
+    if (user?.id) {
+      const { data: me } = await supabase.from("clientes")
+        .select("empresa, nome").eq("user_id", user.id).maybeSingle();
+      setCompanyName(me?.empresa || me?.nome || "");
+    }
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
@@ -80,8 +88,11 @@ const Team = () => {
   return (
     <PortalLayout>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">Team</h1>
-        <p className="text-sm text-muted-foreground">Add employees who can log in for your company. They share your account's pricing and catalog access.</p>
+        <h1 className="text-2xl font-bold">Team{companyName ? ` — ${companyName}` : ""}</h1>
+        <p className="text-sm text-muted-foreground">
+          Add employees who can log in for <strong>{companyName || "your company"}</strong>.
+          They share this account's pricing and catalog access.
+        </p>
       </div>
 
       <Card className="p-5 mb-6">

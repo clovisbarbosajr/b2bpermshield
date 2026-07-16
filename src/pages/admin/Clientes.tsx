@@ -40,7 +40,9 @@ const AdminClientes = () => {
   const fetchData = async () => {
     const [{ data }, { data: pl }, { data: repData }, { data: pg }, { data: acts }] = await Promise.all([
       // Ordena por data de cadastro (mais recente primeiro) para espelhar o B2BWave (clone).
-      supabase.from("clientes").select("*").order("created_at", { ascending: false }),
+      // Sub-logins (funcionários do cliente, parent_customer_id preenchido) NÃO são
+      // clientes — apareciam como empresa duplicada na lista (caso jess@permwood 2026-07-16).
+      supabase.from("clientes").select("*").is("parent_customer_id", null).order("created_at", { ascending: false }),
       supabase.from("tabelas_preco").select("id, nome").eq("ativo", true),
       supabase.from("representantes").select("id, nome").eq("ativo", true).order("nome"),
       supabase.from("privacy_groups").select("id, nome").eq("ativo", true),
