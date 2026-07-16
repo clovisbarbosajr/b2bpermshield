@@ -827,14 +827,33 @@ Deno.serve(async (req) => {
         try { if (allowedOrigins.includes(new URL(redirectTo).origin)) safeRedirect = redirectTo; } catch { /* url inválida: dropa */ }
       }
       // Generate the reset link using Supabase Admin API
-      const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+      const resetEmailNorm = String(resetEmail).trim().toLowerCase();
+      let { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
         type: "recovery",
-        email: resetEmail,
+        email: resetEmailNorm,
         options: { redirectTo: safeRedirect },
       });
       if (linkError) {
+        // Cliente migrado do B2BWave: existe em `clientes` mas nunca teve login
+        // no auth — provisiona agora (mesma regra do request_magic_link: só
+        // cliente ATIVO) e tenta de novo. Senão, silêncio genérico (não revela).
+        const { data: cliRow } = await adminClient.from("clientes")
+          .select("id, status, is_active, user_id")
+          .ilike("email", resetEmailNorm).limit(1).maybeSingle();
+        if (cliRow && cliRow.status === "ativo" && cliRow.is_active !== false) {
+          const { data: created, error: cErr } = await adminClient.auth.admin.createUser({ email: resetEmailNorm, email_confirm: true });
+          if (!cErr && created?.user) {
+            await adminClient.from("clientes").update({ user_id: created.user.id }).eq("id", cliRow.id).is("user_id", null);
+            await adminClient.from("user_roles").upsert({ user_id: created.user.id, role: "cliente" }, { onConflict: "user_id" });
+            ({ data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+              type: "recovery", email: resetEmailNorm, options: { redirectTo: safeRedirect },
+            }));
+          }
+        }
+      }
+      if (linkError) {
         // Don't reveal if the user doesn't exist — just return success silently
-        console.log(`[send-email] password_reset: user not found or error for ${resetEmail}:`, linkError.message);
+        console.log(`[send-email] password_reset: user not found or error for ${resetEmailNorm}:`, linkError.message);
         return new Response(JSON.stringify({ success: true }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -845,10 +864,11 @@ Deno.serve(async (req) => {
       const { data: customerData } = await adminClient
         .from("clientes")
         .select("nome")
-        .eq("email", resetEmail)
+        .ilike("email", resetEmailNorm)
+        .limit(1)
         .maybeSingle();
       const custName = customerData?.nome || "";
-      to = resetEmail;
+      to = resetEmailNorm;
       subject = `Password Reset — ${COMPANY_NAME}`;
       html = templatePasswordReset(custName, actionLink);
     } else if (type === "request_magic_link") {
