@@ -30,18 +30,37 @@ Deno.serve(async (req) => {
 
     const db = createClient(supabaseUrl, serviceKey);
 
-    // Só o DONO da conta gerencia a equipe: registro em `clientes` com este user_id
-    // E SEM pai (parent_customer_id IS NULL). Um sub-usuário NÃO pode gerenciar/escalar.
-    const { data: owner } = await db.from("clientes")
-      .select("id, empresa, nome, tabela_preco_id, parent_customer_id")
-      .eq("user_id", caller.id).maybeSingle();
+    const body = await req.json();
+    const action = body.action || "create";
+
+    // Quem é a EMPRESA-alvo?
+    // - Cliente dono logado: a própria linha em `clientes` (user_id = caller, sem pai).
+    // - STAFF em "view as": a sessão real é do STAFF (o view-as não troca o JWT!),
+    //   então o alvo vem EXPLÍCITO no body (cliente_id) e validamos o papel. Sem isso,
+    //   o funcionário era criado embaixo da linha de clientes atrelada ao usuário do
+    //   admin (caso "Nextgen Flooring") — empresa errada, invisível pro dono certo.
+    let owner: { id: string; empresa: string | null; nome: string | null; parent_customer_id: string | null } | null = null;
+
+    const { data: roleRow } = await db.from("user_roles").select("role").eq("user_id", caller.id).maybeSingle();
+    const isStaff = ["admin", "manager"].includes(roleRow?.role ?? "");
+
+    if (isStaff) {
+      if (!body.cliente_id) return json({ error: "cliente_id is required when managing a team as staff (view as)" }, 400);
+      const { data } = await db.from("clientes")
+        .select("id, empresa, nome, parent_customer_id")
+        .eq("id", body.cliente_id).maybeSingle();
+      owner = data;
+    } else {
+      const { data } = await db.from("clientes")
+        .select("id, empresa, nome, parent_customer_id")
+        .eq("user_id", caller.id).maybeSingle();
+      owner = data;
+    }
+
     if (!owner || owner.parent_customer_id) {
       return json({ error: "Only the account owner can manage the team" }, 403);
     }
     const companyId = owner.id;
-
-    const body = await req.json();
-    const action = body.action || "create";
 
     // ── Listar a equipe (sub-clientes desta conta) ──
     if (action === "list") {

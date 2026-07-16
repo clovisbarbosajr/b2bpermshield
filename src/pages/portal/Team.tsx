@@ -19,8 +19,11 @@ type Member = {
 };
 
 const Team = () => {
-  const { isSubUser, user } = useAuth();
+  const { isSubUser, user, impersonatedCustomer } = useAuth();
   const canManage = !isSubUser; // só o dono da conta gerencia a equipe
+  // Em "view as" a sessão real é do STAFF — a função precisa saber o alvo explícito,
+  // senão o funcionário cai na empresa errada (caso "Nextgen Flooring").
+  const target = impersonatedCustomer ? { cliente_id: impersonatedCustomer.id } : {};
 
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,12 +32,14 @@ const Team = () => {
   const [form, setForm] = useState({ nome: "", email: "", can_confirm_order: false, can_view_full_history: false });
 
   const load = async () => {
-    const { data, error } = await supabase.functions.invoke("company-member", { body: { action: "list" } });
+    const { data, error } = await supabase.functions.invoke("company-member", { body: { action: "list", ...target } });
     if (error) toast.error(error.message);
     else setMembers(data?.members ?? []);
     // Nome da EMPRESA DA CONTA logada no título — o header mostra a marca da LOJA,
     // o que já fez funcionário ser adicionado no time da empresa errada por engano.
-    if (user?.id) {
+    if (impersonatedCustomer) {
+      setCompanyName(impersonatedCustomer.empresa || impersonatedCustomer.nome || "");
+    } else if (user?.id) {
       const { data: me } = await supabase.from("clientes")
         .select("empresa, nome").eq("user_id", user.id).maybeSingle();
       setCompanyName(me?.empresa || me?.nome || "");
@@ -52,6 +57,7 @@ const Team = () => {
         action: "create", email: form.email.trim().toLowerCase(), nome: form.nome.trim(),
         can_confirm_order: form.can_confirm_order, can_view_full_history: form.can_view_full_history,
         redirectTo: `${window.location.origin}/reset-password`,
+        ...target,
       },
     });
     setSaving(false);
@@ -65,13 +71,13 @@ const Team = () => {
 
   const toggleFlag = async (m: Member, field: "can_confirm_order" | "can_view_full_history", value: boolean) => {
     setMembers((prev) => prev.map((x) => x.id === m.id ? { ...x, [field]: value } : x));
-    const { error } = await supabase.functions.invoke("company-member", { body: { action: "update", member_id: m.id, [field]: value } });
+    const { error } = await supabase.functions.invoke("company-member", { body: { action: "update", member_id: m.id, [field]: value, ...target } });
     if (error) { toast.error(error.message); load(); }
   };
 
   const removeMember = async (m: Member) => {
     if (!confirm(`Remove ${m.nome}'s access?`)) return;
-    const { error } = await supabase.functions.invoke("company-member", { body: { action: "delete", member_id: m.id } });
+    const { error } = await supabase.functions.invoke("company-member", { body: { action: "delete", member_id: m.id, ...target } });
     if (error) { toast.error(error.message); return; }
     toast.success(`${m.nome} removed`);
     setMembers((prev) => prev.map((x) => x.id === m.id ? { ...x, ativo: false } : x));
