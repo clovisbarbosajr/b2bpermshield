@@ -35,6 +35,13 @@ const Checkout = () => {
   const [clienteId, setClienteId] = useState<string | null>(null);
   const [enderecos, setEnderecos] = useState<any[]>([]);
   const [enderecoId, setEnderecoId] = useState("");
+  // Endereço da CONTA da empresa (clientes.endereco/cidade/estado) — opção default
+  // quando não há endereços cadastrados; vira linha em `enderecos` só ao finalizar.
+  const [companyAddress, setCompanyAddress] = useState<any>(null);
+  const [addressOwnerId, setAddressOwnerId] = useState("");
+  const [showNewAddress, setShowNewAddress] = useState(false);
+  const [newAddr, setNewAddr] = useState({ logradouro: "", complemento: "", cidade: "", estado: "", cep: "" });
+  const [savingAddr, setSavingAddr] = useState(false);
   const [shippingOptions, setShippingOptions] = useState<any[]>([]);
   const [paymentOptions, setPaymentOptions] = useState<any[]>([]);
   const [shippingId, setShippingId] = useState("");
@@ -84,12 +91,24 @@ const Checkout = () => {
         setSubCannotOrder(!!(cliente as any).parent_customer_id && (cliente as any).can_confirm_order === false);
         // Endereço puxa da conta da EMPRESA: sub-usuário usa os endereços do pai.
         const addressClienteId = (cliente as any).parent_customer_id ?? cliente.id;
+        setAddressOwnerId(addressClienteId);
         const { data: ends } = await supabase.from("enderecos").select("*").eq("cliente_id", addressClienteId);
         setEnderecos(ends ?? []);
+        // Endereço cadastrado na CONTA da empresa (clientes) — sempre oferecido como opção.
+        const { data: acct } = await supabase.from("clientes")
+          .select("endereco, cidade, estado").eq("id", addressClienteId).maybeSingle();
+        const companyAddr = acct?.endereco && acct?.cidade
+          ? { logradouro: acct.endereco, complemento: "", cidade: acct.cidade, estado: acct.estado ?? "", cep: (acct as any).cep ?? "" }
+          : null;
+        setCompanyAddress(companyAddr);
         const principal = ends?.find((e: any) => e.principal);
         if (principal) {
           setEnderecoId(principal.id);
           setSelectedEndereco(principal);
+        } else if (!ends?.length && companyAddr) {
+          // Sem endereços cadastrados → default = endereço da empresa (antes ficava vazio).
+          setEnderecoId("__company__");
+          setSelectedEndereco(companyAddr);
         }
       }
 
@@ -173,7 +192,53 @@ const Checkout = () => {
 
   const handleEnderecoChange = (id: string) => {
     setEnderecoId(id);
+    if (id === "__new__") { setShowNewAddress(true); setSelectedEndereco(null); return; }
+    setShowNewAddress(false);
+    if (id === "__company__") { setSelectedEndereco(companyAddress); return; }
     setSelectedEndereco(enderecos.find(e => e.id === id) || null);
+  };
+
+  // Salva o endereço novo digitado no checkout e já o seleciona.
+  const saveNewAddress = async () => {
+    if (!newAddr.logradouro.trim() || !newAddr.cidade.trim() || !newAddr.estado.trim() || !newAddr.cep.trim()) {
+      toast.error("Fill in street, city, state and ZIP."); return;
+    }
+    setSavingAddr(true);
+    const { data, error } = await supabase.from("enderecos").insert({
+      cliente_id: addressOwnerId,
+      logradouro: newAddr.logradouro.trim(), complemento: newAddr.complemento.trim() || null,
+      cidade: newAddr.cidade.trim(), estado: newAddr.estado.trim(), cep: newAddr.cep.trim(),
+      principal: false,
+    } as any).select().single();
+    setSavingAddr(false);
+    if (error || !data) { toast.error("Could not save address: " + (error?.message ?? "unknown error")); return; }
+    setEnderecos(prev => [...prev, data]);
+    setEnderecoId((data as any).id);
+    setSelectedEndereco(data);
+    setShowNewAddress(false);
+    setNewAddr({ logradouro: "", complemento: "", cidade: "", estado: "", cep: "" });
+    toast.success("Address saved");
+  };
+
+  // Resolve o endereço escolhido pra um id REAL de `enderecos` na hora de finalizar:
+  // opção "empresa" reusa (ou cria uma vez) a linha correspondente.
+  const resolveEnderecoEntregaId = async (): Promise<{ ok: boolean; id: string | null }> => {
+    if (enderecoId === "__new__") {
+      toast.error("Save the new address first (or pick another one).");
+      return { ok: false, id: null };
+    }
+    if (enderecoId === "__company__" && companyAddress) {
+      const existing = enderecos.find(e => e.logradouro === companyAddress.logradouro && e.cidade === companyAddress.cidade);
+      if (existing) return { ok: true, id: existing.id };
+      const { data: created } = await supabase.from("enderecos").insert({
+        cliente_id: addressOwnerId,
+        logradouro: companyAddress.logradouro, cidade: companyAddress.cidade,
+        estado: companyAddress.estado || "-", cep: companyAddress.cep || "-",
+        principal: false,
+      } as any).select().single();
+      return { ok: true, id: (created as any)?.id ?? null };
+    }
+    return { ok: true, id: enderecoId || null };
   };
 
   const applyCoupon = async () => {
@@ -396,6 +461,9 @@ const Checkout = () => {
     const recalcTax = (recalcSubtotal - recalcDiscount) * taxRate / 100;
     const recalcGrossTotal = recalcSubtotal - recalcDiscount + recalcTax + shippingCost;
 
+    const addr = await resolveEnderecoEntregaId();
+    if (!addr.ok) { setLoading(false); return; }
+
     const { data: pedido, error } = await supabase.from("pedidos").insert({
       cliente_id: clienteId,
       subtotal: recalcSubtotal,
@@ -404,7 +472,7 @@ const Checkout = () => {
       sales_tax: recalcTax > 0 ? recalcTax : null,
       shipping_costs: shippingCost > 0 ? shippingCost : null,
       coupon_id: coupon?.id ?? null,
-      endereco_entrega_id: enderecoId || null,
+      endereco_entrega_id: addr.id,
       shipping_option_id: shippingId || null,
       payment_option_id: paymentId || null,
       observacoes: comments || null,
@@ -592,13 +660,39 @@ const Checkout = () => {
           <Select value={enderecoId} onValueChange={handleEnderecoChange}>
             <SelectTrigger><SelectValue placeholder="Select address" /></SelectTrigger>
             <SelectContent>
+              {companyAddress && (
+                <SelectItem value="__company__">
+                  Company address — {companyAddress.logradouro}, {companyAddress.cidade}{companyAddress.estado ? `, ${companyAddress.estado}` : ""}
+                </SelectItem>
+              )}
               {enderecos.map(e => (
                 <SelectItem key={e.id} value={e.id}>
                   {e.logradouro}, {e.cidade}, {e.estado}, {e.cep}
                 </SelectItem>
               ))}
+              <SelectItem value="__new__">+ Add a new address...</SelectItem>
             </SelectContent>
           </Select>
+
+          {showNewAddress && (
+            <div className="mt-3 space-y-3 rounded-md border border-border p-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2"><Label className="text-xs">Street address *</Label>
+                  <Input value={newAddr.logradouro} onChange={e => setNewAddr({ ...newAddr, logradouro: e.target.value })} placeholder="1800 N Powerline Rd Ste A6" /></div>
+                <div><Label className="text-xs">Address 2</Label>
+                  <Input value={newAddr.complemento} onChange={e => setNewAddr({ ...newAddr, complemento: e.target.value })} placeholder="Suite, unit..." /></div>
+                <div><Label className="text-xs">ZIP *</Label>
+                  <Input value={newAddr.cep} onChange={e => setNewAddr({ ...newAddr, cep: e.target.value })} placeholder="33069" /></div>
+                <div><Label className="text-xs">City *</Label>
+                  <Input value={newAddr.cidade} onChange={e => setNewAddr({ ...newAddr, cidade: e.target.value })} placeholder="Pompano Beach" /></div>
+                <div><Label className="text-xs">State *</Label>
+                  <Input value={newAddr.estado} onChange={e => setNewAddr({ ...newAddr, estado: e.target.value })} placeholder="FL" /></div>
+              </div>
+              <Button type="button" size="sm" onClick={saveNewAddress} disabled={savingAddr}>
+                {savingAddr ? "Saving..." : "Save address"}
+              </Button>
+            </div>
+          )}
 
           {selectedEndereco && (
             <div className="mt-3 grid grid-cols-2 gap-3">
