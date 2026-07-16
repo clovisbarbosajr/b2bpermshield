@@ -359,7 +359,10 @@ const CustomerEdit = () => {
                     disabled={!cliente?.id}
                     onClick={async () => {
                       if (!form.email) { toast.error("No email"); return; }
-                      const { data, error } = await supabase.auth.signInWithOtp({ email: form.email });
+                      // Server-side: provisiona o auth user se faltar (cliente migrado do B2BWave).
+                      const { error } = await supabase.functions.invoke("send-email", {
+                        body: { type: "request_magic_link", email: form.email.trim().toLowerCase(), redirectTo: window.location.origin },
+                      });
                       if (error) toast.error(error.message);
                       else toast.success(`One-time login link sent to ${form.email}`);
                     }}>🔑 Send one-time login link</Button>

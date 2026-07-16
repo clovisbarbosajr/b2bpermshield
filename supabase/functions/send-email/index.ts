@@ -851,6 +851,58 @@ Deno.serve(async (req) => {
       to = resetEmail;
       subject = `Password Reset — ${COMPANY_NAME}`;
       html = templatePasswordReset(custName, actionLink);
+    } else if (type === "request_magic_link") {
+      // Login sem senha pra QUALQUER cliente ATIVO — inclusive os migrados do
+      // B2BWave que ainda não têm login no auth (o signInWithOtp do front
+      // recusava com "Signups not allowed for otp"). Provisiona o auth user na
+      // hora, gera o link no servidor e envia. Resposta SEMPRE genérica (não
+      // revela se o email é cadastrado). NÃO privilegiado: só envia pro
+      // PRÓPRIO email informado, e só se for cliente ativo.
+      const emailReq = String(body.email ?? "").trim().toLowerCase();
+      const generic = () => new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+      if (!emailReq || !emailReq.includes("@")) return generic();
+
+      const { data: cli } = await adminClient.from("clientes")
+        .select("id, nome, status, is_active, user_id")
+        .ilike("email", emailReq).limit(1).maybeSingle();
+      if (!cli || cli.status !== "ativo" || cli.is_active === false) {
+        console.log(`[send-email] request_magic_link: no active customer for ${emailReq}`);
+        return generic();
+      }
+
+      // redirect seguro — mesma allow-list do password_reset
+      const allowedOrigins = (Deno.env.get("ALLOWED_REDIRECT_ORIGINS") || "")
+        .split(",").map((s) => s.trim()).filter(Boolean);
+      let safeRedirect: string | undefined = undefined;
+      if (body.redirectTo && allowedOrigins.length > 0) {
+        try { if (allowedOrigins.includes(new URL(body.redirectTo).origin)) safeRedirect = body.redirectTo; } catch { /* dropa */ }
+      }
+
+      let linkRes = await adminClient.auth.admin.generateLink({
+        type: "magiclink", email: emailReq, options: { redirectTo: safeRedirect },
+      });
+      if (linkRes.error) {
+        // Sem auth user (cliente migrado do B2BWave) → cria agora e vincula.
+        const { data: created, error: cErr } = await adminClient.auth.admin.createUser({ email: emailReq, email_confirm: true });
+        if (cErr || !created?.user) {
+          console.log(`[send-email] request_magic_link: provisioning failed for ${emailReq}: ${cErr?.message}`);
+          return generic();
+        }
+        await adminClient.from("clientes").update({ user_id: created.user.id }).eq("id", cli.id).is("user_id", null);
+        await adminClient.from("user_roles").upsert({ user_id: created.user.id, role: "cliente" }, { onConflict: "user_id" });
+        linkRes = await adminClient.auth.admin.generateLink({
+          type: "magiclink", email: emailReq, options: { redirectTo: safeRedirect },
+        });
+        if (linkRes.error) {
+          console.log(`[send-email] request_magic_link: generateLink still failing for ${emailReq}: ${linkRes.error.message}`);
+          return generic();
+        }
+      }
+      to = emailReq;
+      subject = `Your one-time login link – ${config?.nome_empresa || COMPANY_NAME}`;
+      html = templateMagicLink(cli.nome || "", linkRes.data?.properties?.action_link || "");
     } else if (type === "raw") {
       // Direct send (for testing and custom uses)
       const { to: rawTo, subject: rawSubject, html: rawHtml } = body;
@@ -875,6 +927,7 @@ Deno.serve(async (req) => {
       "rejection",
       "set_password",
       "magic_link",
+      "request_magic_link",
       "product_available",
       "password_reset",
     ];

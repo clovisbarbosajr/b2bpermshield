@@ -189,21 +189,9 @@ const PortalLayout = ({ children }: { children: React.ReactNode }) => {
             <aside className="hidden lg:block w-64 shrink-0 p-4">
               <div className="bg-card rounded-lg border overflow-hidden">
                 {rootCats.map(cat => renderCatItem(cat))}
-                {catalogPdfUrl ? (
-                  <a
-                    href={catalogPdfUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    download
-                    className="flex items-center justify-center gap-2 px-4 py-3 bg-muted/80 text-sm font-semibold hover:bg-muted transition-colors"
-                  >
-                    <FileText className="h-4 w-4" /> PDF CATALOG
-                  </a>
-                ) : (
-                  <span className="flex items-center justify-center gap-2 px-4 py-3 bg-muted/50 text-sm font-semibold text-muted-foreground cursor-not-allowed">
-                    <FileText className="h-4 w-4" /> PDF CATALOG
-                  </span>
-                )}
+                {/* PDF CATALOG removido do sidebar (2026-07-16, pedido do dono — feature
+                    desativada). O upload continua em Settings → Profile (catalog_pdf_url);
+                    pra reativar o botão aqui, restaurar o bloco deste commit. */}
               </div>
             </aside>
           )}

@@ -19,13 +19,11 @@ const MagicLinkModal = ({ open, onClose }: Props) => {
     if (!trimmed) { toast.error("Please enter your email"); return; }
     setLoading(true);
 
-    // Always attempt to send — don't reveal whether the email is registered
-    const { error } = await supabase.auth.signInWithOtp({
-      email: trimmed,
-      options: {
-        shouldCreateUser: false,
-        emailRedirectTo: window.location.origin,
-      },
+    // Server-side (send-email request_magic_link): funciona também pra cliente
+    // migrado do B2BWave sem login no auth ainda — o signInWithOtp recusava
+    // com "Signups not allowed for otp". Resposta é sempre genérica.
+    const { error } = await supabase.functions.invoke("send-email", {
+      body: { type: "request_magic_link", email: trimmed, redirectTo: window.location.origin },
     });
     setLoading(false);
     if (error) {
