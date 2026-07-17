@@ -92,7 +92,11 @@ const B2BWaveSync = () => {
       if (data?.success) {
         setStatuses((s) => ({ ...s, [item.key]: "success" }));
         setResults((r) => ({ ...r, [item.key]: data.message || "Done" }));
-        toast.success(`${item.label}: ${data.message}`);
+        // O toast recebe só o RESUMO (antes do "|" técnico de SYNC_VERSION) —
+        // a mensagem completa fica no card. Antes o toast estourava por trás dos
+        // outros cards com o array de debug inteiro.
+        const short = String(data.message || "Done").split("|")[0].trim();
+        toast.success(`${item.label}: ${short}`);
       } else {
         throw new Error(data?.error || "Failed");
       }
@@ -254,7 +258,7 @@ const B2BWaveSync = () => {
             <CardContent>
               <p className="mb-3 text-xs text-muted-foreground">{item.description}</p>
               {results[item.key] && (
-                <p className={`mb-2 text-xs ${statuses[item.key] === "error" ? "text-destructive" : "text-green-600"}`}>
+                <p className={`mb-2 text-xs break-words whitespace-pre-wrap ${statuses[item.key] === "error" ? "text-destructive" : "text-green-600"}`}>
                   {results[item.key]}
                 </p>
               )}
