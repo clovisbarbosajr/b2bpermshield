@@ -642,9 +642,15 @@ Deno.serve(async (req) => {
           const { data: e } = await adminClient.from("enderecos").select("*").eq("id", ord.endereco_entrega_id).maybeSingle();
           ship = e;
         }
+        // MESMA prioridade do email (templateNewOrderCustomer): endereço de entrega
+        // do pedido > campos do próprio pedido > cadastro do cliente. Assim o PDF
+        // nunca vem mais vazio que o email.
         const addressParts = ship
           ? [ship.logradouro ?? ship.endereco, ship.complemento, ship.cidade, ship.estado, ship.cep]
-          : [cust.endereco, cust.endereco2, cust.cidade, cust.estado, cust.cep];
+          : [
+              ord.endereco ?? cust.endereco, ord.endereco2 ?? cust.endereco2,
+              ord.cidade ?? cust.cidade, ord.estado ?? cust.estado, ord.zip ?? ord.cep ?? cust.cep,
+            ];
         const customerAddress = addressParts.filter(Boolean).join(", ");
 
         const pdfItems: PdfOrderItem[] = (items || []).map((i: any) => ({
