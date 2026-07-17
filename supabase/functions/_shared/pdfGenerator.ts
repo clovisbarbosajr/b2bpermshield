@@ -86,64 +86,81 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
     text(t, xRight - w, yy, opts);
   };
 
-  // ── Header: logo (posição configurável) + título do documento ──
-  const headerY = y - 28;
+  const leftX = MARGIN;
+  // Descarta pedaços "vazios" ("-"/"—"/"n/a") que causavam "FL, -".
+  const clean = (t?: string) => (t || "").split(",").map((s) => s.trim())
+    .filter((s) => s && !["-", "—", "n/a", "na"].includes(s.toLowerCase())).join(", ");
+  const addr = clean(data.customerAddress);
+
+  // ── Header no layout do B2BWave (imagem de referência): logo CENTRALIZADA,
+  // título "Order" centralizado, linha, e coluna de campos rotulados à esquerda
+  // + dados da empresa à direita. (Itens/totais/rodapé abaixo ficam inalterados.)
+  const headerTop = y;
   if (logoImg) {
-    const maxH = 40, maxW = 160;
+    const maxH = 46, maxW = 200;
     const scale = Math.min(maxW / logoImg.width, maxH / logoImg.height, 1);
     const w = logoImg.width * scale, h = logoImg.height * scale;
-    const pos = data.logoPosition ?? "left";
-    const x = pos === "center" ? (PAGE_W - w) / 2 : pos === "right" ? PAGE_W - MARGIN - w - 140 : MARGIN;
-    page.drawImage(logoImg, { x, y: headerY - h + 10, width: w, height: h });
+    page.drawImage(logoImg, { x: (PAGE_W - w) / 2, y: headerTop - h, width: w, height: h });
+    y = headerTop - h - 6;
   } else {
-    text(data.companyName || "PermShield", MARGIN, headerY, { font: bold, size: 18, color: NAVY });
+    const name = data.companyName || "PermShield";
+    const nameW = bold.widthOfTextAtSize(name, 18);
+    text(name, (PAGE_W - nameW) / 2, headerTop - 18, { font: bold, size: 18, color: NAVY });
+    y = headerTop - 30;
   }
-  rightText("ORDER", PAGE_W - MARGIN, y, { font: bold, size: 16, color: NAVY });
-  rightText(`#${data.orderNumber}`, PAGE_W - MARGIN, y - 18, { font: bold, size: 12, color: ORANGE });
-  rightText(data.orderDate, PAGE_W - MARGIN, y - 32, { size: 9, color: GRAY });
-  y -= 60;
+  // Título "Order" centralizado
+  const title = "Order";
+  const titleW = regular.widthOfTextAtSize(title, 20);
+  text(title, (PAGE_W - titleW) / 2, y - 18, { size: 20, color: GRAY });
+  y -= 30;
   page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_W - MARGIN, y }, thickness: 1.5, color: NAVY });
-  y -= 22;
+  y -= 20;
 
-  // ── Bill To / From (duas colunas) ──
-  const colW = (PAGE_W - MARGIN * 2 - 20) / 2;
-  const leftX = MARGIN, rightX = MARGIN + colW + 20;
-  let ly = y, ry = y;
-  const leftMax = colW; // largura da coluna esquerda p/ quebrar textos longos
-  const wrapLine = (t: string, size = 9) => {
-    // Quebra por palavras pra endereço/comentário longo não estourar a coluna.
-    const words = (t || "").split(/\s+/);
-    const lines: string[] = []; let cur = "";
+  // Coluna esquerda: pares label→valor (label cinza, right-aligned; valor escuro).
+  const labelRight = MARGIN + 68;   // labels terminam aqui (right-aligned)
+  const valueLeft = MARGIN + 76;    // valores começam aqui
+  const valueMax = MARGIN + 68 + 190; // largura p/ quebrar endereço longo
+  let ly = y;
+  const wrapAt = (t: string, maxRight: number, size = 9) => {
+    const words = (t || "").split(/\s+/); const lines: string[] = []; let cur = "";
     for (const w of words) {
       const test = cur ? `${cur} ${w}` : w;
-      if (regular.widthOfTextAtSize(test, size) > leftMax && cur) { lines.push(cur); cur = w; }
+      if (regular.widthOfTextAtSize(test, size) > (maxRight - valueLeft) && cur) { lines.push(cur); cur = w; }
       else cur = test;
     }
     if (cur) lines.push(cur);
     return lines;
   };
-  const leftLine = (t: string, opts: any = {}) => { text(t, leftX, ly, opts); ly -= 13; };
+  const field = (label: string, value: string, opts: { bold?: boolean } = {}) => {
+    rightText(label, labelRight, ly, { size: 8, color: rgb(0.42, 0.52, 0.66) });
+    const lines = wrapAt(value || "", valueMax);
+    if (lines.length === 0) lines.push("");
+    lines.forEach((l, i) => {
+      text(l, valueLeft, ly - i * 12, { size: 9, font: opts.bold ? bold : regular, color: rgb(0.13, 0.13, 0.13) });
+    });
+    ly -= 13 + (lines.length - 1) * 12;
+  };
 
-  // Descarta pedaços "vazios" que vinham como "-"/"—"/"n/a" (causavam "FL, -").
-  const clean = (t?: string) => (t || "").split(",").map((s) => s.trim())
-    .filter((s) => s && !["-", "—", "n/a", "na"].includes(s.toLowerCase())).join(", ");
-  const addr = clean(data.customerAddress);
+  // Dados da empresa à direita (right-aligned na margem direita) — topo alinhado.
+  let ry = y;
+  const companyLine = (t: string, opts: { bold?: boolean; color?: any } = {}) => {
+    if (!t) return;
+    rightText(t, PAGE_W - MARGIN, ry, { size: opts.bold ? 11 : 9, font: opts.bold ? bold : regular, color: opts.color ?? rgb(0.13, 0.13, 0.13) });
+    ry -= 13;
+  };
+  companyLine(data.companyName || "", { bold: true, color: NAVY });
+  if (data.companyAddress) for (const l of clean(data.companyAddress).split(",").reduce((acc: string[], _p, _i, arr) => acc.length ? acc : [arr.slice(0,2).join(",").trim(), arr.slice(2).join(",").trim()].filter(Boolean), [])) companyLine(l);
+  if (data.companyEmail) companyLine(data.companyEmail, { color: rgb(0.16, 0.5, 0.74) });
 
-  text("BILL TO", leftX, ly, { font: bold, size: 8, color: GRAY }); ly -= 13;
-  text(data.customerName || "—", leftX, ly, { font: bold, size: 11, color: NAVY }); ly -= 13;
-  if (data.customerContact) leftLine(`Attn: ${data.customerContact}`, { size: 9 });
-  if (data.customerEmail) leftLine(data.customerEmail, { size: 9 });
-  if (data.customerPhone) leftLine(data.customerPhone, { size: 9 });
-  if (addr) for (const l of wrapLine(addr)) leftLine(l, { size: 9 });
-  // PO Number e Delivery SEMPRE aparecem (label), como no template do email —
-  // mesmo vazios, pra consistência (o dono pediu explicitamente).
-  leftLine(`PO Number: ${data.poNumber || "—"}`, { size: 9, font: bold, color: NAVY });
-  if (data.deliveryDate) leftLine(`Requested delivery: ${data.deliveryDate}`, { size: 9 });
-
-  text("FROM", rightX, ry, { font: bold, size: 8, color: GRAY }); ry -= 13;
-  text(data.companyName || "—", rightX, ry, { font: bold, size: 11, color: NAVY }); ry -= 13;
-  if (data.companyAddress) { text(data.companyAddress, rightX, ry, { size: 9 }); ry -= 13; }
-  if (data.companyEmail) { text(data.companyEmail, rightX, ry, { size: 9 }); ry -= 13; }
+  // Campos da esquerda, na ordem da imagem.
+  field("Order", String(data.orderNumber || ""), { bold: true });
+  field("PO", data.poNumber || "");
+  field("Customer", data.customerName || "");
+  field("Address", addr);
+  field("Email", data.customerEmail || "");
+  field("Date", data.orderDate || "");
+  field("Delivery date", data.deliveryDate || "");
+  field("Comments", data.notes || "");
 
   y = Math.min(ly, ry) - 16;
 
@@ -194,28 +211,7 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
   page.drawLine({ start: { x: colTotal - 160, y: y + 10 }, end: { x: colTotal, y: y + 10 }, thickness: 1.5, color: NAVY });
   y -= 6;
   totalsRow("Gross Total", fmtUSD(data.grossTotal), true);
-
-  // ── Comments (SEMPRE aparece, mesmo vazio — pedido do dono). Quebra em várias
-  // linhas e a caixa cresce com o texto. ──
-  {
-    y -= 14;
-    const bodyMax = PAGE_W - MARGIN * 2 - 16;
-    const words = String(data.notes || "").split(/\s+/).filter(Boolean);
-    const noteLines: string[] = []; let cur = "";
-    for (const w of words) {
-      const test = cur ? `${cur} ${w}` : w;
-      if (regular.widthOfTextAtSize(test, 9) > bodyMax && cur) { noteLines.push(cur); cur = w; }
-      else cur = test;
-    }
-    if (cur) noteLines.push(cur);
-    const boxH = 20 + Math.max(noteLines.length, 1) * 12;
-    if (y - boxH < 60) newPage();
-    page.drawRectangle({ x: MARGIN, y: y - boxH, width: PAGE_W - MARGIN * 2, height: boxH, color: rgb(0.98, 0.98, 0.92) });
-    text("Comments:", MARGIN + 8, y - 14, { font: bold, size: 9, color: NAVY });
-    let ny = y - 14;
-    for (const l of noteLines) { text(l, MARGIN + 8, ny - 12, { size: 9, color: rgb(0.3, 0.3, 0.3) }); ny -= 12; }
-    y = y - boxH - 12;
-  }
+  // (Comments ficam no cabeçalho agora — igual à imagem de referência.)
 
   // ── Rodapé ── (sem branding hardcoded — só os dados reais da empresa)
   const footerY = 36;
