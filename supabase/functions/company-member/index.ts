@@ -143,7 +143,42 @@ Deno.serve(async (req) => {
       if (elsewhere) {
         return json({ error: `This email already belongs to the customer account "${elsewhere.empresa || emailLc}" — it can't also be added as an employee.` });
       }
-      return json({ error: `This email already has a login in the system (staff or pending account). Use a different email.` });
+
+      // ADOÇÃO DE LOGIN ÓRFÃO: existe login em auth.users mas SEM nenhuma ficha
+      // em `clientes` (deletado antes / migrado sem perfil). Em vez de travar o
+      // email pra sempre, cria a ficha de sub-cliente apontando pro login que já
+      // existe. Só NÃO adota se for login de STAFF (evita escalonamento).
+      const { data: orphanUserId } = await db.rpc("auth_user_id_by_email", { _email: emailLc });
+      if (orphanUserId) {
+        const { data: staff } = await db.rpc("is_staff_login", { _user_id: orphanUserId });
+        if (staff) {
+          return json({ error: `This email belongs to a staff login (admin/manager/warehouse) and can't be added as an employee.` });
+        }
+        const { data: adopted, error: adoptErr } = await db.from("clientes").insert({
+          user_id: orphanUserId, parent_customer_id: companyId,
+          nome: nome || emailLc, email: emailLc, empresa: owner.empresa || owner.nome || "",
+          can_confirm_order: canConfirm, can_view_full_history: canHistory,
+          status: "ativo", is_active: true,
+        }).select("id, nome, email, can_confirm_order, can_view_full_history").single();
+        if (adoptErr) return json({ error: adoptErr.message }, 400);
+        await db.from("user_roles").upsert({ user_id: orphanUserId, role: "cliente" }, { onConflict: "user_id" });
+        let adoptMail = true;
+        try {
+          const r = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${serviceKey}`, "apikey": serviceKey },
+            body: JSON.stringify({ type: "password_reset", email: emailLc, redirectTo: body.redirectTo || "" }),
+          });
+          adoptMail = r.ok;
+        } catch { adoptMail = false; }
+        return json({
+          success: true, adopted: true,
+          member: { id: adopted.id, nome: adopted.nome, email: adopted.email, can_confirm_order: adopted.can_confirm_order, can_view_full_history: adopted.can_view_full_history, ativo: true },
+          mailOk: adoptMail,
+        });
+      }
+
+      return json({ error: `This email already has a login but no profile, and it couldn't be linked automatically. Contact support to free this email.` });
     }
 
     // Sub-cliente: papel 'cliente' apenas, pai = a própria conta, herda price list (trigger).
