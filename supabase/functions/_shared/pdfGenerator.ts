@@ -19,7 +19,9 @@ export interface PdfOrderData {
   poNumber?: string;
   deliveryDate?: string;
   customerName: string;
+  customerContact?: string;
   customerEmail?: string;
+  customerPhone?: string;
   customerAddress?: string;
   companyName: string;
   companyAddress?: string;
@@ -107,12 +109,29 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
   const colW = (PAGE_W - MARGIN * 2 - 20) / 2;
   const leftX = MARGIN, rightX = MARGIN + colW + 20;
   let ly = y, ry = y;
+  const leftMax = colW; // largura da coluna esquerda p/ quebrar textos longos
+  const wrapLine = (t: string, size = 9) => {
+    // Quebra por palavras pra endereço/comentário longo não estourar a coluna.
+    const words = (t || "").split(/\s+/);
+    const lines: string[] = []; let cur = "";
+    for (const w of words) {
+      const test = cur ? `${cur} ${w}` : w;
+      if (regular.widthOfTextAtSize(test, size) > leftMax && cur) { lines.push(cur); cur = w; }
+      else cur = test;
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  };
+  const leftLine = (t: string, opts: any = {}) => { text(t, leftX, ly, opts); ly -= 13; };
+
   text("BILL TO", leftX, ly, { font: bold, size: 8, color: GRAY }); ly -= 13;
   text(data.customerName || "—", leftX, ly, { font: bold, size: 11, color: NAVY }); ly -= 13;
-  if (data.customerEmail) { text(data.customerEmail, leftX, ly, { size: 9 }); ly -= 13; }
-  if (data.customerAddress) { text(data.customerAddress, leftX, ly, { size: 9 }); ly -= 13; }
-  if (data.poNumber) { text(`PO: ${data.poNumber}`, leftX, ly, { size: 9 }); ly -= 13; }
-  if (data.deliveryDate) { text(`Requested delivery: ${data.deliveryDate}`, leftX, ly, { size: 9 }); ly -= 13; }
+  if (data.customerContact) leftLine(`Attn: ${data.customerContact}`, { size: 9 });
+  if (data.customerEmail) leftLine(data.customerEmail, { size: 9 });
+  if (data.customerPhone) leftLine(data.customerPhone, { size: 9 });
+  if (data.customerAddress) for (const l of wrapLine(data.customerAddress)) leftLine(l, { size: 9 });
+  if (data.poNumber) leftLine(`PO: ${data.poNumber}`, { size: 9, font: bold, color: NAVY });
+  if (data.deliveryDate) leftLine(`Requested delivery: ${data.deliveryDate}`, { size: 9 });
 
   text("FROM", rightX, ry, { font: bold, size: 8, color: GRAY }); ry -= 13;
   text(data.companyName || "—", rightX, ry, { font: bold, size: 11, color: NAVY }); ry -= 13;
@@ -169,14 +188,25 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
   y -= 6;
   totalsRow("Gross Total", fmtUSD(data.grossTotal), true);
 
-  // ── Notas ──
+  // ── Comments / Notes (quebra em várias linhas; caixa cresce com o texto) ──
   if (data.notes) {
     y -= 14;
-    if (y < 80) newPage();
-    page.drawRectangle({ x: MARGIN, y: y - 30, width: PAGE_W - MARGIN * 2, height: 34, color: rgb(0.98, 0.98, 0.92) });
-    text("Notes:", MARGIN + 8, y - 12, { font: bold, size: 9 });
-    text((data.notes || "").slice(0, 200), MARGIN + 55, y - 12, { size: 9, color: rgb(0.3, 0.3, 0.3) });
-    y -= 40;
+    const bodyMax = PAGE_W - MARGIN * 2 - 16;
+    const words = String(data.notes).split(/\s+/);
+    const noteLines: string[] = []; let cur = "";
+    for (const w of words) {
+      const test = cur ? `${cur} ${w}` : w;
+      if (regular.widthOfTextAtSize(test, 9) > bodyMax && cur) { noteLines.push(cur); cur = w; }
+      else cur = test;
+    }
+    if (cur) noteLines.push(cur);
+    const boxH = 20 + noteLines.length * 12;
+    if (y - boxH < 60) newPage();
+    page.drawRectangle({ x: MARGIN, y: y - boxH, width: PAGE_W - MARGIN * 2, height: boxH, color: rgb(0.98, 0.98, 0.92) });
+    text("Comments:", MARGIN + 8, y - 14, { font: bold, size: 9, color: NAVY });
+    let ny = y - 14;
+    for (const l of noteLines) { text(l, MARGIN + 8, ny - 12, { size: 9, color: rgb(0.3, 0.3, 0.3) }); ny -= 12; }
+    y = y - boxH - 12;
   }
 
   // ── Rodapé ── (sem branding hardcoded — só os dados reais da empresa)

@@ -618,27 +618,57 @@ Deno.serve(async (req) => {
     const buildOrderPdf = async (order: any, customer: any, items: any[]) => {
       try {
         const { generateOrderPdf } = await import("../_shared/pdfGenerator.ts");
+
+        // HIDRATA do banco — o `order`/`customer` que chega do checkout costuma vir
+        // PARCIAL (sem endereço do cliente, às vezes sem PO/comments). Buscar a linha
+        // completa garante que o PDF tenha os MESMOS dados do email (PO, comments,
+        // endereço de entrega), venha de onde vier a chamada.
+        let ord = order;
+        if (order?.id) {
+          const { data: full } = await adminClient.from("pedidos").select("*").eq("id", order.id).maybeSingle();
+          if (full) ord = { ...order, ...full };
+        }
+        // Cliente completo (endereço) — pelo cliente_id do pedido ou pelo id passado.
+        let cust = customer ?? {};
+        const cliId = ord?.cliente_id ?? customer?.id;
+        if (cliId) {
+          const { data: cli } = await adminClient.from("clientes")
+            .select("nome, empresa, email, endereco, endereco2, cidade, estado, cep, telefone").eq("id", cliId).maybeSingle();
+          if (cli) cust = { ...cli, ...customer, email: customer?.email ?? cli.email };
+        }
+        // Endereço de ENTREGA do pedido (tem prioridade sobre o do cadastro).
+        let ship: any = null;
+        if (ord?.endereco_entrega_id) {
+          const { data: e } = await adminClient.from("enderecos").select("*").eq("id", ord.endereco_entrega_id).maybeSingle();
+          ship = e;
+        }
+        const addressParts = ship
+          ? [ship.logradouro ?? ship.endereco, ship.complemento, ship.cidade, ship.estado, ship.cep]
+          : [cust.endereco, cust.endereco2, cust.cidade, cust.estado, cust.cep];
+        const customerAddress = addressParts.filter(Boolean).join(", ");
+
         const pdfItems: PdfOrderItem[] = (items || []).map((i: any) => ({
           sku: i.sku ?? "", name: i.nome_produto ?? i.name ?? "",
           qty: Number(i.quantidade ?? 0), price: Number(i.preco_unitario ?? 0), total: Number(i.subtotal ?? 0),
         }));
         const pdfBytes = await generateOrderPdf({
-          orderNumber: String(order.numero ?? order.id ?? ""),
-          orderDate: order.created_at ? new Date(order.created_at).toLocaleDateString("en-US") : "",
-          poNumber: order.po_number ?? "", deliveryDate: order.delivery_date ? new Date(order.delivery_date).toLocaleDateString("en-US") : "",
-          customerName: customer.empresa || customer.nome || "", customerEmail: customer.email ?? "",
-          customerAddress: [customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", "),
+          orderNumber: String(ord.numero ?? ord.id ?? ""),
+          orderDate: ord.created_at ? new Date(ord.created_at).toLocaleDateString("en-US") : "",
+          poNumber: ord.po_number ?? "", deliveryDate: ord.delivery_date ? new Date(ord.delivery_date).toLocaleDateString("en-US") : "",
+          customerName: cust.empresa || cust.nome || "", customerContact: cust.empresa && cust.nome ? cust.nome : "",
+          customerEmail: cust.email ?? "", customerPhone: cust.telefone ?? "",
+          customerAddress,
           companyName: config?.nome_empresa || COMPANY_NAME,
           companyAddress: config?.endereco || "",
           companyEmail: config?.email_contato || COMPANY_EMAIL,
           logoUrl: customTemplateCfg.email_logo_url ?? undefined,
           logoPosition: (customTemplateCfg.email_logo_position as "left" | "center" | "right") ?? "left",
           items: pdfItems,
-          subtotal: Number(order.subtotal ?? 0), discount: Number(order.desconto ?? 0),
-          shipping: Number(order.shipping_costs ?? 0), tax: Number(order.sales_tax ?? 0),
-          grossTotal: Number(order.total ?? 0), notes: order.observacoes ?? "",
+          subtotal: Number(ord.subtotal ?? 0), discount: Number(ord.desconto ?? 0),
+          shipping: Number(ord.shipping_costs ?? 0), tax: Number(ord.sales_tax ?? 0),
+          grossTotal: Number(ord.total ?? 0), notes: ord.observacoes ?? "",
         });
-        return { filename: `order-${order.numero ?? order.id ?? "confirmation"}.pdf`, content: pdfBytes } as EmailAttachment;
+        return { filename: `order-${ord.numero ?? ord.id ?? "confirmation"}.pdf`, content: pdfBytes } as EmailAttachment;
       } catch (pdfErr: any) {
         console.error("[send-email] PDF generation failed:", pdfErr?.message ?? pdfErr);
         return undefined;
