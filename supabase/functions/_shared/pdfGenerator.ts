@@ -124,13 +124,20 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
   };
   const leftLine = (t: string, opts: any = {}) => { text(t, leftX, ly, opts); ly -= 13; };
 
+  // Descarta pedaços "vazios" que vinham como "-"/"—"/"n/a" (causavam "FL, -").
+  const clean = (t?: string) => (t || "").split(",").map((s) => s.trim())
+    .filter((s) => s && !["-", "—", "n/a", "na"].includes(s.toLowerCase())).join(", ");
+  const addr = clean(data.customerAddress);
+
   text("BILL TO", leftX, ly, { font: bold, size: 8, color: GRAY }); ly -= 13;
   text(data.customerName || "—", leftX, ly, { font: bold, size: 11, color: NAVY }); ly -= 13;
   if (data.customerContact) leftLine(`Attn: ${data.customerContact}`, { size: 9 });
   if (data.customerEmail) leftLine(data.customerEmail, { size: 9 });
   if (data.customerPhone) leftLine(data.customerPhone, { size: 9 });
-  if (data.customerAddress) for (const l of wrapLine(data.customerAddress)) leftLine(l, { size: 9 });
-  if (data.poNumber) leftLine(`PO: ${data.poNumber}`, { size: 9, font: bold, color: NAVY });
+  if (addr) for (const l of wrapLine(addr)) leftLine(l, { size: 9 });
+  // PO Number e Delivery SEMPRE aparecem (label), como no template do email —
+  // mesmo vazios, pra consistência (o dono pediu explicitamente).
+  leftLine(`PO Number: ${data.poNumber || "—"}`, { size: 9, font: bold, color: NAVY });
   if (data.deliveryDate) leftLine(`Requested delivery: ${data.deliveryDate}`, { size: 9 });
 
   text("FROM", rightX, ry, { font: bold, size: 8, color: GRAY }); ry -= 13;
@@ -188,11 +195,12 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
   y -= 6;
   totalsRow("Gross Total", fmtUSD(data.grossTotal), true);
 
-  // ── Comments / Notes (quebra em várias linhas; caixa cresce com o texto) ──
-  if (data.notes) {
+  // ── Comments (SEMPRE aparece, mesmo vazio — pedido do dono). Quebra em várias
+  // linhas e a caixa cresce com o texto. ──
+  {
     y -= 14;
     const bodyMax = PAGE_W - MARGIN * 2 - 16;
-    const words = String(data.notes).split(/\s+/);
+    const words = String(data.notes || "").split(/\s+/).filter(Boolean);
     const noteLines: string[] = []; let cur = "";
     for (const w of words) {
       const test = cur ? `${cur} ${w}` : w;
@@ -200,7 +208,7 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
       else cur = test;
     }
     if (cur) noteLines.push(cur);
-    const boxH = 20 + noteLines.length * 12;
+    const boxH = 20 + Math.max(noteLines.length, 1) * 12;
     if (y - boxH < 60) newPage();
     page.drawRectangle({ x: MARGIN, y: y - boxH, width: PAGE_W - MARGIN * 2, height: boxH, color: rgb(0.98, 0.98, 0.92) });
     text("Comments:", MARGIN + 8, y - 14, { font: bold, size: 9, color: NAVY });
