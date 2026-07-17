@@ -2957,6 +2957,7 @@ export type Database = {
         Args: { _desc: string; _name: string; _value: string }
         Returns: undefined
       }
+      auth_user_id_by_email: { Args: { _email: string }; Returns: string }
       categoria_visivel_para: {
         Args: { _cat_id: string; _cli_id: string }
         Returns: boolean
@@ -3009,6 +3010,7 @@ export type Database = {
         Returns: undefined
       }
       is_ops_manager: { Args: never; Returns: boolean }
+      is_staff_login: { Args: { _user_id: string }; Returns: boolean }
       is_subcustomer_of: { Args: { _parent_id: string }; Returns: boolean }
       preco_autoritativo: {
         Args: { _cliente_id: string; _produto_id: string; _qtd: number }
