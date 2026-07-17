@@ -69,6 +69,28 @@ serve(async (req) => {
       return json({ users: matched });
     }
 
+    // ── Action: delete login (libera o email para recadastro) ──────────────────
+    // Usado pelo delete definitivo de cliente/funcionário. Guardas: nunca deleta
+    // login de STAFF, e nunca deleta login ainda referenciado por outra ficha.
+    if (action === "delete_user") {
+      if (!targetUserId) return json({ error: "user_id required" }, 400);
+      const { data: staffRow } = await adminClient.from("user_roles")
+        .select("role").eq("user_id", targetUserId)
+        .in("role", ["admin", "manager", "warehouse"]).maybeSingle();
+      if (staffRow) {
+        return json({ error: `This login belongs to a STAFF member (${staffRow.role}) — refusing to delete it.` });
+      }
+      const { count } = await adminClient.from("clientes")
+        .select("id", { count: "exact", head: true }).eq("user_id", targetUserId);
+      if ((count ?? 0) > 0) {
+        return json({ error: `This login is still linked to ${count} customer record(s). Delete those first.` });
+      }
+      const { error: delErr } = await adminClient.auth.admin.deleteUser(targetUserId);
+      if (delErr) return json({ error: `Could not delete the login: ${delErr.message}` });
+      await adminClient.from("user_roles").delete().eq("user_id", targetUserId);
+      return json({ success: true });
+    }
+
     // ── Action: reset / update password ────────────────────────────────────────
     if (action === "update_password") {
       if (!targetUserId || !new_password || new_password.length < 6) {

@@ -805,6 +805,35 @@ const CustomerEdit = () => {
                           }}>
                           🔒
                         </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Set password manually (bypass — no email needed)"
+                          onClick={async () => {
+                            const pwd = prompt(`Set a password for ${ct.email} (min 6 chars).\nUse this when the setup email never arrived — tell them the password directly.`);
+                            if (!pwd) return;
+                            if (pwd.length < 6) { toast.error("Password must have at least 6 characters."); return; }
+                            const { data, error } = await supabase.functions.invoke("admin-create-user", {
+                              body: { action: "update_password", user_id: ct.user_id, new_password: pwd },
+                            });
+                            if (error || data?.error) toast.error(data?.error || error?.message);
+                            else toast.success(`Password set for ${ct.email} — they can log in now.`);
+                          }}>
+                          🔑
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" title="Delete permanently (frees the email for re-registration)"
+                          onClick={async () => {
+                            if (!confirm(`Permanently delete ${ct.email}?\nThis removes the employee AND the login — the email can be registered again from scratch.`)) return;
+                            const { error: rowErr } = await supabase.from("clientes").delete().eq("id", ct.id);
+                            if (rowErr) { toast.error(`Could not delete the employee record: ${rowErr.message}`); return; }
+                            if (ct.user_id) {
+                              const { data } = await supabase.functions.invoke("admin-create-user", {
+                                body: { action: "delete_user", user_id: ct.user_id },
+                              });
+                              if (data?.error) { toast.warning(`Employee removed, but the login was kept: ${data.error}`); }
+                            }
+                            setContacts(prev => prev.filter(c => c.id !== ct.id));
+                            toast.success(`${ct.email} deleted permanently.`);
+                          }}>
+                          🗑
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -909,6 +938,10 @@ const CustomerEdit = () => {
                   setCliente({ ...cliente, status: "ativo", is_active: true });
                   toast.success("Customer approved!");
                   log("updated", "customer", cliente.id, cliente.empresa || cliente.nome, { action: "approved" });
+                  // Se as notificações de email estiverem DESLIGADAS, o envio volta
+                  // "skipped" — aí perguntamos se a admin quer enviar mesmo assim
+                  // (force). Sem isso a conta aprovada ficava sem NENHUM email e a
+                  // admin nem ficava sabendo.
                   supabase.functions.invoke("send-email", {
                     body: {
                       type: "approval",
@@ -916,6 +949,26 @@ const CustomerEdit = () => {
                       customerName: cliente.nome || cliente.empresa || "",
                       loginUrl: `${window.location.origin}/customers-login`,
                     },
+                  }).then(async ({ data }) => {
+                    if (data?.skipped) {
+                      const sendAnyway = confirm(
+                        "Email notifications are currently DISABLED (Settings → Notifications), so the approval email was NOT sent.\n\n" +
+                        "OK = send it anyway just for this customer.\n" +
+                        "Cancel = don't send (you can set their password manually in the Employees tab, or enable notifications and re-approve).",
+                      );
+                      if (sendAnyway) {
+                        const { data: d2, error: e2 } = await supabase.functions.invoke("send-email", {
+                          body: {
+                            type: "approval", force: true,
+                            customerEmail: cliente.email,
+                            customerName: cliente.nome || cliente.empresa || "",
+                            loginUrl: `${window.location.origin}/customers-login`,
+                          },
+                        });
+                        if (e2 || d2?.error) toast.error(`Approval email failed: ${d2?.error || e2?.message}`);
+                        else toast.success(`Approval email sent to ${cliente.email}.`);
+                      }
+                    }
                   }).catch(() => {});
                   supabase.functions.invoke("notify-dispatch", { body: { event: "account_approved", vars: {
                     customer_name: cliente.nome || cliente.empresa || "", customer_company: cliente.empresa ?? "",

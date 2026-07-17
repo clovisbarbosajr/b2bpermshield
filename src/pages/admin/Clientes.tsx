@@ -106,10 +106,19 @@ const AdminClientes = () => {
       dt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDelete = async (e: React.MouseEvent, c: any) => {
     e.stopPropagation();
-    if (!confirm("Delete this customer?")) return;
-    await supabase.from("clientes").delete().eq("id", id);
+    if (!confirm(`Permanently delete "${c.empresa || c.nome || c.email}"?\nThis also deletes the login (if any), freeing the email for re-registration.`)) return;
+    const { error } = await supabase.from("clientes").delete().eq("id", c.id);
+    if (error) { toast.error(`Could not delete: ${error.message}`); return; }
+    // Libera o LOGIN também (senão o email fica "preso" — não recadastra nunca).
+    // A função recusa sozinha logins de staff ou ainda usados por outra ficha.
+    if (c.user_id) {
+      const { data } = await supabase.functions.invoke("admin-create-user", {
+        body: { action: "delete_user", user_id: c.user_id },
+      });
+      if (data?.error) toast.warning(`Customer removed, but the login was kept: ${data.error}`);
+    }
     toast.success("Customer deleted");
     fetchData();
   };
@@ -362,7 +371,7 @@ const AdminClientes = () => {
                       <Button variant="default" size="icon" className="h-7 w-7 bg-cyan-600 hover:bg-cyan-700" onClick={(e) => handleViewAs(e, c)} title="View as">
                         <Users className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="default" size="icon" className="h-7 w-7 bg-destructive hover:bg-destructive/90" onClick={(e) => handleDelete(e, c.id)} title="Delete">
+                      <Button variant="default" size="icon" className="h-7 w-7 bg-destructive hover:bg-destructive/90" onClick={(e) => handleDelete(e, c)} title="Delete permanently (also frees the login/email)">
                         <X className="h-3.5 w-3.5 font-bold" />
                       </Button>
                     </div>

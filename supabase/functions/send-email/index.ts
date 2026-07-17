@@ -570,6 +570,10 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const { type } = body;
+    // force=true: admin escolheu enviar MESMO com a notificação desabilitada
+    // (ex.: aprovar cliente com canal de email OFF — sem isso a conta ficava
+    // impossível de ativar por email). Só afeta os checks email_on_*.
+    const force = body.force === true;
 
     // ── SEGURANÇA: tipos privilegiados (email 100% arbitrário / links de auth)
     //    só admin ou cron. Sem isto, qualquer um com a anon key (que está no
@@ -643,7 +647,7 @@ Deno.serve(async (req) => {
 
     if (type === "approval") {
       // Customer approved
-      if (config?.email_on_approval === false) {
+      if (config?.email_on_approval === false && !force) {
         return new Response(JSON.stringify({ skipped: true, reason: "approval notifications disabled" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -665,7 +669,7 @@ Deno.serve(async (req) => {
       }, "Thank you for your application!", templateWaitingApproval(customerEmail)));
     } else if (type === "new_order_admin") {
       // New order — notify admin(s)
-      if (config?.email_on_new_order === false) {
+      if (config?.email_on_new_order === false && !force) {
         return new Response(JSON.stringify({ skipped: true, reason: "new_order admin notifications disabled" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -704,7 +708,7 @@ Deno.serve(async (req) => {
       orderPdfAttachment = await buildOrderPdf(order, customer, items || []);
     } else if (type === "new_order_customer") {
       // New order — confirm to customer (+ BCC to configured addresses)
-      if (config?.email_on_new_order === false) {
+      if (config?.email_on_new_order === false && !force) {
         return new Response(JSON.stringify({ skipped: true, reason: "new_order customer notifications disabled" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -751,7 +755,7 @@ Deno.serve(async (req) => {
       orderPdfAttachment = await buildOrderPdf(order, customer, orderItems);
     } else if (type === "order_status_change") {
       // Order status updated — notify customer
-      if (config?.email_on_order_status === false) {
+      if (config?.email_on_order_status === false && !force) {
         return new Response(JSON.stringify({ skipped: true, reason: "status_change notifications disabled" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -771,7 +775,7 @@ Deno.serve(async (req) => {
         templateOrderStatusChange(order, customer, newStatus)));
     } else if (type === "rejection") {
       // Customer rejected — notify customer
-      if (config?.email_on_rejection === false) {
+      if (config?.email_on_rejection === false && !force) {
         return new Response(JSON.stringify({ skipped: true, reason: "rejection notifications disabled" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -784,7 +788,7 @@ Deno.serve(async (req) => {
       }, `Application Update — ${config?.nome_empresa || COMPANY_NAME}`, templateRejection(customerName)));
     } else if (type === "new_registration_admin") {
       // New customer registered — notify admin(s)
-      if (config?.email_on_new_registration === false) {
+      if (config?.email_on_new_registration === false && !force) {
         return new Response(JSON.stringify({ skipped: true, reason: "new_registration notifications disabled" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
