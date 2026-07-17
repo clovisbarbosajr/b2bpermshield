@@ -75,9 +75,9 @@ function templateNewOrderAdmin(order: any, customer: any, items: any[]) {
         <small style="color:#888;">${esc(i.sku || "")}</small>
       </td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto || i.name || "")}<br/><small>${esc(i.notes || "")}</small></td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario).toFixed(2)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario || 0).toFixed(2)}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;">${i.quantidade}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal).toFixed(2)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal || 0).toFixed(2)}</td>
     </tr>
   `,
     )
@@ -715,7 +715,7 @@ Deno.serve(async (req) => {
       const adminEmails = parseEmails(config?.email_new_orders) || [];
       to = adminEmails.length ? adminEmails : adminEmail || config?.email_contato || COMPANY_EMAIL;
       const adminItemsTable = `<table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Price</th><th style="padding:6px 8px;text-align:right;">Qty</th><th style="padding:6px 8px;text-align:right;">Total</th></tr></thead><tbody>${
-        (items || []).map((i: any) => `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.sku ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto ?? i.name ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario).toFixed(2)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">${i.quantidade}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal).toFixed(2)}</td></tr>`).join("")
+        (items || []).map((i: any) => `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.sku ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto ?? i.name ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario || 0).toFixed(2)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">${i.quantidade}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal || 0).toFixed(2)}</td></tr>`).join("")
       }</tbody></table>`;
       const fmtDateAdm = (d: string) => d ? new Date(d).toLocaleDateString("en-US") : "-";
       const adminVars: Record<string, string> = {
@@ -766,7 +766,7 @@ Deno.serve(async (req) => {
       if (customTemplateCfg.email_order_template) {
         // Template customizado (aba Notifications → Email) — mesma renderização do preview do admin.
         const itemsTable = `<table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Price</th><th style="padding:6px 8px;text-align:right;">Qty</th><th style="padding:6px 8px;text-align:right;">Total</th></tr></thead><tbody>${
-          orderItems.map((i) => `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.sku ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto ?? i.name ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario).toFixed(2)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">${i.quantidade}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal).toFixed(2)}</td></tr>`).join("")
+          orderItems.map((i) => `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.sku ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto ?? i.name ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario || 0).toFixed(2)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">${i.quantidade}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal || 0).toFixed(2)}</td></tr>`).join("")
         }</tbody></table>`;
         const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("en-US") : "-";
         const vars: Record<string, string> = {
