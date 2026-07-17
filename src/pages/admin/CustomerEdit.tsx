@@ -212,6 +212,14 @@ const CustomerEdit = () => {
     activity: form.activity || null,
     language: form.language,
     is_active: form.is_active,
+    // Mantém `status` COERENTE com o "Is active" — senão reativar um removido só
+    // mexia no is_active e o Team (que lê status==="inativo") seguia mostrando
+    // "Removed". Preserva pendente/rejeitado (fluxo de aprovação, não é toggle).
+    ...((() => {
+      const cur = cliente?.status;
+      if (cur === "pendente" || cur === "rejeitado") return {};
+      return { status: form.is_active ? "ativo" : "inativo" };
+    })()),
     disable_ordering: form.disable_ordering,
     discount: form.discount,
     minimum_order_value: form.minimum_order_value ? parseFloat(form.minimum_order_value) : null,
