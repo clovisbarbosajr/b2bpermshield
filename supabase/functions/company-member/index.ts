@@ -108,7 +108,43 @@ Deno.serve(async (req) => {
     const { data: newUser, error: createErr } = await db.auth.admin.createUser({
       email, email_confirm: true, user_metadata: { nome: nome || "" },
     });
-    if (createErr || !newUser?.user) return json({ error: createErr?.message ?? "Failed to create user" }, 400);
+    if (createErr || !newUser?.user) {
+      // Email já tem login. Mensagens ESPECÍFICAS (não "non-2xx") + reativação
+      // automática quando for um funcionário removido DESTA mesma empresa.
+      const emailLc = email.trim().toLowerCase();
+      const { data: sameCompany } = await db.from("clientes")
+        .select("id, nome, status, can_confirm_order, can_view_full_history")
+        .ilike("email", emailLc).eq("parent_customer_id", companyId).limit(1).maybeSingle();
+      if (sameCompany) {
+        const { error: reErr } = await db.from("clientes").update({
+          status: "ativo", is_active: true,
+          nome: nome || sameCompany.nome,
+          can_confirm_order: canConfirm, can_view_full_history: canHistory,
+        }).eq("id", sameCompany.id);
+        if (reErr) return json({ error: reErr.message });
+        try {
+          await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${serviceKey}`, "apikey": serviceKey },
+            body: JSON.stringify({ type: "password_reset", email: emailLc, redirectTo: body.redirectTo || "" }),
+          });
+        } catch { /* reenvio falhou; membro reativado mesmo assim */ }
+        return json({
+          success: true, reactivated: true,
+          member: { id: sameCompany.id, nome: nome || sameCompany.nome, email: emailLc, can_confirm_order: canConfirm, can_view_full_history: canHistory, ativo: true },
+          mailOk: true,
+        });
+      }
+      const { data: elsewhere } = await db.from("clientes")
+        .select("id, empresa, parent_customer_id").ilike("email", emailLc).limit(1).maybeSingle();
+      if (elsewhere?.parent_customer_id) {
+        return json({ error: `This email is already an employee of another company ("${elsewhere.empresa || "unknown"}"). Remove it there first, or use a different email.` });
+      }
+      if (elsewhere) {
+        return json({ error: `This email already belongs to the customer account "${elsewhere.empresa || emailLc}" — it can't also be added as an employee.` });
+      }
+      return json({ error: `This email already has a login in the system (staff or pending account). Use a different email.` });
+    }
 
     // Sub-cliente: papel 'cliente' apenas, pai = a própria conta, herda price list (trigger).
     const { data: sub, error: subErr } = await db.from("clientes").insert({

@@ -677,14 +677,29 @@ Deno.serve(async (req) => {
       const adminItemsTable = `<table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Price</th><th style="padding:6px 8px;text-align:right;">Qty</th><th style="padding:6px 8px;text-align:right;">Total</th></tr></thead><tbody>${
         (items || []).map((i: any) => `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.sku ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto ?? i.name ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario).toFixed(2)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">${i.quantidade}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal).toFixed(2)}</td></tr>`).join("")
       }</tbody></table>`;
-      ({ subject, html } = customOr("new_order_admin", {
-        orderNumber: String(order.numero || order.id || ""),
+      const fmtDateAdm = (d: string) => d ? new Date(d).toLocaleDateString("en-US") : "-";
+      const adminVars: Record<string, string> = {
+        orderNumber: String(order.numero || order.id || ""), orderDate: fmtDateAdm(order.created_at),
+        poNumber: order.po_number ?? "", deliveryDate: order.delivery_date ? fmtDateAdm(order.delivery_date) : "-",
         customerCompany: esc(customer.empresa ?? ""), customerName: esc(customer.nome ?? ""), customerEmail: esc(customer.email ?? ""),
+        customerAddress: [customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", "),
         grossTotal: `$${Number(order.total ?? 0).toFixed(2)}`, subtotal: `$${Number(order.subtotal ?? 0).toFixed(2)}`,
+        discount: order.desconto ? `-$${Number(order.desconto).toFixed(2)}` : "$0.00",
+        shippingCosts: order.shipping_costs ? `$${Number(order.shipping_costs).toFixed(2)}` : "$0.00",
+        salesTax: order.sales_tax ? `$${Number(order.sales_tax).toFixed(2)}` : "$0.00",
         itemsTable: adminItemsTable, notes: esc(order.observacoes ?? ""),
         companyName: config?.nome_empresa || COMPANY_NAME,
-      }, `New Order #${order.numero || order.id} from ${customer.empresa || customer.nome}`,
-        templateNewOrderAdmin(order, customer, items || [])));
+        companyAddress: config?.endereco || "", companyEmail: config?.email_contato || COMPANY_EMAIL,
+      };
+      // PEDIDO DO DONO (2026-07-16): admin recebe o MESMO email de confirmação do
+      // cliente. Fallback em cascata: template específico do tipo (email_templates)
+      // → template "Order Confirmation" (configuracoes.email_order_template) → fixo.
+      const adminFallbackHtml = customTemplateCfg.email_order_template
+        ? renderVars(customTemplateCfg.email_order_template, adminVars)
+        : templateNewOrderAdmin(order, customer, items || []);
+      ({ subject, html } = customOr("new_order_admin", adminVars,
+        `New Order #${order.numero || order.id} from ${customer.empresa || customer.nome}`,
+        adminFallbackHtml));
       // Admin também recebe o PDF do pedido anexado.
       orderPdfAttachment = await buildOrderPdf(order, customer, items || []);
     } else if (type === "new_order_customer") {

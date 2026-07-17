@@ -40,9 +40,10 @@ const AdminClientes = () => {
   const fetchData = async () => {
     const [{ data }, { data: pl }, { data: repData }, { data: pg }, { data: acts }] = await Promise.all([
       // Ordena por data de cadastro (mais recente primeiro) para espelhar o B2BWave (clone).
-      // Sub-logins (funcionários do cliente, parent_customer_id preenchido) NÃO são
-      // clientes — apareciam como empresa duplicada na lista (caso jess@permwood 2026-07-16).
-      supabase.from("clientes").select("*").is("parent_customer_id", null).order("created_at", { ascending: false }),
+      // Sub-logins (funcionários, parent_customer_id preenchido) APARECEM na lista —
+      // o admin precisa gerenciá-los (reset de senha etc.) — mas marcados com badge
+      // "Employee of <empresa>" pra não parecerem empresa duplicada.
+      supabase.from("clientes").select("*").order("created_at", { ascending: false }),
       supabase.from("tabelas_preco").select("id, nome").eq("ativo", true),
       supabase.from("representantes").select("id, nome").eq("ativo", true).order("nome"),
       supabase.from("privacy_groups").select("id, nome").eq("ativo", true),
@@ -336,7 +337,14 @@ const AdminClientes = () => {
             <TableBody>
               {paginated.map((c) => (
                 <TableRow key={c.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/customers/${c.id}`)}>
-                  <TableCell><span className="text-primary hover:underline font-medium">{c.empresa || "—"}</span></TableCell>
+                  <TableCell>
+                    <span className="text-primary hover:underline font-medium">{c.empresa || "—"}</span>
+                    {c.parent_customer_id && (
+                      <Badge variant="secondary" className="ml-2 text-[10px]">
+                        Employee{(() => { const p = clientes.find((x: any) => x.id === c.parent_customer_id); return p ? ` of ${p.empresa || p.nome}` : ""; })()}
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell>{c.nome}</TableCell>
                   <TableCell className="text-primary text-sm">{c.email}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{c.telefone || ""}</TableCell>
