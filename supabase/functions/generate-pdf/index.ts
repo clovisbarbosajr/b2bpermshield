@@ -32,7 +32,6 @@ function buildDefaultTemplate(data: {
   companyName: string;
   companyAddress: string;
   companyEmail: string;
-  companyWebsite: string;
   itemsRows: string;
   subtotal: string;
   discount: string;
@@ -45,7 +44,7 @@ function buildDefaultTemplate(data: {
   const {
     orderNumber, orderDate, poNumber, deliveryDate,
     customerName, customerEmail, customerAddress,
-    companyName, companyAddress, companyEmail, companyWebsite,
+    companyName, companyAddress, companyEmail,
     itemsRows, subtotal, discount, tax, grossTotal, notes,
     logoUrl, logoPosition,
   } = data;
@@ -71,6 +70,8 @@ function buildDefaultTemplate(data: {
   .logo-text { font-size:22px; font-weight:800; color:#1a2d5a; letter-spacing:-0.5px; }
   .logo-text span { color:#e88a1a; }
   .logo-sub { font-size:9px; color:#999; margin-top:2px; }
+  .fld-l { text-align:right; font-size:8px; color:#6b85a8; padding:1px 8px 1px 0; white-space:nowrap; vertical-align:top; }
+  .fld-v { font-size:9px; color:#222; padding:1px 0; vertical-align:top; }
   .doc-info { text-align:right; }
   .doc-title { font-size:18px; font-weight:700; color:#1a2d5a; }
   .doc-num   { font-size:13px; color:#e88a1a; font-weight:700; margin-top:2px; }
@@ -117,40 +118,28 @@ function buildDefaultTemplate(data: {
 </head>
 <body>
 
-<!-- Header -->
-<div class="hdr">
-  ${headerBrand}
-  <div class="doc-info">
-    <div class="doc-title">ORDER</div>
-    <div class="doc-num">#${orderNumber}</div>
-    <div class="doc-date">${orderDate}</div>
-  </div>
-</div>
+<!-- Header — MESMO layout do PDF anexado no email (pdfGenerator.ts):
+     logo centralizada, título "Order", linha, campos rotulados à esquerda e
+     empresa à direita. Website REMOVIDO (era do sistema antigo). -->
+<div style="text-align:center;margin-bottom:6px;">${headerBrand}</div>
+<div style="text-align:center;font-size:20px;color:#666;margin-bottom:8px;">Order</div>
+<div style="border-bottom:2px solid #1a2d5a;margin-bottom:16px;"></div>
 
-<!-- Order info + Company info side by side -->
-<div class="info-row">
-  <div class="info-left">
-    <div class="info-block">
-      <div class="info-label">Order</div>
-      <div class="info-value">#${orderNumber}</div>
-    </div>
-    <div class="info-block">
-      <div class="info-label">Customer</div>
-      <div class="info-value">${customerName}</div>
-    </div>
-    ${customerEmail ? `<div class="info-block"><div class="info-label">Email</div><div class="info-value normal">${customerEmail}</div></div>` : ""}
-    ${customerAddress ? `<div class="info-block"><div class="info-label">Ship To</div><div class="info-value normal">${customerAddress}</div></div>` : ""}
-    ${poNumber ? `<div class="info-block"><div class="info-label">Purchase Order</div><div class="info-value">${poNumber}</div></div>` : ""}
-    ${deliveryDate ? `<div class="info-block"><div class="info-label">Requested Delivery</div><div class="info-value">${deliveryDate}</div></div>` : ""}
-  </div>
-  <div class="info-right">
-    <div class="info-block">
-      <div class="info-label">From</div>
-      <div class="info-value">${companyName}</div>
-    </div>
-    ${companyAddress ? `<div class="info-block"><div class="info-value normal">${companyAddress}</div></div>` : ""}
-    ${companyEmail ? `<div class="info-block"><div class="info-label">Email</div><div class="info-value normal">${companyEmail}</div></div>` : ""}
-    ${companyWebsite ? `<div class="info-block"><div class="info-label">Website</div><div class="info-value normal">${companyWebsite}</div></div>` : ""}
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;">
+  <table style="border-collapse:collapse;">
+    <tr><td class="fld-l">Order</td><td class="fld-v"><strong>${orderNumber}</strong></td></tr>
+    <tr><td class="fld-l">PO</td><td class="fld-v">${poNumber || ""}</td></tr>
+    <tr><td class="fld-l">Customer</td><td class="fld-v">${customerName}</td></tr>
+    <tr><td class="fld-l">Address</td><td class="fld-v">${customerAddress || ""}</td></tr>
+    <tr><td class="fld-l">Email</td><td class="fld-v">${customerEmail || ""}</td></tr>
+    <tr><td class="fld-l">Date</td><td class="fld-v">${orderDate}</td></tr>
+    <tr><td class="fld-l">Delivery date</td><td class="fld-v">${deliveryDate || ""}</td></tr>
+    <tr><td class="fld-l">Comments</td><td class="fld-v">${notes || ""}</td></tr>
+  </table>
+  <div style="text-align:right;font-size:10px;color:#333;">
+    <div style="font-size:12px;font-weight:bold;color:#1a2d5a;">${companyName}</div>
+    ${companyAddress ? `<div>${companyAddress}</div>` : ""}
+    ${companyEmail ? `<div style="color:#1a7fbd;">${companyEmail}</div>` : ""}
   </div>
 </div>
 
@@ -181,7 +170,7 @@ function buildDefaultTemplate(data: {
 </div>
 
 <!-- Notes -->
-${notes ? `<div class="notes-box"><strong>Notes:</strong> ${notes}</div>` : ""}
+<!-- Comments no cabecalho (paridade com o PDF anexado) -->
 
 <!-- Footer -->
 <div class="footer">
@@ -299,7 +288,6 @@ Deno.serve(async (req) => {
     const companyName    = cfg?.nome_empresa    || "Zap Supplies, LLC";
     const companyEmail   = cfg?.email_contato   || "jess@zapsupplies.com";
     const companyAddress = cfg?.endereco        || "1800 N Powerline Rd Ste A6, POMPANO BEACH FL 33069";
-    const companyWebsite = "https://zapsupplies.b2bwave.com/";
 
     // Customer address
     const customerAddress = endereco
@@ -333,7 +321,6 @@ Deno.serve(async (req) => {
       companyName,
       companyAddress,
       companyEmail,
-      companyWebsite,
       itemsRows,
       subtotal:        fmtUSD(pedido.subtotal),
       discount:        fmtUSD(pedido.desconto),

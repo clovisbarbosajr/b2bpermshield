@@ -164,12 +164,36 @@ const OrderDetail = () => {
       shipping_costs: Number.isFinite(parseFloat(form.shipping_costs)) ? parseFloat(form.shipping_costs) : null,
       is_paid: form.is_paid,
     };
+    // Mudanças que INTERESSAM ao cliente/admin (tracking, envio, data de entrega)
+    // precisam notificar ao SALVAR — antes só o dropdown de status notificava, e
+    // adicionar rastreio e salvar não avisava ninguém.
+    const notifiable =
+      (update.tracking_number || "") !== (((order as any).tracking_number) || "") ||
+      (update.delivery_date || "") !== (((order as any).delivery_date) || "") ||
+      (update.delivery_mode || "") !== (((order as any).delivery_mode) || "");
+
     const { error } = await supabase.from("pedidos").update(update).eq("id", order.id);
     setSaving(false);
     if (error) { toast.error("Error saving"); return; }
     toast.success("Order saved");
     log("updated", "order", order.id, `Order #${order.numero || order.id}`);
     setOrder({ ...order, ...update });
+
+    if (notifiable) {
+      const updated = { ...order, ...update };
+      if (cliente?.email) {
+        supabase.functions.invoke("send-email", {
+          body: { type: "order_status_change", order: updated, customer: cliente, newStatus: (order as any).status },
+        }).catch(() => {});
+      }
+      supabase.functions.invoke("notify-dispatch", { body: { event: "order_status", vars: {
+        order_id: (order as any).numero ?? order.id, status: (order as any).status ?? "",
+        total: (order as any).total ?? "",
+        customer_name: cliente?.nome ?? "", customer_company: cliente?.empresa ?? "",
+        customer_email: cliente?.email ?? "", customer_phone: (cliente as any)?.telefone ?? "",
+      }, customer: { email: cliente?.email, phone: (cliente as any)?.telefone, whatsapp: (cliente as any)?.telefone } } }).catch(() => {});
+    }
+
     if (goBack) navigate("/admin/orders");
   };
 
