@@ -579,6 +579,28 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const { type } = body;
+
+    // INTERRUPTOR MESTRE de email (canal Email em Notifications → Channels).
+    // Se o canal está OFF, NENHUM email de NOTIFICAÇÃO sai — mesmo que os flags
+    // email_on_* estejam ligados/nulos (era o bypass: flags dessincronizados do
+    // canal). Emails de AUTH (reset de senha, magic link, set password) e alertas
+    // internos NÃO são bloqueados — senão o cliente não consegue nem logar.
+    // `force` (Resend manual do admin) também passa.
+    let emailChannelOff = false;
+    try {
+      const { data: emailCh } = await adminClient.from("notification_channels")
+        .select("enabled").eq("id", "email").maybeSingle();
+      emailChannelOff = emailCh?.enabled === false;
+    } catch (_e) { /* na dúvida, não bloqueia */ }
+    const AUTH_TYPES = new Set(["password_reset", "magic_link", "set_password", "admin_alert", "raw"]);
+    if (emailChannelOff && !AUTH_TYPES.has(type) && body.force !== true) {
+      await adminClient.from("notification_log").insert({
+        event: type, channel: "email", recipient: "-",
+        status: "failed", error: "skip: email channel is OFF (master switch)", payload: {},
+      });
+      return new Response(JSON.stringify({ skipped: true, reason: "email channel disabled (master switch)" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     // force=true: admin escolheu enviar MESMO com a notificação desabilitada
     // (ex.: aprovar cliente com canal de email OFF — sem isso a conta ficava
     // impossível de ativar por email). Só afeta os checks email_on_*.
