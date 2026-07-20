@@ -2,6 +2,27 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import PortalLayout from "@/components/layouts/PortalLayout";
+
+// Dispara as notificações do pedido em BACKGROUND, sem travar o checkout.
+// `keepalive` faz o request sobreviver à navegação/desmontagem da página — era
+// exatamente isso que faltava (antes usavam `await` só pra o navigate não
+// cancelar os fetches, o que fazia o cliente esperar ~1 min pelos emails/SMTP).
+async function fireOrderNotifications(bodies: Array<{ fn: string; body: any }>) {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const anon = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  let token = anon;
+  try { token = (await supabase.auth.getSession()).data.session?.access_token || anon; } catch { /* usa anon */ }
+  for (const { fn, body } of bodies) {
+    try {
+      fetch(`${url}/functions/v1/${fn}`, {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json", apikey: anon, Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      }).catch(() => {});
+    } catch { /* nunca bloqueia o checkout */ }
+  }
+}
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -574,19 +595,18 @@ const Checkout = () => {
           .from("pedidos")
           .update({ is_paid: true, payment_intent_id: paymentIntent.id } as any)
           .eq("id", pedido.id);
-        // Notificações: AGUARDA antes de navegar — fire-and-forget + navigate cancelava
-        // o fetch no unload (pedido sem email). allSettled não bloqueia por falha.
+        // Notificações em BACKGROUND (keepalive) — o cliente NÃO espera os emails.
         const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerName };
         const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
-        await Promise.allSettled([
-          supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } }),
-          supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } }),
-          supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
+        await fireOrderNotifications([
+          { fn: "send-email", body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } },
+          { fn: "send-email", body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } },
+          { fn: "notify-dispatch", body: { event: "new_order", vars: {
             order_id: (pedido as any).numero ?? pedido.id, total: finalTotal,
             date: new Date().toLocaleString("pt-BR"),
             items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
             customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
-          }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } }),
+          }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } },
         ]);
         orderPlacedRef.current = true;
         clearCart();
@@ -601,18 +621,18 @@ const Checkout = () => {
       return;
     }
 
-    // Notificações: AGUARDA antes de navegar (mesmo motivo do caminho com cartão).
+    // Notificações em BACKGROUND (keepalive) — o cliente NÃO espera os emails.
     const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerName };
     const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
-    await Promise.allSettled([
-      supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } }),
-      supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } }),
-      supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
+    await fireOrderNotifications([
+      { fn: "send-email", body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } },
+      { fn: "send-email", body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } },
+      { fn: "notify-dispatch", body: { event: "new_order", vars: {
         order_id: (pedido as any).numero ?? pedido.id, total: finalTotal,
         date: new Date().toLocaleString("pt-BR"),
         items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
         customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
-      }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } }),
+      }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } },
     ]);
 
     orderPlacedRef.current = true;
