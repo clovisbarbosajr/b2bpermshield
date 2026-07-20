@@ -59,24 +59,49 @@ export async function dispatchEvent(db: Db, event: string, vars: Record<string, 
   const ch = Object.fromEntries((channels ?? []).map((c: any) => [c.id, c]));
 
   const { data: evt } = await db.from("notification_events").select("*").eq("id", event).maybeSingle();
-  if (!evt || !evt.enabled) return { ok: true, sent: 0, results: [], problems: [] };
+
+  // OBSERVABILIDADE: todo NÃO-envio precisa deixar rastro no log — antes esses
+  // returns/skips sumiam e em produção não dava pra saber o motivo da falha.
+  if (!evt) {
+    await logRow(db, event, "-", "-", { ok: false, error: "skip: event not found in notification_events" }, vars);
+    return { ok: true, sent: 0, results: [], problems: ["event not found"] };
+  }
+  if (!evt.enabled) {
+    await logRow(db, event, "-", "-", { ok: false, error: "skip: event disabled (enabled=false)" }, vars);
+    return { ok: true, sent: 0, results: [], problems: ["event disabled"] };
+  }
 
   const targets: Array<{ channel: string; to: string }> = [];
   const skips: Array<{ channel: string; who: string; reason: string }> = [];
   const chans: string[] = evt.channels ?? [];
 
+  if ((chans ?? []).length === 0) {
+    await logRow(db, event, "-", "-", { ok: false, error: "skip: event has no channels selected" }, vars);
+  }
+
   if (evt.notify_admin) {
     const { data: recips } = await db.from("notification_recipients").select("*").eq("active", true);
+    if (!recips || recips.length === 0) {
+      await logRow(db, event, "-", "(admin)", { ok: false, error: "skip: notify_admin on but no ACTIVE recipients configured" }, vars);
+    }
     for (const r of recips ?? []) {
       if (chans.includes("email")) r.email ? targets.push({ channel: "email", to: r.email }) : skips.push({ channel: "email", who: "admin", reason: "recipient has no email" });
       if (chans.includes("sms")) r.phone ? targets.push({ channel: "sms", to: r.phone }) : skips.push({ channel: "sms", who: "admin", reason: "recipient has no phone" });
       if (chans.includes("whatsapp") && r.whatsapp) targets.push({ channel: "whatsapp", to: r.whatsapp });
     }
   }
-  if (evt.notify_customer && customer) {
-    if (chans.includes("email")) customer.email ? targets.push({ channel: "email", to: String(customer.email) }) : skips.push({ channel: "email", who: "customer", reason: "customer has no email" });
-    if (chans.includes("sms")) customer.phone ? targets.push({ channel: "sms", to: String(customer.phone) }) : skips.push({ channel: "sms", who: "customer", reason: "customer has no phone" });
-    if (chans.includes("whatsapp") && customer.whatsapp) targets.push({ channel: "whatsapp", to: String(customer.whatsapp) });
+  if (evt.notify_customer) {
+    if (!customer) {
+      await logRow(db, event, "-", "(customer)", { ok: false, error: "skip: notify_customer on but no customer data passed to this event" }, vars);
+    } else {
+      if (chans.includes("email")) customer.email ? targets.push({ channel: "email", to: String(customer.email) }) : skips.push({ channel: "email", who: "customer", reason: "customer has no email" });
+      if (chans.includes("sms")) customer.phone ? targets.push({ channel: "sms", to: String(customer.phone) }) : skips.push({ channel: "sms", who: "customer", reason: "customer has no phone" });
+      if (chans.includes("whatsapp") && customer.whatsapp) targets.push({ channel: "whatsapp", to: String(customer.whatsapp) });
+    }
+  }
+
+  if (!evt.notify_admin && !evt.notify_customer) {
+    await logRow(db, event, "-", "-", { ok: false, error: "skip: neither notify_admin nor notify_customer is enabled" }, vars);
   }
 
   const subject = SUBJECTS[event] ?? "Notification";
