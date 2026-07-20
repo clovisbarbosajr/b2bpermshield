@@ -511,15 +511,22 @@ Deno.serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
-    // Colunas do template/logo customizados — select separado: foram criadas via SQL
-    // direto e o PostgREST pode não ter recarregado o schema cache ainda; se essa
-    // query falhar, cai pro template fixo (fallback já existente), sem derrubar o envio.
+    // Template e logo em queries SEPARADAS e tolerantes. Antes era um select
+    // combinado das 3 colunas: se as colunas de LOGO (mais novas) não estivessem
+    // no schema cache do PostgREST, a query inteira falhava e o email_order_template
+    // (que EXISTE desde abril) era perdido junto → o email SEMPRE caía no template
+    // fixo, ignorando o customizado. (Causa do "email não muda".)
     let customTemplateCfg: { email_order_template?: string | null; email_logo_url?: string | null; email_logo_position?: string | null } = {};
     try {
       const { data } = await adminClient.from("configuracoes")
-        .select("email_order_template, email_logo_url, email_logo_position").limit(1).maybeSingle();
-      if (data) customTemplateCfg = data;
-    } catch (_e) { /* fica no fallback fixo */ }
+        .select("email_order_template").limit(1).maybeSingle();
+      if (data) customTemplateCfg.email_order_template = data.email_order_template;
+    } catch (_e) { /* sem template custom → fallback fixo */ }
+    try {
+      const { data } = await adminClient.from("configuracoes")
+        .select("email_logo_url, email_logo_position").limit(1).maybeSingle();
+      if (data) { customTemplateCfg.email_logo_url = data.email_logo_url; customTemplateCfg.email_logo_position = data.email_logo_position; }
+    } catch (_e) { /* sem logo */ }
 
     // Templates customizados POR TIPO (aba Notifications → Email → All email
     // templates; tabela email_templates). corpo vazio/inexistente → fallback
