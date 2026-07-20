@@ -580,8 +580,11 @@ Deno.serve(async (req) => {
     //    bundle do front) usava `raw` como relay de spam/phishing pelo seu domínio,
     //    ou disparava set_password/magic_link com link forjado.
     // `admin_alert` também é arbitrário (to/subject/html do body) -> privilegiado.
+    // `toOverride` (usado pelo "Resend" da tela de pedido) manda o email de
+    // pedido pra um destinatário ARBITRÁRIO — por isso exige admin, igual aos
+    // tipos privilegiados. Sem isso viraria relay de spam com a anon key.
     const PRIVILEGED_TYPES = new Set(["raw", "set_password", "magic_link", "admin_alert"]);
-    if (PRIVILEGED_TYPES.has(type)) {
+    if (PRIVILEGED_TYPES.has(type) || body.toOverride) {
       const authHeader = req.headers.get("Authorization") ?? "";
       const cronSecret = Deno.env.get("CRON_SECRET");
       const viaCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
@@ -713,7 +716,7 @@ Deno.serve(async (req) => {
       const { order, customer, items, adminEmail } = body;
       // email_new_orders = comma-separated admin notification emails; fallback to single adminEmail / email_contato
       const adminEmails = parseEmails(config?.email_new_orders) || [];
-      to = adminEmails.length ? adminEmails : adminEmail || config?.email_contato || COMPANY_EMAIL;
+      to = body.toOverride || (adminEmails.length ? adminEmails : adminEmail || config?.email_contato || COMPANY_EMAIL);
       const adminItemsTable = `<table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Price</th><th style="padding:6px 8px;text-align:right;">Qty</th><th style="padding:6px 8px;text-align:right;">Total</th></tr></thead><tbody>${
         (items || []).map((i: any) => `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.sku ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;">${esc(i.nome_produto ?? i.name ?? "")}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.preco_unitario || 0).toFixed(2)}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">${i.quantidade}</td><td style="padding:4px 8px;border-bottom:1px solid #eee;text-align:right;">$${Number(i.subtotal || 0).toFixed(2)}</td></tr>`).join("")
       }</tbody></table>`;
@@ -760,7 +763,7 @@ Deno.serve(async (req) => {
       const companyName = config?.nome_empresa || companyData?.company_name || COMPANY_NAME;
       const companyAddress = config?.endereco || companyData?.company_address || "";
       const companyEmailAddr = config?.email_contato || COMPANY_EMAIL;
-      to = customer.email;
+      to = body.toOverride || customer.email;
       subject = `Order #${order.numero || order.id} received – ${companyName}`;
 
       if (customTemplateCfg.email_order_template) {

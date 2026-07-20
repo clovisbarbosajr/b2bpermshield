@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Pencil, Trash2, Plus, Save, Printer, FileText, Search, X as XIcon } from "lucide-react";
+import { Pencil, Trash2, Plus, Save, Printer, FileText, Search, X as XIcon, Send } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { useAuth } from "@/contexts/AuthContext";
 import { categoryPath } from "@/lib/categoryTree";
@@ -34,6 +34,11 @@ const OrderDetail = () => {
   const [rep, setRep] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Resend da confirmação do pedido (modal)
+  const [resendOpen, setResendOpen] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [adminEmails, setAdminEmails] = useState("");
+  const [resend, setResend] = useState({ customer: false, admin: false, other: false, otherEmail: "" });
   const [shippingOptions, setShippingOptions] = useState<any[]>([]);
   const [paymentOptions, setPaymentOptions] = useState<any[]>([]);
   const [tabelasPreco, setTabelasPreco] = useState<any[]>([]);
@@ -82,6 +87,10 @@ const OrderDetail = () => {
     // Categorias p/ mostrar o caminho (localização › categoria) no modal de produtos.
     const { data: cats } = await supabase.from("categorias").select("id, nome, parent_id");
     setCategorias(cats ?? []);
+    // Destinatários admin — mostrados no modal de Resend (igual ao B2BWave).
+    const { data: cfg } = await supabase.from("configuracoes")
+      .select("email_new_orders, email_contato").limit(1).maybeSingle();
+    setAdminEmails(cfg?.email_new_orders || cfg?.email_contato || "");
     // Para criar pedido pelo admin precisamos da lista de clientes.
     if (isNew) {
       const { data: cls } = await supabase
@@ -147,6 +156,55 @@ const OrderDetail = () => {
       customer_name: cliente?.nome ?? "", customer_company: cliente?.empresa ?? "",
       customer_email: cliente?.email ?? "", customer_phone: (cliente as any)?.telefone ?? "",
     }, customer: { email: cliente?.email, phone: (cliente as any)?.telefone, whatsapp: (cliente as any)?.telefone } } }).catch(() => {});
+  };
+
+  // ── Resend da confirmação do pedido (cliente / admin / email avulso) ──
+  const handleResend = async () => {
+    if (!order) return;
+    const custom = resend.otherEmail.trim();
+    if (resend.other && (!custom || !custom.includes("@"))) {
+      toast.error("Enter a valid email address."); return;
+    }
+    if (!resend.customer && !resend.admin && !resend.other) {
+      toast.error("Select at least one recipient."); return;
+    }
+    setResending(true);
+    const emailCustomer = cliente
+      ? { id: cliente.id, email: cliente.email, nome: cliente.nome, empresa: (cliente as any).empresa }
+      : {};
+    const emailItems = items.map((i) => ({
+      sku: i.sku, nome_produto: i.nome_produto, preco_unitario: i.preco_unitario,
+      quantidade: i.quantidade, subtotal: i.subtotal ?? i.preco_unitario * i.quantidade,
+    }));
+    const calls: Promise<any>[] = [];
+    // force: reenvio é ação MANUAL do admin — sai mesmo se a notificação
+    // automática estiver desligada (senão o botão não funcionaria).
+    if (resend.customer && cliente?.email) {
+      calls.push(supabase.functions.invoke("send-email", {
+        body: { type: "new_order_customer", order, customer: emailCustomer, items: emailItems, force: true },
+      }));
+    }
+    if (resend.admin) {
+      calls.push(supabase.functions.invoke("send-email", {
+        body: { type: "new_order_admin", order, customer: emailCustomer, items: emailItems, force: true },
+      }));
+    }
+    if (resend.other) {
+      calls.push(supabase.functions.invoke("send-email", {
+        body: { type: "new_order_customer", order, customer: emailCustomer, items: emailItems, force: true, toOverride: custom },
+      }));
+    }
+    const results = await Promise.allSettled(calls);
+    setResending(false);
+    const failed = results.filter((r) => r.status === "rejected" || (r as any).value?.error || (r as any).value?.data?.error);
+    if (failed.length) {
+      const msg = (failed[0] as any)?.value?.data?.error || (failed[0] as any)?.value?.error?.message || "unknown error";
+      toast.error(`Some emails failed: ${msg}`);
+    } else {
+      toast.success("Order confirmation re-sent.");
+      setResendOpen(false);
+    }
+    log("updated", "order", order.id, `Resent order #${order.numero || order.id} confirmation`);
   };
 
   const handleSave = async (goBack = false) => {
@@ -932,6 +990,9 @@ const OrderDetail = () => {
           </Button>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1" onClick={() => setResendOpen(true)}>
+            <Send className="h-4 w-4" /> Resend
+          </Button>
           <Button variant="outline" size="sm" className="gap-1" onClick={handleGeneratePdf}>
             <Printer className="h-4 w-4" /> Invoice
           </Button>
@@ -940,6 +1001,42 @@ const OrderDetail = () => {
           </Button>
         </div>
       </div>
+
+      {/* Resend order confirmation (igual ao B2BWave: cliente / admin / email avulso) */}
+      <Dialog open={resendOpen} onOpenChange={setResendOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Resend order</DialogTitle></DialogHeader>
+          <p className="text-sm text-primary">Re-send order confirmation email</p>
+          <div className="space-y-3 py-2">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={resend.customer} disabled={!cliente?.email}
+                onCheckedChange={(v) => setResend((r) => ({ ...r, customer: v === true }))} />
+              To customer {cliente?.email ? `(${cliente.email})` : "(no email on file)"}
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={resend.admin}
+                onCheckedChange={(v) => setResend((r) => ({ ...r, admin: v === true }))} />
+              To admin {adminEmails ? `(${adminEmails})` : ""}
+            </label>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-2 text-sm cursor-pointer shrink-0">
+                <Checkbox checked={resend.other}
+                  onCheckedChange={(v) => setResend((r) => ({ ...r, other: v === true }))} />
+                To email
+              </label>
+              <Input type="email" className="h-8" placeholder="name@company.com"
+                value={resend.otherEmail}
+                onChange={(e) => setResend((r) => ({ ...r, other: true, otherEmail: e.target.value }))} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setResendOpen(false)}>Cancel</Button>
+            <Button size="sm" onClick={handleResend} disabled={resending}>
+              {resending ? "Sending..." : "Send"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       {/* Add Product Dialog */}
       <Dialog open={addProductOpen} onOpenChange={setAddProductOpen}>
         <DialogContent className="max-w-xl">
