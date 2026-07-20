@@ -25,7 +25,9 @@ function esc(v: any): string {
 // Following the B2BWave email template style (Zap Supplies, LLC branding)
 
 const COMPANY_NAME = "Zap Supplies, LLC";
-const COMPANY_SITE = "https://zapsupplies.b2bwave.com/";
+// Portal REAL (não o b2bwave antigo). Configurável por env pra quando houver
+// domínio próprio; fallback pro Vercel atual.
+const COMPANY_SITE = (Deno.env.get("PORTAL_URL") || "https://b2bpermshield.vercel.app/").replace(/\/*$/, "/");
 const COMPANY_EMAIL = "jess@zapsupplies.com";
 
 function emailFooter() {
