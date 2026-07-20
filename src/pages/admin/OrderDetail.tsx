@@ -145,17 +145,14 @@ const OrderDetail = () => {
     setOrder({ ...order, status: newStatus });
     toast.success("Status updated");
     log("updated", "order", order.id, `Order #${order.numero || order.id}`, { status: newStatus });
-    // Fire-and-forget email to customer on status change
+    // Email do cliente (send-email, tem sessão do admin). O SMS/notify-dispatch
+    // do order_status agora sai por TRIGGER no banco (trg_order_status_notify) —
+    // confiável e independe do frontend. NÃO chamar notify-dispatch aqui (dup).
     if (cliente?.email) {
       supabase.functions.invoke("send-email", {
         body: { type: "order_status_change", order: { ...order, status: newStatus }, customer: cliente, newStatus },
       }).catch(() => {});
     }
-    supabase.functions.invoke("notify-dispatch", { body: { event: "order_status", vars: {
-      order_id: (order as any).numero ?? order.id, status: newStatus, total: (order as any).total ?? "",
-      customer_name: cliente?.nome ?? "", customer_company: cliente?.empresa ?? "",
-      customer_email: cliente?.email ?? "", customer_phone: (cliente as any)?.telefone ?? "",
-    }, customer: { email: cliente?.email, phone: (cliente as any)?.telefone, whatsapp: (cliente as any)?.telefone } } }).catch(() => {});
   };
 
   // ── Resend da confirmação do pedido (cliente / admin / email avulso) ──

@@ -52,6 +52,26 @@ Deno.serve(async (req) => {
       status: "pendente", is_active: true, can_confirm_order: false, parent_customer_id: null,
     }).select("id").single();
     if (error) return json({ error: error.message }, 400);
+
+    // 5) SMS/notificação new_customer pro admin — do SERVIDOR (o cliente ainda não
+    // tem sessão no signup, então o frontend não consegue chamar o notify-dispatch,
+    // que exige usuário logado; aqui usamos o x-cron-secret).
+    try {
+      await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/notify-dispatch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-cron-secret": Deno.env.get("CRON_SECRET") ?? "",
+          "apikey": Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+          "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY") ?? ""}`,
+        },
+        body: JSON.stringify({
+          event: "new_customer",
+          vars: { customer_name: nome || "", customer_company: empresa || "", customer_email: emailLc, customer_phone: "" },
+        }),
+      });
+    } catch (_e) { /* não bloqueia o cadastro */ }
+
     return json({ ok: true, created: created.id });
   } catch (err: any) {
     return json({ error: err.message }, 500);

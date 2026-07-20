@@ -49,9 +49,9 @@ const Cadastro = () => {
         supabase.functions.invoke("send-email", {
           body: { type: "new_registration_admin", customerEmail: email, customerName: nome, empresa },
         }).catch(() => {});
-        supabase.functions.invoke("notify-dispatch", { body: { event: "new_customer", vars: {
-          customer_name: nome, customer_company: empresa, customer_email: email, customer_phone: "",
-        }, customer: { email } } }).catch(() => {});
+        // NÃO chamar notify-dispatch new_customer aqui — o cliente ainda não tem
+        // sessão no signup e o notify-dispatch exige login (dava 401 silencioso).
+        // O SMS/notificação new_customer agora sai do register-customer (server-side).
       });
     }
   };
