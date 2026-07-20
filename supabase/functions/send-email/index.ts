@@ -1,10 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import nodemailer from "npm:nodemailer@6.9.8";
 import { Buffer } from "node:buffer";
-// NOTA: o gerador de PDF (pdf-lib) é importado DINAMICAMENTE dentro do try do
-// new_order_customer — se o npm resolver falhar no boot, o email inteiro
-// morreria junto. Import estático só do TIPO (apagado na compilação).
-import type { PdfOrderItem } from "../_shared/pdfGenerator.ts";
+// Import ESTÁTICO do gerador de PDF — garante que o código ATUAL do gerador
+// entra no bundle a cada deploy. (Era import dinâmico, que podia rodar uma
+// versão em cache — causa do "PDF continua o antigo" mesmo após redeploy.)
+import { generateOrderPdf, type PdfOrderItem } from "../_shared/pdfGenerator.ts";
 
 // Deno edge runtime may require an npm install hint when resolving Node packages locally.
 
@@ -651,7 +651,6 @@ Deno.serve(async (req) => {
     // Import dinâmico + try/catch: falha de PDF nunca derruba o email.
     const buildOrderPdf = async (order: any, customer: any, items: any[]) => {
       try {
-        const { generateOrderPdf } = await import("../_shared/pdfGenerator.ts");
 
         // HIDRATA do banco — o `order`/`customer` que chega do checkout costuma vir
         // PARCIAL (sem endereço do cliente, às vezes sem PO/comments). Buscar a linha

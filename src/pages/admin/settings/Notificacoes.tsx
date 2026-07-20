@@ -589,8 +589,15 @@ export default function Notificacoes() {
     const { data: pedido } = await sb.from('pedidos').select('id').order('created_at', { ascending: false }).limit(1).maybeSingle();
     if (!pedido?.id) { toast.error('No orders found to preview. Place a test order first.'); setPdfPreviewing(false); return; }
     const { data, error } = await sb.functions.invoke('generate-pdf', { body: { pedido_id: pedido.id } });
-    if (error || !data?.html) toast.error('Failed to generate preview: ' + (error?.message || 'unknown error'));
-    else setPdfPreviewHtml(data.html);
+    // Abre o PDF REAL (o MESMO que vai anexado no email) numa nova aba.
+    if (error || !data?.pdf_base64) {
+      toast.error('Failed to generate preview: ' + (error?.message || data?.error || 'unknown error'));
+    } else {
+      const bytes = Uint8Array.from(atob(data.pdf_base64), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
     setPdfPreviewing(false);
   }
 
@@ -883,54 +890,21 @@ export default function Notificacoes() {
             )}
           </Card>
 
-          {/* Order PDF Template */}
+          {/* Order PDF — o PDF anexado é gerado por código (layout B2BWave, com a
+              logo acima). NÃO é editável por HTML; este card só PRÉ-VISUALIZA o
+              PDF REAL que vai no email. */}
           <Card className="p-4 space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <p className="font-medium flex items-center gap-2"><FileText className="w-4 h-4" /> Order PDF Template</p>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="gap-1.5" onClick={handlePdfPreview} disabled={pdfPreviewing}>
-                  <Eye className="w-3.5 h-3.5" /> {pdfPreviewing ? 'Loading...' : 'Preview'}
-                </Button>
-                <Button variant="outline" size="sm" className="gap-1.5 text-destructive" onClick={handlePdfReset}>
-                  <RefreshCw className="w-3.5 h-3.5" /> Reset to default
-                </Button>
-                <Button size="sm" className="gap-1.5" onClick={handlePdfSave} disabled={pdfSaving}>
-                  <Save className="w-3.5 h-3.5" /> {pdfSaving ? 'Saving...' : 'Save PDF Template'}
-                </Button>
-              </div>
+              <p className="font-medium flex items-center gap-2"><FileText className="w-4 h-4" /> Order PDF (attached to the email)</p>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={handlePdfPreview} disabled={pdfPreviewing}>
+                <Eye className="w-3.5 h-3.5" /> {pdfPreviewing ? 'Loading...' : 'Preview PDF'}
+              </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              HTML layout used for the order PDF (currently the admin's print/preview — not yet attached
-              to the customer email automatically). Leave blank to use the system default.
+              This is the <strong>exact PDF</strong> attached to the order confirmation email — generated
+              automatically (company header, logo, order details). Click <strong>Preview PDF</strong> to open
+              it (uses the most recent order). Layout changes are done in code; ask your developer.
             </p>
-            <textarea
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[300px]"
-              value={pdfTemplate} onChange={(e) => setPdfTemplate(e.target.value)} spellCheck={false}
-              placeholder="Leave blank to use the system default template. Paste full HTML here to customize..."
-            />
-            {pdfTemplate !== pdfOriginal && (
-              <p className="text-xs text-amber-600">Unsaved changes — click Save PDF Template to apply.</p>
-            )}
-            <details className="text-xs text-muted-foreground">
-              <summary className="cursor-pointer select-none">Available variables</summary>
-              <div className="grid gap-1 sm:grid-cols-2 mt-2">
-                {PDF_VARIABLES.map((v) => (
-                  <div key={v.var} className="flex items-center gap-2">
-                    <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">{v.var}</code>
-                    <span>{v.desc}</span>
-                  </div>
-                ))}
-              </div>
-            </details>
-            {pdfPreviewHtml && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium">Preview (most recent order)</p>
-                  <Button variant="ghost" size="sm" onClick={() => setPdfPreviewHtml('')}>Close</Button>
-                </div>
-                <iframe srcDoc={pdfPreviewHtml} className="w-full rounded border border-border" style={{ height: 600 }} title="PDF Preview" />
-              </div>
-            )}
           </Card>
 
           {/* Todos os outros emails do sistema — editor rico + assunto + preview por tipo.
