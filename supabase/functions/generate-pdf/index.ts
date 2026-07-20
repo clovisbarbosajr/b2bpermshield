@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.2";
+import { generateOrderPdf } from "../_shared/pdfGenerator.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -335,12 +336,33 @@ Deno.serve(async (req) => {
         : "",
     };
 
-    // Use custom template from DB or build default
-    const html = cfg?.pdf_order_template
-      ? applyCustomTemplate(cfg.pdf_order_template, data)
-      : buildDefaultTemplate(data);
+    // ── PREVIEW = ANEXO: usa o MESMO gerador pdf-lib do email (generateOrderPdf).
+    // Antes o preview era HTML próprio e divergia do PDF anexado. Agora é
+    // idêntico byte a byte porque é a MESMA função. Devolve o PDF em base64. ──
+    const pdfItems = (itens ?? []).map((i: any) => ({
+      sku: i.sku ?? "", name: i.nome_produto ?? "",
+      qty: Number(i.quantidade ?? 0), price: Number(i.preco_unitario ?? 0), total: Number(i.subtotal ?? 0),
+    }));
+    const pdfBytes = await generateOrderPdf({
+      orderNumber: data.orderNumber, orderDate: data.orderDate,
+      poNumber: data.poNumber, deliveryDate: data.deliveryDate,
+      customerName: cliente?.empresa || cliente?.nome || "",
+      customerContact: cliente?.empresa && cliente?.nome ? cliente.nome : "",
+      customerEmail: cliente?.email ?? "", customerPhone: cliente?.telefone ?? "",
+      customerAddress,
+      companyName, companyAddress, companyEmail,
+      logoUrl: logoCfg.email_logo_url ?? undefined,
+      logoPosition: (logoCfg.email_logo_position as "left" | "center" | "right") ?? "left",
+      items: pdfItems,
+      subtotal: Number(pedido.subtotal ?? 0), discount: Number(pedido.desconto ?? 0),
+      shipping: Number(pedido.shipping_costs ?? 0), tax: Number(pedido.sales_tax ?? 0),
+      grossTotal: Number(pedido.total ?? 0), notes: pedido.observacoes ?? "",
+    });
+    // base64 sem Buffer
+    let binary = ""; for (let i = 0; i < pdfBytes.length; i++) binary += String.fromCharCode(pdfBytes[i]);
+    const pdfBase64 = btoa(binary);
 
-    return new Response(JSON.stringify({ html }), {
+    return new Response(JSON.stringify({ pdf_base64: pdfBase64, filename: `order-${data.orderNumber}.pdf` }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 

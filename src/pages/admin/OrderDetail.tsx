@@ -393,8 +393,16 @@ const OrderDetail = () => {
     try {
       const { data, error } = await supabase.functions.invoke("generate-pdf", { body: { pedido_id: order.id } });
       if (error) throw error;
-      const win = window.open("", "_blank");
-      if (win) { win.document.write(data.html); win.document.close(); setTimeout(() => win.print(), 500); }
+      // Abre o PDF REAL (o MESMO que vai anexado no email) numa nova aba.
+      if (data?.pdf_base64) {
+        const bytes = Uint8Array.from(atob(data.pdf_base64), (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } else {
+        toast.error("PDF not generated.");
+      }
     } catch (err: any) {
       toast.error("Error generating PDF: " + (err.message ?? ""));
     }
