@@ -842,6 +842,10 @@ Deno.serve(async (req) => {
         companyName: config?.nome_empresa || COMPANY_NAME,
       }, `Order #${order.numero || order.id} status update – ${config?.nome_empresa || COMPANY_NAME}`,
         templateOrderStatusChange(order, customer, newStatus)));
+      // Anexa o PDF ATUALIZADO — ao editar/mudar status a ordem vai com o PDF novo.
+      // buildOrderPdf hidrata pedido+itens do banco pelo order.id, então reflete
+      // as últimas mudanças (itens, PO, tracking, totais) mesmo sem passar items.
+      orderPdfAttachment = await buildOrderPdf(order, customer, []);
     } else if (type === "rejection") {
       // Customer rejected — notify customer
       if (config?.email_on_rejection === false && !force) {
