@@ -36,6 +36,9 @@ const Cadastro = () => {
     } else {
       setSent(true);
       toast.success("Check your email to confirm your registration");
+      // Cria a ficha PENDENTE na hora (server-side) pra o admin ver/aprovar SEM
+      // esperar o 1º login do cliente. Aguarda pra garantir que grava antes de sair.
+      await supabase.functions.invoke("register-customer", { body: { email, nome, empresa } }).catch(() => {});
       // Fire-and-forget emails: welcome to customer + notify admin
       import("@/integrations/supabase/client").then(({ supabase }) => {
         // Notify customer

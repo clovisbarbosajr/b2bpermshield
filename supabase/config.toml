@@ -11,3 +11,8 @@ verify_jwt = false
 # X-Cron-Secret p/ teste). Permite forçar um teste sem login admin.
 [functions.notify-dispatch]
 verify_jwt = false
+
+# Auto-cadastro cria a ficha pendente logo após o signUp (ainda sem sessão) —
+# gateway off; a função valida o auth user pelo email e só cria status 'pendente'.
+[functions.register-customer]
+verify_jwt = false
