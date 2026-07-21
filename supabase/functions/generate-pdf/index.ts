@@ -347,7 +347,7 @@ Deno.serve(async (req) => {
       orderNumber: data.orderNumber, orderDate: data.orderDate,
       poNumber: data.poNumber, deliveryDate: data.deliveryDate,
       customerName: cliente?.empresa || cliente?.nome || "",
-      customerContact: cliente?.empresa && cliente?.nome ? cliente.nome : "",
+      customerContact: (cliente?.empresa && cliente?.nome && cliente.nome !== cliente.empresa) ? cliente.nome : "",
       customerEmail: cliente?.email ?? "", customerPhone: cliente?.telefone ?? "",
       customerAddress,
       companyName, companyAddress, companyEmail,

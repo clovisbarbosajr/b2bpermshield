@@ -143,19 +143,33 @@ export async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> 
 
   // Dados da empresa à direita (right-aligned na margem direita) — topo alinhado.
   let ry = y;
+  const companyMaxW = 230; // largura da coluna direita p/ quebrar o endereço
   const companyLine = (t: string, opts: { bold?: boolean; color?: any } = {}) => {
     if (!t) return;
     rightText(t, PAGE_W - MARGIN, ry, { size: opts.bold ? 11 : 9, font: opts.bold ? bold : regular, color: opts.color ?? rgb(0.13, 0.13, 0.13) });
     ry -= 13;
   };
+  // Quebra por LARGURA (right-aligned) — endereço da empresa em várias linhas.
+  const wrapRight = (t: string, maxW: number, size = 9) => {
+    const words = (t || "").split(/\s+/); const lines: string[] = []; let cur = "";
+    for (const w of words) {
+      const test = cur ? `${cur} ${w}` : w;
+      if (regular.widthOfTextAtSize(test, size) > maxW && cur) { lines.push(cur); cur = w; }
+      else cur = test;
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  };
   companyLine(data.companyName || "", { bold: true, color: NAVY });
-  if (data.companyAddress) for (const l of clean(data.companyAddress).split(",").reduce((acc: string[], _p, _i, arr) => acc.length ? acc : [arr.slice(0,2).join(",").trim(), arr.slice(2).join(",").trim()].filter(Boolean), [])) companyLine(l);
+  if (data.companyAddress) for (const l of wrapRight(clean(data.companyAddress), companyMaxW)) companyLine(l);
   if (data.companyEmail) companyLine(data.companyEmail, { color: rgb(0.16, 0.5, 0.74) });
 
-  // Campos da esquerda, na ordem da imagem.
+  // Campos da esquerda, na ordem da imagem. Customer = EMPRESA; Contact = pessoa
+  // (só aparece quando há nome de contato distinto da empresa) — "respeita a tag".
   field("Order", String(data.orderNumber || ""), { bold: true });
   field("PO", data.poNumber || "");
   field("Customer", data.customerName || "");
+  if (data.customerContact) field("Contact", data.customerContact);
   field("Address", addr);
   field("Email", data.customerEmail || "");
   field("Date", data.orderDate || "");

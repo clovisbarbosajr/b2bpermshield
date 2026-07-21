@@ -753,7 +753,7 @@ Deno.serve(async (req) => {
           orderNumber: String(ord.numero ?? ord.id ?? ""),
           orderDate: ord.created_at ? new Date(ord.created_at).toLocaleDateString("en-US") : "",
           poNumber: ord.po_number ?? "", deliveryDate: ord.delivery_date ? new Date(ord.delivery_date).toLocaleDateString("en-US") : "",
-          customerName: cust.empresa || cust.nome || "", customerContact: cust.empresa && cust.nome ? cust.nome : "",
+          customerName: cust.empresa || cust.nome || "", customerContact: (cust.empresa && cust.nome && cust.nome !== cust.empresa) ? cust.nome : "",
           customerEmail: cust.email ?? "", customerPhone: cust.telefone ?? "",
           customerAddress,
           companyName: config?.nome_empresa || COMPANY_NAME,
