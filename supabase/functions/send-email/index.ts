@@ -93,7 +93,7 @@ async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
   if (data.companyEmail) companyLine(data.companyEmail, { color: rgb(0.16, 0.5, 0.74) });
   field("Order", String(data.orderNumber || ""), { bold: true });
   field("PO", data.poNumber || "");
-  field("Customer", data.customerName || "");
+  field("Company", data.customerName || "");
   if (data.customerContact) field("Contact", data.customerContact);
   field("Address", addr);
   field("Email", data.customerEmail || "");
@@ -147,7 +147,7 @@ async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
   // CARIMBO DE VERSÃO (diagnóstico): se este marcador aparecer no PDF do email,
   // o deploy do send-email pegou o código novo. Se NÃO aparecer, o deploy está
   // stale (Lovable não redeployou). Remover depois de confirmado.
-  rightText("layout 0721b", _PW - _MG, footerY - 12, { size: 7, color: _GRAY });
+  rightText("layout 0721c", _PW - _MG, footerY - 12, { size: 7, color: _GRAY });
   return await pdfDoc.save();
 }
 // ─── fim do gerador embutido ─────────────────────────────────────────────────
