@@ -56,16 +56,22 @@ const Carrinho = () => {
     persistSaved(savedItems.filter((s) => s.produto_id !== produto_id));
   };
 
-  // Check product availability in real time
+  // Disponibilidade em TEMPO REAL — não pode ter risco de comprar com estoque
+  // faltando. Re-checa: ao mudar o carrinho, a cada 10s (polling), ao VOLTAR pra
+  // aba, e via Supabase Realtime (mudança de estoque dos produtos do carrinho).
+  // O guard FINAL é o trigger de reserva no banco (rejeita no submit), isto é a
+  // camada de aviso pra bloquear ANTES.
   useEffect(() => {
-    if (items.length === 0) { setUnavailableItems(new Set()); return; }
+    if (items.length === 0) { setUnavailableItems(new Set()); setInsufficientItems(new Map()); return; }
+    const ids = items.map(i => i.produto_id);
+    let cancelled = false;
+
     const check = async () => {
-      const ids = items.map(i => i.produto_id);
       const [{ data: prods }, { data: statuses }] = await Promise.all([
         supabase.from("produtos").select("id, estoque_total, estoque_reservado, status_produto").in("id", ids),
         supabase.from("product_statuses").select("nome, permite_comprar"),
       ]);
-      if (!prods || !statuses) return;
+      if (cancelled || !prods || !statuses) return;
       const statusMap = new Map(statuses.map(s => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
       const blocked = new Set<string>();
       const insufficient = new Map<string, number>();
@@ -87,7 +93,24 @@ const Carrinho = () => {
       setUnavailableItems(blocked);
       setInsufficientItems(insufficient);
     };
+
     check();
+    const interval = setInterval(check, 10000);
+    const onFocus = () => { if (document.visibilityState !== "hidden") check(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const channel = supabase
+      .channel(`cart-stock-${ids.length}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "produtos", filter: `id=in.(${ids.join(",")})` }, () => check())
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      supabase.removeChannel(channel);
+    };
   }, [items]);
 
   useEffect(() => {

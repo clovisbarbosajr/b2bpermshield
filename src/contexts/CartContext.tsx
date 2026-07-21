@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export type CartItem = {
@@ -56,6 +56,10 @@ export const useCart = () => useContext(CartContext);
 export const CartProvider = ({ children }: { children: ReactNode }) => {
   const [userId, setUserId] = useState<string | null>(null);
   const [items, setItems] = useState<CartItem[]>([]);
+  // Só persiste DEPOIS que o carrinho do usuário foi hidratado do localStorage.
+  // Sem isto, o [] inicial podia sobrescrever o carrinho salvo durante a corrida
+  // do auth (causa do "itens somem ao sair e voltar").
+  const hydratedRef = useRef(false);
 
   // On auth state change: switch cart to the logged-in user's cart, clear on logout
   useEffect(() => {
@@ -63,6 +67,7 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
       const uid = session?.user?.id ?? null;
       setUserId(uid);
       setItems(loadCart(uid ? storageKey(uid) : ANON_KEY));
+      hydratedRef.current = true;
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -76,13 +81,15 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
         // New user logged in — load their own cart
         setItems(loadCart(storageKey(uid)));
       }
+      hydratedRef.current = true;
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // Persist to localStorage whenever cart changes
+  // Persist to localStorage whenever cart changes — só após a hidratação inicial.
   useEffect(() => {
+    if (!hydratedRef.current) return;
     const key = userId ? storageKey(userId) : ANON_KEY;
     try {
       localStorage.setItem(key, JSON.stringify(items));

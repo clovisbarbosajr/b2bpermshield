@@ -28,7 +28,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChevronRight, Lock } from "lucide-react";
+import { ChevronRight, Lock, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -88,6 +88,9 @@ const Checkout = () => {
   const [stripeReady, setStripeReady] = useState(false);
   const [stripeError, setStripeError] = useState("");
   const [shippingCost, setShippingCost] = useState(0);
+  // Itens que esgotaram/ficaram insuficientes enquanto o cliente está no checkout
+  // (aviso proativo — o submit e o trigger do banco são os guards finais).
+  const [outOfStock, setOutOfStock] = useState<string[]>([]);
   const orderPlacedRef = useRef(false); // evita o redirect de "carrinho vazio" após finalizar
   const stripeRef = useRef<any>(null);
   const cardElementRef = useRef<any>(null);
@@ -414,6 +417,49 @@ const Checkout = () => {
     // Fallback to option's flat preco
     setShippingCost(Number(opt.preco) || 0);
   }, [shippingId, shippingOptions, total, selectedEndereco]);
+
+  // Aviso PROATIVO de estoque no checkout — se um item esgotar enquanto o cliente
+  // está aqui, desabilita o botão ANTES do clique. Polling 10s + realtime + foco.
+  // (O submit re-valida e o trigger do banco é o guard final — 3 camadas.)
+  useEffect(() => {
+    if (items.length === 0) { setOutOfStock([]); return; }
+    const ids = items.map(i => i.produto_id);
+    let cancelled = false;
+    const check = async () => {
+      const [{ data: prods }, { data: statuses }] = await Promise.all([
+        supabase.from("produtos").select("id, estoque_total, estoque_reservado, status_produto").in("id", ids),
+        supabase.from("product_statuses").select("nome, permite_comprar"),
+      ]);
+      if (cancelled || !prods || !statuses) return;
+      const statusMap = new Map(statuses.map((s: any) => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
+      const blocked: string[] = [];
+      for (const item of items) {
+        const prod = prods.find((p: any) => p.id === item.produto_id);
+        if (!prod) continue;
+        const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
+        const normalized = (nameMap[prod.status_produto || "disponivel"] || prod.status_produto || "").toLowerCase();
+        const canBuy = statusMap.get(normalized) ?? true;
+        const isPreOrder = normalized === "pre-order";
+        const disponivel = prod.estoque_total - prod.estoque_reservado;
+        if (!canBuy || (!isPreOrder && disponivel < item.quantidade)) blocked.push(item.nome);
+      }
+      setOutOfStock(blocked);
+    };
+    check();
+    const interval = setInterval(check, 10000);
+    const onFocus = () => { if (document.visibilityState !== "hidden") check(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const channel = supabase.channel(`checkout-stock-${ids.length}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "produtos", filter: `id=in.(${ids.join(",")})` }, () => check())
+      .subscribe();
+    return () => {
+      cancelled = true; clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      supabase.removeChannel(channel);
+    };
+  }, [items]);
 
   const handleSubmit = async () => {
     if (!clienteId) {
@@ -913,9 +959,17 @@ const Checkout = () => {
           </div>
         </div>
 
+        {outOfStock.length > 0 && (
+          <div className="flex items-center justify-end mb-2">
+            <p className="text-sm text-destructive flex items-center gap-1 text-right">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              Sold out / insufficient stock: <strong>{outOfStock.join(", ")}</strong>. Go back to the cart to remove or save for later.
+            </p>
+          </div>
+        )}
         <div className="flex items-center justify-end gap-3">
           <Button variant="ghost" onClick={() => navigate("/portal/carrinho")}>BACK</Button>
-          <Button onClick={handleSubmit} disabled={loading || (payByCard && !stripeReady)}>
+          <Button onClick={handleSubmit} disabled={loading || (payByCard && !stripeReady) || outOfStock.length > 0}>
             {loading
               ? payByCard ? "Processing payment..." : "Sending..."
               : payByCard
