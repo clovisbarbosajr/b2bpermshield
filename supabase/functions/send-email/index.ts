@@ -615,31 +615,80 @@ Deno.serve(async (req) => {
     // `toOverride` (usado pelo "Resend" da tela de pedido) manda o email de
     // pedido pra um destinatário ARBITRÁRIO — por isso exige admin, igual aos
     // tipos privilegiados. Sem isso viraria relay de spam com a anon key.
-    const PRIVILEGED_TYPES = new Set(["raw", "set_password", "magic_link", "admin_alert"]);
-    if (PRIVILEGED_TYPES.has(type) || body.toOverride) {
-      const authHeader = req.headers.get("Authorization") ?? "";
-      const cronSecret = Deno.env.get("CRON_SECRET");
-      const viaCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
-      // chamada server-to-server (dispatch.ts) usa a service-role key como bearer
-      const viaService = !!Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
-        && authHeader === `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`;
-      let isAdmin = viaCron || viaService;
-      if (!isAdmin) {
-        const userClient = createClient(
-          Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-          { global: { headers: { Authorization: authHeader } } },
-        );
-        const { data: { user } } = await userClient.auth.getUser();
-        if (user) {
-          const { data: adminRow } = await adminClient.from("user_roles")
-            .select("role").eq("user_id", user.id).eq("role", "admin").maybeSingle();
-          isAdmin = !!adminRow;
-        }
+    // ── Contexto do chamador (computado UMA vez, reusado nas travas abaixo) ──
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    const viaCron = !!cronSecret && req.headers.get("x-cron-secret") === cronSecret;
+    // chamada server-to-server (register-customer, b2bwave-sync, self-alert) usa a
+    // service-role key como bearer.
+    const viaService = !!Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")
+      && authHeader === `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`;
+    let isAdmin = viaCron || viaService;
+    let callerEmail = "";            // email do usuário LOGADO (se houver sessão)
+    let isLoggedIn = viaCron || viaService;
+    if (!isAdmin) {
+      const userClient = createClient(
+        Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+        { global: { headers: { Authorization: authHeader } } },
+      );
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        isLoggedIn = true;
+        callerEmail = (user.email ?? "").trim().toLowerCase();
+        const { data: adminRow } = await adminClient.from("user_roles")
+          .select("role").eq("user_id", user.id).eq("role", "admin").maybeSingle();
+        isAdmin = !!adminRow;
       }
-      if (!isAdmin) {
-        return new Response(JSON.stringify({ error: "Not authorized for this email type" }),
+    }
+    const isPrivilegedCaller = viaCron || viaService || isAdmin;
+
+    // ── SEGURANÇA 1: tipos privilegiados (email 100% arbitrário / links de auth)
+    //    e `toOverride` (destino arbitrário do Resend) só admin/cron/service.
+    const PRIVILEGED_TYPES = new Set(["raw", "set_password", "magic_link", "admin_alert"]);
+    if ((PRIVILEGED_TYPES.has(type) || body.toOverride) && !isPrivilegedCaller) {
+      return new Response(JSON.stringify({ error: "Not authorized for this email type" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // ── SEGURANÇA 2 (anti-relay): tipos de NOTIFICAÇÃO com destinatário vindo do
+    //    body. A anon key está no bundle do front, então sem trava qualquer um
+    //    mandava email com a marca/domínio da empresa pra qualquer vítima.
+    //    • customer-facing (destino = email do cliente/body): só admin/service/cron,
+    //      OU o próprio usuário logado mandando pra ELE MESMO (checkout do cliente).
+    //    • admin-facing (destino = emails do admin da config, não do body): exige
+    //      ao menos um chamador logado/servidor (evita spam anônimo ao admin).
+    const CUSTOMER_FACING = new Set([
+      "new_order_customer", "order_status_change", "approval", "waiting_approval",
+      "rejection", "product_available",
+    ]);
+    const ADMIN_FACING = new Set(["new_order_admin", "new_registration_admin"]);
+    const bodyRecipient = String(body.customerEmail ?? body.customer?.email ?? body.order?.customer?.email ?? "").trim().toLowerCase();
+    if (CUSTOMER_FACING.has(type) && !isPrivilegedCaller) {
+      // Aceita se o destino for o email de LOGIN do chamador OU o email da FICHA
+      // dele em `clientes` (cobre cliente cujo email de cadastro difere do login,
+      // sub-usuário, migrado). Só bloqueia relay pra terceiro de verdade.
+      const ownEmails = new Set<string>();
+      if (callerEmail) ownEmails.add(callerEmail);
+      if (isLoggedIn) {
+        try {
+          const uc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+            { global: { headers: { Authorization: authHeader } } });
+          const { data: { user: u2 } } = await uc.auth.getUser();
+          if (u2) {
+            const { data: cliRow } = await adminClient.from("clientes")
+              .select("email").eq("user_id", u2.id).maybeSingle();
+            if (cliRow?.email) ownEmails.add(String(cliRow.email).trim().toLowerCase());
+          }
+        } catch (_e) { /* mantém só o email de login */ }
+      }
+      if (!bodyRecipient || !ownEmails.has(bodyRecipient)) {
+        return new Response(JSON.stringify({ error: "Not authorized: recipient must be your own account" }),
           { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
+    }
+    if (ADMIN_FACING.has(type) && !isLoggedIn) {
+      return new Response(JSON.stringify({ error: "Not authorized for this email type" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
     // ── Route by email type ──────────────────────────────────────────────────

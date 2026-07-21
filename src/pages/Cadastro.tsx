@@ -36,23 +36,12 @@ const Cadastro = () => {
     } else {
       setSent(true);
       toast.success("Check your email to confirm your registration");
-      // Cria a ficha PENDENTE na hora (server-side) pra o admin ver/aprovar SEM
-      // esperar o 1º login do cliente. Aguarda pra garantir que grava antes de sair.
+      // register-customer (server-side) faz TUDO do cadastro: cria a ficha PENDENTE
+      // (pro admin ver/aprovar sem esperar o 1º login) E dispara as notificações
+      // (email pro cliente + email/SMS pro admin). Feito no servidor porque no
+      // signup o cliente ainda NÃO tem sessão — o frontend cairia na trava anti-relay
+      // e no 401 do notify-dispatch. Aguarda pra garantir que roda antes de sair.
       await supabase.functions.invoke("register-customer", { body: { email, nome, empresa } }).catch(() => {});
-      // Fire-and-forget emails: welcome to customer + notify admin
-      import("@/integrations/supabase/client").then(({ supabase }) => {
-        // Notify customer
-        supabase.functions.invoke("send-email", {
-          body: { type: "waiting_approval", customerEmail: email },
-        }).catch(() => {});
-        // Notify admin
-        supabase.functions.invoke("send-email", {
-          body: { type: "new_registration_admin", customerEmail: email, customerName: nome, empresa },
-        }).catch(() => {});
-        // NÃO chamar notify-dispatch new_customer aqui — o cliente ainda não tem
-        // sessão no signup e o notify-dispatch exige login (dava 401 silencioso).
-        // O SMS/notificação new_customer agora sai do register-customer (server-side).
-      });
     }
   };
 
