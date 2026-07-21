@@ -97,9 +97,12 @@ const Checkout = () => {
     const fetch = async () => {
       if (!user && !impersonatedCustomer) return;
 
+      // Traz JÁ os campos de endereço + grupo de imposto na MESMA query — evita
+      // 2 buscas redundantes depois (endereço da empresa e tax_customer_group_id).
+      const cols = "id, nome, empresa, email, telefone, parent_customer_id, can_confirm_order, endereco, cidade, estado, cep, tax_customer_group_id";
       const clienteQuery = impersonatedCustomer?.id
-        ? supabase.from("clientes").select("id, nome, empresa, email, telefone, parent_customer_id, can_confirm_order").eq("id", impersonatedCustomer.id).maybeSingle()
-        : supabase.from("clientes").select("id, nome, empresa, email, telefone, parent_customer_id, can_confirm_order").eq("user_id", user!.id).maybeSingle();
+        ? supabase.from("clientes").select(cols).eq("id", impersonatedCustomer.id).maybeSingle()
+        : supabase.from("clientes").select(cols).eq("user_id", user!.id).maybeSingle();
 
       const { data: cliente } = await clienteQuery;
 
@@ -113,13 +116,20 @@ const Checkout = () => {
         // Endereço puxa da conta da EMPRESA: sub-usuário usa os endereços do pai.
         const addressClienteId = (cliente as any).parent_customer_id ?? cliente.id;
         setAddressOwnerId(addressClienteId);
-        const { data: ends } = await supabase.from("enderecos").select("*").eq("cliente_id", addressClienteId);
+        // Endereços salvos + (só se for sub-usuário) o cadastro do PAI, em PARALELO.
+        // Pra conta própria, o endereço da empresa já veio na query do cliente acima
+        // → zero busca extra. Antes eram 2 buscas SEQUENCIAIS aqui (lentidão).
+        const isSub = !!(cliente as any).parent_customer_id;
+        const [{ data: ends }, parentAcct] = await Promise.all([
+          supabase.from("enderecos").select("*").eq("cliente_id", addressClienteId),
+          isSub
+            ? supabase.from("clientes").select("endereco, cidade, estado, cep").eq("id", addressClienteId).maybeSingle()
+            : Promise.resolve({ data: cliente } as any),
+        ]);
         setEnderecos(ends ?? []);
-        // Endereço cadastrado na CONTA da empresa (clientes) — sempre oferecido como opção.
-        const { data: acct } = await supabase.from("clientes")
-          .select("endereco, cidade, estado").eq("id", addressClienteId).maybeSingle();
+        const acct: any = (parentAcct as any)?.data ?? cliente;
         const companyAddr = acct?.endereco && acct?.cidade
-          ? { logradouro: acct.endereco, complemento: "", cidade: acct.cidade, estado: acct.estado ?? "", cep: (acct as any).cep ?? "" }
+          ? { logradouro: acct.endereco, complemento: "", cidade: acct.cidade, estado: acct.estado ?? "", cep: acct.cep ?? "" }
           : null;
         setCompanyAddress(companyAddr);
         const principal = ends?.find((e: any) => e.principal);
@@ -148,15 +158,18 @@ const Checkout = () => {
       }
       const canSee = (o: any, allowed: Set<string>) => !o.privado || allowed.has(o.id);
 
-      const { data: ship } = await supabase.from("shipping_options").select("*").eq("ativo", true).order("ordem");
+      // Frete e pagamento em PARALELO (eram 2 buscas sequenciais).
+      const [{ data: ship }, { data: pay }] = await Promise.all([
+        supabase.from("shipping_options").select("*").eq("ativo", true).order("ordem"),
+        supabase.from("payment_options").select("*").eq("ativo", true).order("ordem"),
+      ]);
       setShippingOptions((ship ?? []).filter((s: any) => s.show_to_customers !== false && canSee(s, allowedShip)));
-      const { data: pay } = await supabase.from("payment_options").select("*").eq("ativo", true).order("ordem");
       setPaymentOptions((pay ?? []).filter((p: any) => canSee(p, allowedPay)));
 
       // Compute tax using rules: match customer's tax_customer_group_id
       if (cliente) {
-        const { data: clienteData } = await supabase.from("clientes").select("tax_customer_group_id").eq("id", cliente.id).maybeSingle();
-        const customerGroupId = clienteData?.tax_customer_group_id;
+        // tax_customer_group_id já veio na query do cliente (sem busca extra).
+        const customerGroupId = (cliente as any).tax_customer_group_id;
 
         // Get default tax class (Taxable)
         const { data: defaultClass } = await supabase.from("tax_classes").select("id").eq("is_default", true).maybeSingle();
