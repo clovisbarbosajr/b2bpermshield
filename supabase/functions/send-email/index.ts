@@ -863,7 +863,11 @@ Deno.serve(async (req) => {
         if (cliId) {
           const { data: cli } = await adminClient.from("clientes")
             .select("nome, empresa, email, endereco, endereco2, cidade, estado, cep, telefone").eq("id", cliId).maybeSingle();
-          if (cli) cust = { ...cli, ...customer, email: customer?.email ?? cli.email };
+          // Banco é AUTORITATIVO p/ empresa/nome/endereço: o `customer` que chega do
+          // checkout costuma vir com empresa = nome da pessoa (bug histórico) e
+          // sobrescrevia o valor correto. Merge invertido → cli vence; só o email
+          // do caller tem prioridade (a ordem pode usar outro contato).
+          if (cli) cust = { ...customer, ...cli, email: customer?.email ?? cli.email };
         }
         // Endereço de ENTREGA do pedido (tem prioridade sobre o do cadastro).
         let ship: any = null;

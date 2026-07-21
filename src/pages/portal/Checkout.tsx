@@ -68,6 +68,7 @@ const Checkout = () => {
   const [shippingId, setShippingId] = useState("");
   const [paymentId, setPaymentId] = useState("");
   const [customerName, setCustomerName] = useState("");
+  const [customerCompany, setCustomerCompany] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [comments, setComments] = useState("");
   const [poNumber, setPoNumber] = useState("");
@@ -112,6 +113,7 @@ const Checkout = () => {
       if (cliente) {
         setClienteId(cliente.id);
         setCustomerName(cliente.nome || cliente.empresa || "");
+        setCustomerCompany(cliente.empresa || "");
         setCustomerEmail(cliente.email || "");
         setCustomerPhone((cliente as any).telefone || "");
         // Sub-customer sem permissão de confirmar não finaliza (espelha a trava do banco).
@@ -655,7 +657,7 @@ const Checkout = () => {
           .update({ is_paid: true, payment_intent_id: paymentIntent.id } as any)
           .eq("id", pedido.id);
         // Notificações em BACKGROUND (keepalive) — o cliente NÃO espera os emails.
-        const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerName };
+        const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerCompany };
         const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
         await fireOrderNotifications([
           { fn: "send-email", body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } },
@@ -681,7 +683,7 @@ const Checkout = () => {
     }
 
     // Notificações em BACKGROUND (keepalive) — o cliente NÃO espera os emails.
-    const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerName };
+    const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerCompany };
     const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
     await fireOrderNotifications([
       { fn: "send-email", body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } },
