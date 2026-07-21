@@ -16,6 +16,18 @@ interface PdfOrderData {
 const _PW = 612, _PH = 792, _MG = 40;
 const _NAVY = rgb(0.102, 0.176, 0.353), _GRAY = rgb(0.4, 0.4, 0.4), _LIGHT = rgb(0.92, 0.93, 0.96);
 function _fmtUSD(n: number): string { return "$" + (n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+// Endereço da empresa (texto livre "rua, cidade, ST ZIP") → 3 linhas: rua / cidade, estado / zip.
+function _fmtStoreAddress(raw: string): string {
+  const s = (raw || "").trim();
+  if (!s) return "";
+  const zipM = s.match(/\s+(\d{5}(?:-\d{4})?)\s*$/);
+  const zip = zipM ? zipM[1] : "";
+  const body = (zip ? s.slice(0, zipM!.index).replace(/,\s*$/, "") : s).trim();
+  const parts = body.split(",").map((p) => p.trim()).filter(Boolean);
+  let street = body, cityState = "";
+  if (parts.length >= 2) { cityState = parts.slice(-2).join(", "); street = parts.slice(0, -2).join(", "); }
+  return [street, cityState, zip].filter(Boolean).join("\n");
+}
 async function _embedLogo(pdfDoc: PDFDocument, url: string) {
   try {
     const res = await fetch(url); if (!res.ok) return null;
@@ -433,9 +445,8 @@ Deno.serve(async (req) => {
     // Company info from config
     const companyName    = cfg?.nome_empresa    || "Zap Supplies, LLC";
     const companyEmail   = cfg?.email_contato   || "jess@zapsupplies.com";
-    // Endereço da empresa (texto livre): cada segmento (vírgula/linha) vira uma linha.
-    const companyAddress = ((cfg?.endereco as string | undefined) || "1800 N Powerline Rd Ste A6, POMPANO BEACH FL 33069")
-      .split(/[\n,]/).map((s) => s.trim()).filter(Boolean).join("\n");
+    // Endereço da empresa (texto livre) → rua / cidade, estado / zip.
+    const companyAddress = _fmtStoreAddress((cfg?.endereco as string | undefined) || "1800 N Powerline Rd Ste A6, POMPANO BEACH FL 33069");
 
     // Customer address organizado em 3 linhas: rua / cidade, estado / zip.
     const customerAddress = endereco

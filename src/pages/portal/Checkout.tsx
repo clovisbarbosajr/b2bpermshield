@@ -193,7 +193,7 @@ const Checkout = () => {
             if (rate) {
               const pct = Number(rate.percentual) || 0;
               setTaxRate(pct);
-              setSalesTax(total * pct / 100);
+              // salesTax é derivado no efeito [total, discount, taxRate] — não calcula aqui.
             }
           }
         } else if (taxClassId) {
@@ -210,7 +210,7 @@ const Checkout = () => {
               if (rate) {
                 const pct = Number(rate.percentual) || 0;
                 setTaxRate(pct);
-                setSalesTax(total * pct / 100);
+                // salesTax é derivado no efeito [total, discount, taxRate] — não calcula aqui.
               }
             }
           }
@@ -227,7 +227,12 @@ const Checkout = () => {
     };
 
     fetch();
-  }, [user, impersonatedCustomer, total]);
+    // NÃO depende de `total`: a busca de rede (cliente, endereços, frete,
+    // pagamento, taxa, config) roda UMA vez. O VALOR do imposto reage ao total
+    // sozinho no efeito derivado abaixo (setSalesTax por total/discount/taxRate).
+    // Antes `total` estava aqui e re-disparava a busca inteira a cada mudança do
+    // carrinho — era a lentidão do endereço voltando.
+  }, [user, impersonatedCustomer]);
 
   const handleEnderecoChange = (id: string) => {
     setEnderecoId(id);

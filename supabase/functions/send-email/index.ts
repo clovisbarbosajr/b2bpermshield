@@ -23,6 +23,20 @@ interface PdfOrderData {
 const _PW = 612, _PH = 792, _MG = 40;
 const _NAVY = rgb(0.102, 0.176, 0.353), _GRAY = rgb(0.4, 0.4, 0.4), _LIGHT = rgb(0.92, 0.93, 0.96);
 function _fmtUSD(n: number): string { return "$" + (n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+// Endereço da empresa vem de um ÚNICO campo de texto livre (configuracoes.endereco),
+// tipicamente "rua, cidade, ST ZIP". Organiza em 3 linhas — rua / cidade, estado / zip —
+// pra bater com o bloco do cliente. Robusto: sem zip vira 2 linhas; sem vírgula, 1 linha.
+function _fmtStoreAddress(raw: string): string {
+  const s = (raw || "").trim();
+  if (!s) return "";
+  const zipM = s.match(/\s+(\d{5}(?:-\d{4})?)\s*$/);
+  const zip = zipM ? zipM[1] : "";
+  const body = (zip ? s.slice(0, zipM!.index).replace(/,\s*$/, "") : s).trim();
+  const parts = body.split(",").map((p) => p.trim()).filter(Boolean);
+  let street = body, cityState = "";
+  if (parts.length >= 2) { cityState = parts.slice(-2).join(", "); street = parts.slice(0, -2).join(", "); }
+  return [street, cityState, zip].filter(Boolean).join("\n");
+}
 async function _embedLogo(pdfDoc: PDFDocument, url: string) {
   try {
     const res = await fetch(url); if (!res.ok) return null;
@@ -917,7 +931,7 @@ Deno.serve(async (req) => {
           companyName: config?.nome_empresa || COMPANY_NAME,
           // Endereço da empresa (texto livre): cada segmento separado por vírgula/linha
           // vira uma linha própria no PDF → rua / cidade, estado / zip.
-          companyAddress: (config?.endereco || "").split(/[\n,]/).map((s) => s.trim()).filter(Boolean).join("\n"),
+          companyAddress: _fmtStoreAddress(config?.endereco || ""),
           companyEmail: config?.email_contato || COMPANY_EMAIL,
           logoUrl: customTemplateCfg.email_logo_url ?? undefined,
           logoPosition: (customTemplateCfg.email_logo_position as "left" | "center" | "right") ?? "left",
