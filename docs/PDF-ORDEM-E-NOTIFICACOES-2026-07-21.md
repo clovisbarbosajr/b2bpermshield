@@ -54,16 +54,23 @@ SEMÂNTICA.
 - **Customer address (esquerda):** montado em `buildOrderPdf` a partir dos
   campos estruturados do endereço de entrega/cadastro, em 3 linhas:
   `rua+complemento` / `cidade, estado` / `zip`, juntadas com `\n`.
-- **Company address (direita):** o texto livre de `configuracoes.endereco` é
-  dividido por vírgula/quebra (`split(/[\n,]/)`), um segmento por linha.
+- **Company address (direita):** o texto livre de `configuracoes.endereco`
+  passa pelo helper **`_fmtStoreAddress`** (commit `d74e7ba`), que interpreta o
+  formato US "rua, cidade, ST ZIP" e monta 3 linhas: `rua` / `cidade, estado` /
+  `zip` — batendo com o bloco do cliente. Robusto: sem zip → 2 linhas; sem
+  vírgula → 1 linha; suporta ZIP+4. (Antes era um `split(/[\n,]/)` ingênuo que
+  quebrava em TODA vírgula, separando "Pompano Beach" de "FL".)
 - **Gerador:** `field()` e o bloco da empresa agora respeitam `\n` (quebra
   semântica) e só aplicam wrap por largura como fallback dentro de cada linha.
   Helpers `cleanSeg`/`cleanAddr` preservam o `\n`. Replicado em `send-email` e
   `generate-pdf`.
 
-**Como preencher o endereço da empresa pra sair organizado:** em
-Settings → Profile → aba **Address**, digite separado por VÍRGULA, ex.:
-`1800 N Powerline Rd Ste A6, Pompano Beach FL, 33069` → vira 3 linhas.
+**Como preencher o endereço da empresa:** em Settings → Profile → aba
+**Address**, pode digitar no formato natural US, ex.:
+`1800 N Powerline Rd #5, Pompano Beach, FL 33069`. O `_fmtStoreAddress` separa
+sozinho em rua / cidade, estado / zip. **Onde alterar o formato:** a função
+`_fmtStoreAddress` no topo de `send-email/index.ts` e `generate-pdf/index.ts`
+(as duas cópias precisam ficar iguais).
 
 ---
 
@@ -106,37 +113,64 @@ e segredos `PROJECT_ANON_KEY` / `CRON_SECRET` no Vault.
 
 ---
 
-## 7. PENDENTE / EM INVESTIGAÇÃO: endereço da empresa (bloco direito) vem vazio
+## 7. Endereço da empresa (bloco direito) vinha vazio — RESOLVIDO
 
-**Sintoma:** o endereço no bloco da direita do PDF não aparece.
+**Sintoma (era):** o endereço no bloco da direita do PDF não aparecia.
 
-**Entendimento (21/jul):** o bloco direito lê `configuracoes.endereco`. O PDF
-mostra "PermShield" (= `config.nome_empresa`), que vem da MESMA query que
-também traz `endereco`. Logo, a query funcionou e o `endereco` foi buscado —
-**está VAZIO na linha que o `send-email` leu.** Não é bug de renderização.
+**Causa real:** o campo `configuracoes.endereco` estava simplesmente VAZIO. O
+dono preencheu em Settings → Profile → aba **Address**, salvou, e o valor
+PERSISTIU (recarregou e continuou lá). Ou seja: não era bug de renderização nem
+de múltiplas linhas — era só o campo não preenchido. Com o campo preenchido +
+o parser `_fmtStoreAddress`, o endereço aparece no bloco direito em 3 linhas.
 
-**Duas causas possíveis:**
-1. O campo nunca foi preenchido/salvo em Settings → Profile → aba Address.
-2. **Múltiplas linhas em `configuracoes` + `.limit(1)` sem `ORDER BY`** — salva
-   numa linha, lê de outra. TODAS as leituras de `configuracoes` no sistema
-   usam `.limit(1).maybeSingle()` sem ordenação (Profile, send-email,
-   EmailSettings, OrderDetail, Notificacoes, Configuracoes...), o que é frágil
-   se existir mais de uma linha.
-
-**Teste pra distinguir:** preencher o Address em Settings → Profile, salvar,
-RECARREGAR a página. Se o valor não persiste → múltiplas linhas. Se persiste
-mas o PDF continua vazio → send-email lê outra linha.
-
-**Fragilidade adicional a consolidar:** o endereço da empresa está espalhado em
-DUAS fontes — `configuracoes.endereco` (texto livre, usado pelo PDF e editado
-no Profile) e as colunas estruturadas `company_address/company_city/
-company_state/company_zip` (usadas pelo template HTML do email, mas SEM tela
-que as edite). Convém unificar numa fonte só e adicionar `ORDER BY` (ou
-garantir linha única) nas leituras de `configuracoes`.
+**Fragilidade a consolidar no futuro (não bloqueante):** o endereço da empresa
+está espalhado em DUAS fontes — `configuracoes.endereco` (texto livre, usado
+pelo PDF e editado no Profile) e as colunas estruturadas `company_address/
+company_city/company_state/company_zip` (usadas pelo template HTML do email,
+mas SEM tela que as edite). Convém unificar numa fonte só. Além disso, todas as
+leituras de `configuracoes` usam `.limit(1).maybeSingle()` sem `ORDER BY` — se
+um dia existir mais de uma linha na tabela, é bom garantir linha única ou
+ordenar.
 
 ---
 
-## 8. Nota de infraestrutura
+## 8. Checkout lento pra carregar o endereço — SOLUÇÃO DEFINITIVA
+
+**Sintoma:** ao abrir o checkout, o endereço demorava pra aparecer (a lentidão
+"voltou" depois de já ter sido mexida antes).
+
+**Causa raiz (commit `d74e7ba`):** o `useEffect` que faz TODAS as buscas de
+rede do checkout (cliente, endereços, conta-pai, frete, pagamento, cascata de
+imposto, config do Stripe) tinha **`total`** no array de dependências:
+```js
+}, [user, impersonatedCustomer, total]);
+```
+Como `total` muda a cada alteração do carrinho, a **busca inteira re-executava
+toda vez** — inclusive o endereço, que não depende do total. O `total` só
+estava ali por causa do cálculo do imposto (`salesTax = total * taxRate/100`).
+
+**Por que a correção é segura:** já existe um efeito derivado separado que
+recalcula só o VALOR do imposto quando o carrinho muda:
+```js
+useEffect(() => { setSalesTax((total - discount) * taxRate / 100); },
+         [total, discount, taxRate]);
+```
+Ou seja, a taxa é buscada 1x; o valor do imposto reage sozinho. Então `total`
+era 100% redundante nas deps da busca.
+
+**Correção:**
+- `src/pages/portal/Checkout.tsx`: removido `total` das deps do efeito de busca
+  → passa a rodar 1x (por `[user, impersonatedCustomer]`).
+- Removidos os `setSalesTax(total * pct / 100)` de dentro da busca (o efeito
+  derivado já cuida do valor).
+
+**Onde mexer no futuro:** se adicionar mais buscas no checkout, mantê-las nesse
+efeito de `[user, impersonatedCustomer]` (roda 1x). Qualquer coisa que dependa
+do `total` deve ser um CÁLCULO derivado num efeito próprio, nunca uma busca.
+
+---
+
+## 9. Nota de infraestrutura
 
 O Supabase deste projeto é do **Lovable Cloud** (ref `bnicfvxvyblzzatvursw`) e
 **não abre pelo dashboard do supabase.com**. SQL sempre pelo runner de SQL do
@@ -150,3 +184,26 @@ Ordem padrão: 1º SQL, 2º publish.
 - `5ff7db7` — rótulo "Customer" → "Company" + carimbo 0721c
 - `1ff708b` — CAUSA RAIZ: checkout mandava `empresa` = nome da pessoa
 - `5a3bb5c` — endereço organizado em linhas (rua / cidade, estado / zip)
+- `d74e7ba` — perf checkout (endereço carrega 1x) + `_fmtStoreAddress`
+  (endereço da empresa em 3 linhas a partir de texto livre US)
+
+---
+
+## Guia rápido: "onde mexer" (pra alterar fácil no futuro)
+
+| Quero mudar... | Arquivo(s) |
+|---|---|
+| Layout/campos do PDF da ordem | `generateOrderPdf` em `supabase/functions/send-email/index.ts` (e a cópia em `generate-pdf/index.ts` — manter iguais) |
+| Formato do endereço da empresa | `_fmtStoreAddress` (topo dos dois arquivos acima) |
+| Rótulos (Company/Contact/Address...) | as chamadas `field("...", ...)` no gerador |
+| Carimbo de versão | `rightText("layout 0721c", ...)` no rodapé do gerador |
+| Textos/templates dos emails | funções `template*` em `send-email/index.ts` + aba Notifications (tabela `email_templates`) |
+| Dados da empresa (nome, endereço, email) | Settings → Profile (`configuracoes`: `nome_empresa`, `endereco`, `email_contato`) |
+| Empresa/contato do cliente | cadastro do cliente (`clientes.empresa` = Company, `clientes.nome` = Full Name) |
+| Buscas do checkout | `useEffect` `[user, impersonatedCustomer]` em `Checkout.tsx` (roda 1x) |
+| Gatilhos de SMS | migrations `*_low_stock_trigger.sql` e `*_order_status_notify.sql` |
+
+**Regra de ouro dos dois geradores de PDF:** `send-email/index.ts` e
+`generate-pdf/index.ts` têm o MESMO gerador inline (proposital — evita
+depender de `_shared/`, que o Lovable às vezes não re-bundla). Qualquer
+mudança no PDF precisa ser feita nos DOIS.
