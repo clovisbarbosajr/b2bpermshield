@@ -39,8 +39,9 @@ async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
     text(t, xRight - font.widthOfTextAtSize(t || "", size), yy, opts);
   };
   const leftX = _MG;
-  const clean = (t?: string) => (t || "").split(",").map((s) => s.trim()).filter((s) => s && !["-", "—", "n/a", "na"].includes(s.toLowerCase())).join(", ");
-  const addr = clean(data.customerAddress);
+  const cleanSeg = (t?: string) => (t || "").split(",").map((s) => s.trim()).filter((s) => s && !["-", "—", "n/a", "na"].includes(s.toLowerCase())).join(", ");
+  const cleanAddr = (t?: string) => (t || "").split("\n").map(cleanSeg).filter(Boolean).join("\n");
+  const addr = cleanAddr(data.customerAddress);
   const headerTop = y;
   if (logoImg) {
     const scale = Math.min(200 / logoImg.width, 46 / logoImg.height, 1);
@@ -66,7 +67,9 @@ async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
   };
   const field = (label: string, value: string, opts: { bold?: boolean } = {}) => {
     rightText(label, labelRight, ly, { size: 8, color: rgb(0.42, 0.52, 0.66) });
-    const lines = wrapAt(value || "", valueMax); if (lines.length === 0) lines.push("");
+    const lines: string[] = [];
+    for (const seg of (value || "").split("\n")) { const w = wrapAt(seg, valueMax); if (w.length) lines.push(...w); else lines.push(""); }
+    if (lines.length === 0) lines.push("");
     lines.forEach((l, i) => text(l, valueLeft, ly - i * 12, { size: 9, font: opts.bold ? bold : regular, color: rgb(0.13, 0.13, 0.13) }));
     ly -= 13 + (lines.length - 1) * 12;
   };
@@ -82,7 +85,7 @@ async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
     if (cur) lines.push(cur); return lines;
   };
   companyLine(data.companyName || "", { bold: true, color: _NAVY });
-  if (data.companyAddress) for (const l of wrapRight(clean(data.companyAddress), 230)) companyLine(l);
+  if (data.companyAddress) for (const seg of cleanAddr(data.companyAddress).split("\n")) { if (seg) for (const l of wrapRight(seg, 230)) companyLine(l); }
   if (data.companyEmail) companyLine(data.companyEmail, { color: rgb(0.16, 0.5, 0.74) });
   field("Order", String(data.orderNumber || ""), { bold: true });
   field("PO", data.poNumber || "");
@@ -430,16 +433,17 @@ Deno.serve(async (req) => {
     // Company info from config
     const companyName    = cfg?.nome_empresa    || "Zap Supplies, LLC";
     const companyEmail   = cfg?.email_contato   || "jess@zapsupplies.com";
-    const companyAddress = cfg?.endereco        || "1800 N Powerline Rd Ste A6, POMPANO BEACH FL 33069";
+    // Endereço da empresa (texto livre): cada segmento (vírgula/linha) vira uma linha.
+    const companyAddress = ((cfg?.endereco as string | undefined) || "1800 N Powerline Rd Ste A6, POMPANO BEACH FL 33069")
+      .split(/[\n,]/).map((s) => s.trim()).filter(Boolean).join("\n");
 
-    // Customer address
+    // Customer address organizado em 3 linhas: rua / cidade, estado / zip.
     const customerAddress = endereco
       ? [
-          endereco.logradouro,
-          endereco.complemento,
+          [endereco.logradouro, endereco.complemento].filter(Boolean).join(" "),
           endereco.cidade && endereco.estado ? `${endereco.cidade}, ${endereco.estado}` : (endereco.cidade || endereco.estado),
           endereco.cep,
-        ].filter(Boolean).join(", ")
+        ].filter(Boolean).join("\n")
       : "";
 
     // Items rows HTML

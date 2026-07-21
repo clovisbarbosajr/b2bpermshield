@@ -46,8 +46,11 @@ async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
     text(t, xRight - font.widthOfTextAtSize(t || "", size), yy, opts);
   };
   const leftX = _MG;
-  const clean = (t?: string) => (t || "").split(",").map((s) => s.trim()).filter((s) => s && !["-", "—", "n/a", "na"].includes(s.toLowerCase())).join(", ");
-  const addr = clean(data.customerAddress);
+  const cleanSeg = (t?: string) => (t || "").split(",").map((s) => s.trim()).filter((s) => s && !["-", "—", "n/a", "na"].includes(s.toLowerCase())).join(", ");
+  // Preserva as quebras semânticas (\n) — rua / cidade, estado / zip — só limpando
+  // separadores vazios dentro de cada linha.
+  const cleanAddr = (t?: string) => (t || "").split("\n").map(cleanSeg).filter(Boolean).join("\n");
+  const addr = cleanAddr(data.customerAddress);
   const headerTop = y;
   if (logoImg) {
     const scale = Math.min(200 / logoImg.width, 46 / logoImg.height, 1);
@@ -73,7 +76,10 @@ async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
   };
   const field = (label: string, value: string, opts: { bold?: boolean } = {}) => {
     rightText(label, labelRight, ly, { size: 8, color: rgb(0.42, 0.52, 0.66) });
-    const lines = wrapAt(value || "", valueMax); if (lines.length === 0) lines.push("");
+    // Respeita quebras semânticas (\n) e, dentro de cada uma, faz wrap por largura.
+    const lines: string[] = [];
+    for (const seg of (value || "").split("\n")) { const w = wrapAt(seg, valueMax); if (w.length) lines.push(...w); else lines.push(""); }
+    if (lines.length === 0) lines.push("");
     lines.forEach((l, i) => text(l, valueLeft, ly - i * 12, { size: 9, font: opts.bold ? bold : regular, color: rgb(0.13, 0.13, 0.13) }));
     ly -= 13 + (lines.length - 1) * 12;
   };
@@ -89,7 +95,7 @@ async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
     if (cur) lines.push(cur); return lines;
   };
   companyLine(data.companyName || "", { bold: true, color: _NAVY });
-  if (data.companyAddress) for (const l of wrapRight(clean(data.companyAddress), 230)) companyLine(l);
+  if (data.companyAddress) for (const seg of cleanAddr(data.companyAddress).split("\n")) { if (seg) for (const l of wrapRight(seg, 230)) companyLine(l); }
   if (data.companyEmail) companyLine(data.companyEmail, { color: rgb(0.16, 0.5, 0.74) });
   field("Order", String(data.orderNumber || ""), { bold: true });
   field("PO", data.poNumber || "");
@@ -878,13 +884,15 @@ Deno.serve(async (req) => {
         // MESMA prioridade do email (templateNewOrderCustomer): endereço de entrega
         // do pedido > campos do próprio pedido > cadastro do cliente. Assim o PDF
         // nunca vem mais vazio que o email.
-        const addressParts = ship
-          ? [ship.logradouro ?? ship.endereco, ship.complemento, ship.cidade, ship.estado, ship.cep]
-          : [
-              ord.endereco ?? cust.endereco, ord.endereco2 ?? cust.endereco2,
-              ord.cidade ?? cust.cidade, ord.estado ?? cust.estado, ord.zip ?? ord.cep ?? cust.cep,
-            ];
-        const customerAddress = addressParts.filter(Boolean).join(", ");
+        // Organiza em 3 linhas: (rua + número/complemento) / (cidade, estado) / (zip).
+        const street = ship
+          ? [ship.logradouro ?? ship.endereco, ship.complemento].filter(Boolean).join(" ")
+          : [ord.endereco ?? cust.endereco, ord.endereco2 ?? cust.endereco2].filter(Boolean).join(" ");
+        const cityState = ship
+          ? [ship.cidade, ship.estado].filter(Boolean).join(", ")
+          : [ord.cidade ?? cust.cidade, ord.estado ?? cust.estado].filter(Boolean).join(", ");
+        const zip = ship ? ship.cep : (ord.zip ?? ord.cep ?? cust.cep);
+        const customerAddress = [street, cityState, zip].filter(Boolean).join("\n");
 
         // Itens: se não vierem no argumento (ex.: email de atualização de status,
         // que chama com []), BUSCA do banco pelo order.id — senão o PDF sairia com
@@ -907,7 +915,9 @@ Deno.serve(async (req) => {
           customerEmail: cust.email ?? "", customerPhone: cust.telefone ?? "",
           customerAddress,
           companyName: config?.nome_empresa || COMPANY_NAME,
-          companyAddress: config?.endereco || "",
+          // Endereço da empresa (texto livre): cada segmento separado por vírgula/linha
+          // vira uma linha própria no PDF → rua / cidade, estado / zip.
+          companyAddress: (config?.endereco || "").split(/[\n,]/).map((s) => s.trim()).filter(Boolean).join("\n"),
           companyEmail: config?.email_contato || COMPANY_EMAIL,
           logoUrl: customTemplateCfg.email_logo_url ?? undefined,
           logoPosition: (customTemplateCfg.email_logo_position as "left" | "center" | "right") ?? "left",
