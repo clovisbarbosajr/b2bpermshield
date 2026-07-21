@@ -15,7 +15,7 @@ import { RichTextEditor } from '@/components/RichTextEditor';
 import { toast } from 'sonner';
 import {
   Mail, MessageSquare, Phone, Loader2, Save, Send, Trash2, Plus, Bell, Pencil, X,
-  Image as ImageIcon, Eye, RefreshCw, FileText,
+  Image as ImageIcon, Eye, RefreshCw,
 } from 'lucide-react';
 
 // Tabelas novas (ainda não nos types gerados) -> client sem tipo aqui.
@@ -215,7 +215,6 @@ export default function Notificacoes() {
   const [emailOrderPreviewHtml, setEmailOrderPreviewHtml] = useState('');
   const [emailOrderPreviewing, setEmailOrderPreviewing] = useState(false);
   const [showHtmlSource, setShowHtmlSource] = useState(false);
-  const [pdfPreviewing, setPdfPreviewing] = useState(false);
 
   // Templates por tipo (email_templates) — corpo vazio = usa o padrão do sistema
   const [typeTpls, setTypeTpls] = useState<Record<string, { id?: string; assunto: string; corpo: string }>>({});
@@ -563,23 +562,6 @@ export default function Notificacoes() {
     setTypeTplPreview({ tipo: def.tipo, html: buildLogoHeaderHtml() + rendered });
   }
 
-  async function handlePdfPreview() {
-    setPdfPreviewing(true);
-    const { data: pedido } = await sb.from('pedidos').select('id').order('created_at', { ascending: false }).limit(1).maybeSingle();
-    if (!pedido?.id) { toast.error('No orders found to preview. Place a test order first.'); setPdfPreviewing(false); return; }
-    const { data, error } = await sb.functions.invoke('generate-pdf', { body: { pedido_id: pedido.id } });
-    // Abre o PDF REAL (o MESMO que vai anexado no email) numa nova aba.
-    if (error || !data?.pdf_base64) {
-      toast.error('Failed to generate preview: ' + (error?.message || data?.error || 'unknown error'));
-    } else {
-      const bytes = Uint8Array.from(atob(data.pdf_base64), (c) => c.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    }
-    setPdfPreviewing(false);
-  }
-
   async function addRecipient() {
     const { data, error } = await sb.from('notification_recipients')
       .insert({ label: 'New recipient', active: true }).select().single();
@@ -867,23 +849,6 @@ export default function Notificacoes() {
                 <iframe srcDoc={emailOrderPreviewHtml} className="w-full rounded border border-border bg-white" style={{ height: 500 }} title="Email Preview" />
               </div>
             )}
-          </Card>
-
-          {/* Order PDF — o PDF anexado é gerado por código (layout B2BWave, com a
-              logo acima). NÃO é editável por HTML; este card só PRÉ-VISUALIZA o
-              PDF REAL que vai no email. */}
-          <Card className="p-4 space-y-3">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <p className="font-medium flex items-center gap-2"><FileText className="w-4 h-4" /> Order PDF (attached to the email)</p>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={handlePdfPreview} disabled={pdfPreviewing}>
-                <Eye className="w-3.5 h-3.5" /> {pdfPreviewing ? 'Loading...' : 'Preview PDF'}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              This is the <strong>exact PDF</strong> attached to the order confirmation email — generated
-              automatically (company header, logo, order details). Click <strong>Preview PDF</strong> to open
-              it (uses the most recent order). Layout changes are done in code; ask your developer.
-            </p>
           </Card>
 
           {/* Todos os outros emails do sistema — editor rico + assunto + preview por tipo.

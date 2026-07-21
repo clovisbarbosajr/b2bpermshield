@@ -137,6 +137,8 @@ async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
   const footerY = 36;
   text(data.companyName || "", _MG, footerY, { font: bold, size: 9, color: _NAVY });
   if (data.companyEmail) text(data.companyEmail, _MG, footerY - 12, { size: 8, color: _GRAY });
+  // Carimbo de versão (mesmo do send-email) — confirma que o deploy pegou.
+  rightText("layout 0721b", _PW - _MG, footerY - 12, { size: 7, color: _GRAY });
   return await pdfDoc.save();
 }
 // ─── fim do gerador embutido ─────────────────────────────────────────────────
