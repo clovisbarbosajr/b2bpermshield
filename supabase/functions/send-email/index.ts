@@ -339,8 +339,9 @@ function templatePasswordReset(customerName: string, resetLink: string) {
 
 // Template 8: Notify customer — product available
 function templateProductAvailable(customerName: string, products: { name: string; sku: string }[]) {
+  // esc() em sku/name — vêm do body e antes eram interpolados crus (injeção de HTML).
   const productList = products
-    .map((p) => `<a href="${COMPANY_SITE}" style="color:#1a7fbd;">${p.sku}</a> - ${p.name}`)
+    .map((p) => `<a href="${COMPANY_SITE}" style="color:#1a7fbd;">${esc(p.sku)}</a> - ${esc(p.name)}`)
     .join("<br/>");
   return wrapTemplate(`
 <p>Hello,</p>
@@ -686,7 +687,16 @@ Deno.serve(async (req) => {
             ];
         const customerAddress = addressParts.filter(Boolean).join(", ");
 
-        const pdfItems: PdfOrderItem[] = (items || []).map((i: any) => ({
+        // Itens: se não vierem no argumento (ex.: email de atualização de status,
+        // que chama com []), BUSCA do banco pelo order.id — senão o PDF sairia com
+        // a tabela de itens VAZIA. (Bug pego na auditoria.)
+        let itemsSrc = items;
+        if ((!itemsSrc || itemsSrc.length === 0) && ord?.id) {
+          const { data: dbItems } = await adminClient.from("pedido_itens")
+            .select("*").eq("pedido_id", ord.id).order("created_at");
+          itemsSrc = dbItems ?? [];
+        }
+        const pdfItems: PdfOrderItem[] = (itemsSrc || []).map((i: any) => ({
           sku: i.sku ?? "", name: i.nome_produto ?? i.name ?? "",
           qty: Number(i.quantidade ?? 0), price: Number(i.preco_unitario ?? 0), total: Number(i.subtotal ?? 0),
         }));

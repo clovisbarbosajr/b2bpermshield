@@ -222,9 +222,12 @@ const OrderDetail = () => {
     // Mudanças que INTERESSAM ao cliente/admin (tracking, envio, data de entrega)
     // precisam notificar ao SALVAR — antes só o dropdown de status notificava, e
     // adicionar rastreio e salvar não avisava ninguém.
+    // Normaliza data (input = "YYYY-MM-DD"; banco pode vir "...T00:00:00") antes de
+    // comparar — senão o notifiable dava true a cada Save e spamava email/SMS.
+    const dOnly = (v: any) => (v ? String(v).split("T")[0] : "");
     const notifiable =
       (update.tracking_number || "") !== (((order as any).tracking_number) || "") ||
-      (update.delivery_date || "") !== (((order as any).delivery_date) || "") ||
+      dOnly(update.delivery_date) !== dOnly((order as any).delivery_date) ||
       (update.delivery_mode || "") !== (((order as any).delivery_mode) || "");
 
     const { error } = await supabase.from("pedidos").update(update).eq("id", order.id);

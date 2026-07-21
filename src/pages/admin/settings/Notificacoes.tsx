@@ -215,10 +215,6 @@ export default function Notificacoes() {
   const [emailOrderPreviewHtml, setEmailOrderPreviewHtml] = useState('');
   const [emailOrderPreviewing, setEmailOrderPreviewing] = useState(false);
   const [showHtmlSource, setShowHtmlSource] = useState(false);
-  const [pdfTemplate, setPdfTemplate] = useState('');
-  const [pdfOriginal, setPdfOriginal] = useState('');
-  const [pdfSaving, setPdfSaving] = useState(false);
-  const [pdfPreviewHtml, setPdfPreviewHtml] = useState('');
   const [pdfPreviewing, setPdfPreviewing] = useState(false);
 
   // Templates por tipo (email_templates) — corpo vazio = usa o padrão do sistema
@@ -282,14 +278,12 @@ export default function Notificacoes() {
     setConfigId(idQ.data?.id ?? null);
 
     const tpl = await sb.from('configuracoes')
-      .select('email_order_template, pdf_order_template').limit(1).maybeSingle();
+      .select('email_order_template').limit(1).maybeSingle();
     if (tpl.error) {
       console.error('[Notificacoes] template columns not readable:', tpl.error.message);
     } else {
       setEmailOrderTemplate(tpl.data?.email_order_template ?? '');
       setEmailOrderOriginal(tpl.data?.email_order_template ?? '');
-      setPdfTemplate(tpl.data?.pdf_order_template ?? '');
-      setPdfOriginal(tpl.data?.pdf_order_template ?? '');
     }
 
     const logo = await sb.from('configuracoes')
@@ -568,21 +562,6 @@ export default function Notificacoes() {
     const rendered = Object.entries(def.sample).reduce((h, [k, v]) => h.split(`{{${k}}}`).join(v), t.corpo);
     setTypeTplPreview({ tipo: def.tipo, html: buildLogoHeaderHtml() + rendered });
   }
-
-  async function handlePdfSave() {
-    const id = await ensureConfigId();
-    if (!id) { toast.error('Configuration not found'); return; }
-    setPdfSaving(true);
-    const { error } = await sb.from('configuracoes').update({ pdf_order_template: pdfTemplate || null }).eq('id', id);
-    if (error) toast.error('Error saving: ' + error.message);
-    else { setPdfOriginal(pdfTemplate); toast.success('PDF template saved'); }
-    setPdfSaving(false);
-  }
-
-  const handlePdfReset = () => {
-    if (!confirm('Reset to the system default PDF template? Your custom template will be cleared.')) return;
-    setPdfTemplate('');
-  };
 
   async function handlePdfPreview() {
     setPdfPreviewing(true);
