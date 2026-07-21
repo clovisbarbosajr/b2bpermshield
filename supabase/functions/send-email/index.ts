@@ -4,7 +4,149 @@ import { Buffer } from "node:buffer";
 // Import ESTÁTICO do gerador de PDF — garante que o código ATUAL do gerador
 // entra no bundle a cada deploy. (Era import dinâmico, que podia rodar uma
 // versão em cache — causa do "PDF continua o antigo" mesmo após redeploy.)
-import { generateOrderPdf, type PdfOrderItem } from "../_shared/pdfGenerator.ts";
+// ─── GERADOR DE PDF EMBUTIDO (era ../_shared/pdfGenerator.ts) ────────────────
+// Embutido AQUI de propósito: garante que o código ATUAL do PDF entra no deploy
+// da send-email, sem depender do arquivo compartilhado ser reempacotado (causa
+// do "PDF continua o antigo" apesar de redeploy). Fonte canônica p/ teste local:
+// _shared/pdfGenerator.ts — manter os dois em sincronia se mudar o layout.
+import { PDFDocument, StandardFonts, rgb, PDFFont } from "npm:pdf-lib@1.17.1";
+
+interface PdfOrderItem { sku: string; name: string; qty: number; price: number; total: number; }
+interface PdfOrderData {
+  orderNumber: string; orderDate: string; poNumber?: string; deliveryDate?: string;
+  customerName: string; customerContact?: string; customerEmail?: string; customerPhone?: string;
+  customerAddress?: string; companyName: string; companyAddress?: string; companyEmail?: string;
+  logoUrl?: string; logoPosition?: "left" | "center" | "right";
+  items: PdfOrderItem[]; subtotal: number; discount: number; shipping: number; tax: number;
+  grossTotal: number; notes?: string;
+}
+const _PW = 612, _PH = 792, _MG = 40;
+const _NAVY = rgb(0.102, 0.176, 0.353), _GRAY = rgb(0.4, 0.4, 0.4), _LIGHT = rgb(0.92, 0.93, 0.96);
+function _fmtUSD(n: number): string { return "$" + (n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+async function _embedLogo(pdfDoc: PDFDocument, url: string) {
+  try {
+    const res = await fetch(url); if (!res.ok) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("png") || url.toLowerCase().endsWith(".png")) return await pdfDoc.embedPng(bytes);
+    return await pdfDoc.embedJpg(bytes);
+  } catch { return null; }
+}
+async function generateOrderPdf(data: PdfOrderData): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.create();
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const regular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const logoImg = data.logoUrl ? await _embedLogo(pdfDoc, data.logoUrl) : null;
+  let page = pdfDoc.addPage([_PW, _PH]); let y = _PH - _MG;
+  const newPage = () => { page = pdfDoc.addPage([_PW, _PH]); y = _PH - _MG; };
+  const text = (t: string, x: number, yy: number, opts: { font?: PDFFont; size?: number; color?: ReturnType<typeof rgb> } = {}) =>
+    page.drawText(t || "", { x, y: yy, size: opts.size ?? 10, font: opts.font ?? regular, color: opts.color ?? rgb(0.13, 0.13, 0.13) });
+  const rightText = (t: string, xRight: number, yy: number, opts: { font?: PDFFont; size?: number; color?: ReturnType<typeof rgb> } = {}) => {
+    const font = opts.font ?? regular, size = opts.size ?? 10;
+    text(t, xRight - font.widthOfTextAtSize(t || "", size), yy, opts);
+  };
+  const leftX = _MG;
+  const clean = (t?: string) => (t || "").split(",").map((s) => s.trim()).filter((s) => s && !["-", "—", "n/a", "na"].includes(s.toLowerCase())).join(", ");
+  const addr = clean(data.customerAddress);
+  const headerTop = y;
+  if (logoImg) {
+    const scale = Math.min(200 / logoImg.width, 46 / logoImg.height, 1);
+    const w = logoImg.width * scale, h = logoImg.height * scale;
+    page.drawImage(logoImg, { x: (_PW - w) / 2, y: headerTop - h, width: w, height: h });
+    y = headerTop - h - 6;
+  } else {
+    const name = data.companyName || "PermShield";
+    text(name, (_PW - bold.widthOfTextAtSize(name, 18)) / 2, headerTop - 18, { font: bold, size: 18, color: _NAVY });
+    y = headerTop - 30;
+  }
+  const title = "Order";
+  text(title, (_PW - regular.widthOfTextAtSize(title, 20)) / 2, y - 18, { size: 20, color: _GRAY });
+  y -= 30;
+  page.drawLine({ start: { x: _MG, y }, end: { x: _PW - _MG, y }, thickness: 1.5, color: _NAVY });
+  y -= 20;
+  const labelRight = _MG + 68, valueLeft = _MG + 76, valueMax = _MG + 68 + 190;
+  let ly = y;
+  const wrapAt = (t: string, maxRight: number, size = 9) => {
+    const words = (t || "").split(/\s+/); const lines: string[] = []; let cur = "";
+    for (const w of words) { const tt = cur ? `${cur} ${w}` : w; if (regular.widthOfTextAtSize(tt, size) > (maxRight - valueLeft) && cur) { lines.push(cur); cur = w; } else cur = tt; }
+    if (cur) lines.push(cur); return lines;
+  };
+  const field = (label: string, value: string, opts: { bold?: boolean } = {}) => {
+    rightText(label, labelRight, ly, { size: 8, color: rgb(0.42, 0.52, 0.66) });
+    const lines = wrapAt(value || "", valueMax); if (lines.length === 0) lines.push("");
+    lines.forEach((l, i) => text(l, valueLeft, ly - i * 12, { size: 9, font: opts.bold ? bold : regular, color: rgb(0.13, 0.13, 0.13) }));
+    ly -= 13 + (lines.length - 1) * 12;
+  };
+  let ry = y;
+  const companyLine = (t: string, opts: { bold?: boolean; color?: any } = {}) => {
+    if (!t) return;
+    rightText(t, _PW - _MG, ry, { size: opts.bold ? 11 : 9, font: opts.bold ? bold : regular, color: opts.color ?? rgb(0.13, 0.13, 0.13) });
+    ry -= 13;
+  };
+  const wrapRight = (t: string, maxW: number, size = 9) => {
+    const words = (t || "").split(/\s+/); const lines: string[] = []; let cur = "";
+    for (const w of words) { const tt = cur ? `${cur} ${w}` : w; if (regular.widthOfTextAtSize(tt, size) > maxW && cur) { lines.push(cur); cur = w; } else cur = tt; }
+    if (cur) lines.push(cur); return lines;
+  };
+  companyLine(data.companyName || "", { bold: true, color: _NAVY });
+  if (data.companyAddress) for (const l of wrapRight(clean(data.companyAddress), 230)) companyLine(l);
+  if (data.companyEmail) companyLine(data.companyEmail, { color: rgb(0.16, 0.5, 0.74) });
+  field("Order", String(data.orderNumber || ""), { bold: true });
+  field("PO", data.poNumber || "");
+  field("Customer", data.customerName || "");
+  if (data.customerContact) field("Contact", data.customerContact);
+  field("Address", addr);
+  field("Email", data.customerEmail || "");
+  field("Date", data.orderDate || "");
+  field("Delivery date", data.deliveryDate || "");
+  field("Comments", data.notes || "");
+  y = Math.min(ly, ry) - 16;
+  const colCode = leftX, colName = leftX + 140, colQty = _PW - _MG - 150, colPrice = _PW - _MG - 100, colTotal = _PW - _MG;
+  const fitText = (t: string, maxWidth: number, size: number) => {
+    let s = t || ""; while (s.length > 1 && regular.widthOfTextAtSize(s, size) > maxWidth) s = s.slice(0, -1);
+    return s === (t || "") ? s : s.slice(0, -1) + "…";
+  };
+  const drawTableHeader = () => {
+    page.drawRectangle({ x: _MG, y: y - 4, width: _PW - _MG * 2, height: 18, color: _NAVY });
+    text("CODE", colCode + 4, y, { font: bold, size: 8, color: rgb(1, 1, 1) });
+    text("PRODUCT", colName, y, { font: bold, size: 8, color: rgb(1, 1, 1) });
+    rightText("QTY", colQty + 30, y, { font: bold, size: 8, color: rgb(1, 1, 1) });
+    rightText("PRICE", colPrice + 40, y, { font: bold, size: 8, color: rgb(1, 1, 1) });
+    rightText("TOTAL", colTotal, y, { font: bold, size: 8, color: rgb(1, 1, 1) });
+    y -= 20;
+  };
+  drawTableHeader();
+  data.items.forEach((it, idx) => {
+    if (y < 130) { newPage(); drawTableHeader(); }
+    if (idx % 2 === 1) page.drawRectangle({ x: _MG, y: y - 4, width: _PW - _MG * 2, height: 16, color: _LIGHT });
+    text(fitText(it.sku || "—", colName - colCode - 12, 9), colCode + 4, y, { size: 9, color: _NAVY });
+    text(fitText(it.name || "", colQty - colName - 8, 9), colName, y, { size: 9 });
+    rightText(String(it.qty), colQty + 30, y, { size: 9 });
+    rightText(_fmtUSD(it.price), colPrice + 40, y, { size: 9 });
+    rightText(_fmtUSD(it.total), colTotal, y, { size: 9, font: bold });
+    y -= 16;
+  });
+  y -= 10;
+  page.drawLine({ start: { x: _MG, y: y + 6 }, end: { x: _PW - _MG, y: y + 6 }, thickness: 0.5, color: _GRAY });
+  if (y < 140) newPage();
+  const totalsRow = (label: string, value: string, big = false) => {
+    rightText(label, colTotal - 90, y, { size: big ? 11 : 9, color: big ? _NAVY : _GRAY, font: big ? bold : regular });
+    rightText(value, colTotal, y, { size: big ? 12 : 9, font: bold, color: big ? _NAVY : rgb(0.13, 0.13, 0.13) });
+    y -= big ? 18 : 15;
+  };
+  totalsRow("Subtotal", _fmtUSD(data.subtotal));
+  if (data.discount > 0) totalsRow("Discount", `-${_fmtUSD(data.discount)}`);
+  if (data.shipping > 0) totalsRow("Shipping", _fmtUSD(data.shipping));
+  if (data.tax > 0) totalsRow("Sales Tax", _fmtUSD(data.tax));
+  page.drawLine({ start: { x: colTotal - 160, y: y + 10 }, end: { x: colTotal, y: y + 10 }, thickness: 1.5, color: _NAVY });
+  y -= 6;
+  totalsRow("Gross Total", _fmtUSD(data.grossTotal), true);
+  const footerY = 36;
+  text(data.companyName || "", _MG, footerY, { font: bold, size: 9, color: _NAVY });
+  if (data.companyEmail) text(data.companyEmail, _MG, footerY - 12, { size: 8, color: _GRAY });
+  return await pdfDoc.save();
+}
+// ─── fim do gerador embutido ─────────────────────────────────────────────────
 
 // Deno edge runtime may require an npm install hint when resolving Node packages locally.
 
