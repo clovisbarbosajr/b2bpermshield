@@ -36,7 +36,9 @@ const CustomerLogin = () => {
           alt=""
           aria-hidden
           loading="eager"
-          fetchPriority="high"
+          // React 18 só reconhece o atributo minúsculo (camelCase é React 19+);
+          // com "fetchPriority" o React descartava a prop e logava warning no console.
+          {...{ fetchpriority: "high" }}
           decoding="async"
           className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none select-none"
         />
