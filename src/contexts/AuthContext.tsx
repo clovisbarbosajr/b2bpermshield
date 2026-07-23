@@ -52,13 +52,18 @@ const VIEW_AS_KEY = "viewAsCustomer";
 // shell da UI sem login (dados sempre bloqueados pela RLS, mas não deve existir em produção).
 // isDemo continua existindo — o "view as" (impersonação) usa pra marcar sessão sintética.
 
+// IMPORTANTE: view-as vive em sessionStorage (POR ABA), não localStorage.
+// localStorage é compartilhado por todas as abas do domínio — com ele, clicar
+// "View as" transformava TODAS as abas abertas na visão do cliente (bug).
+// Com sessionStorage, só a aba que consumiu o token impersona; as outras
+// continuam com a sessão staff normal.
 const getStoredViewAsCustomer = (): ViewAsCustomer | null => {
-  const raw = localStorage.getItem(VIEW_AS_KEY);
+  const raw = sessionStorage.getItem(VIEW_AS_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as ViewAsCustomer;
   } catch {
-    localStorage.removeItem(VIEW_AS_KEY);
+    sessionStorage.removeItem(VIEW_AS_KEY);
     return null;
   }
 };
@@ -174,11 +179,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    // Higiene: versões antigas guardavam o view-as no localStorage (compartilhado
+    // entre abas — causa do bug "todas as abas viram o cliente"). Remove qualquer
+    // resíduo antigo pra ele não sequestrar sessões depois de um deploy.
+    localStorage.removeItem(VIEW_AS_KEY);
+
     const viewAsCustomer = getStoredViewAsCustomer();
     if (viewAsCustomer) {
       applyViewAsSession(viewAsCustomer);
       // GUARDA: view-as só vale se a sessão REAL do navegador for de STAFF. Sem isso,
-      // uma chave "viewAsCustomer" pendurada no localStorage sequestrava até o login
+      // uma chave "viewAsCustomer" pendurada no storage sequestrava até o login
       // de um CLIENTE real (ele abria o portal "como" outro cliente) — e o "Return to"
       // do banner revelava a sessão errada. Se a sessão não é staff (ou não existe),
       // limpa a chave e reinicia como o usuário real.
@@ -190,7 +200,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           staff = data?.role === "admin" || data?.role === "manager" || data?.role === "warehouse";
         }
         if (!staff) {
-          localStorage.removeItem(VIEW_AS_KEY);
+          sessionStorage.removeItem(VIEW_AS_KEY);
           window.location.replace("/");
         }
       });
@@ -202,7 +212,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       // Logout limpa a impersonação — senão um "ver como cliente" esquecido vaza
       // pro próximo login no mesmo navegador (ficava preso na visão do cliente).
-      if (_event === "SIGNED_OUT") localStorage.removeItem(VIEW_AS_KEY);
+      if (_event === "SIGNED_OUT") sessionStorage.removeItem(VIEW_AS_KEY);
       const activeViewAsCustomer = _event === "SIGNED_OUT" ? null : getStoredViewAsCustomer();
       if (activeViewAsCustomer) {
         applyViewAsSession(activeViewAsCustomer);
@@ -270,7 +280,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const clearViewAs = (dest: string = "/admin/customers") => {
-    localStorage.removeItem(VIEW_AS_KEY);
+    sessionStorage.removeItem(VIEW_AS_KEY);
     setImpersonatedCustomer(null);
     window.location.href = dest;
   };
@@ -285,7 +295,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(null);
       return;
     }
-    localStorage.removeItem(VIEW_AS_KEY); // garante que não fica impersonação pendurada
+    sessionStorage.removeItem(VIEW_AS_KEY); // garante que não fica impersonação pendurada
     await supabase.auth.signOut();
   };
 

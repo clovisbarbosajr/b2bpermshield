@@ -13,7 +13,7 @@ const ViewAsRedirect = () => {
       const token = params.get("token");
 
       if (!token) {
-        localStorage.removeItem(VIEW_AS_KEY);
+        sessionStorage.removeItem(VIEW_AS_KEY);
         window.location.replace("/login");
         return;
       }
@@ -25,12 +25,14 @@ const ViewAsRedirect = () => {
       const customer = Array.isArray(data) ? data[0] : null;
 
       if (error || !customer) {
-        localStorage.removeItem(VIEW_AS_KEY);
+        sessionStorage.removeItem(VIEW_AS_KEY);
         window.location.replace("/login");
         return;
       }
 
-      localStorage.setItem(VIEW_AS_KEY, JSON.stringify(customer));
+      // sessionStorage = POR ABA: só ESTA aba vira a visão do cliente; as outras
+      // abas do navegador continuam com a sessão staff normal.
+      sessionStorage.setItem(VIEW_AS_KEY, JSON.stringify(customer));
       window.location.replace("/portal");
     };
 

@@ -168,18 +168,25 @@ const AdminClientes = () => {
     setInviteOpen(false);
   };
 
-  const handleViewAs = (e: React.MouseEvent, c: any) => {
+  const handleViewAs = async (e: React.MouseEvent, c: any) => {
     e.stopPropagation();
-    const viewAsData = {
-      id: c.id,
-      user_id: c.user_id,
-      empresa: c.empresa,
-      nome: c.nome,
-      email: c.email,
-      tabela_preco_id: c.tabela_preco_id,
-    };
-    localStorage.setItem("viewAsCustomer", JSON.stringify(viewAsData));
-    window.open("/portal", "_blank", "noopener,noreferrer");
+    // Fluxo por TOKEN (aba isolada): antes gravávamos direto no localStorage,
+    // que é COMPARTILHADO entre todas as abas — clicar "View as" transformava
+    // todas as abas abertas na visão do cliente. Agora criamos um token de uso
+    // único e abrimos /view-as?token=... numa aba nova; SÓ ela consome o token
+    // e guarda a impersonação no próprio sessionStorage (por aba). As outras
+    // abas continuam na sessão staff normal.
+    // A aba é aberta ANTES do await (gesto do usuário) pra não cair no popup blocker.
+    const tab = window.open("about:blank", "_blank");
+    const { data: token, error } = await (supabase as any).rpc("create_view_as_token", { _customer_id: c.id });
+    if (error || !token) {
+      tab?.close();
+      toast.error("Failed to start View as: " + (error?.message ?? "no token"));
+      return;
+    }
+    const url = `${window.location.origin}/view-as?token=${token}`;
+    if (tab) { tab.opener = null; tab.location.href = url; }
+    else window.open(url, "_blank", "noopener,noreferrer"); // fallback se o popup foi bloqueado
     toast.info(`Viewing portal as ${c.empresa || c.nome}`);
   };
 
