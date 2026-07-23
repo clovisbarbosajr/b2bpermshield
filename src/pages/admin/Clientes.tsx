@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Search, ChevronLeft, ChevronRight, Plus, Mail, Download, X, Pencil, Eye, Trash2, Check, Users } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 
 const PAGE_SIZE = 25;
 
@@ -24,6 +25,9 @@ const emptyFilters = {
 
 const AdminClientes = () => {
   const navigate = useNavigate();
+  // "View as" é SÓ pra admin (regra de negócio) — manager/warehouse nem veem o botão.
+  const { role } = useAuth();
+  const isAdmin = role === "admin";
   const [clientes, setClientes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -375,9 +379,11 @@ const AdminClientes = () => {
                       <Button variant="default" size="icon" className="h-7 w-7 bg-cyan-600 hover:bg-cyan-700" onClick={() => navigate(`/admin/customers/${c.id}`)} title="Edit">
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="default" size="icon" className="h-7 w-7 bg-cyan-600 hover:bg-cyan-700" onClick={(e) => handleViewAs(e, c)} title="View as">
-                        <Users className="h-3.5 w-3.5" />
-                      </Button>
+                      {isAdmin && (
+                        <Button variant="default" size="icon" className="h-7 w-7 bg-cyan-600 hover:bg-cyan-700" onClick={(e) => handleViewAs(e, c)} title="View as">
+                          <Users className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                       <Button variant="default" size="icon" className="h-7 w-7 bg-destructive hover:bg-destructive/90" onClick={(e) => handleDelete(e, c)} title="Delete permanently (also frees the login/email)">
                         <X className="h-3.5 w-3.5 font-bold" />
                       </Button>

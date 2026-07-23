@@ -187,19 +187,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const viewAsCustomer = getStoredViewAsCustomer();
     if (viewAsCustomer) {
       applyViewAsSession(viewAsCustomer);
-      // GUARDA: view-as só vale se a sessão REAL do navegador for de STAFF. Sem isso,
-      // uma chave "viewAsCustomer" pendurada no storage sequestrava até o login
-      // de um CLIENTE real (ele abria o portal "como" outro cliente) — e o "Return to"
-      // do banner revelava a sessão errada. Se a sessão não é staff (ou não existe),
-      // limpa a chave e reinicia como o usuário real.
+      // GUARDA: view-as só vale se a sessão REAL do navegador for de ADMIN
+      // (regra de negócio: só admin impersona cliente — manager/warehouse não).
+      // Sem isso, uma chave "viewAsCustomer" pendurada no storage sequestrava até
+      // o login de um CLIENTE real (ele abria o portal "como" outro cliente) — e o
+      // "Return to" do banner revelava a sessão errada. Se a sessão não é admin
+      // (ou não existe), limpa a chave e reinicia como o usuário real.
       supabase.auth.getSession().then(async ({ data: { session: real } }) => {
-        let staff = false;
+        let isAdmin = false;
         if (real?.user?.id) {
           const { data } = await (supabase as any)
             .from("user_roles").select("role").eq("user_id", real.user.id).maybeSingle();
-          staff = data?.role === "admin" || data?.role === "manager" || data?.role === "warehouse";
+          isAdmin = data?.role === "admin";
         }
-        if (!staff) {
+        if (!isAdmin) {
           sessionStorage.removeItem(VIEW_AS_KEY);
           window.location.replace("/");
         }
