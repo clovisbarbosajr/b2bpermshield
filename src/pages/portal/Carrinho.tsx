@@ -21,6 +21,8 @@ const Carrinho = () => {
   const { user, canPlaceOrders, impersonatedCustomer } = useAuth();
   const navigate = useNavigate();
   const [salesTax, setSalesTax] = useState(0);
+  // Taxa (%) buscada 1x; o VALOR do imposto é derivado de total × taxa (efeito abaixo).
+  const [taxRate, setTaxRate] = useState(0);
   const [unavailableItems, setUnavailableItems] = useState<Set<string>>(new Set());
   // Itens COM algum estoque, mas menos que a quantidade pedida (quer 5, tem 3).
   // Bloqueiam finalizar, mas a quantidade pode ser reduzida (input fica habilitado).
@@ -113,19 +115,23 @@ const Carrinho = () => {
     };
   }, [items]);
 
+  // Busca a TAXA (%) uma vez por usuário. Antes esse efeito dependia de `total`
+  // e refazia a cascata inteira (até 5 queries) A CADA clique de quantidade —
+  // mesma classe da lentidão corrigida no Checkout. O VALOR do imposto é
+  // derivado no efeito [total, taxRate] logo abaixo, sem ir ao banco.
   useEffect(() => {
-    const fetchTax = async () => {
-      if (!user && !impersonatedCustomer) { setSalesTax(0); return; }
+    const fetchTaxRate = async () => {
+      if (!user && !impersonatedCustomer) { setTaxRate(0); return; }
       // Get customer's tax group
       const clienteQuery = impersonatedCustomer?.id
         ? supabase.from("clientes").select("tax_customer_group_id").eq("id", impersonatedCustomer.id).maybeSingle()
         : supabase.from("clientes").select("tax_customer_group_id").eq("user_id", user!.id).maybeSingle();
       const { data: cliente } = await clienteQuery;
-      if (!cliente) { setSalesTax(0); return; }
+      if (!cliente) { setTaxRate(0); return; }
 
       const groupId = cliente.tax_customer_group_id;
       const { data: defaultClass } = await supabase.from("tax_classes").select("id").eq("is_default", true).maybeSingle();
-      if (!defaultClass?.id) { setSalesTax(0); return; }
+      if (!defaultClass?.id) { setTaxRate(0); return; }
 
       // Resolve group: use customer's group or default group
       let effectiveGroupId = groupId;
@@ -133,21 +139,25 @@ const Carrinho = () => {
         const { data: dg } = await supabase.from("tax_customer_groups").select("id").eq("is_default", true).maybeSingle();
         effectiveGroupId = dg?.id;
       }
-      if (!effectiveGroupId) { setSalesTax(0); return; }
+      if (!effectiveGroupId) { setTaxRate(0); return; }
 
       const { data: rule } = await supabase.from("tax_rules")
         .select("tax_rate_id")
         .eq("tax_class_id", defaultClass.id)
         .eq("tax_customer_group_id", effectiveGroupId)
         .maybeSingle();
-      if (!rule?.tax_rate_id) { setSalesTax(0); return; }
+      if (!rule?.tax_rate_id) { setTaxRate(0); return; }
 
       const { data: rate } = await supabase.from("tax_rates").select("percentual").eq("id", rule.tax_rate_id).maybeSingle();
-      const pct = Number(rate?.percentual) || 0;
-      setSalesTax(total * pct / 100);
+      setTaxRate(Number(rate?.percentual) || 0);
     };
-    fetchTax();
-  }, [total, user, impersonatedCustomer]);
+    fetchTaxRate();
+  }, [user, impersonatedCustomer]);
+
+  // Valor do imposto derivado localmente — reage ao carrinho sem tocar o banco.
+  useEffect(() => {
+    setSalesTax(total * taxRate / 100);
+  }, [total, taxRate]);
 
   const totalQuantity = items.reduce((sum, i) => sum + i.quantidade, 0);
   const grossTotal = total + salesTax;
