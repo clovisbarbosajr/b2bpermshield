@@ -133,22 +133,73 @@ Verificado no DOM.
 
 ---
 
-## 6. Commits da rodada (2026-07-23)
+## 6. AUDITORIA FINAL da rodada (pedido do dono: "procure falhas e corrija")
+
+Revisão linha a linha dos diffs do dia + bateria de estresse. Resultado:
+**1 falha real encontrada e corrigida**, o resto passou.
+
+### 6.1 Falha corrigida: "aba zumbi" (commit `6390145`)
+O branch view-as do `AuthContext` retorna cedo e **não assinava nenhum
+listener de auth**. Se a admin fizesse **logout em outra aba**, a aba
+impersonada não ficava sabendo — seguia mostrando o portal do cliente com a
+sessão real morta (RLS bloqueia os dados, mas a aba quebrava silenciosamente,
+queries falhando sem explicação). Fix mínimo: listener dedicado no branch que
+só reage a `SIGNED_OUT` (o supabase-js propaga o evento entre abas) → limpa a
+chave da aba e volta pra `/`. Com cleanup (`unsubscribe`). Não interfere na
+guarda nem no fluxo normal (`INITIAL_SESSION`/`TOKEN_REFRESHED` ignorados).
+
+### 6.2 Bateria de estresse executada (local + backend real)
+| # | Teste | Resultado |
+|---|---|---|
+| T1 | 10× `consume_view_as_token` com tokens forjados, em sequência | ✅ 10/10 rejeitados ("Invalid or expired token"), nada gravado |
+| T2 | 3× `create_view_as_token` SEM autenticação | ✅ rejeitadas — msg "Only **admins**..." confirma migration admin-only VIGENTE no banco |
+| T3 | JSON **corrompido** plantado no `sessionStorage` + reload | ✅ try/catch remove a chave, app renderiza normal, zero crash |
+| T4 | `/view-as?token=lixo` (nível página) | ✅ → `/login`, sem resíduo |
+| T5 | 3 abas: 2 impersonações DIFERENTES simultâneas + 1 limpa | ✅ isolamento perfeito, cada aba com seu estado |
+| T6 | Guarda simultânea: 2 abas forjadas recarregadas ao mesmo tempo | ✅ ambas expulsas, zero resíduo |
+| T7 | Regressões: login renderiza + `fetchpriority="high"` no DOM | ✅ |
+| T8 | Re-teste pós-fix da aba zumbi (forja + reload) | ✅ guarda intacta, typecheck limpo, console/server sem erros |
+
+### 6.3 Limitação honesta dos testes
+Sem credenciais de admin/manager/warehouse/cliente, o clique real no botão
+"View as" e os fluxos logados não foram exercitados end-to-end — o que foi
+testado é a soma das partes (RPCs no backend real + mecânica de storage +
+guardas). Roteiro manual: admin com 2+ abas → "View as" → só a aba nova vira
+o cliente; logout numa aba → a impersonada volta pra `/` sozinha (fix novo);
+como manager → botão nem aparece.
+
+### 6.4 Desfazer (estado limpo)
+- Navegador: `sessionStorage`/`localStorage` de teste limpos nas 3 abas; abas
+  extras fechadas.
+- Banco: **nada a desfazer** — todas as chamadas de teste foram REJEITADAS por
+  design (nenhum token criado, nenhuma linha inserida, nenhum pedido).
+
+### 6.5 Observações conhecidas (não são bugs, decisão consciente)
+- Janela de ~300ms: numa forja, o shell da UI aparece como cliente até a
+  guarda async validar e expulsar. Dados protegidos por RLS o tempo todo.
+- `signOut` na aba impersonada só encerra o view-as DA ABA (não desloga a
+  admin nas outras abas) — comportamento desejado.
+
+---
+
+## 7. Commits da rodada (2026-07-23)
 
 - `f5f67c4` — view-as isolado POR ABA (token + sessionStorage + guarda)
 - `46e92bd` — warning `fetchPriority` no CustomerLogin
 - `46d6a2c` — view-as restrito a SÓ ADMIN (3 camadas) + migration reversora
 - `47033c9` — perf: imposto do carrinho não refaz queries por clique
+- `2271d31` — docs desta rodada
+- `6390145` — fix "aba zumbi" (logout em outra aba encerra o view-as)
 
-## 7. Estado de deploy (no momento deste doc)
+## 8. Estado de deploy (no momento deste doc)
 
 - **SQL**: as duas migrations do view-as já RODADAS no Lovable (vigente:
   admin-only). Nada pendente de SQL.
-- **Publish**: frontend até `47033c9` pendente de publish no Lovable.
+- **Publish**: frontend até `6390145` pendente de publish no Lovable.
   Nenhuma edge function mudou nesta rodada.
 - Ordem padrão do projeto: 1º SQL, 2º publish.
 
-## 8. Onde mexer (guia rápido)
+## 9. Onde mexer (guia rápido)
 
 | Quero mudar... | Onde |
 |---|---|
