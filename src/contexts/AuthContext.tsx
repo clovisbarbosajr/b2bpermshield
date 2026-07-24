@@ -205,7 +205,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           window.location.replace("/");
         }
       });
-      return;
+      // ABA ZUMBI: este branch retorna cedo e não assinava NENHUM listener de
+      // auth. Se a admin fizesse logout em OUTRA aba, esta aba impersonada não
+      // ficava sabendo — seguia mostrando o portal com a sessão real morta
+      // (RLS bloqueia os dados, mas a aba quebra silenciosamente). O supabase-js
+      // propaga SIGNED_OUT entre abas; ao recebê-lo, encerra o view-as junto.
+      const { data: { subscription: viewAsSub } } = supabase.auth.onAuthStateChange((event) => {
+        if (event === "SIGNED_OUT") {
+          sessionStorage.removeItem(VIEW_AS_KEY);
+          window.location.replace("/");
+        }
+      });
+      return () => viewAsSub.unsubscribe();
     }
 
     const {
