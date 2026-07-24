@@ -164,11 +164,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-function fmtUSD(v: number | string | null | undefined): string {
-  const n = Number(v) || 0;
-  return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
 function fmtDate(d: string | null | undefined): string {
   if (!d) return "—";
   const dt = new Date(d);
@@ -178,176 +173,6 @@ function fmtDate(d: string | null | undefined): string {
     dt.getUTCFullYear();
 }
 
-/** Default PDF HTML template. Supports {{placeholder}} substitution. */
-function buildDefaultTemplate(data: {
-  orderNumber: string;
-  orderDate: string;
-  poNumber: string;
-  deliveryDate: string;
-  customerName: string;
-  customerEmail: string;
-  customerAddress: string;
-  companyName: string;
-  companyAddress: string;
-  companyEmail: string;
-  itemsRows: string;
-  subtotal: string;
-  discount: string;
-  tax: string;
-  grossTotal: string;
-  notes: string;
-  logoUrl?: string;
-  logoPosition?: string;
-}): string {
-  const {
-    orderNumber, orderDate, poNumber, deliveryDate,
-    customerName, customerEmail, customerAddress,
-    companyName, companyAddress, companyEmail,
-    itemsRows, subtotal, discount, tax, grossTotal, notes,
-    logoUrl, logoPosition,
-  } = data;
-
-  // Logo do admin (Notifications → Email) quando existir; senão o nome da
-  // empresa em texto — SEM branding hardcoded (o "PermShield" laranja antigo
-  // não era a logo do cliente e parecia "logo com cor errada").
-  const logoAlign = logoPosition === "center" ? "center" : logoPosition === "right" ? "right" : "left";
-  const headerBrand = logoUrl
-    ? `<div style="flex:1;text-align:${logoAlign};"><img src="${logoUrl}" alt="${companyName}" style="max-height:48px;max-width:200px;"/></div>`
-    : `<div style="flex:1;"><div class="logo-text">${companyName}</div></div>`;
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size:11px; color:#222; padding:32px; }
-
-  /* ─── Header ─── */
-  .hdr { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #1a2d5a; padding-bottom:14px; margin-bottom:18px; }
-  .logo-text { font-size:22px; font-weight:800; color:#1a2d5a; letter-spacing:-0.5px; }
-  .logo-text span { color:#e88a1a; }
-  .logo-sub { font-size:9px; color:#999; margin-top:2px; }
-  .fld-l { text-align:right; font-size:8px; color:#6b85a8; padding:1px 8px 1px 0; white-space:nowrap; vertical-align:top; }
-  .fld-v { font-size:9px; color:#222; padding:1px 0; vertical-align:top; }
-  .doc-info { text-align:right; }
-  .doc-title { font-size:18px; font-weight:700; color:#1a2d5a; }
-  .doc-num   { font-size:13px; color:#e88a1a; font-weight:700; margin-top:2px; }
-  .doc-date  { font-size:10px; color:#666; margin-top:2px; }
-
-  /* ─── Two-column info ─── */
-  .info-row { display:flex; gap:0; margin-bottom:18px; }
-  .info-left { flex:1; padding-right:20px; border-right:1px solid #ddd; }
-  .info-right { flex:1; padding-left:20px; }
-  .info-block { margin-bottom:6px; }
-  .info-label { color:#888; font-size:9px; text-transform:uppercase; letter-spacing:0.5px; }
-  .info-value { font-size:11px; font-weight:600; color:#1a2d5a; margin-top:1px; }
-  .info-value.normal { font-weight:400; color:#333; }
-
-  /* ─── Items table ─── */
-  table { width:100%; border-collapse:collapse; margin-bottom:12px; }
-  thead tr { background:#1a2d5a; color:#fff; }
-  th { padding:7px 10px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; text-align:left; }
-  th:nth-child(3) { text-align:center; }
-  th:nth-child(4), th:nth-child(5) { text-align:right; }
-  td { padding:7px 10px; border-bottom:1px solid #eee; font-size:11px; vertical-align:top; }
-  td:nth-child(3) { text-align:center; }
-  td:nth-child(4), td:nth-child(5) { text-align:right; }
-  tr:nth-child(even) td { background:#f8f9fb; }
-
-  /* ─── Totals ─── */
-  .totals { display:flex; justify-content:flex-end; margin-bottom:18px; }
-  .totals-table { min-width:240px; border-collapse:collapse; }
-  .totals-table td { padding:4px 10px; font-size:11px; }
-  .totals-table td:first-child { color:#666; text-align:right; }
-  .totals-table td:last-child { font-weight:600; text-align:right; color:#1a2d5a; min-width:80px; }
-  .totals-table tr.grand td { border-top:2px solid #1a2d5a; font-size:13px; font-weight:800; padding-top:7px; }
-
-  /* ─── Notes ─── */
-  .notes-box { background:#f5f7fa; border-left:3px solid #e88a1a; padding:10px 12px; font-size:10px; color:#555; margin-bottom:18px; }
-
-  /* ─── Footer ─── */
-  .footer { border-top:1px solid #ddd; padding-top:12px; display:flex; justify-content:space-between; align-items:flex-end; }
-  .footer-company { font-size:10px; color:#555; line-height:1.6; }
-  .footer-company strong { font-size:11px; color:#1a2d5a; }
-  .footer-brand { font-size:16px; font-weight:800; color:#1a2d5a; }
-  .footer-brand span { color:#e88a1a; }
-</style>
-</head>
-<body>
-
-<!-- Header — MESMO layout do PDF anexado no email (pdfGenerator.ts):
-     logo centralizada, título "Order", linha, campos rotulados à esquerda e
-     empresa à direita. Website REMOVIDO (era do sistema antigo). -->
-<div style="text-align:center;margin-bottom:6px;">${headerBrand}</div>
-<div style="text-align:center;font-size:20px;color:#666;margin-bottom:8px;">Order</div>
-<div style="border-bottom:2px solid #1a2d5a;margin-bottom:16px;"></div>
-
-<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;">
-  <table style="border-collapse:collapse;">
-    <tr><td class="fld-l">Order</td><td class="fld-v"><strong>${orderNumber}</strong></td></tr>
-    <tr><td class="fld-l">PO</td><td class="fld-v">${poNumber || ""}</td></tr>
-    <tr><td class="fld-l">Customer</td><td class="fld-v">${customerName}</td></tr>
-    <tr><td class="fld-l">Address</td><td class="fld-v">${customerAddress || ""}</td></tr>
-    <tr><td class="fld-l">Email</td><td class="fld-v">${customerEmail || ""}</td></tr>
-    <tr><td class="fld-l">Date</td><td class="fld-v">${orderDate}</td></tr>
-    <tr><td class="fld-l">Delivery date</td><td class="fld-v">${deliveryDate || ""}</td></tr>
-    <tr><td class="fld-l">Comments</td><td class="fld-v">${notes || ""}</td></tr>
-  </table>
-  <div style="text-align:right;font-size:10px;color:#333;">
-    <div style="font-size:12px;font-weight:bold;color:#1a2d5a;">${companyName}</div>
-    ${companyAddress ? `<div>${companyAddress}</div>` : ""}
-    ${companyEmail ? `<div style="color:#1a7fbd;">${companyEmail}</div>` : ""}
-  </div>
-</div>
-
-<!-- Items -->
-<table>
-  <thead>
-    <tr>
-      <th>Code</th>
-      <th>Name / Description</th>
-      <th>Qty</th>
-      <th>Price</th>
-      <th>Total</th>
-    </tr>
-  </thead>
-  <tbody>
-    ${itemsRows}
-  </tbody>
-</table>
-
-<!-- Totals -->
-<div class="totals">
-  <table class="totals-table">
-    <tr><td>Subtotal</td><td>${subtotal}</td></tr>
-    ${discount !== "$0.00" ? `<tr><td>Discount</td><td>- ${discount}</td></tr>` : ""}
-    ${tax !== "$0.00" ? `<tr><td>Sales Tax</td><td>${tax}</td></tr>` : ""}
-    <tr class="grand"><td>Gross Total</td><td>${grossTotal}</td></tr>
-  </table>
-</div>
-
-<!-- Notes -->
-<!-- Comments no cabecalho (paridade com o PDF anexado) -->
-
-<!-- Footer -->
-<div class="footer">
-  <div class="footer-company">
-    <strong>${companyName}</strong><br>
-    ${companyAddress ? companyAddress + "<br>" : ""}
-    ${companyEmail ? `E-mail: ${companyEmail}` : ""}
-  </div>
-  ${logoUrl ? `<div><img src="${logoUrl}" alt="${companyName}" style="max-height:28px;max-width:120px;"/></div>` : ""}
-</div>
-
-</body>
-</html>`;
-}
-
-/** Apply {{placeholders}} from a custom template stored in DB */
-function applyCustomTemplate(template: string, data: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => data[key] ?? "");
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -401,7 +226,7 @@ Deno.serve(async (req) => {
         .single(),
       supabase
         .from("configuracoes")
-        .select("nome_empresa, email_contato, endereco, telefone_contato, pdf_order_template")
+        .select("nome_empresa, email_contato, endereco")
         .limit(1)
         .maybeSingle(),
     ]);
@@ -457,41 +282,7 @@ Deno.serve(async (req) => {
         ].filter(Boolean).join("\n")
       : "";
 
-    // Items rows HTML
-    const itemsRows = (itens ?? []).map((i: any) => `
-      <tr>
-        <td>${i.sku || "—"}</td>
-        <td>${i.nome_produto || "—"}</td>
-        <td>${i.quantidade}</td>
-        <td>${fmtUSD(i.preco_unitario)}</td>
-        <td>${fmtUSD(i.subtotal)}</td>
-      </tr>
-    `).join("");
-
-    const data = {
-      orderNumber:     String(pedido.numero || pedido.id),
-      orderDate:       fmtDate(pedido.created_at),
-      poNumber:        pedido.po_number || "",
-      deliveryDate:    pedido.delivery_date ? fmtDate(pedido.delivery_date) : "",
-      customerName:    cliente?.empresa || cliente?.nome || "—",
-      customerEmail:   cliente?.email || "",
-      customerAddress,
-      companyName,
-      companyAddress,
-      companyEmail,
-      itemsRows,
-      subtotal:        fmtUSD(pedido.subtotal),
-      discount:        fmtUSD(pedido.desconto),
-      tax:             fmtUSD(pedido.sales_tax),
-      grossTotal:      fmtUSD(pedido.total),
-      notes:           pedido.observacoes || "",
-      logoUrl:         logoCfg.email_logo_url || "",
-      logoPosition:    logoCfg.email_logo_position || "left",
-      // {{logo}} disponível também no template customizado
-      logo:            logoCfg.email_logo_url
-        ? `<img src="${logoCfg.email_logo_url}" alt="logo" style="max-height:48px;max-width:200px;"/>`
-        : "",
-    };
+    const orderNumber = String(pedido.numero || pedido.id);
 
     // ── PREVIEW = ANEXO: usa o MESMO gerador pdf-lib do email (generateOrderPdf).
     // Antes o preview era HTML próprio e divergia do PDF anexado. Agora é
@@ -501,8 +292,8 @@ Deno.serve(async (req) => {
       qty: Number(i.quantidade ?? 0), price: Number(i.preco_unitario ?? 0), total: Number(i.subtotal ?? 0),
     }));
     const pdfBytes = await generateOrderPdf({
-      orderNumber: data.orderNumber, orderDate: data.orderDate,
-      poNumber: data.poNumber, deliveryDate: data.deliveryDate,
+      orderNumber, orderDate: fmtDate(pedido.created_at),
+      poNumber: pedido.po_number || "", deliveryDate: pedido.delivery_date ? fmtDate(pedido.delivery_date) : "",
       customerName: cliente?.empresa || cliente?.nome || "",
       customerContact: (cliente?.empresa && cliente?.nome && cliente.nome !== cliente.empresa) ? cliente.nome : "",
       customerEmail: cliente?.email ?? "", customerPhone: cliente?.telefone ?? "",
@@ -519,7 +310,7 @@ Deno.serve(async (req) => {
     let binary = ""; for (let i = 0; i < pdfBytes.length; i++) binary += String.fromCharCode(pdfBytes[i]);
     const pdfBase64 = btoa(binary);
 
-    return new Response(JSON.stringify({ pdf_base64: pdfBase64, filename: `order-${data.orderNumber}.pdf` }), {
+    return new Response(JSON.stringify({ pdf_base64: pdfBase64, filename: `order-${orderNumber}.pdf` }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 
