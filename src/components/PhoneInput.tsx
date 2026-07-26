@@ -36,9 +36,21 @@ export function PhoneInput({
   const max = country === '+55' ? 11 : 10;
   const display = country === '+55' ? formatBR(digits) : formatUS(digits);
 
-  const setCountry = (c: string) => onChange(digits ? `${c}${digits}` : '');
+  // Re-clampa no limite do país NOVO: sem isto, trocar +55 (11 dígitos) para +1
+  // (10) deixava um dígito a mais no valor salvo, diferente do que a tela exibia.
+  const setCountry = (c: string) => {
+    const d = digits.slice(0, c === '+55' ? 11 : 10);
+    onChange(d ? `${c}${d}` : '');
+  };
   const setDigits = (raw: string) => {
-    const d = raw.replace(/\D/g, '').slice(0, max);
+    let d = raw.replace(/\D/g, '');
+    // Colar um número em E.164 ("+1 561 849-8555") trazia o DDI junto: o "1"
+    // virava dígito do assinante e o corte no limite comia o último dígito REAL
+    // (+15618498555 → +11561849855). Pior, o número corrompido ainda passava na
+    // validação. Se veio dígito a mais e começa com o DDI atual, tira o DDI.
+    const cc = country.replace('+', '');
+    if (d.length > max && d.startsWith(cc)) d = d.slice(cc.length);
+    d = d.slice(0, max);
     onChange(d ? `${country}${d}` : '');
   };
 

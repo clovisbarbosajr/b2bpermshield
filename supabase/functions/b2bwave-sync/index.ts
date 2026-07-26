@@ -89,10 +89,16 @@ async function fetchAllPaginated(endpoint: string, username: string, apiKey: str
   return all;
 }
 
+// Mapeia para os status CANÔNICOS do app (src/lib/orderStatuses.ts).
+// Antes convertia para os legados em PT (concluido/recebido/enviado/...): como o
+// admin grava o canônico e o diff compara string crua, a cada ciclo do cron (15
+// min) o sync via "sent" != "enviado" e REVERTIA o status alterado pelo admin —
+// e a reversão disparava trg_order_status_notify, mandando ao cliente uma segunda
+// notificação com o valor interno cru ("Order #123: recebido").
 const statusMap: Record<string, string> = {
-  "complete": "concluido", "completed": "concluido", "submitted": "recebido",
-  "received": "recebido", "processing": "em_processamento", "in progress": "em_processamento",
-  "shipped": "enviado", "cancelled": "cancelado", "canceled": "cancelado",
+  "complete": "complete", "completed": "complete", "submitted": "submitted",
+  "received": "submitted", "processing": "on_hold", "in progress": "on_hold",
+  "shipped": "sent", "cancelled": "cancelled", "canceled": "cancelled",
 };
 
 // Escolhe o primeiro campo numérico > 0 dentre várias chaves possíveis da API B2BWave.
