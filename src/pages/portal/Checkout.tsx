@@ -610,9 +610,14 @@ const Checkout = () => {
 
     // Incrementa uso do cupom de forma ATÔMICA (não read-modify-write) e só se o
     // desconto realmente entrou (o trigger valida ativo/datas/uso no servidor).
-    if (coupon && couponApplied) {
-      await supabase.rpc("increment_coupon_usage", { _coupon_id: coupon.id });
-    }
+    // SÓ é chamado quando o pedido REALMENTE se concretiza: antes isto rodava aqui,
+    // ANTES do pagamento — cartão recusado cancelava o pedido mas o cupom já tinha
+    // sido consumido (cupom de uso único ficava queimado sem venda nenhuma).
+    const bumpCouponUsage = async () => {
+      if (coupon && couponApplied) {
+        await supabase.rpc("increment_coupon_usage", { _coupon_id: coupon.id });
+      }
+    };
 
     // Stripe card payment
     if (payByCard) {
@@ -661,6 +666,7 @@ const Checkout = () => {
           .from("pedidos")
           .update({ is_paid: true, payment_intent_id: paymentIntent.id } as any)
           .eq("id", pedido.id);
+        await bumpCouponUsage(); // pagamento aprovado → agora sim consome o cupom
         // Notificações em BACKGROUND (keepalive) — o cliente NÃO espera os emails.
         const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerCompany };
         const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
@@ -671,7 +677,7 @@ const Checkout = () => {
             order_id: (pedido as any).numero ?? pedido.id, total: finalTotal,
             date: new Date().toLocaleString("pt-BR"),
             items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
-            customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
+            customer_name: customerName, customer_company: customerCompany, customer_email: customerEmail, customer_phone: customerPhone,
           }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } },
         ]);
         orderPlacedRef.current = true;
@@ -687,6 +693,7 @@ const Checkout = () => {
       return;
     }
 
+    await bumpCouponUsage(); // pedido sem cartão: confirmado no submit
     // Notificações em BACKGROUND (keepalive) — o cliente NÃO espera os emails.
     const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerCompany };
     const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
@@ -697,7 +704,7 @@ const Checkout = () => {
         order_id: (pedido as any).numero ?? pedido.id, total: finalTotal,
         date: new Date().toLocaleString("pt-BR"),
         items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
-        customer_name: customerName, customer_company: customerName, customer_email: customerEmail, customer_phone: customerPhone,
+        customer_name: customerName, customer_company: customerCompany, customer_email: customerEmail, customer_phone: customerPhone,
       }, customer: { email: customerEmail, phone: customerPhone, whatsapp: customerPhone } } },
     ]);
 

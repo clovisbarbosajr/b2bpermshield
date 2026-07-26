@@ -141,7 +141,15 @@ const OrderDetail = () => {
   const handleStatusChange = async (newStatus: string) => {
     setForm(f => ({ ...f, status: newStatus }));
     if (!order) return;
-    await supabase.from("pedidos").update({ status: newStatus as any }).eq("id", order.id);
+    // Sem checar o erro, um UPDATE recusado (RLS/rede) ainda mostrava "Status
+    // updated" e MANDAVA o email ao cliente ("seu pedido foi enviado") com o
+    // pedido parado no status antigo. Agora falha reverte a tela e não notifica.
+    const { error: stErr } = await supabase.from("pedidos").update({ status: newStatus as any }).eq("id", order.id);
+    if (stErr) {
+      setForm(f => ({ ...f, status: order.status }));
+      toast.error("Failed to update status: " + stErr.message);
+      return;
+    }
     setOrder({ ...order, status: newStatus });
     toast.success("Status updated");
     log("updated", "order", order.id, `Order #${order.numero || order.id}`, { status: newStatus });

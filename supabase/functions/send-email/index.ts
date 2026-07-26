@@ -427,7 +427,12 @@ E-mail: ${companyEmail}
 
 // Template 5: Order status change (sent to customer)
 function templateOrderStatusChange(order: any, customer: any, newStatus: string) {
+  // Espelha src/lib/orderStatuses.ts (fonte única). Sem os valores CANÔNICOS o
+  // fallback `|| newStatus` mandava o slug cru pro cliente ("ready_for_pickup").
+  // Os legados em PT continuam aqui pra pedidos antigos.
   const statusLabel: Record<string, string> = {
+    submitted: "Submitted", ready_for_pickup: "Ready for Pickup", partial: "Partial",
+    on_hold: "On Hold", sent: "Sent", complete: "Complete", cancelled: "Canceled",
     recebido: "Submitted",
     processando: "Processing",
     enviado: "Shipped",
@@ -759,7 +764,11 @@ Deno.serve(async (req) => {
         .select("enabled").eq("id", "email").maybeSingle();
       emailChannelOff = emailCh?.enabled === false;
     } catch (_e) { /* na dúvida, não bloqueia */ }
-    const AUTH_TYPES = new Set(["password_reset", "magic_link", "set_password", "admin_alert", "raw"]);
+    // `request_magic_link` (fluxo público "me manda um link de login", usado pelos
+    // clientes migrados que não têm senha) É um email de AUTH — estava faltando
+    // aqui, então o interruptor mestre o bloqueava e o cliente não conseguia logar,
+    // recebendo {success:true} sem email nenhum (falha invisível).
+    const AUTH_TYPES = new Set(["password_reset", "magic_link", "request_magic_link", "set_password", "admin_alert", "raw"]);
     if (emailChannelOff && !AUTH_TYPES.has(type) && body.force !== true) {
       await adminClient.from("notification_log").insert({
         event: type, channel: "email", recipient: "-",
@@ -829,6 +838,11 @@ Deno.serve(async (req) => {
     ]);
     const ADMIN_FACING = new Set(["new_order_admin", "new_registration_admin"]);
     const bodyRecipient = String(body.customerEmail ?? body.customer?.email ?? body.order?.customer?.email ?? "").trim().toLowerCase();
+    // Guardado pra RE-VALIDAR o destinatário DEPOIS do roteamento (ver gate final).
+    // O gate abaixo só olha `body.customerEmail`, mas os tipos de pedido enviam para
+    // `customer.email` — campos DIFERENTES. Sem a re-validação dava pra passar o
+    // próprio email em `customerEmail` (aprova) e a vítima em `customer.email` (envia).
+    let ownEmailsForGate: Set<string> | null = null;
     if (CUSTOMER_FACING.has(type) && !isPrivilegedCaller) {
       // Aceita se o destino for o email de LOGIN do chamador OU o email da FICHA
       // dele em `clientes` (cobre cliente cujo email de cadastro difere do login,
@@ -851,6 +865,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ error: "Not authorized: recipient must be your own account" }),
           { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
+      ownEmailsForGate = ownEmails;
     }
     if (ADMIN_FACING.has(type) && !isLoggedIn) {
       return new Response(JSON.stringify({ error: "Not authorized for this email type" }),
@@ -1064,7 +1079,10 @@ Deno.serve(async (req) => {
       }
       const { order, customer, newStatus } = body;
       to = customer.email;
+      // Mesmo mapa do templateOrderStatusChange — canônicos (orderStatuses.ts) + legados.
       const statusLabels: Record<string, string> = {
+        submitted: "Submitted", ready_for_pickup: "Ready for Pickup", partial: "Partial",
+        on_hold: "On Hold", sent: "Sent", complete: "Complete", cancelled: "Canceled",
         recebido: "Submitted", processando: "Processing", enviado: "Shipped",
         concluido: "Complete", cancelado: "Cancelled",
       };
@@ -1276,7 +1294,13 @@ Deno.serve(async (req) => {
       "product_available",
       "password_reset",
     ];
-    const bcc = CUSTOMER_TYPES.includes(type) ? config?.bcc_outgoing_emails || "" : "";
+    // NUNCA mandar BCC em email que carrega LINK DE ACESSO (reset de senha, magic
+    // link, definir senha). O BCC existe pra arquivar confirmação de pedido; com
+    // esses tipos ele entregava um token de login VÁLIDO do cliente numa caixa
+    // compartilhada — qualquer um com acesso a ela assumia a conta do cliente.
+    const AUTH_LINK_TYPES = new Set(["set_password", "magic_link", "request_magic_link", "password_reset"]);
+    const bcc = (CUSTOMER_TYPES.includes(type) && !AUTH_LINK_TYPES.has(type))
+      ? config?.bcc_outgoing_emails || "" : "";
 
     // Logo no topo de TODO email com cara de marca (cliente E avisos de admin) —
     // central, uma vez só. Fora: raw e admin_alert (internos/arbitrários).
@@ -1285,6 +1309,22 @@ Deno.serve(async (req) => {
     ]);
     if (logoHeaderHtml && LOGO_TYPES.has(type)) {
       html = logoHeaderHtml + html;
+    }
+
+    // GATE FINAL anti-relay: valida o destinatário JÁ RESOLVIDO pelo roteamento.
+    // O gate de cima olha `body.customerEmail`; os tipos de pedido enviam para
+    // `customer.email`. Sem esta checagem, um cliente logado passava o próprio
+    // email no campo validado e o de um TERCEIRO no campo usado — recebendo o
+    // email com a marca da empresa (e o PDF do pedido). Só vale pra chamador NÃO
+    // privilegiado em tipo customer-facing; service-role/cron não passam por aqui.
+    if (ownEmailsForGate) {
+      const resolved = (Array.isArray(to) ? to : [to])
+        .map((t) => String(t ?? "").trim().toLowerCase()).filter(Boolean);
+      const alien = resolved.filter((t) => !ownEmailsForGate!.has(t));
+      if (!resolved.length || alien.length) {
+        return new Response(JSON.stringify({ error: "Not authorized: recipient must be your own account" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     const result = await sendEmailResilient(

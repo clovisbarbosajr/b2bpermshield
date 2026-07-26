@@ -42,20 +42,23 @@ const Carrinho = () => {
     localStorage.setItem(savedKey(user?.id), JSON.stringify(updated));
   };
 
+  // Identidade do item salvo = produto + variante (cartKey). Filtrar só por
+  // produto_id APAGAVA a outra variante: salvar "Camiseta M" e depois "Camiseta G"
+  // descartava a M silenciosamente (ela já tinha saído do carrinho).
   const saveForLater = (item: any) => {
     removeItem(cartKey(item));
-    persistSaved([...savedItems.filter((s) => s.produto_id !== item.produto_id), item]);
+    persistSaved([...savedItems.filter((s) => cartKey(s) !== cartKey(item)), item]);
     toast.info(`${item.nome} saved for later`);
   };
 
   const moveToCart = (item: any) => {
     addItem(item);
-    persistSaved(savedItems.filter((s) => s.produto_id !== item.produto_id));
+    persistSaved(savedItems.filter((s) => cartKey(s) !== cartKey(item)));
     toast.success(`${item.nome} moved to cart`);
   };
 
-  const removeSaved = (produto_id: string) => {
-    persistSaved(savedItems.filter((s) => s.produto_id !== produto_id));
+  const removeSaved = (key: string) => {
+    persistSaved(savedItems.filter((s) => cartKey(s) !== key));
   };
 
   // Disponibilidade em TEMPO REAL — não pode ter risco de comprar com estoque
@@ -203,7 +206,9 @@ const Carrinho = () => {
               </TableHeader>
               <TableBody>
                 {items.map(item => (
-                  <TableRow key={item.produto_id}>
+                  // key por produto+variante: com `produto_id` duas variantes do mesmo
+                  // produto geravam chaves DUPLICADAS e o React embaralhava as linhas.
+                  <TableRow key={cartKey(item)}>
                     <TableCell>
                       <div className="h-10 w-10 bg-muted rounded overflow-hidden">
                         {item.imagem_url ? (
@@ -314,7 +319,7 @@ const Carrinho = () => {
           <h3 className="text-lg font-bold mb-4">Saved for Later ({savedItems.length})</h3>
           <div className="divide-y">
             {savedItems.map((item) => (
-              <div key={item.produto_id} className="flex items-center justify-between py-3">
+              <div key={cartKey(item)} className="flex items-center justify-between py-3">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded bg-muted overflow-hidden flex-shrink-0">
                     {item.imagem_url ? (
@@ -335,7 +340,7 @@ const Carrinho = () => {
                     <RotateCcw className="h-3.5 w-3.5" /> Move to Cart
                   </Button>
                   <button
-                    onClick={() => removeSaved(item.produto_id)}
+                    onClick={() => removeSaved(cartKey(item))}
                     className="h-7 w-7 rounded-full border border-destructive text-destructive flex items-center justify-center hover:bg-destructive hover:text-white transition-colors"
                   >
                     <X className="h-3.5 w-3.5" />

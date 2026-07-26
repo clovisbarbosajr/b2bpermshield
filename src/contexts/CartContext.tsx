@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 export type CartItem = {
   produto_id: string;
@@ -30,6 +31,12 @@ interface CartContextType {
 }
 
 const storageKey = (userId: string) => `b2b_cart_${userId}`;
+// Durante "View as", a sessão REAL é a do admin — sem uma chave própria por cliente
+// impersonado, TODOS os clientes vistos pelo admin dividiam o mesmo carrinho
+// (`b2b_cart_<admin_uid>`). Com view-as por aba isso é pior: duas abas com clientes
+// diferentes gravavam uma por cima da outra, dando pra enviar o pedido do cliente A
+// no nome do B.
+const viewAsStorageKey = (customerId: string) => `b2b_cart_viewas_${customerId}`;
 const ANON_KEY = "b2b_cart_anon";
 
 const loadCart = (key: string): CartItem[] => {
@@ -56,45 +63,52 @@ export const useCart = () => useContext(CartContext);
 export const CartProvider = ({ children }: { children: ReactNode }) => {
   const [userId, setUserId] = useState<string | null>(null);
   const [items, setItems] = useState<CartItem[]>([]);
-  // Só persiste DEPOIS que o carrinho do usuário foi hidratado do localStorage.
-  // Sem isto, o [] inicial podia sobrescrever o carrinho salvo durante a corrida
-  // do auth (causa do "itens somem ao sair e voltar").
-  const hydratedRef = useRef(false);
+  const [authResolved, setAuthResolved] = useState(false);
+  const { impersonatedCustomer } = useAuth();
+  const viewAsId = impersonatedCustomer?.id ?? null;
+  // Chave EFETIVA: durante "View as" é a do CLIENTE impersonado (cada cliente com o
+  // seu carrinho); fora dele, a do usuário logado.
+  const cartStorageKey = viewAsId
+    ? viewAsStorageKey(viewAsId)
+    : (userId ? storageKey(userId) : ANON_KEY);
+  // Só persiste DEPOIS que a chave ATUAL foi hidratada do localStorage. Sem isto, o
+  // [] inicial podia sobrescrever o carrinho salvo durante a corrida do auth (causa
+  // do "itens somem ao sair e voltar") — e, ao TROCAR de chave, os itens da chave
+  // antiga seriam gravados na nova.
+  const hydratedKeyRef = useRef<string | null>(null);
 
-  // On auth state change: switch cart to the logged-in user's cart, clear on logout
+  // Acompanha a sessão REAL (no view-as continua sendo a do admin).
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      const uid = session?.user?.id ?? null;
-      setUserId(uid);
-      setItems(loadCart(uid ? storageKey(uid) : ANON_KEY));
-      hydratedRef.current = true;
+      setUserId(session?.user?.id ?? null);
+      setAuthResolved(true);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const uid = session?.user?.id ?? null;
       setUserId(uid);
-      if (!uid) {
-        // User logged out — clear cart completely
-        setItems([]);
-        try { localStorage.removeItem(ANON_KEY); } catch {}
-      } else {
-        // New user logged in — load their own cart
-        setItems(loadCart(storageKey(uid)));
-      }
-      hydratedRef.current = true;
+      // User logged out — clear the anon cart too
+      if (!uid) { try { localStorage.removeItem(ANON_KEY); } catch {} }
+      setAuthResolved(true);
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // Persist to localStorage whenever cart changes — só após a hidratação inicial.
+  // Hidrata a partir da chave efetiva — troca de usuário OU de cliente impersonado.
   useEffect(() => {
-    if (!hydratedRef.current) return;
-    const key = userId ? storageKey(userId) : ANON_KEY;
+    if (!authResolved) return;
+    setItems(loadCart(cartStorageKey));
+    hydratedKeyRef.current = cartStorageKey;
+  }, [authResolved, cartStorageKey]);
+
+  // Persiste — só na chave que já foi hidratada (evita gravar itens da chave antiga).
+  useEffect(() => {
+    if (hydratedKeyRef.current !== cartStorageKey) return;
     try {
-      localStorage.setItem(key, JSON.stringify(items));
+      localStorage.setItem(cartStorageKey, JSON.stringify(items));
     } catch {}
-  }, [items, userId]);
+  }, [items, cartStorageKey]);
 
   const addItem = (item: CartItem) => {
     setItems((prev) => {
