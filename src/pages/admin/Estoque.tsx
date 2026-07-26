@@ -53,11 +53,20 @@ const AdminEstoque = () => {
   const handleAjuste = async () => {
     if (!selected) return;
     setSaving(true);
+    // O UPDATE vem PRIMEIRO e é checado: antes, o estoque_log e o activity log
+    // eram gravados mesmo quando o update falhava (RLS/rede) e a tela dizia
+    // "Stock updated" — o histórico registrava um ajuste que nunca aconteceu.
+    const { error: updErr } = await supabase.from("produtos")
+      .update({ estoque_total: novaQtd }).eq("id", selected.id);
+    if (updErr) {
+      setSaving(false);
+      toast.error("Failed to update stock: " + updErr.message);
+      return;
+    }
     await supabase.from("estoque_log").insert({
       produto_id: selected.id, quantidade_anterior: selected.estoque_total,
       quantidade_nova: novaQtd, motivo: motivo || null, usuario_id: user?.id ?? null,
     });
-    await supabase.from("produtos").update({ estoque_total: novaQtd }).eq("id", selected.id);
     // Também no Activity Logs (Settings → Activity Logs), com detalhes.
     log("updated", "inventory", selected.id, selected.sku ? `${selected.nome} (${selected.sku})` : selected.nome, {
       qty_before: selected.estoque_total, qty_after: novaQtd,

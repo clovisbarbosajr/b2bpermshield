@@ -22,7 +22,10 @@ const AdminRelatorios = () => {
       const [pRes, prRes, iRes] = await Promise.all([
         supabase.from("pedidos").select("*, clientes(nome, empresa)").order("created_at", { ascending: false }),
         supabase.from("produtos").select("id, nome, sku, preco, estoque_total, estoque_reservado, quantidade_minima"),
-        supabase.from("pedido_itens").select("produto_id, nome_produto, quantidade, subtotal"),
+        // `pedido_id` é necessário pra excluir itens de pedido CANCELADO do
+        // "Top Products" (a receita total já os exclui — os dois números do
+        // mesmo painel se contradiziam).
+        supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, quantidade, subtotal"),
       ]);
       setPedidos(pRes.data ?? []);
       setProdutos(prRes.data ?? []);
@@ -32,14 +35,22 @@ const AdminRelatorios = () => {
     fetch();
   }, []);
 
-  // Sales by month
-  const salesByMonth = pedidos.reduce((acc: Record<string, number>, p) => {
+  // Sales by month — chave ORDENÁVEL (YYYY-MM) + ordenação cronológica.
+  // Antes a chave era o rótulo ("Jul 2026") e o slice(-12) cortava pela ordem de
+  // INSERÇÃO; como `pedidos` vem em created_at DESC, isso pegava os 12 meses MAIS
+  // ANTIGOS e ainda plotava o eixo invertido (novo → velho).
+  const salesByMonth = pedidos.reduce((acc: Record<string, { label: string; total: number }>, p) => {
     if (canonicalStatus(p.status) === "cancelled") return acc;
-    const month = new Date(p.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short" });
-    acc[month] = (acc[month] ?? 0) + Number(p.total);
+    const d = new Date(p.created_at);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (!acc[key]) acc[key] = { label: d.toLocaleDateString("en-US", { year: "numeric", month: "short" }), total: 0 };
+    acc[key].total += Number(p.total);
     return acc;
   }, {});
-  const salesData = Object.entries(salesByMonth).map(([month, total]) => ({ month, total })).slice(-12);
+  const salesData = Object.entries(salesByMonth)
+    .sort(([a], [b]) => a.localeCompare(b))            // cronológico
+    .slice(-12)                                        // 12 meses MAIS RECENTES
+    .map(([, v]) => ({ month: v.label, total: v.total }));
 
   // Orders by status
   const statusCounts = pedidos.reduce((acc: Record<string, number>, p) => {
@@ -49,8 +60,14 @@ const AdminRelatorios = () => {
   }, {});
   const statusData = Object.entries(statusCounts).map(([k, value]) => ({ name: statusLabel(k), value }));
 
-  // Top products by quantity sold
+  // Top products by quantity sold — SEM os itens de pedido cancelado (a receita
+  // total abaixo já os exclui; incluir aqui fazia os dois números do mesmo painel
+  // se contradizerem).
+  const cancelledOrderIds = new Set(
+    pedidos.filter((p) => canonicalStatus(p.status) === "cancelled").map((p) => p.id),
+  );
   const productSales = itens.reduce((acc: Record<string, { name: string; qty: number; revenue: number }>, i) => {
+    if (cancelledOrderIds.has((i as any).pedido_id)) return acc;
     if (!acc[i.produto_id]) acc[i.produto_id] = { name: i.nome_produto, qty: 0, revenue: 0 };
     acc[i.produto_id].qty += i.quantidade;
     acc[i.produto_id].revenue += Number(i.subtotal);

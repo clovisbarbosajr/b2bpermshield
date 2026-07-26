@@ -76,16 +76,37 @@ const BulkUpdateOrders = () => {
         continue;
       }
 
-      const { data: updated, error } = await supabase
+      // `pedidos.numero` NÃO é único (a migration do sync diz isso explicitamente,
+      // e já houve colisão real entre numeração nativa e ids do B2BWave). Antes o
+      // update era `.eq("numero", ...)`: uma linha do CSV alterava TODOS os pedidos
+      // com aquele número — inclusive o de outro cliente — e reportava "Updated"
+      // em verde (só o caso "nenhum encontrado" era tratado).
+      // Agora: resolve o número para UM id antes; ambiguidade vira erro, sem tocar
+      // em nada.
+      const { data: matches, error: findErr } = await supabase
+        .from("pedidos").select("id").eq("numero", orderNumber);
+
+      if (findErr) {
+        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: findErr.message });
+        continue;
+      }
+      if (!matches || matches.length === 0) {
+        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: `Order #${orderNumber} not found` });
+        continue;
+      }
+      if (matches.length > 1) {
+        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error",
+          message: `Ambiguous: ${matches.length} orders share number #${orderNumber}. Update them individually.` });
+        continue;
+      }
+
+      const { error } = await supabase
         .from("pedidos")
         .update(updatePayload as any)
-        .eq("numero", orderNumber)
-        .select("id");
+        .eq("id", (matches[0] as any).id);
 
       if (error) {
         res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: error.message });
-      } else if (!updated || updated.length === 0) {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: `Order #${orderNumber} not found` });
       } else {
         res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "ok", message: "Updated" });
       }
