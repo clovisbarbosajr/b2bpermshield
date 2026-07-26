@@ -7,8 +7,11 @@ import { Buffer } from "node:buffer";
 // ─── GERADOR DE PDF EMBUTIDO (era ../_shared/pdfGenerator.ts) ────────────────
 // Embutido AQUI de propósito: garante que o código ATUAL do PDF entra no deploy
 // da send-email, sem depender do arquivo compartilhado ser reempacotado (causa
-// do "PDF continua o antigo" apesar de redeploy). Fonte canônica p/ teste local:
-// _shared/pdfGenerator.ts — manter os dois em sincronia se mudar o layout.
+// do "PDF continua o antigo" apesar de redeploy).
+// ATENÇÃO: a fonte de verdade são ESTA cópia e a de generate-pdf/index.ts — as
+// duas devem mudar JUNTAS. NÃO copiar de _shared/pdfGenerator.ts: aquele arquivo
+// está órfão (nenhum import) e DESATUALIZADO (rótulo "Customer", sem quebra de
+// endereço) — copiar de lá REGRIDE o layout.
 import { PDFDocument, StandardFonts, rgb, PDFFont } from "npm:pdf-lib@1.17.1";
 
 interface PdfOrderItem { sku: string; name: string; qty: number; price: number; total: number; }

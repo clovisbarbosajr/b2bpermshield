@@ -556,7 +556,10 @@ Deno.serve(async (req) => {
           ativo: p.is_active !== false,
           imagem_url: p.image_url || (p.gallery_image_urls?.[0]) || null,
           estoque_total: parseInt(p.quantity || p.stock || "0") || 0,
-          estoque_reservado: parseInt(p.quantity_reserved || "0") || 0,
+          // NÃO sincronizar `estoque_reservado`: é um contador LOCAL, mantido pelos
+          // triggers de reserva do portal. O B2BWave não devolve esse campo, então
+          // ele virava 0 a cada sync — o disponível (total - reservado) inflava e o
+          // portal vendia estoque já comprometido por pedidos abertos.
           quantidade_minima: Math.max(parseInt(p.minimum_quantity || p.min_quantity || "0") || 0, 1),
           unidade_venda: p.unit || p.unit_of_measure || 'un',
           peso: parseFloat(p.weight || "0") || null,
@@ -601,7 +604,6 @@ Deno.serve(async (req) => {
           const changed = existing.nome !== row.nome || Number(existing.preco) !== row.preco ||
             existing.ativo !== row.ativo || existing.imagem_url !== row.imagem_url ||
             existing.estoque_total !== row.estoque_total || existing.categoria_id !== row.categoria_id ||
-            (existing.estoque_reservado ?? 0) !== (row.estoque_reservado ?? 0) ||
             // sku no diff: repõe o código real do B2BWave quando o local diverge
             // (é o caminho de RESTAURAÇÃO dos códigos zerados por engano).
             (existing.sku ?? null) !== (row.sku ?? null) ||

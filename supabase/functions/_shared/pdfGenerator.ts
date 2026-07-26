@@ -1,3 +1,11 @@
+// ⚠️ ARQUIVO OBSOLETO — NÃO USAR, NÃO COPIAR DAQUI.
+// Nenhum código importa este arquivo: send-email/index.ts e generate-pdf/index.ts
+// têm o gerador EMBUTIDO (foi embutido pra não depender do _shared ser
+// reempacotado no deploy). Esta cópia ficou para trás e está DESATUALIZADA —
+// rótulo "Customer" (hoje é "Company"), sem _fmtStoreAddress (quebra de linha do
+// endereço) e sem o carimbo de versão. Copiar daqui REGRIDE o layout do PDF.
+// Mantido só como histórico; pode ser removido com segurança.
+//
 // Gera o PDF de pedido de VERDADE (bytes, não HTML) — pra anexar no email.
 // Sem headless browser disponível no Deno/Supabase Edge Functions, então o
 // layout é desenhado à mão com pdf-lib (puro JS, sem dependência nativa) em

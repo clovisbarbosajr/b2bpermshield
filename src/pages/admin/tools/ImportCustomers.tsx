@@ -49,28 +49,54 @@ const ImportCustomers = () => {
     setImporting(true);
     const res: Result[] = [];
 
+    // Quem JÁ existe não pode ser rebaixado pela reimportação. Antes o upsert
+    // mandava sempre status "pendente" + is_active false e nome/empresa com ""
+    // default: reimportar a planilha (mesmo pra corrigir 1 linha) derrubava TODOS
+    // os clientes aprovados pra pendente/inativo — perdiam acesso ao portal — e
+    // apagava nome/empresa de quem não tinha essas colunas no CSV.
+    const csvEmails = rows.map((r) => r["email"]?.trim()).filter(Boolean) as string[];
+    const existingEmails = new Set<string>();
+    if (csvEmails.length > 0) {
+      const { data: existing } = await supabase.from("clientes").select("email").in("email", csvEmails);
+      for (const c of existing ?? []) {
+        if (c.email) existingEmails.add(String(c.email).trim().toLowerCase());
+      }
+    }
+
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const email = r["email"]?.trim();
       if (!email) {
-        res.push({ row: i + 2, email: "â€”", status: "error", message: "Missing email" });
+        res.push({ row: i + 2, email: "—", status: "error", message: "Missing email" });
         continue;
       }
+      const isExisting = existingEmails.has(email.toLowerCase());
 
-      const payload: any = {
-        email,
-        nome: r["name"] || r["nome"] || "",
-        empresa: r["company"] || r["empresa"] || "",
-        telefone: r["phone"] || r["telefone"] || null,
-        endereco: r["address"] || r["endereco"] || null,
-        cidade: r["city"] || r["cidade"] || null,
-        estado: r["state"] || r["estado"] || null,
-        pais: r["country"] || r["pais"] || "United States",
-        cep: r["zip"] || r["cep"] || null,
-        website: r["website"] || null,
-        status: "pendente",
-        is_active: false,
+      const payload: any = { email };
+      // Só grava o que veio preenchido no CSV — coluna ausente/vazia não apaga o
+      // dado que já está no cadastro.
+      const put = (col: string, val: any) => {
+        const v = typeof val === "string" ? val.trim() : val;
+        if (v !== undefined && v !== null && v !== "") payload[col] = v;
       };
+      put("nome", r["name"] || r["nome"]);
+      put("empresa", r["company"] || r["empresa"]);
+      put("telefone", r["phone"] || r["telefone"]);
+      put("endereco", r["address"] || r["endereco"]);
+      put("cidade", r["city"] || r["cidade"]);
+      put("estado", r["state"] || r["estado"]);
+      put("cep", r["zip"] || r["cep"]);
+      put("website", r["website"]);
+      if (isExisting) {
+        put("pais", r["country"] || r["pais"]);
+      } else {
+        // Cliente NOVO entra como pendente/inativo (aprovação manual do admin).
+        payload.nome = payload.nome ?? "";
+        payload.empresa = payload.empresa ?? "";
+        payload.pais = (r["country"] || r["pais"] || "United States");
+        payload.status = "pendente";
+        payload.is_active = false;
+      }
 
       const { error } = await supabase.from("clientes").upsert(payload, { onConflict: "email" });
       if (error) {

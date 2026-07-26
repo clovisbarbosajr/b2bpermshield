@@ -271,61 +271,90 @@ const ProductEdit = () => {
   };
 
   const saveSubData = async (pid: string) => {
+    // Todo bloco aqui é DELETE + INSERT. O insert PRECISA checar erro: como o
+    // delete já foi commitado, um insert que falha (RLS, constraint, rede) APAGA
+    // os dados — e antes disso passava batido, com a tela dizendo "Product saved"
+    // (galeria/preços/price lists sumiam em silêncio). Lançar aqui faz o
+    // handleSave avisar sem declarar sucesso; o estado segue em memória.
+    const orFail = ({ error }: { error: any }, what: string) => {
+      if (error) throw new Error(`Failed to save ${what}: ${error.message}`);
+    };
+
     // Gallery images
     await supabase.from("produto_imagens").delete().eq("produto_id", pid);
     if (galleryImages.length > 0) {
-      await supabase.from("produto_imagens").insert(galleryImages.map((img, i) => ({
+      orFail(await supabase.from("produto_imagens").insert(galleryImages.map((img, i) => ({
         produto_id: pid, imagem_url: img.imagem_url, ordem: i
-      })));
+      }))), "gallery images");
     }
 
     // Files
     await supabase.from("produto_arquivos").delete().eq("produto_id", pid);
     if (files.length > 0) {
-      await supabase.from("produto_arquivos").insert(files.map(f => ({
+      orFail(await supabase.from("produto_arquivos").insert(files.map(f => ({
         produto_id: pid, titulo: f.titulo, arquivo_url: f.arquivo_url
-      })));
+      }))), "files");
     }
 
     // Discounts
     await supabase.from("produto_descontos").delete().eq("produto_id", pid);
     if (discounts.length > 0) {
-      await supabase.from("produto_descontos").insert(discounts.map(d => ({ ...d, produto_id: pid, id: undefined })));
+      orFail(await supabase.from("produto_descontos").insert(discounts.map(d => ({ ...d, produto_id: pid, id: undefined }))), "discounts");
     }
 
     // Customer prices
     await supabase.from("produto_precos_cliente").delete().eq("produto_id", pid);
     if (customerPrices.length > 0) {
-      await supabase.from("produto_precos_cliente").insert(customerPrices.map(cp => ({ ...cp, produto_id: pid, id: undefined })));
+      orFail(await supabase.from("produto_precos_cliente").insert(customerPrices.map(cp => ({ ...cp, produto_id: pid, id: undefined }))), "customer prices");
     }
 
     // Related products — ignora linhas sem produto escolhido (FK invalida).
     await supabase.from("produtos_relacionados").delete().eq("produto_id", pid);
     const relValid = relatedProducts.filter(rp => rp.produto_relacionado_id);
     if (relValid.length > 0) {
-      await supabase.from("produtos_relacionados").insert(relValid.map(rp => ({ ...rp, produto_id: pid, id: undefined })));
+      orFail(await supabase.from("produtos_relacionados").insert(relValid.map(rp => ({ ...rp, produto_id: pid, id: undefined }))), "related products");
     }
 
     // Assigned options
     await supabase.from("produto_opcoes").delete().eq("produto_id", pid);
     if (assignedOptions.length > 0) {
-      await supabase.from("produto_opcoes").insert(assignedOptions.map(o => ({ produto_id: pid, option_id: o.option_id })));
+      orFail(await supabase.from("produto_opcoes").insert(assignedOptions.map(o => ({ produto_id: pid, option_id: o.option_id }))), "assigned options");
     }
 
     // Price lists
     await supabase.from("tabela_preco_itens").delete().eq("produto_id", pid);
     if (priceLists.length > 0) {
-      await supabase.from("tabela_preco_itens").insert(priceLists.map(pl => ({
+      orFail(await supabase.from("tabela_preco_itens").insert(priceLists.map(pl => ({
         produto_id: pid, tabela_preco_id: pl.tabela_preco_id, preco: pl.preco
-      })));
+      }))), "price lists");
     }
 
     // Status rules
     await supabase.from("produto_status_regras").delete().eq("produto_id", pid);
     if (statusRules.length > 0) {
-      await supabase.from("produto_status_regras").insert(
+      orFail(await supabase.from("produto_status_regras").insert(
         statusRules.map(sr => ({ produto_id: pid, status_nome: sr.status_nome, regra_tipo: sr.regra_tipo, valor_limite: sr.valor_limite }))
-      );
+      ), "status rules");
+    }
+
+    // Variantes (aba "Code & Price Variants"). Esta tabela era só LIDA: dava pra
+    // criar/editar/excluir variante na tela, o Save dizia "Product saved" e NADA
+    // era gravado — o trabalho sumia ao recarregar. Linha sem `codigo` é ignorada
+    // (coluna NOT NULL no banco).
+    await supabase.from("produto_variantes").delete().eq("produto_id", pid);
+    const variantRows = variants
+      .filter(v => (v.codigo ?? "").trim())
+      .map(v => ({
+        produto_id: pid,
+        codigo: String(v.codigo).trim(),
+        ativo: v.ativo ?? true,
+        quantidade: Number(v.quantidade) || 0,
+        imagem_url: v.imagem_url || null,
+        valores_opcao: v.valores_opcao ?? [],
+      }));
+    if (variantRows.length > 0) {
+      const { error: varErr } = await supabase.from("produto_variantes").insert(variantRows);
+      if (varErr) throw new Error("Failed to save variants: " + varErr.message);
     }
 
     // Access: grupos (em privacy_group_id + grupo_nome p/ compat) e grant/exclude por cliente.

@@ -149,12 +149,30 @@ const UsersManagement = () => {
       updatePayload.permissions = {};
     }
 
-    await (supabase.from("user_roles") as any).upsert(updatePayload, { onConflict: "user_id" });
+    // Erro do papel/permissões NÃO pode passar batido: sem isto a tela dizia
+    // "User updated" com o papel inalterado no banco.
+    const { error: roleErr } = await (supabase.from("user_roles") as any)
+      .upsert(updatePayload, { onConflict: "user_id" });
+    if (roleErr) {
+      toast.error("Failed to save role/permissions: " + roleErr.message);
+      setSaving(false);
+      return;
+    }
 
     // Sincroniza os LOCAIS (categorias de topo). Vazio = sem restrição (vê tudo).
+    // Por isso o insert PRECISA ser checado: se o delete passa e o insert falha, o
+    // usuário fica sem NENHUMA amarração — o que significa "vê TODAS as
+    // localizações". Falha silenciosa aqui AMPLIAVA acesso (fail-open).
     await supabase.from("user_locations").delete().eq("user_id", editUser.user_id);
     if (editLocs.size > 0) {
-      await supabase.from("user_locations").insert([...editLocs].map((cid) => ({ user_id: editUser.user_id, categoria_id: cid })));
+      const { error: locErr } = await supabase.from("user_locations")
+        .insert([...editLocs].map((cid) => ({ user_id: editUser.user_id, categoria_id: cid })));
+      if (locErr) {
+        toast.error("Failed to save location access — the user is now UNRESTRICTED. Fix and save again: " + locErr.message);
+        setSaving(false);
+        fetchData();
+        return;
+      }
     }
 
     // Update password if provided
@@ -164,11 +182,14 @@ const UsersManagement = () => {
         setSaving(false);
         return;
       }
-      const { data: pwData } = await supabase.functions.invoke("admin-create-user", {
+      // `error` do invoke era descartado: numa resposta 4xx o supabase-js devolve
+      // data=null, então `pwData?.error` era undefined e a tela dizia "User
+      // updated" — o admin passava ao funcionário uma senha que não funcionava.
+      const { data: pwData, error: pwErr } = await supabase.functions.invoke("admin-create-user", {
         body: { action: "update_password", user_id: editUser.user_id, new_password: editPassword.trim() },
       });
-      if (pwData?.error) {
-        toast.error(pwData.error);
+      if (pwErr || pwData?.error) {
+        toast.error("Failed to update password: " + (pwData?.error ?? pwErr?.message ?? "unknown error"));
         setSaving(false);
         return;
       }

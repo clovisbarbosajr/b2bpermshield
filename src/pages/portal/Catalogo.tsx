@@ -238,14 +238,24 @@ const Catalogo = () => {
     setQtys((prev) => ({ ...prev, [p.id]: Math.max(min, Math.floor(v) || min) }));
   };
 
-  const handleAdd = (p: Produto) => {
+  const handleAdd = async (p: Produto) => {
     if (!canBuy(p)) return;
     // Produto com variante: não dá pra escolher a opção no grid → manda pra página do produto.
     if (variantProductIds.has(p.id)) {
       navigate(`/portal/produto/${p.id}`);
       return;
     }
-    const calculatedPrice = getPrice(p);
+    // Preço da VITRINE é calculado com quantidade 1; ao adicionar, recalcula com a
+    // quantidade REAL pra pegar as faixas de desconto por quantidade. Sem isto o
+    // carrinho mostrava o preço de 1 unidade e o checkout (que recalcula na
+    // finalização) cobrava outro valor — cliente via um preço e pagava outro.
+    let calculatedPrice = getPrice(p);
+    if (clienteId) {
+      try {
+        const r = await getProductPrice({ productId: p.id, customerId: clienteId, quantity: qtyOf(p) });
+        if (typeof r?.price === "number") calculatedPrice = r.price;
+      } catch { /* mantém o preço da vitrine */ }
+    }
     // Preço $0 (não configurado / "contact us") PODE ser adicionado ao carrinho — o
     // vendedor ajusta o preço depois. (Sem trava de preço zero aqui.)
     const isPreOrder = getStatusInfo(p).nome.toLowerCase() === "pre-order";

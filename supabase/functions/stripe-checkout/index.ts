@@ -145,7 +145,12 @@ Deno.serve(async (req) => {
       const paymentIntent = await (stripe as any).paymentIntents.create({
         amount: Math.round(serverAmount * 100),
         currency,
-        metadata: { pedido_id: pedido_id || "", ...metadata },
+        // `pedido_id` DEPOIS do spread: o metadata vem do cliente e, com ele por
+        // último, dava pra sobrescrever o pedido_id — pagava-se um pedido de $10
+        // e o webhook/confirm_payment marcava OUTRO pedido (de qualquer valor)
+        // como pago, ou o cancelava. O valor cobrado sempre veio do banco; o que
+        // faltava era amarrar o metadata ao MESMO pedido que definiu o valor.
+        metadata: { ...metadata, pedido_id: pedido_id || "" },
         automatic_payment_methods: { enabled: true },
       });
 

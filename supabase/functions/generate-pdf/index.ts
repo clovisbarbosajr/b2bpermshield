@@ -1,7 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.99.2";
 // ─── GERADOR DE PDF EMBUTIDO (era ../_shared/pdfGenerator.ts) ────────────────
 // Embutido de propósito (mesmo motivo do send-email): garante que o preview usa
-// o código ATUAL, idêntico ao anexo. Sincronizar com _shared/pdfGenerator.ts.
+// o código ATUAL, idêntico ao anexo.
+// ATENÇÃO: sincronizar com a cópia de send-email/index.ts (as duas mudam JUNTAS).
+// NÃO copiar de _shared/pdfGenerator.ts: órfão e DESATUALIZADO — regride o layout.
 import { PDFDocument, StandardFonts, rgb, PDFFont } from "npm:pdf-lib@1.17.1";
 
 interface PdfOrderItem { sku: string; name: string; qty: number; price: number; total: number; }

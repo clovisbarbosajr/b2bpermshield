@@ -88,8 +88,12 @@ const ImportProductDiscounts = () => {
           continue;
         }
 
+        // NÃO enviar `preco`: com `preco: null` explícito, importar um desconto
+        // APAGAVA o preço custom que o produto já tinha nessa tabela de preço.
+        // Omitindo a coluna, o upsert preserva o preço existente e só grava o
+        // desconto (linha nova nasce sem preço custom, como antes).
         const { error } = await (supabase.from("tabela_preco_itens") as any).upsert(
-          { tabela_preco_id: tabelaId, produto_id: produtoId, preco: null, desconto: discountPercent },
+          { tabela_preco_id: tabelaId, produto_id: produtoId, desconto: discountPercent },
           { onConflict: "tabela_preco_id,produto_id" }
         );
 

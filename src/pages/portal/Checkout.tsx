@@ -274,13 +274,22 @@ const Checkout = () => {
     if (enderecoId === "__company__" && companyAddress) {
       const existing = enderecos.find(e => e.logradouro === companyAddress.logradouro && e.cidade === companyAddress.cidade);
       if (existing) return { ok: true, id: existing.id };
-      const { data: created } = await supabase.from("enderecos").insert({
+      const { data: created, error: addrErr } = await supabase.from("enderecos").insert({
         cliente_id: addressOwnerId,
         logradouro: companyAddress.logradouro, cidade: companyAddress.cidade,
         estado: companyAddress.estado || "-", cep: companyAddress.cep || "-",
         principal: false,
       } as any).select().single();
-      return { ok: true, id: (created as any)?.id ?? null };
+      // Sem checar o erro, uma falha aqui (ex.: RLS barrando sub-usuário que grava
+      // com o cliente_id do PAI) devolvia ok:true com id NULL e o pedido era criado
+      // SEM endereço de entrega, com mensagem de sucesso — ninguém percebia até o
+      // despacho. Agora falha explícita: o pedido não é criado.
+      if (addrErr || !(created as any)?.id) {
+        toast.error("Could not use the company address for delivery: " +
+          (addrErr?.message ?? "address not created") + ". Please pick or add a delivery address.");
+        return { ok: false, id: null };
+      }
+      return { ok: true, id: (created as any).id };
     }
     return { ok: true, id: enderecoId || null };
   };
