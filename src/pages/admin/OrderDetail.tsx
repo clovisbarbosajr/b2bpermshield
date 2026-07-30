@@ -306,6 +306,29 @@ const OrderDetail = () => {
     loadOrder();
   };
 
+  // Override manual de preço da linha (preço especial). Grava preco_unitario +
+  // subtotal do item e recomputa o subtotal do pedido; o trigger BEFORE UPDATE
+  // recomputa desconto/imposto/frete/total a partir do novo subtotal. O trigger
+  // de preço server-side é só BEFORE INSERT, então o override NÃO é sobrescrito.
+  const saveItemPrice = async (itemId: string, priceRaw: string | number) => {
+    if (!order) return;
+    const item = items.find((i) => i.id === itemId);
+    if (!item) return;
+    const preco = Math.max(0, parseFloat(String(priceRaw)) || 0);
+    const subtotal = preco * Number(item.quantidade || 0);
+    if (preco === Number(item.preco_unitario) && subtotal === Number(item.subtotal)) return; // sem mudança
+    const { error } = await supabase.from("pedido_itens")
+      .update({ preco_unitario: preco, subtotal } as any).eq("id", itemId);
+    if (error) { toast.error("Error saving price: " + error.message); loadOrder(); return; }
+    const newItems = items.map((i) => i.id === itemId ? { ...i, preco_unitario: preco, subtotal } : i);
+    const orderSubtotal = newItems.reduce((s, i) => s + Number(i.subtotal || 0), 0);
+    const { error: ordErr } = await supabase.from("pedidos")
+      .update({ subtotal: orderSubtotal } as any).eq("id", order.id);
+    if (ordErr) { toast.error("Error updating order total: " + ordErr.message); }
+    toast.success("Price updated");
+    loadOrder();
+  };
+
   // ===== Criação de pedido pelo admin (isNew) — itens ficam em rascunho na memória =====
   const handleAddProductDraft = async (product: any) => {
     if (!selectedClienteId) { toast.error("Select a customer first"); return; }
@@ -863,7 +886,20 @@ const OrderDetail = () => {
                 </TableCell>
                 <TableCell className="font-mono text-xs">{item.sku}</TableCell>
                 <TableCell className="font-medium text-primary">{item.nome_produto}</TableCell>
-                <TableCell className="text-right">{fmt(item.preco_unitario)}</TableCell>
+                <TableCell className="text-right">
+                  <Input
+                    type="number" min={0} step="0.01"
+                    className="h-8 w-24 ml-auto text-right"
+                    value={item.preco_unitario ?? 0}
+                    onChange={(e) => {
+                      const p = e.target.value;
+                      setItems((prev) => prev.map((it) => it.id === item.id ? { ...it, preco_unitario: p } : it));
+                    }}
+                    onBlur={(e) => saveItemPrice(item.id, e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    title="Manual price override (special price)"
+                  />
+                </TableCell>
                 <TableCell className="text-center">{item.quantidade}</TableCell>
                 <TableCell className="text-center">
                   <Checkbox
