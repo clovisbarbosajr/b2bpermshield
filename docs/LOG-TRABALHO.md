@@ -35,6 +35,9 @@ Lovable.
 | 14 | — | `EDITADO` | Criado este `docs/LOG-TRABALHO.md` a pedido do dono (documentar cada passo em paralelo) |
 | 15 | — | `EDITADO` | Memória: novo arquivo `documentar-em-paralelo.md` + índice em `MEMORY.md` — a regra passa a valer em qualquer conversa nova, não só nesta |
 | 16 | — | `FEITO` | Commit da documentação (log + memória + doc dos 3 problemas) |
+| 17 | — | `FEITO` | Dono rodou o SQL no Lovable — **sem retorno é o esperado**: `CREATE OR REPLACE FUNCTION`, `DROP/CREATE TRIGGER`, `REVOKE` e `GRANT` são DDL e não devolvem linhas |
+| 18 | — | `FEITO` | Descoberto por que **não aparecia o botão de publish**: os commits `e40ab2c` e `a5efb6e` estavam só no repo LOCAL (`main` 2 commits à frente do `origin`). O Lovable só vê o código depois do push no GitHub. `git push` feito → `7e1f563..a5efb6e main -> main` |
+| 19 | — | `AGUARDANDO` | Lovable sincronizar o push do GitHub e o **publish** ficar disponível; depois testar "View as" e o override de preço |
 
 ### Aguardando resposta do dono (arrastado de 26/jul)
 - Decisão sobre as **3 críticas de trigger** (reserva de estoque com
