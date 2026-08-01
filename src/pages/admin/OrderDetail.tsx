@@ -306,10 +306,12 @@ const OrderDetail = () => {
     loadOrder();
   };
 
-  // Override manual de preço da linha (preço especial). Grava preco_unitario +
-  // subtotal do item e recomputa o subtotal do pedido; o trigger BEFORE UPDATE
-  // recomputa desconto/imposto/frete/total a partir do novo subtotal. O trigger
-  // de preço server-side é só BEFORE INSERT, então o override NÃO é sobrescrito.
+  // Override manual de preço da linha (preço especial).
+  // Grava preco_unitario + subtotal do item; o trigger AFTER UPDATE em
+  // pedido_itens (trg_pedido_recompute_subtotal, migration 20260730120000)
+  // recomputa pedidos.subtotal automaticamente, e fn_pedido_total_appside
+  // (BEFORE UPDATE em pedidos) recomputa desconto/imposto/frete/total.
+  // O trigger de preço server-side é só BEFORE INSERT — o override NÃO é sobrescrito.
   const saveItemPrice = async (itemId: string, priceRaw: string | number) => {
     if (!order) return;
     const item = items.find((i) => i.id === itemId);
@@ -320,11 +322,7 @@ const OrderDetail = () => {
     const { error } = await supabase.from("pedido_itens")
       .update({ preco_unitario: preco, subtotal } as any).eq("id", itemId);
     if (error) { toast.error("Error saving price: " + error.message); loadOrder(); return; }
-    const newItems = items.map((i) => i.id === itemId ? { ...i, preco_unitario: preco, subtotal } : i);
-    const orderSubtotal = newItems.reduce((s, i) => s + Number(i.subtotal || 0), 0);
-    const { error: ordErr } = await supabase.from("pedidos")
-      .update({ subtotal: orderSubtotal } as any).eq("id", order.id);
-    if (ordErr) { toast.error("Error updating order total: " + ordErr.message); }
+    // Não precisa atualizar pedidos.subtotal manualmente — o trigger faz isso.
     toast.success("Price updated");
     loadOrder();
   };
