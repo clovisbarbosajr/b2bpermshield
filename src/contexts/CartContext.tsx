@@ -39,6 +39,22 @@ const storageKey = (userId: string) => `b2b_cart_${userId}`;
 const viewAsStorageKey = (customerId: string) => `b2b_cart_viewas_${customerId}`;
 const ANON_KEY = "b2b_cart_anon";
 
+// No logout, o carrinho PESSOAL (`b2b_cart_<uid>`) fica de propósito — o cliente
+// espera reencontrar os itens ao voltar. Já os carrinhos de "View as" são rascunho
+// da sessão do admin: se ficarem no localStorage, sobrevivem à saída dele e ainda
+// aparecem pro próximo admin que entrar naquela máquina.
+const purgeViewAsCarts = () => {
+  try {
+    const alvos: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith("b2b_cart_viewas_") || k.startsWith("cart_saved_for_later_viewas_")) alvos.push(k);
+    }
+    alvos.forEach((k) => localStorage.removeItem(k));
+  } catch {}
+};
+
 const loadCart = (key: string): CartItem[] => {
   try {
     if (typeof window === "undefined" || !window.localStorage) return [];
@@ -87,8 +103,12 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const uid = session?.user?.id ?? null;
       setUserId(uid);
-      // User logged out — clear the anon cart too
-      if (!uid) { try { localStorage.removeItem(ANON_KEY); } catch {} }
+      // Logout: limpa o carrinho anônimo E os rascunhos de "View as" (senão o
+      // carrinho montado pelo admin dentro de um cliente fica na máquina).
+      if (!uid) {
+        try { localStorage.removeItem(ANON_KEY); } catch {}
+        purgeViewAsCarts();
+      }
       setAuthResolved(true);
     });
 
@@ -152,8 +172,10 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
 
   const clearCart = () => {
     setItems([]);
-    const key = userId ? storageKey(userId) : ANON_KEY;
-    try { localStorage.removeItem(key); } catch {}
+    // Precisa apagar a chave EFETIVA. Usando `storageKey(userId)` aqui, um
+    // "DELETE ALL" / checkout feito dentro do "View as" apagava o carrinho pessoal
+    // do ADMIN (userId = admin) e deixava o do cliente impersonado intacto.
+    try { localStorage.removeItem(cartStorageKey); } catch {}
   };
 
   const total = items.reduce((sum, i) => sum + i.preco * i.quantidade, 0);

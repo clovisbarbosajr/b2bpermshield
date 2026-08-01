@@ -14,7 +14,11 @@ import { Badge } from "@/components/ui/badge";
 
 // Chave POR USUÁRIO (antes era global -> "saved for later" de um usuário aparecia
 // pra outro no mesmo navegador). Espelha o padrão do carrinho (b2b_cart_<uid>).
+// Durante "View as" a sessão real é a do ADMIN: sem a chave por cliente impersonado,
+// a lista era compartilhada entre TODOS os clientes vistos e se misturava com a do
+// próprio admin (mesmo problema já resolvido no CartContext).
 const savedKey = (uid?: string | null) => uid ? `cart_saved_for_later_${uid}` : "cart_saved_for_later_anon";
+const savedViewAsKey = (customerId: string) => `cart_saved_for_later_viewas_${customerId}`;
 
 const Carrinho = () => {
   const { items, removeItem, updateQuantity, clearCart, total, addItem } = useCart();
@@ -29,17 +33,22 @@ const Carrinho = () => {
   const [insufficientItems, setInsufficientItems] = useState<Map<string, number>>(new Map());
   const [savedItems, setSavedItems] = useState<any[]>([]);
 
+  // Chave EFETIVA do "saved for later" — durante "View as" é a do cliente impersonado.
+  const effectiveSavedKey = impersonatedCustomer?.id
+    ? savedViewAsKey(impersonatedCustomer.id)
+    : savedKey(user?.id);
+
   // Carrega "saved for later" do usuário atual e limpa a chave global legada (que vazava).
   useEffect(() => {
     try {
-      setSavedItems(JSON.parse(localStorage.getItem(savedKey(user?.id)) ?? "[]"));
+      setSavedItems(JSON.parse(localStorage.getItem(effectiveSavedKey) ?? "[]"));
     } catch { setSavedItems([]); }
     localStorage.removeItem("cart_saved_for_later"); // remove dados vazados da chave antiga
-  }, [user?.id]);
+  }, [effectiveSavedKey]);
 
   const persistSaved = (updated: any[]) => {
     setSavedItems(updated);
-    localStorage.setItem(savedKey(user?.id), JSON.stringify(updated));
+    localStorage.setItem(effectiveSavedKey, JSON.stringify(updated));
   };
 
   // Identidade do item salvo = produto + variante (cartKey). Filtrar só por
@@ -104,8 +113,12 @@ const Carrinho = () => {
     const onFocus = () => { if (document.visibilityState !== "hidden") check(); };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
+    // Nome ÚNICO por execução do efeito. Com `cart-stock-${ids.length}` o topic se
+    // repetia (mesma qtd de itens, ou carrinho + checkout abertos), e o unsubscribe
+    // do efeito antigo podia derrubar o canal novo — o carrinho parava de receber
+    // mudança de estoque em tempo real e só o polling de 10s salvava.
     const channel = supabase
-      .channel(`cart-stock-${ids.length}`)
+      .channel(`cart-stock-${crypto.randomUUID()}`)
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "produtos", filter: `id=in.(${ids.join(",")})` }, () => check())
       .subscribe();
 

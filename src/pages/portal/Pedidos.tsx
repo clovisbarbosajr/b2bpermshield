@@ -32,6 +32,7 @@ const Pedidos = () => {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [reordering, setReordering] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // Filters
   const [fromDate, setFromDate] = useState("");
@@ -130,19 +131,52 @@ const Pedidos = () => {
     setReordering(null);
   };
 
-  const handleExport = () => {
-    const rows = [
-      ["ID", "Date", "Delivery Date", "Total", "Quantity", "Status"],
-      ...pedidos.map(p => [
-        p.numero, fmtDate(p.created_at), fmtDateShort(p.delivery_date ?? ""),
-        Number(p.total).toFixed(2), p.quantidade_total ?? "", p.status,
-      ]),
-    ];
-    const csv = rows.map(r => r.join(",")).join("\n");
-    const a = document.createElement("a");
-    a.href = "data:text/csv," + encodeURIComponent(csv);
-    a.download = "order-history.csv";
-    a.click();
+  // Campo CSV com aspas: sem isso, um po_number/status com vírgula quebrava as colunas.
+  const csvCell = (v: any) => {
+    const s = v === null || v === undefined ? "" : String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const handleExport = async () => {
+    if (!clienteId || exporting) return;
+    setExporting(true);
+    try {
+      // Antes exportava só a página atual (.range) — o botão diz "Export" e o
+      // cliente achava que tinha baixado o histórico inteiro. Agora traz TODOS
+      // os pedidos que casam com os filtros aplicados.
+      let q = supabase.from("pedidos")
+        .select("numero, created_at, delivery_date, total, quantidade_total, status")
+        .eq("cliente_id", clienteId)
+        .order("created_at", { ascending: false });
+
+      if (applied.fromDate) q = q.gte("created_at", applied.fromDate);
+      if (applied.toDate) q = q.lte("created_at", applied.toDate + "T23:59:59");
+      if (applied.status && applied.status !== "_all") q = q.eq("status", applied.status as any);
+      if (applied.reference) q = q.ilike("po_number", `%${applied.reference}%`);
+
+      const { data, error } = await q;
+      if (error) { toast.error("Export failed"); return; }
+      const linhas = data ?? [];
+      if (linhas.length === 0) { toast.error("Nothing to export"); return; }
+
+      const rows = [
+        ["ID", "Date", "Delivery Date", "Total", "Quantity", "Status"],
+        ...linhas.map((p: any) => [
+          p.numero, fmtDate(p.created_at), fmtDateShort(p.delivery_date ?? ""),
+          Number(p.total).toFixed(2), p.quantidade_total ?? "", statusLabel(p.status),
+        ]),
+      ];
+      const csv = rows.map(r => r.map(csvCell).join(",")).join("\r\n");
+      const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "order-history.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`${linhas.length} order(s) exported`);
+    } finally {
+      setExporting(false);
+    }
   };
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -168,8 +202,8 @@ const Pedidos = () => {
 
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold">Order History</h2>
-        <Button variant="outline" size="sm" className="gap-1" onClick={handleExport}>
-          <Download className="h-4 w-4" /> EXPORT
+        <Button variant="outline" size="sm" className="gap-1" onClick={handleExport} disabled={exporting}>
+          <Download className="h-4 w-4" /> {exporting ? "EXPORTING..." : "EXPORT"}
         </Button>
       </div>
 

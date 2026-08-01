@@ -466,7 +466,9 @@ const Checkout = () => {
     const onFocus = () => { if (document.visibilityState !== "hidden") check(); };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
-    const channel = supabase.channel(`checkout-stock-${ids.length}`)
+    // Topic único por execução (o antigo `checkout-stock-${ids.length}` colidia com
+    // o do carrinho / com outra aba, e o cleanup de um efeito derrubava o canal do outro).
+    const channel = supabase.channel(`checkout-stock-${crypto.randomUUID()}`)
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "produtos", filter: `id=in.(${ids.join(",")})` }, () => check())
       .subscribe();
     return () => {

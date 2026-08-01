@@ -46,7 +46,10 @@ const Team = () => {
     }
     setLoading(false);
   };
-  useEffect(() => { load(); }, []);
+  // Depende do ALVO: com `[]` o primeiro load podia rodar antes de `impersonatedCustomer`
+  // /`user` resolverem, mandando `target` vazio pra edge function (lista da empresa
+  // errada / vazia até um refresh manual).
+  useEffect(() => { load(); }, [impersonatedCustomer?.id, user?.id]);
 
   const addMember = async () => {
     if (!form.email || !form.email.includes("@")) { toast.error("Valid email required"); return; }
