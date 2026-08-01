@@ -327,6 +327,14 @@ const OrderDetail = () => {
     loadOrder();
   };
 
+  // Os 3 campos abaixo (backorder / shipped qty / status da linha) gravavam
+  // fire-and-forget: sem await e sem checar erro, a tela mostrava o valor novo e o
+  // banco ficava com o antigo. Um helper único faz o mesmo que o saveItemPrice.
+  const patchItem = async (itemId: string, patch: Record<string, any>, what: string) => {
+    const { error } = await supabase.from("pedido_itens").update(patch as any).eq("id", itemId);
+    if (error) { toast.error(`Error saving ${what}: ${error.message}`); loadOrder(); }
+  };
+
   // ===== Criação de pedido pelo admin (isNew) — itens ficam em rascunho na memória =====
   const handleAddProductDraft = async (product: any) => {
     if (!selectedClienteId) { toast.error("Select a customer first"); return; }
@@ -905,7 +913,7 @@ const OrderDetail = () => {
                     onCheckedChange={(v) => {
                       const b = v === true;
                       setItems((prev) => prev.map((it) => it.id === item.id ? { ...it, backorder: b } : it));
-                      supabase.from("pedido_itens").update({ backorder: b } as any).eq("id", item.id);
+                      patchItem(item.id, { backorder: b }, "backorder");
                     }}
                   />
                 </TableCell>
@@ -914,11 +922,19 @@ const OrderDetail = () => {
                     type="number" min={0} max={item.quantidade}
                     className="h-8 w-16 mx-auto text-center"
                     value={item.quantidade_enviada ?? 0}
+                    // Grava no BLUR/Enter, como o campo de preço ao lado. Com onChange,
+                    // digitar "10" mandava um UPDATE com 1 e outro com 10 — e cada um
+                    // dispara a cascata de triggers (subtotal do pedido → total).
                     onChange={(e) => {
-                      const q = parseInt(e.target.value) || 0;
+                      const q = e.target.value;
                       setItems((prev) => prev.map((it) => it.id === item.id ? { ...it, quantidade_enviada: q } : it));
-                      supabase.from("pedido_itens").update({ quantidade_enviada: q } as any).eq("id", item.id);
                     }}
+                    onBlur={(e) => {
+                      const q = Math.min(Math.max(parseInt(e.target.value) || 0, 0), Number(item.quantidade) || 0);
+                      setItems((prev) => prev.map((it) => it.id === item.id ? { ...it, quantidade_enviada: q } : it));
+                      patchItem(item.id, { quantidade_enviada: q }, "shipped quantity");
+                    }}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                   />
                 </TableCell>
                 <TableCell>
@@ -926,7 +942,7 @@ const OrderDetail = () => {
                     value={item.status_linha ?? ""}
                     onValueChange={(v) => {
                       setItems((prev) => prev.map((it) => it.id === item.id ? { ...it, status_linha: v } : it));
-                      supabase.from("pedido_itens").update({ status_linha: v } as any).eq("id", item.id);
+                      patchItem(item.id, { status_linha: v }, "line status");
                     }}
                   >
                     <SelectTrigger className="h-8 w-[150px] text-xs">
