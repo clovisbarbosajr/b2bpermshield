@@ -181,6 +181,16 @@ Lovable.
 | 76 | — | `FEITO` | **Idem (menor) — `quantidade_enviada` grava a cada tecla** — `:917` é `onChange`, não `onBlur`: digitar "10" manda um UPDATE com 1 e outro com 10, e cada um dispara a cascata de triggers (subtotal → total). O campo de preço ao lado já usa `onBlur`/Enter — o padrão certo está no mesmo arquivo |
 | 77 | — | `EDITADO` | **75 e 76 corrigidos** — `OrderDetail.tsx`: criei o helper `patchItem(itemId, patch, what)` (checa `error`, avisa e recarrega, igual ao `saveItemPrice`) e troquei os 3 updates soltos por ele. O `quantidade_enviada` passou pra `onBlur`+Enter e agora clampa em `[0, quantidade]` na gravação (o `max` do input só limita a setinha, não o que se digita) |
 
+### Preço do sub-login (bugs 38/50 e 40/49)
+
+| # | Hora | Estado | O que |
+|---|---|---|---|
+| 78 | — | `EDITADO` | **38 corrigido no CLIENTE** — `src/lib/pricing.ts`: resolve a conta com `parent_customer_id ?? id` e busca `produto_precos_cliente` pela conta da EMPRESA. O preço negociado é do PAI; o funcionário não casava nessa linha e via preço de tabela/base — **mesma compra, dois preços**. A tabela de preço usa a do próprio sub-login se houver, senão a da empresa (o trigger `trg_subuser_inherit_pricelist` copia no INSERT, mas é snapshot e fica velho) |
+| 79 | — | `AGUARDANDO` | **38 corrigido no SERVIDOR (que é quem grava)** — `supabase/migrations/20260801140000_preco_subuser_parent_account.sql` reescreve `preco_autoritativo` com a mesma regra. **Este é o que importa de verdade**: `trg_pedido_item_preco` recalcula no INSERT do item, então sem esta migration o preço do pedido continua errado mesmo com o frontend certo. **Falta o dono rodar no Lovable** |
+| 80 | — | `EDITADO` | **40/49 corrigido** — `resolveDiscount` filtrava as datas **em JS depois** do `.limit(50)`: 50 faixas expiradas do mesmo produto escondiam a válida e o cliente perdia o desconto. Agora filtra no banco (`.or("data_inicio.is.null,data_inicio.lte.…")`), igual ao servidor. Tirei os milissegundos do ISO porque o `.` é separador na sintaxe `col.op.valor` do PostgREST |
+| 81 | — | `FEITO` | **48 revisto (não é bug do código, é do schema)** — mantive a perna `tabela_preco_id.is.null` no OR de propósito, com comentário: `produto_descontos.tabela_preco_id` é NOT NULL, então desconto "global" é inexpressável hoje; se a coluna virar nullable, o código já funciona. **Cliente sem tabela de preço continua sem nenhum desconto por quantidade** — decisão de schema, precisa o dono dizer se quer desconto global de verdade (aí é `ALTER COLUMN ... DROP NOT NULL`) |
+
+
 
 
 

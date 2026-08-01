@@ -16,17 +16,29 @@ export async function getProductPrice({
   customerId: string;
   quantity?: number;
 }): Promise<PriceResult> {
-  const [clienteRes, customerPriceRes, produtoRes] = await Promise.all([
-    supabase
-      .from("clientes")
-      .select("tabela_preco_id")
-      .eq("id", customerId)
-      .maybeSingle(),
+  const { data: cliente, error: clienteErr } = await supabase
+    .from("clientes")
+    .select("tabela_preco_id, parent_customer_id")
+    .eq("id", customerId)
+    .maybeSingle();
+  if (clienteErr) throw new Error(`Erro ao buscar cliente: ${clienteErr.message}`);
+
+  // Sub-login usa a CONTA DA EMPRESA pra preço — mesma convenção
+  // COALESCE(parent_customer_id, id) do resto do repo (privacidade, RLS). A RLS de
+  // `produto_precos_cliente` já libera o sub-login a LER os preços do pai
+  // (`is_subcustomer_of`), mas ninguém pedia por eles: o funcionário via preço de
+  // tabela/base enquanto o dono via o preço negociado.
+  const accountId = (cliente as any)?.parent_customer_id ?? customerId;
+
+  const [accountRes, customerPriceRes, produtoRes] = await Promise.all([
+    accountId === customerId
+      ? Promise.resolve({ data: cliente, error: null } as any)
+      : supabase.from("clientes").select("tabela_preco_id").eq("id", accountId).maybeSingle(),
     supabase
       .from("produto_precos_cliente")
       .select("preco, aplicar_descontos_extras")
       .eq("produto_id", productId)
-      .eq("cliente_id", customerId)
+      .eq("cliente_id", accountId)
       .maybeSingle(),
     supabase
       .from("produtos")
@@ -35,12 +47,17 @@ export async function getProductPrice({
       .maybeSingle(),
   ]);
 
-  if (clienteRes.error) throw new Error(`Erro ao buscar cliente: ${clienteRes.error.message}`);
+  if (accountRes.error) throw new Error(`Erro ao buscar conta: ${accountRes.error.message}`);
   if (customerPriceRes.error) throw new Error(`Erro ao buscar preço cliente: ${customerPriceRes.error.message}`);
   if (produtoRes.error) throw new Error(`Erro ao buscar produto: ${produtoRes.error.message}`);
 
   const basePrice = Number(produtoRes.data?.preco ?? 0);
-  const tabelaPrecoId = clienteRes.data?.tabela_preco_id ?? null;
+  // Tabela do sub-login se ele tiver uma; senão a da empresa. O trigger
+  // `trg_subuser_inherit_pricelist` copia a do pai no INSERT, mas é um SNAPSHOT —
+  // fica velho se o pai trocar de tabela depois.
+  const tabelaPrecoId = (cliente as any)?.tabela_preco_id
+    ?? (accountRes.data as any)?.tabela_preco_id
+    ?? null;
   const customerPrice = customerPriceRes.data;
   const aplicarDescontosExtras = customerPrice?.aplicar_descontos_extras === true;
 
@@ -88,15 +105,28 @@ async function resolveDiscount(
   quantity: number,
   referencePrice: number,
 ): Promise<PriceResult | null> {
-  // Build query for discounts matching tabela_preco_id OR global (no tabela)
+  // Sem os milissegundos: o `.` é separador na sintaxe `col.op.valor` do filtro
+  // `or` do PostgREST, e "…:00.000Z" quebraria o parse do valor.
+  const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  // Datas filtradas NO BANCO (era em JS, DEPOIS do .limit(50): 50 faixas expiradas
+  // do mesmo produto escondiam a válida e o cliente perdia o desconto). O servidor
+  // (`_resolve_desconto`) sempre filtrou em SQL — este é o lado que divergia, e o
+  // servidor é quem grava o preço no pedido.
   let query = supabase
     .from("produto_descontos")
     .select("percentual, preco_final, quantidade_minima, data_inicio, data_fim, tabela_preco_id")
     .eq("produto_id", productId)
     .lte("quantidade_minima", quantity)
+    .or(`data_inicio.is.null,data_inicio.lte.${nowIso}`)
+    .or(`data_fim.is.null,data_fim.gte.${nowIso}`)
     .order("quantidade_minima", { ascending: false })
     .limit(50);
 
+  // `tabela_preco_id` é NOT NULL na tabela, então a perna `.is.null` nunca casa —
+  // desconto "global" (pra todas as tabelas) é inexpressável no schema atual. Fica
+  // no OR de propósito: se um dia a coluna virar nullable, isto passa a funcionar
+  // sem precisar mexer aqui. Cliente SEM tabela de preço não tem desconto por
+  // quantidade nenhum — é consequência do schema, não deste código.
   if (tabelaPrecoId) {
     query = query.or(`tabela_preco_id.eq.${tabelaPrecoId},tabela_preco_id.is.null`);
   } else {
@@ -109,16 +139,9 @@ async function resolveDiscount(
 
   if (!descontos || descontos.length === 0) return null;
 
-  const now = new Date();
-  const valid = descontos.filter((d) => {
-    if (d.data_inicio && new Date(d.data_inicio) > now) return false;
-    if (d.data_fim && new Date(d.data_fim) < now) return false;
-    return true;
-  });
-
   // Prefer specific (tabela_preco_id match) over global (null)
-  const specific = valid.filter((d) => d.tabela_preco_id === tabelaPrecoId);
-  const candidates = specific.length > 0 ? specific : valid;
+  const specific = descontos.filter((d) => d.tabela_preco_id === tabelaPrecoId);
+  const candidates = specific.length > 0 ? specific : descontos;
 
   if (candidates.length === 0) return null;
 
