@@ -21,6 +21,9 @@ const statusBadge = (status: string) => (
 );
 
 const PAGE_SIZE = 10;
+// Teto do PostgREST (`db-max-rows`) no Supabase. Serve pra saber se o export
+// veio truncado e avisar o cliente.
+const EXPORT_CAP = 1000;
 
 const Pedidos = () => {
   const { user, impersonatedCustomer } = useAuth();
@@ -172,8 +175,16 @@ const Pedidos = () => {
       a.href = url;
       a.download = "order-history.csv";
       a.click();
-      URL.revokeObjectURL(url);
-      toast.success(`${linhas.length} order(s) exported`);
+      // Revogar na hora cancelava o download em alguns navegadores (o blob morria
+      // antes de a gravação começar).
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      // PostgREST corta em `db-max-rows` (1000 no Supabase). Se vier exatamente no
+      // limite, o arquivo pode estar incompleto — avisa em vez de fingir que veio tudo.
+      if (linhas.length >= EXPORT_CAP) {
+        toast.warning(`Exported the ${linhas.length} most recent orders (limit). Narrow the date range to get the rest.`);
+      } else {
+        toast.success(`${linhas.length} order(s) exported`);
+      }
     } finally {
       setExporting(false);
     }
