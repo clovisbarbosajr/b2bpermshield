@@ -37,7 +37,9 @@ Lovable.
 | 16 | — | `FEITO` | Commit da documentação (log + memória + doc dos 3 problemas) |
 | 17 | — | `FEITO` | Dono rodou o SQL no Lovable — **sem retorno é o esperado**: `CREATE OR REPLACE FUNCTION`, `DROP/CREATE TRIGGER`, `REVOKE` e `GRANT` são DDL e não devolvem linhas |
 | 18 | — | `FEITO` | Descoberto por que **não aparecia o botão de publish**: os commits `e40ab2c` e `a5efb6e` estavam só no repo LOCAL (`main` 2 commits à frente do `origin`). O Lovable só vê o código depois do push no GitHub. `git push` feito → `7e1f563..a5efb6e main -> main` |
-| 19 | — | `AGUARDANDO` | Lovable sincronizar o push do GitHub e o **publish** ficar disponível; depois testar "View as" e o override de preço |
+| 19 | — | `FEITO` | Lovable sincronizou, publish apareceu, dono fez o publish |
+| 20 | — | `BLOQUEADO` | "View as" continua com erro após o publish. Diagnóstico: o dono rodou a migration **20260723140000** (que ainda tem `gen_random_bytes` quebrado, linha 23) em vez da **20260727120000** (que corrige com `gen_random_uuid`). Mandado o SQL correto. |
+| 21 | — | `AGUARDANDO` | Dono rodar o SQL da 120000 (create_view_as_token com gen_random_uuid) e testar "View as" + override de preço |
 
 ### Aguardando resposta do dono (arrastado de 26/jul)
 - Decisão sobre as **3 críticas de trigger** (reserva de estoque com
@@ -53,3 +55,26 @@ Lovable.
 - Override de preço **em produção** (só typecheck local; o dev server não foi
   usado com login de admin real).
 - "View as" ponta a ponta depois do SQL — depende do publish.
+
+---
+
+## 2026-08-01
+
+### Contexto compactado — retomada da conversa
+
+| # | Hora | Estado | O que |
+|---|---|---|---|
+| 22 | — | `INICIADO` | Nova conversa iniciada (contexto anterior compactado). Retomada a partir do estado do repo e do log de 30/jul. |
+| 23 | — | `INICIADO` | Re-leitura completa de todo o fluxo "View as" para confirmar que nada foi esquecido antes do teste: `ViewAsRedirect.tsx`, `AuthContext.tsx`, `Clientes.tsx:handleViewAs`, `PortalLayout.tsx`, `Catalogo.tsx`, migrations `20260319215104`, `20260723140000`, `20260726120000`, `20260726130000`, `20260727120000` |
+| 24 | — | `FEITO` | `npx tsc --noEmit` → **0 erros** (verificação limpa após retomada) |
+| 25 | — | `FEITO` | Confirmado: o único SQL ainda pendente é o `20260727120000_fix_view_as_token_gen.sql` (`create_view_as_token` com `gen_random_uuid`). Enviado ao dono novamente. Nenhum arquivo de código foi alterado nesta sessão — só verificação. |
+| 26 | — | `EDITADO` | `docs/LOG-TRABALHO.md` — seção 01/ago adicionada; entradas 19-21 (do dia 30/jul) e esta seção estavam uncommitted. Commitando tudo. |
+
+### Aguardando
+- Dono rodar `20260727120000` (create_view_as_token com gen_random_uuid) — **ainda não confirmado como rodado**.
+- Testar "View as" ponta a ponta após o SQL.
+- Testar override de preço na ordem em produção.
+
+### O que ainda não foi testado
+- Override de preço (campo editável na linha do pedido) em produção.
+- "View as" ponta a ponta (depende do SQL acima).
