@@ -69,6 +69,10 @@ Lovable.
 | 24 | — | `FEITO` | `npx tsc --noEmit` → **0 erros** (verificação limpa após retomada) |
 | 25 | — | `FEITO` | Confirmado: o único SQL ainda pendente é o `20260727120000_fix_view_as_token_gen.sql` (`create_view_as_token` com `gen_random_uuid`). Enviado ao dono novamente. Nenhum arquivo de código foi alterado nesta sessão — só verificação. |
 | 26 | — | `EDITADO` | `docs/LOG-TRABALHO.md` — seção 01/ago adicionada; entradas 19-21 (do dia 30/jul) e esta seção estavam uncommitted. Commitando tudo. |
+| 27 | — | `FEITO` | Bug identificado em `saveItemPrice`: o código fazia `UPDATE pedidos SET subtotal` manualmente **após** gravar o item — mas o trigger `trg_pedido_recompute_subtotal` (20260730120000) já faz exatamente isso em AFTER UPDATE. Double-write desnecessário + potencial race condition. |
+| 28 | — | `EDITADO` | `src/pages/admin/OrderDetail.tsx` — removido o `UPDATE pedidos` manual dentro de `saveItemPrice`; agora só grava `pedido_itens` e deixa o trigger fazer o resto. |
+| 29 | — | `FEITO` | `tsc --noEmit` → 0 erros. Commit `7b8222c` + push. |
+| 30 | — | `AGUARDANDO` | Publish no Lovable (commit `7b8222c`) + teste do override de preço + teste do "View as" |
 
 ### Aguardando
 - Dono rodar `20260727120000` (create_view_as_token com gen_random_uuid) — **ainda não confirmado como rodado**.
