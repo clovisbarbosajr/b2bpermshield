@@ -73,12 +73,21 @@ Lovable.
 | 28 | — | `EDITADO` | `src/pages/admin/OrderDetail.tsx` — removido o `UPDATE pedidos` manual dentro de `saveItemPrice`; agora só grava `pedido_itens` e deixa o trigger fazer o resto. |
 | 29 | — | `FEITO` | `tsc --noEmit` → 0 erros. Commit `7b8222c` + push. |
 | 30 | — | `AGUARDANDO` | Publish no Lovable (commit `7b8222c`) + teste do override de preço + teste do "View as" |
+| 31 | — | `FEITO` | Varredura completa do fluxo "View as" + itens pendentes. Resultado abaixo. |
 
 ### Aguardando
-- Dono rodar `20260727120000` (create_view_as_token com gen_random_uuid) — **ainda não confirmado como rodado**.
-- Testar "View as" ponta a ponta após o SQL.
-- Testar override de preço na ordem em produção.
+- **Publish** do commit `7b8222c` (fix double-write saveItemPrice) no Lovable.
+- Testar "View as" e override de preço em produção depois do publish.
+- Decisão do dono sobre as 3 críticas de trigger.
 
-### O que ainda não foi testado
-- Override de preço (campo editável na linha do pedido) em produção.
-- "View as" ponta a ponta (depende do SQL acima).
+### Resultado da varredura (01/ago)
+
+| Componente | Estado | Detalhe |
+|---|---|---|
+| `ViewAsRedirect.tsx` | ✅ OK | `jaTentou` ref, `await getSession()`, consume token, sessionStorage, redirect `/portal` |
+| `Clientes.tsx handleViewAs` | ✅ OK | Abre aba antes do await (evita popup blocker), cria token, navega |
+| `AuthContext.tsx` | ✅ OK | Lê sessionStorage, valida sessão admin real, limpa em SIGNED_OUT cross-tab |
+| `App.tsx rota /view-as` | ✅ OK | Rota pública — correto; `ViewAsRedirect` faz a guarda internamente |
+| Migration `20260727120000` | ✅ OK | `create_view_as_token` com `gen_random_uuid()` (sem pgcrypto) |
+| `OauthApplications.tsx` | ✅ OK | `client_id`/`client_secret` gerados no frontend com `crypto.getRandomValues` — defaults de `gen_random_bytes` na coluna nunca são invocados no INSERT. Sem bug. |
+| `saveItemPrice` | ✅ CORRIGIDO | Double-write removido (commit `7b8222c`); trigger cuida do subtotal |
