@@ -89,6 +89,14 @@ const Carrinho = () => {
       const statusMap = new Map(statuses.map(s => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
       const blocked = new Set<string>();
       const insufficient = new Map<string, number>();
+      // Quantidade TOTAL pedida por produto. Duas variantes do mesmo produto são
+      // linhas separadas (cartKey = produto+variante) mas dividem o MESMO
+      // `estoque_total`. Comparando linha a linha, 6 "Tam M" + 6 "Tam G" passavam
+      // as duas com estoque 10 (6 < 10 em cada) e o pedido furava a reserva no banco.
+      const pedidoPorProduto = new Map<string, number>();
+      for (const item of items) {
+        pedidoPorProduto.set(item.produto_id, (pedidoPorProduto.get(item.produto_id) ?? 0) + item.quantidade);
+      }
       for (const item of items) {
         const prod = prods.find(p => p.id === item.produto_id);
         if (!prod) continue;
@@ -98,9 +106,10 @@ const Carrinho = () => {
         const canBuy = statusMap.get(normalized) ?? true;
         const isPreOrder = normalized === "pre-order";
         const disponivel = prod.estoque_total - prod.estoque_reservado;
+        const totalPedido = pedidoPorProduto.get(item.produto_id) ?? item.quantidade;
         if (!canBuy || (!isPreOrder && disponivel < 1)) {
           blocked.add(item.produto_id);                 // esgotado / não comprável → remover
-        } else if (!isPreOrder && disponivel < item.quantidade) {
+        } else if (!isPreOrder && disponivel < totalPedido) {
           insufficient.set(item.produto_id, disponivel); // tem menos que o pedido → reduzir
         }
       }

@@ -161,3 +161,11 @@ Lovable.
 | 66 | — | `AGUARDANDO` | **SQL criado** — `supabase/migrations/20260801120000_subuser_insert_enderecos.sql`: cria `"Sub-customer inserts parent addresses"` (`FOR INSERT ... WITH CHECK (public.is_subcustomer_of(cliente_id))`) e dropa a policy natimorta. UPDATE/DELETE seguem só com o titular/admin **de propósito** (funcionário adiciona local de entrega, não mexe nos endereços da empresa). **Falta o dono rodar no Lovable** |
 | 67 | — | `FEITO` | **Confirmado que o app avisa** (não é falha silenciosa) — `Checkout.tsx:283-291` já checa `addrErr` e bloqueia o pedido com mensagem; `saveNewAddress:258` idem. Ou seja: hoje o sub-usuário vê um erro de permissão e **não consegue prosseguir** — não fecha pedido sem endereço |
 
+### Bug de estoque com variantes (corrigido)
+
+| # | Hora | Estado | O que |
+|---|---|---|---|
+| 68 | — | `EDITADO` | **BUG (estoque, médio→alto) CORRIGIDO** — as 3 validações de estoque comparavam **linha a linha**: `disponivel < item.quantidade`. Como duas variantes do mesmo produto são **linhas separadas** (`cartKey` = produto+variante) que dividem o MESMO `produtos.estoque_total`, um carrinho com 6 "Tam M" + 6 "Tam G" passava nas duas (6 < 10 em cada) e ia pro banco pedindo 12 com 10 em estoque. Agora soma por `produto_id` antes de comparar. Corrigido em: `Carrinho.tsx` (watcher), `Checkout.tsx` (aviso proativo) e `Checkout.tsx` (re-validação do submit) |
+| 69 | — | `FEITO` | **Nota**: isso é DIFERENTE do bug 35/57 (estoque por variante ignorado). O 68 é o mesmo produto contado duas vezes; o 35 continua aberto — `produto_variantes.quantidade` existe e o carrinho não olha. Só a página do produto olha (`ProdutoDetalhe.tsx:171` `effectiveDisponivel`), então o furo é entrar pela página (que valida certo), mudar a quantidade **no carrinho** e passar |
+
+

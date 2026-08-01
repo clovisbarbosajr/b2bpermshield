@@ -449,6 +449,12 @@ const Checkout = () => {
       if (cancelled || !prods || !statuses) return;
       const statusMap = new Map(statuses.map((s: any) => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
       const blocked: string[] = [];
+      // Soma por produto: variantes distintas são linhas separadas mas compartilham
+      // o mesmo estoque. Sem somar, duas linhas de 6 passavam com estoque 10.
+      const pedidoPorProduto = new Map<string, number>();
+      for (const item of items) {
+        pedidoPorProduto.set(item.produto_id, (pedidoPorProduto.get(item.produto_id) ?? 0) + item.quantidade);
+      }
       for (const item of items) {
         const prod = prods.find((p: any) => p.id === item.produto_id);
         if (!prod) continue;
@@ -457,7 +463,8 @@ const Checkout = () => {
         const canBuy = statusMap.get(normalized) ?? true;
         const isPreOrder = normalized === "pre-order";
         const disponivel = prod.estoque_total - prod.estoque_reservado;
-        if (!canBuy || (!isPreOrder && disponivel < item.quantidade)) blocked.push(item.nome);
+        const totalPedido = pedidoPorProduto.get(item.produto_id) ?? item.quantidade;
+        if (!canBuy || (!isPreOrder && disponivel < totalPedido)) blocked.push(item.nome);
       }
       setOutOfStock(blocked);
     };
@@ -515,6 +522,12 @@ const Checkout = () => {
     if (freshProducts && allStatuses) {
       const statusMap = new Map(allStatuses.map(s => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
       const blockedItems: string[] = [];
+      // Mesma soma por produto da checagem proativa: sem isso, o submit deixava
+      // passar duas variantes do mesmo produto que juntas estouram o estoque.
+      const pedidoPorProduto = new Map<string, number>();
+      for (const item of items) {
+        pedidoPorProduto.set(item.produto_id, (pedidoPorProduto.get(item.produto_id) ?? 0) + item.quantidade);
+      }
 
       for (const item of items) {
         const prod = freshProducts.find(p => p.id === item.produto_id);
@@ -525,8 +538,9 @@ const Checkout = () => {
         const canBuy = statusMap.get(normalized) ?? true;
         const isPreOrder = normalized === "pre-order";
         const disponivel = prod.estoque_total - prod.estoque_reservado;
+        const totalPedido = pedidoPorProduto.get(item.produto_id) ?? item.quantidade;
 
-        if (!canBuy || (!isPreOrder && disponivel < item.quantidade)) {
+        if (!canBuy || (!isPreOrder && disponivel < totalPedido)) {
           blockedItems.push(item.nome);
         }
       }
