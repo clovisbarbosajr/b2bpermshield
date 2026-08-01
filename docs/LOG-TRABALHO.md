@@ -168,4 +168,14 @@ Lovable.
 | 68 | — | `EDITADO` | **BUG (estoque, médio→alto) CORRIGIDO** — as 3 validações de estoque comparavam **linha a linha**: `disponivel < item.quantidade`. Como duas variantes do mesmo produto são **linhas separadas** (`cartKey` = produto+variante) que dividem o MESMO `produtos.estoque_total`, um carrinho com 6 "Tam M" + 6 "Tam G" passava nas duas (6 < 10 em cada) e ia pro banco pedindo 12 com 10 em estoque. Agora soma por `produto_id` antes de comparar. Corrigido em: `Carrinho.tsx` (watcher), `Checkout.tsx` (aviso proativo) e `Checkout.tsx` (re-validação do submit) |
 | 69 | — | `FEITO` | **Nota**: isso é DIFERENTE do bug 35/57 (estoque por variante ignorado). O 68 é o mesmo produto contado duas vezes; o 35 continua aberto — `produto_variantes.quantidade` existe e o carrinho não olha. Só a página do produto olha (`ProdutoDetalhe.tsx:171` `effectiveDisponivel`), então o furo é entrar pela página (que valida certo), mudar a quantidade **no carrinho** e passar |
 
+### Os 3 críticos de trigger — SQL escrito (pendente do dono rodar)
+
+| # | Hora | Estado | O que |
+|---|---|---|---|
+| 70 | — | `AGUARDANDO` | **SQL dos 3 críticos** — `supabase/migrations/20260801130000_fix_3_trigger_criticals.sql`. Estavam abertos desde 26/jul esperando decisão; escrevi os três de uma vez porque nenhum tem alternativa razoável (não é questão de preferência, é bug). **Falta o dono rodar no Lovable** |
+| 71 | — | `FEITO` | **Crítico 1 (estoque) — como corrigi**: `UPDATE produtos p ... FROM pedido_itens pi` aplica **uma linha só por alvo** quando o produto se repete no pedido. Troquei o `FROM pedido_itens` por um subselect `SELECT produto_id, SUM(quantidade) ... GROUP BY produto_id` nas 3 pernas (cancelado / concluído / reativado) + nos 3 `estoque_log`. Assim o produto repetido vira uma linha só e o UPDATE volta a ser correto. **Isso conecta com o 68**: como variante não tem coluna em `pedido_itens`, produto repetido é o caso COMUM, não a exceção |
+| 72 | — | `FEITO` | **Crítico 2 (cupom) — como corrigi**: `fn_pedido_total_appside` revalidava `uso_atual < uso_maximo` em TODO UPDATE, mas o checkout incrementa `uso_atual` **depois** do insert do pedido → num cupom de uso único, a 1ª mudança de status não achava mais o cupom, `NEW.desconto := 0` e **o total do cliente subia sozinho depois de ele já ter pago**. Agora a checagem de elegibilidade (ativo/datas/uso) roda **só no INSERT** (`TG_OP <> 'INSERT' OR (...)`); no UPDATE o valor é recalculado sobre o subtotal novo, sem re-validar |
+| 73 | — | `FEITO` | **Crítico 3 (imposto) — como corrigi**: acrescentei `NEW.tax_customer_group_id := OLD.tax_customer_group_id;` em `fn_lock_privileged_cliente_cols`. Era a única coluna que o trigger de total de `pedidos` consulta e que o cliente ainda podia editar na própria linha |
+
+
 
