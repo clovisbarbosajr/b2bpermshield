@@ -33,6 +33,12 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const action = body.action || "create";
 
+    // `ilike` trata % e _ como curinga. O email vem do body, então um valor como
+    // "%@concorrente.com" casava com QUALQUER email e a mensagem de erro devolvia
+    // o nome da empresa dona — dava pra varrer a base de clientes pelo formulário
+    // de "adicionar funcionário". Escapa os curingas antes de usar no ilike.
+    const likeEscape = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
+
     // Quem é a EMPRESA-alvo?
     // - Cliente dono logado: a própria linha em `clientes` (user_id = caller, sem pai).
     // - STAFF em "view as": a sessão real é do STAFF (o view-as não troca o JWT!),
@@ -114,7 +120,7 @@ Deno.serve(async (req) => {
       const emailLc = email.trim().toLowerCase();
       const { data: sameCompany } = await db.from("clientes")
         .select("id, nome, status, can_confirm_order, can_view_full_history")
-        .ilike("email", emailLc).eq("parent_customer_id", companyId).limit(1).maybeSingle();
+        .ilike("email", likeEscape(emailLc)).eq("parent_customer_id", companyId).limit(1).maybeSingle();
       if (sameCompany) {
         const { error: reErr } = await db.from("clientes").update({
           status: "ativo", is_active: true,
@@ -136,7 +142,7 @@ Deno.serve(async (req) => {
         });
       }
       const { data: elsewhere } = await db.from("clientes")
-        .select("id, empresa, parent_customer_id").ilike("email", emailLc).limit(1).maybeSingle();
+        .select("id, empresa, parent_customer_id").ilike("email", likeEscape(emailLc)).limit(1).maybeSingle();
       if (elsewhere?.parent_customer_id) {
         return json({ error: `This email is already an employee of another company ("${elsewhere.empresa || "unknown"}"). Remove it there first, or use a different email.` });
       }
