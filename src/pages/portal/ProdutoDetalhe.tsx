@@ -12,6 +12,7 @@ import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice } from "@/lib/pricing";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
+import { formatOpcao } from "@/lib/variants";
 
 type Produto = {
   id: string; nome: string; descricao: string | null; preco: number; sku: string;
@@ -21,27 +22,6 @@ type Produto = {
 };
 
 type Categoria = { id: string; nome: string; parent_id: string | null };
-
-// Formata o valores_opcao da variante (vindo do B2BWave) em texto legível.
-// Robusto a vários formatos: objeto {Size:"M"}, array de strings, array de {name,value}.
-const formatOpcao = (v: any): string => {
-  if (v == null) return "";
-  if (typeof v === "string" || typeof v === "number") return String(v);
-  if (Array.isArray(v)) {
-    return v.map((x) => {
-      if (x == null) return "";
-      if (typeof x === "string" || typeof x === "number") return String(x);
-      const name = x.option_name ?? x.name ?? x.key ?? x.label;
-      const val = x.value ?? x.valor ?? x.v;
-      if (name != null && val != null) return `${name}: ${val}`;
-      return String(val ?? name ?? "");
-    }).filter(Boolean).join(" / ");
-  }
-  if (typeof v === "object") {
-    return Object.entries(v).map(([k, val]) => `${k}: ${val}`).join(" / ");
-  }
-  return String(v);
-};
 
 const ProdutoDetalhe = () => {
   const { id } = useParams<{ id: string }>();

@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { useCart, cartKey } from "@/contexts/CartContext";
+import { checkCartStock } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -27,7 +28,10 @@ const Carrinho = () => {
   const [salesTax, setSalesTax] = useState(0);
   // Taxa (%) buscada 1x; o VALOR do imposto é derivado de total × taxa (efeito abaixo).
   const [taxRate, setTaxRate] = useState(0);
-  const [unavailableItems, setUnavailableItems] = useState<Set<string>>(new Set());
+  // Chaveados por `cartKey` (produto+variante), não por produto: com duas
+  // variantes do mesmo produto no carrinho, chavear por produto_id marcava as
+  // DUAS linhas quando só uma estava sem estoque.
+  const [unavailableItems, setUnavailableItems] = useState<Map<string, any>>(new Map());
   // Itens COM algum estoque, mas menos que a quantidade pedida (quer 5, tem 3).
   // Bloqueiam finalizar, mas a quantidade pode ser reduzida (input fica habilitado).
   const [insufficientItems, setInsufficientItems] = useState<Map<string, number>>(new Map());
@@ -76,43 +80,25 @@ const Carrinho = () => {
   // O guard FINAL é o trigger de reserva no banco (rejeita no submit), isto é a
   // camada de aviso pra bloquear ANTES.
   useEffect(() => {
-    if (items.length === 0) { setUnavailableItems(new Set()); setInsufficientItems(new Map()); return; }
+    if (items.length === 0) { setUnavailableItems(new Map()); setInsufficientItems(new Map()); return; }
     const ids = items.map(i => i.produto_id);
     let cancelled = false;
 
     const check = async () => {
-      const [{ data: prods }, { data: statuses }] = await Promise.all([
+      // As variantes do carrinho entram na conta: o estoque por variante existe
+      // (`produto_variantes.quantidade`) e antes só a página do produto olhava —
+      // dava pra entrar por lá e depois furar mudando a quantidade AQUI.
+      const varIds = items.map(i => i.variante_id).filter(Boolean) as string[];
+      const [{ data: prods }, { data: statuses }, { data: vars }] = await Promise.all([
         supabase.from("produtos").select("id, estoque_total, estoque_reservado, status_produto").in("id", ids),
         supabase.from("product_statuses").select("nome, permite_comprar"),
+        varIds.length
+          ? supabase.from("produto_variantes").select("id, produto_id, quantidade").in("id", varIds)
+          : Promise.resolve({ data: [] as any[] }),
       ]);
       if (cancelled || !prods || !statuses) return;
-      const statusMap = new Map(statuses.map(s => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
-      const blocked = new Set<string>();
-      const insufficient = new Map<string, number>();
-      // Quantidade TOTAL pedida por produto. Duas variantes do mesmo produto são
-      // linhas separadas (cartKey = produto+variante) mas dividem o MESMO
-      // `estoque_total`. Comparando linha a linha, 6 "Tam M" + 6 "Tam G" passavam
-      // as duas com estoque 10 (6 < 10 em cada) e o pedido furava a reserva no banco.
-      const pedidoPorProduto = new Map<string, number>();
-      for (const item of items) {
-        pedidoPorProduto.set(item.produto_id, (pedidoPorProduto.get(item.produto_id) ?? 0) + item.quantidade);
-      }
-      for (const item of items) {
-        const prod = prods.find(p => p.id === item.produto_id);
-        if (!prod) continue;
-        const statusName = prod.status_produto || "disponivel";
-        const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
-        const normalized = (nameMap[statusName] || statusName).toLowerCase();
-        const canBuy = statusMap.get(normalized) ?? true;
-        const isPreOrder = normalized === "pre-order";
-        const disponivel = prod.estoque_total - prod.estoque_reservado;
-        const totalPedido = pedidoPorProduto.get(item.produto_id) ?? item.quantidade;
-        if (!canBuy || (!isPreOrder && disponivel < 1)) {
-          blocked.add(item.produto_id);                 // esgotado / não comprável → remover
-        } else if (!isPreOrder && disponivel < totalPedido) {
-          insufficient.set(item.produto_id, disponivel); // tem menos que o pedido → reduzir
-        }
-      }
+      // Regra única, compartilhada com o Checkout e coberta por teste (src/lib/stock.test.ts).
+      const { blocked, insufficient } = checkCartStock(items, prods, statuses, vars ?? []);
       setUnavailableItems(blocked);
       setInsufficientItems(insufficient);
     };
@@ -247,12 +233,12 @@ const Carrinho = () => {
                       {item.variante_label && (
                         <span className="block text-xs text-muted-foreground font-normal">{item.variante_label}</span>
                       )}
-                      {unavailableItems.has(item.produto_id) && (
+                      {unavailableItems.has(cartKey(item)) && (
                         <Badge variant="destructive" className="ml-2 text-xs">Out of stock</Badge>
                       )}
-                      {insufficientItems.has(item.produto_id) && (
+                      {insufficientItems.has(cartKey(item)) && (
                         <Badge variant="destructive" className="ml-2 text-xs">
-                          Only {insufficientItems.get(item.produto_id)} left — reduce qty
+                          Only {insufficientItems.get(cartKey(item))} left — reduce qty
                         </Badge>
                       )}
                     </TableCell>
@@ -265,7 +251,7 @@ const Carrinho = () => {
                         value={item.quantidade}
                         onChange={e => updateQuantity(cartKey(item), parseInt(e.target.value) || item.quantidade_minima)}
                         className="h-8 w-20"
-                        disabled={unavailableItems.has(item.produto_id)}
+                        disabled={unavailableItems.has(cartKey(item))}
                       />
                     </TableCell>
                     <TableCell className="text-muted-foreground">-</TableCell>

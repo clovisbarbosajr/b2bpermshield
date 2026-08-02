@@ -16,10 +16,10 @@ export type CartItem = {
   imagem_url?: string | null;
 };
 
-// Identidade de uma linha do carrinho = produto + variante. Duas variantes do mesmo
-// produto são linhas DISTINTAS. Item sem variante => chave "produto::".
-export const cartKey = (i: { produto_id: string; variante_id?: string | null }) =>
-  `${i.produto_id}::${i.variante_id ?? ""}`;
+// Identidade de uma linha do carrinho = produto + variante. A definição mora em
+// "@/lib/stock" (módulo puro, sem arrastar o cliente Supabase junto) e é
+// re-exportada aqui para não quebrar os imports existentes.
+export { cartKey } from "@/lib/stock";
 
 interface CartContextType {
   items: CartItem[];

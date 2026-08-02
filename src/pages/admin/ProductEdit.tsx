@@ -280,8 +280,43 @@ const ProductEdit = () => {
       if (error) throw new Error(`Failed to save ${what}: ${error.message}`);
     };
 
+    // ── VALIDAÇÃO ANTES DE QUALQUER DELETE ────────────────────────────────────
+    // O padrão daqui é DELETE + INSERT sem transação: se o INSERT falha, os dados
+    // JÁ foram apagados. O `orFail` avisa e o formulário segue em memória, mas um
+    // F5 consolida a perda. A falha MAIS provável é previsível: os botões "Add"
+    // criam a linha com o campo-chave vazio (`tabela_preco_id: ""`,
+    // `cliente_id: ""`, `status_nome: ""`) e "" não é uuid válido nem passa no
+    // NOT NULL. Basta clicar Add e salvar sem escolher.
+    // Checando ANTES, o erro mais comum nunca chega a destruir nada.
+    const faltando: string[] = [];
+    if (discounts.some((d: any) => !String(d.tabela_preco_id ?? "").trim()))
+      faltando.push('Discounts: pick a price list on every row');
+    if (customerPrices.some((cp: any) => !String(cp.cliente_id ?? "").trim()))
+      faltando.push('Customer prices: pick a customer on every row');
+    if (priceLists.some((pl: any) => !String(pl.tabela_preco_id ?? "").trim()))
+      faltando.push('Price lists: pick a price list on every row');
+    if (statusRules.some((sr: any) => !String(sr.status_nome ?? "").trim()))
+      faltando.push('Status rules: pick a status on every row');
+    if (assignedOptions.some((o: any) => !String(o.option_id ?? "").trim()))
+      faltando.push('Options: pick an option on every row');
+    if (galleryImages.some((g: any) => !String(g.imagem_url ?? "").trim()))
+      faltando.push('Gallery: an image row has no file');
+    if (files.some((f: any) => !String(f.arquivo_url ?? "").trim()))
+      faltando.push('Files: a file row has no file');
+    if (faltando.length > 0) {
+      throw new Error(`Nothing was saved — fix these first:\n• ${faltando.join('\n• ')}`);
+    }
+
+    // DELETE também é checado: um delete que falha (RLS) passava em silêncio e o
+    // INSERT seguinte batia em chave duplicada (ex.: tabela_preco_itens tem
+    // UNIQUE(tabela_preco_id, produto_id)), com uma mensagem que não explicava nada.
+    const delOrFail = async (table: string, what: string) => {
+      const { error } = await (supabase as any).from(table).delete().eq("produto_id", pid);
+      if (error) throw new Error(`Failed to replace ${what}: ${error.message}`);
+    };
+
     // Gallery images
-    await supabase.from("produto_imagens").delete().eq("produto_id", pid);
+    await delOrFail("produto_imagens", "gallery images");
     if (galleryImages.length > 0) {
       orFail(await supabase.from("produto_imagens").insert(galleryImages.map((img, i) => ({
         produto_id: pid, imagem_url: img.imagem_url, ordem: i
@@ -289,7 +324,7 @@ const ProductEdit = () => {
     }
 
     // Files
-    await supabase.from("produto_arquivos").delete().eq("produto_id", pid);
+    await delOrFail("produto_arquivos", "files");
     if (files.length > 0) {
       orFail(await supabase.from("produto_arquivos").insert(files.map(f => ({
         produto_id: pid, titulo: f.titulo, arquivo_url: f.arquivo_url
@@ -297,32 +332,32 @@ const ProductEdit = () => {
     }
 
     // Discounts
-    await supabase.from("produto_descontos").delete().eq("produto_id", pid);
+    await delOrFail("produto_descontos", "discounts");
     if (discounts.length > 0) {
       orFail(await supabase.from("produto_descontos").insert(discounts.map(d => ({ ...d, produto_id: pid, id: undefined }))), "discounts");
     }
 
     // Customer prices
-    await supabase.from("produto_precos_cliente").delete().eq("produto_id", pid);
+    await delOrFail("produto_precos_cliente", "customer prices");
     if (customerPrices.length > 0) {
       orFail(await supabase.from("produto_precos_cliente").insert(customerPrices.map(cp => ({ ...cp, produto_id: pid, id: undefined }))), "customer prices");
     }
 
     // Related products — ignora linhas sem produto escolhido (FK invalida).
-    await supabase.from("produtos_relacionados").delete().eq("produto_id", pid);
+    await delOrFail("produtos_relacionados", "related products");
     const relValid = relatedProducts.filter(rp => rp.produto_relacionado_id);
     if (relValid.length > 0) {
       orFail(await supabase.from("produtos_relacionados").insert(relValid.map(rp => ({ ...rp, produto_id: pid, id: undefined }))), "related products");
     }
 
     // Assigned options
-    await supabase.from("produto_opcoes").delete().eq("produto_id", pid);
+    await delOrFail("produto_opcoes", "assigned options");
     if (assignedOptions.length > 0) {
       orFail(await supabase.from("produto_opcoes").insert(assignedOptions.map(o => ({ produto_id: pid, option_id: o.option_id }))), "assigned options");
     }
 
     // Price lists
-    await supabase.from("tabela_preco_itens").delete().eq("produto_id", pid);
+    await delOrFail("tabela_preco_itens", "price lists");
     if (priceLists.length > 0) {
       orFail(await supabase.from("tabela_preco_itens").insert(priceLists.map(pl => ({
         produto_id: pid, tabela_preco_id: pl.tabela_preco_id, preco: pl.preco
@@ -330,7 +365,7 @@ const ProductEdit = () => {
     }
 
     // Status rules
-    await supabase.from("produto_status_regras").delete().eq("produto_id", pid);
+    await delOrFail("produto_status_regras", "status rules");
     if (statusRules.length > 0) {
       orFail(await supabase.from("produto_status_regras").insert(
         statusRules.map(sr => ({ produto_id: pid, status_nome: sr.status_nome, regra_tipo: sr.regra_tipo, valor_limite: sr.valor_limite }))
@@ -341,7 +376,7 @@ const ProductEdit = () => {
     // criar/editar/excluir variante na tela, o Save dizia "Product saved" e NADA
     // era gravado — o trabalho sumia ao recarregar. Linha sem `codigo` é ignorada
     // (coluna NOT NULL no banco).
-    await supabase.from("produto_variantes").delete().eq("produto_id", pid);
+    await delOrFail("produto_variantes", "variants");
     const variantRows = variants
       .filter(v => (v.codigo ?? "").trim())
       .map(v => ({
@@ -361,7 +396,7 @@ const ProductEdit = () => {
     // CHECA erro nos inserts de privacidade: se falhar após o delete, o produto privado
     // ficaria sem acesso nenhum (vazamento/sumiço). Lança -> handleSave avisa e o admin
     // reenvia (o estado ainda está em memória, nada é perdido de verdade).
-    await supabase.from("produto_acesso").delete().eq("produto_id", pid);
+    await delOrFail("produto_acesso", "access groups");
     if (form.is_private && accGroups.size > 0) {
       const { error: accErr } = await supabase.from("produto_acesso").insert(
         [...accGroups].map((gid) => ({
@@ -372,7 +407,7 @@ const ProductEdit = () => {
       );
       if (accErr) throw new Error("Failed to save access groups (privacy): " + accErr.message);
     }
-    await (supabase as any).from("produto_cliente_acesso").delete().eq("produto_id", pid);
+    await delOrFail("produto_cliente_acesso", "customer access");
     const cliRows = form.is_private
       ? [
           ...accGrant.map((cid) => ({ produto_id: pid, cliente_id: cid, tipo: "grant" })),

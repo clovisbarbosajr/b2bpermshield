@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Download } from "lucide-react";
 import { toast } from "sonner";
 import { statusLabel, statusBadge } from "@/lib/orderStatuses";
+import { formatOpcao } from "@/lib/variants";
 
 const PedidoDetalhe = () => {
   const { id } = useParams();
@@ -78,21 +79,37 @@ const PedidoDetalhe = () => {
   }, [id, user, impersonatedCustomer]);
 
   const handleAddToOrder = async (item: any) => {
-    const { data: prod } = await supabase.from("produtos")
-      .select("id, preco, estoque_total, estoque_reservado, quantidade_minima, unidade_venda, imagem_url")
-      .eq("id", item.produto_id).maybeSingle();
+    // Mesma regra do re-order da lista: a variante vem de `pedido_itens.variante_id`.
+    // Sem ela, repetir a linha mandava o produto-pai (tamanho/cor errados).
+    const [{ data: prod }, { data: v }] = await Promise.all([
+      supabase.from("produtos")
+        .select("id, preco, estoque_total, estoque_reservado, quantidade_minima, unidade_venda, imagem_url")
+        .eq("id", item.produto_id).maybeSingle(),
+      item.variante_id
+        ? supabase.from("produto_variantes")
+            .select("id, codigo, quantidade, imagem_url, valores_opcao, ativo")
+            .eq("id", item.variante_id).maybeSingle()
+        : Promise.resolve({ data: null } as any),
+    ]);
     if (!prod) { toast.error("Product not available"); return; }
-    const disponivel = (prod.estoque_total ?? 0) - (prod.estoque_reservado ?? 0);
+    if (item.variante_id && (!v || v.ativo === false)) {
+      toast.error("That option is no longer available.");
+      return;
+    }
+    const dispProduto = (prod.estoque_total ?? 0) - (prod.estoque_reservado ?? 0);
+    const disponivel = v ? Math.min(dispProduto, v.quantidade ?? 0) : dispProduto;
     addItem({
       produto_id: item.produto_id,
+      variante_id: item.variante_id ?? null,
+      variante_label: v ? formatOpcao(v.valores_opcao) || v.codigo : null,
       nome: item.nome_produto,
-      sku: item.sku ?? "",
+      sku: v?.codigo || item.sku || "",
       preco: prod.preco ?? item.preco_unitario,
       quantidade: Math.min(item.quantidade, Math.max(disponivel, 1)),
       unidade_venda: prod.unidade_venda ?? "UN",
       quantidade_minima: prod.quantidade_minima ?? 1,
       estoque_disponivel: disponivel,   // estoque REAL (antes era Math.max(...,99) -> oversell)
-      imagem_url: prod.imagem_url ?? null,
+      imagem_url: v?.imagem_url || prod.imagem_url || null,
     });
     toast.success(`${item.nome_produto} added to cart`);
   };

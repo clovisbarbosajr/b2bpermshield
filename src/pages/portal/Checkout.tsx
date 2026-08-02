@@ -31,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ChevronRight, Lock, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useCart } from "@/contexts/CartContext";
+import { checkCartStock, cartKey } from "@/lib/stock";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice } from "@/lib/pricing";
 
@@ -442,31 +443,23 @@ const Checkout = () => {
     const ids = items.map(i => i.produto_id);
     let cancelled = false;
     const check = async () => {
-      const [{ data: prods }, { data: statuses }] = await Promise.all([
+      const varIds = items.map((i: any) => i.variante_id).filter(Boolean) as string[];
+      const [{ data: prods }, { data: statuses }, { data: vars }] = await Promise.all([
         supabase.from("produtos").select("id, estoque_total, estoque_reservado, status_produto").in("id", ids),
         supabase.from("product_statuses").select("nome, permite_comprar"),
+        varIds.length
+          ? supabase.from("produto_variantes").select("id, produto_id, quantidade").in("id", varIds)
+          : Promise.resolve({ data: [] as any[] }),
       ]);
       if (cancelled || !prods || !statuses) return;
-      const statusMap = new Map(statuses.map((s: any) => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
-      const blocked: string[] = [];
-      // Soma por produto: variantes distintas são linhas separadas mas compartilham
-      // o mesmo estoque. Sem somar, duas linhas de 6 passavam com estoque 10.
-      const pedidoPorProduto = new Map<string, number>();
-      for (const item of items) {
-        pedidoPorProduto.set(item.produto_id, (pedidoPorProduto.get(item.produto_id) ?? 0) + item.quantidade);
-      }
-      for (const item of items) {
-        const prod = prods.find((p: any) => p.id === item.produto_id);
-        if (!prod) continue;
-        const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
-        const normalized = (nameMap[prod.status_produto || "disponivel"] || prod.status_produto || "").toLowerCase();
-        const canBuy = statusMap.get(normalized) ?? true;
-        const isPreOrder = normalized === "pre-order";
-        const disponivel = prod.estoque_total - prod.estoque_reservado;
-        const totalPedido = pedidoPorProduto.get(item.produto_id) ?? item.quantidade;
-        if (!canBuy || (!isPreOrder && disponivel < totalPedido)) blocked.push(item.nome);
-      }
-      setOutOfStock(blocked);
+      // Regra única (src/lib/stock.ts), a mesma do Carrinho e do submit: teto da
+      // variante + soma por produto. Coberta por teste em src/lib/stock.test.ts.
+      const { blocked, insufficient } = checkCartStock(items, prods, statuses, vars ?? []);
+      const nomes = [
+        ...[...blocked.values()].map((i) => i.nome),
+        ...items.filter((i: any) => insufficient.has(cartKey(i))).map((i: any) => i.nome),
+      ];
+      setOutOfStock([...new Set(nomes)]);
     };
     check();
     const interval = setInterval(check, 10000);
@@ -510,6 +503,7 @@ const Checkout = () => {
 
     // Validate stock & status before submitting
     const productIds = items.map(i => i.produto_id);
+    const variantIds = items.map((i: any) => i.variante_id).filter(Boolean) as string[];
     const { data: freshProducts } = await supabase
       .from("produtos")
       .select("id, estoque_total, estoque_reservado, status_produto")
@@ -519,31 +513,20 @@ const Checkout = () => {
       .from("product_statuses")
       .select("nome, permite_comprar");
 
+    // Estoque por variante relido agora — o teto da variante entra na validação final.
+    const { data: freshVariants } = variantIds.length
+      ? await supabase.from("produto_variantes").select("id, produto_id, quantidade").in("id", variantIds)
+      : { data: [] as any[] };
+
     if (freshProducts && allStatuses) {
-      const statusMap = new Map(allStatuses.map(s => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
-      const blockedItems: string[] = [];
-      // Mesma soma por produto da checagem proativa: sem isso, o submit deixava
-      // passar duas variantes do mesmo produto que juntas estouram o estoque.
-      const pedidoPorProduto = new Map<string, number>();
-      for (const item of items) {
-        pedidoPorProduto.set(item.produto_id, (pedidoPorProduto.get(item.produto_id) ?? 0) + item.quantidade);
-      }
-
-      for (const item of items) {
-        const prod = freshProducts.find(p => p.id === item.produto_id);
-        if (!prod) continue;
-        const statusName = prod.status_produto || "disponivel";
-        const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
-        const normalized = (nameMap[statusName] || statusName).toLowerCase();
-        const canBuy = statusMap.get(normalized) ?? true;
-        const isPreOrder = normalized === "pre-order";
-        const disponivel = prod.estoque_total - prod.estoque_reservado;
-        const totalPedido = pedidoPorProduto.get(item.produto_id) ?? item.quantidade;
-
-        if (!canBuy || (!isPreOrder && disponivel < totalPedido)) {
-          blockedItems.push(item.nome);
-        }
-      }
+      // Mesma regra da checagem proativa (src/lib/stock.ts): teto da variante +
+      // soma por produto. Antes o submit olhava só o total do produto, então
+      // dava pra fechar 10 de um tamanho que só tinha 2.
+      const { blocked, insufficient } = checkCartStock(items, freshProducts, allStatuses, freshVariants ?? []);
+      const blockedItems = [...new Set([
+        ...[...blocked.values()].map((i) => i.nome),
+        ...items.filter((i: any) => insufficient.has(cartKey(i))).map((i: any) => i.nome),
+      ])];
 
       if (blockedItems.length > 0) {
         toast.error(`Cannot complete order. The following items are unavailable or out of stock: ${blockedItems.join(", ")}`);
@@ -602,6 +585,10 @@ const Checkout = () => {
     const itens = recalculated.map(i => ({
       pedido_id: pedido.id,
       produto_id: i.produto_id,
+      // Coluna própria da variante: o texto abaixo é pro humano ler, ISTO é o
+      // que o re-order e os relatórios usam. Antes a variante só existia no
+      // nome/sku e o re-order trazia o produto errado.
+      variante_id: (i as any).variante_id ?? null,
       // Inclui a variante (Size/Color) no nome da linha do pedido; sku = código da variante.
       nome_produto: (i as any).variante_label ? `${i.nome} (${(i as any).variante_label})` : i.nome,
       sku: i.sku ?? "",

@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ClipboardList, Download } from "lucide-react";
 import { toast } from "sonner";
 import { ORDER_STATUSES, statusLabel, statusBadge as statusBadgeClass } from "@/lib/orderStatuses";
+import { formatOpcao } from "@/lib/variants";
 
 const STATUS_OPTIONS = [{ value: "", label: "Please select..." }, ...ORDER_STATUSES];
 
@@ -107,29 +108,51 @@ const Pedidos = () => {
     const { data: itens } = await supabase.from("pedido_itens").select("*").eq("pedido_id", pedidoId);
     if (!itens || itens.length === 0) { toast.error("No items found"); setReordering(null); return; }
     const productIds = itens.map((i: any) => i.produto_id);
-    const { data: prods } = await supabase.from("produtos")
-      .select("id, preco, estoque_total, estoque_reservado, quantidade_minima, unidade_venda, imagem_url")
-      .in("id", productIds);
+    // A variante agora tem coluna própria (`pedido_itens.variante_id`). Sem isso o
+    // re-order remontava o item só com `produto_id` e o cliente repetia o pedido
+    // recebendo o produto errado (o tamanho/cor só existia no texto do nome).
+    const variantIds = itens.map((i: any) => i.variante_id).filter(Boolean) as string[];
+    const [{ data: prods }, { data: vars }] = await Promise.all([
+      supabase.from("produtos")
+        .select("id, preco, estoque_total, estoque_reservado, quantidade_minima, unidade_venda, imagem_url")
+        .in("id", productIds),
+      variantIds.length
+        ? supabase.from("produto_variantes").select("id, produto_id, codigo, quantidade, imagem_url, valores_opcao, ativo").in("id", variantIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
     const prodMap = new Map((prods ?? []).map((p: any) => [p.id, p]));
+    const varMap = new Map((vars ?? []).map((v: any) => [v.id, v]));
     let added = 0;
+    const perdidos: string[] = [];
     for (const item of itens) {
       const prod = prodMap.get(item.produto_id);
       if (!prod) continue;
-      const disponivel = (prod.estoque_total ?? 0) - (prod.estoque_reservado ?? 0);
+      const v = item.variante_id ? varMap.get(item.variante_id) : null;
+      // Variante apagada ou desativada desde o pedido original: não dá pra repetir
+      // essa linha (adicionar sem variante mandaria o produto errado de novo).
+      if (item.variante_id && (!v || v.ativo === false)) { perdidos.push(item.nome_produto); continue; }
+      const dispProduto = (prod.estoque_total ?? 0) - (prod.estoque_reservado ?? 0);
+      const disponivel = v ? Math.min(dispProduto, v.quantidade ?? 0) : dispProduto;
       addItem({
         produto_id: item.produto_id,
+        variante_id: item.variante_id ?? null,
+        variante_label: v ? formatOpcao(v.valores_opcao) || v.codigo : null,
         nome: item.nome_produto,
-        sku: item.sku ?? "",
+        sku: v?.codigo || item.sku || "",
         preco: prod.preco ?? item.preco_unitario,
         quantidade: Math.min(item.quantidade, Math.max(disponivel, prod.quantidade_minima ?? 1)),
         unidade_venda: prod.unidade_venda ?? "UN",
         quantidade_minima: prod.quantidade_minima ?? 1,
         estoque_disponivel: disponivel, // estoque REAL (antes inflava p/ 99 e furava a validação)
-        imagem_url: prod.imagem_url ?? null,
+        imagem_url: v?.imagem_url || prod.imagem_url || null,
       });
       added++;
     }
-    toast.success(`${added} item(s) added to cart`);
+    if (added > 0) toast.success(`${added} item(s) added to cart`);
+    if (perdidos.length) {
+      toast.error(`Not re-ordered (option no longer available): ${[...new Set(perdidos)].join(", ")}`);
+    }
+    if (added === 0) { setReordering(null); return; }
     navigate("/portal/carrinho");
     setReordering(null);
   };
