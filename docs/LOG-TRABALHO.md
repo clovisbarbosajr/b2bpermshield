@@ -204,6 +204,10 @@ Lovable.
 | 107 | — | `AGUARDANDO` | **SQL da parte 2 criado** — `supabase/migrations/20260802150000_fechar_leitura_anonima_parte2.sql`: recria as 4 policies **idênticas**, só trocando `TO authenticated, anon` por `TO authenticated`. O `USING` não muda em nada (privacidade por grupo, grant/exclude, `ativo`, `show_to_customers`). **Falta o dono rodar** e repetir a conferência |
 | 108 | — | `FEITO` | **Lição pro futuro**: procurar policy anônima **por nome** não basta. O certo é sempre `SELECT ... FROM pg_policies WHERE 'anon' = ANY(roles)` — foi o que o CSV do dono provou |
 
+| 109 | — | `RESOLVIDO` | ✅ **LEITURA ANÔNIMA FECHADA — confirmado pelo dono.** Ele rodou a parte 2 e repetiu a conferência: `SELECT ... FROM pg_policies WHERE 'anon' = ANY(roles)` **voltou vazia**. Nenhuma policy do schema `public` concede mais nada ao papel `anon`. Fecha o item 2 da conversa de 02/ago ("Nada pode ser público") |
+| 110 | — | `FEITO` | **Placar do fechamento**: 19 policies na parte 1 (`20260802140000`) + 4 na parte 2 (`20260802150000`) = **23 aberturas anônimas removidas**. As 4 da parte 2 eram as piores (catálogo, frete, pagamento) e só apareceram porque o dono rodou a conferência — meu levantamento por nome não as pegou |
+| 111 | — | `AGUARDANDO` | **Ainda na fila**: (1) SQL do `pedido_itens.variante_id` (`20260802130000`) — **não rodado**; (2) **publish** no Lovable, que leva TUDO que está no GitHub e ainda não foi publicado: estoque por variante (`src/lib/stock.ts` + 18 testes), variante no re-order, validação do `ProductEdit` antes do delete, relatórios paginados com tratamento de erro, export do histórico, canais Realtime, vazamentos do view-as. **O SQL da leitura anônima já está valendo em produção sem depender do publish** (é só banco) |
+
 ### Correção dos 3 riscos que sobraram (02/ago)
 
 | # | Hora | Estado | O que |
