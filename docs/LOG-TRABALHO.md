@@ -208,6 +208,16 @@ Lovable.
 | 110 | — | `FEITO` | **Placar do fechamento**: 19 policies na parte 1 (`20260802140000`) + 4 na parte 2 (`20260802150000`) = **23 aberturas anônimas removidas**. As 4 da parte 2 eram as piores (catálogo, frete, pagamento) e só apareceram porque o dono rodou a conferência — meu levantamento por nome não as pegou |
 | 111 | — | `AGUARDANDO` | **Ainda na fila**: (1) SQL do `pedido_itens.variante_id` (`20260802130000`) — **não rodado**; (2) **publish** no Lovable, que leva TUDO que está no GitHub e ainda não foi publicado: estoque por variante (`src/lib/stock.ts` + 18 testes), variante no re-order, validação do `ProductEdit` antes do delete, relatórios paginados com tratamento de erro, export do histórico, canais Realtime, vazamentos do view-as. **O SQL da leitura anônima já está valendo em produção sem depender do publish** (é só banco) |
 
+### Fim do dia 02/ago — tudo aplicado, testes ficam pra 03/ago
+
+| # | Hora | Estado | O que |
+|---|---|---|---|
+| 112 | — | `FEITO` | **Dono rodou o SQL do `variante_id` E fez o publish.** Ou seja: **não há mais SQL pendente** e o código do GitHub está em produção. Palavras dele: *"JA fiz os dois...vamos esperar os testes amanha"* |
+| 113 | — | `AGUARDANDO` | **Testes reais em produção ficam pra 03/ago**, com o dono. Lista do que precisa de login e eu não consigo validar daqui: (1) carrinho do view-as isolado por cliente + "DELETE ALL" não apagar o do admin; (2) sub-login salvando endereço novo no checkout; (3) duas variantes do mesmo produto estourando o estoque juntas → tem que bloquear; (4) 10 de um tamanho que só tem 2 → tem que bloquear (bug 35); (5) re-order trazendo a variante certa (bug 36); (6) export do histórico completo; (7) override manual de preço na linha do pedido; (8) ProductEdit: clicar "Add discount" e salvar SEM escolher a tabela → tem que avisar e **não apagar** os descontos existentes; (9) relatórios do admin carregando com dados reais |
+| 114 | — | `AGUARDANDO` | **Teste extra que o SQL de hoje exige** — a leitura anônima fechou `produtos`, `categorias`, `payment_options` e `shipping_options`. Cliente **logado** não deveria sentir diferença nenhuma, mas catálogo e checkout precisam ser abertos pra confirmar que continuam normais |
+| 115 | — | `AGUARDANDO` | **Continua sem varredura nenhuma** (os agentes morreram por quota, ninguém olhou): admin Pedidos, admin Estoque, lista de Produtos, `tools/Import*`, e as edge functions fora da `company-member` |
+| 116 | — | `LEMBRETE` | **A pendência P1 (desconto por quantidade) segue ABERTA e no topo deste arquivo.** O dono pediu explicitamente pra não deixar cair: *"coloque como pendencia..?NAo pode esqeucer"*. Ele vai testar e responder em 03/ago |
+
 ### Correção dos 3 riscos que sobraram (02/ago)
 
 | # | Hora | Estado | O que |
