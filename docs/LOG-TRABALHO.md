@@ -183,6 +183,22 @@ Lovable.
 | 84 | — | `FEITO` | **Revisei o trabalho da outra sessão nos relatórios** (`fetchAllRows.ts` + 13 telas de `admin/reports/`). A lógica está **correta**: cada `.select()` sem `.range()` virou `fetchAllRows`, que pagina de 1000 em 1000 até a última página. Resolve o corte silencioso do PostgREST, que fazia o total sair plausível e errado |
 | 85 | — | `EDITADO` | **REGRESSÃO que aquele trabalho introduziu — corrigida.** `fetchAllRows` **lança** em erro, enquanto o código antigo (`.data ?? []`) engolia. Em **12 das 13 telas** o `fetch()` não tinha `catch` → o `setLoading(false)` nunca rodava: **spinner eterno + unhandled rejection**. Adicionado `.catch()` com `console.error` + toast + `setLoading(false)` nas 13 (a 13ª, `OrdersPerMonth`, tinha um catch **mudo** — mostrava gráfico vazio como se não houvesse pedido; agora avisa) |
 | 86 | — | `FEITO` | **Validado até onde dá sem login**: `npx tsc --noEmit` limpo · `npx vite build` limpo (2462 módulos) · app sobe em `localhost:8080`, carrega a home, **zero erro de console** · `/admin/reports/inventory-control` redireciona pra home (guarda `<A>` de admin funcionando). **O que falta precisa da conta do dono** — não tenho e não devo usar credencial |
+## ⚠️ PENDÊNCIA ABERTA — NÃO ESQUECER
+
+| # | Estado | O que |
+|---|---|---|
+| **P1** | `AGUARDANDO O DONO` | **Desconto por quantidade — o dono vai TESTAR antes de decidir.** Palavras dele (02/ago): *"Eu vou ter que testar isso aqui pq tá bem confuso. Não sei como tá o desconto lá, não mexi nisso ainda"*. **Contexto pra quando ele voltar**: hoje TODO desconto por quantidade é obrigatoriamente amarrado a UMA tabela de preço (`produto_descontos.tabela_preco_id` é NOT NULL). Não existe desconto "vale pra todos" — tem que recriar em cada tabela, e tabela nova criada depois nasce sem os descontos. O sistema foi escrito ESPERANDO que a opção global existisse: `pricing.ts:99` (`query.is("tabela_preco_id", null)`) e o servidor (`_resolve_desconto`, `20260622220000:19` e `20260623000000:117`) têm a perna do NULL, que **nunca casa**. Duas saídas: (1) tornar a coluna anulável e ligar o "vale pra todos" — muda semântica de preço, precisa do aval dele; (2) confirmar que é sempre por tabela e apagar o código morto. **Nada foi mexido** |
+
+### Decisões do dono (02/ago) — itens 2 e 3 fechados
+
+| # | Hora | Estado | O que |
+|---|---|---|---|
+| 100 | — | `RESOLVIDO` | **Item 3 — pedido mínimo: FECHADO.** O dono confirmou: *"Ta correto, não existe pedido mínimo"*. Não é bug, não é pendência, o comportamento atual está certo |
+| 101 | — | `FEITO` | **Item 2 — o dono foi MAIS LONGE que a pergunta**: *"Nada pode ser público. Só tem acesso a produto do sistema se tiver login"*. Eu tinha perguntado só sobre 2 tabelas; a resposta vale pro banco inteiro. Fiz o levantamento: cruzando CREATE × DROP POLICY em todas as migrations, sobravam **19** policies `FOR SELECT TO anon USING (true)` das migrations de mar/2026 |
+| 102 | — | `FEITO` | **O que dava pra ler SEM LOGIN** — além das 2 que eu já sabia (`produto_descontos`, `produto_arquivos`): `produto_imagens`, `produto_variantes` (**incluindo a quantidade em estoque de cada tamanho/cor**), `produtos_relacionados`, `produto_opcoes`, as **4 tabelas de imposto**, `coupons` com `ativo = true` (**dava pra pescar código de cupom válido**), `brands`, `product_statuses`, `measurement_units`, `extra_fields`, `privacy_groups`, `banners`, `noticias`, `quick_links`. As mais graves (clientes, pedidos, pedido_itens, enderecos, produtos, tabelas_preco) já tinham sido fechadas em 18-19/jun — estas escaparam |
+| 103 | — | `FEITO` | **Conferi ANTES de fechar que nada público quebra**: `/` não consulta o banco · `/login`, `/customers-login`, `/admin-login`, `/recuperar-senha`, `/reset-password` só usam `supabase.auth.*` · `/cadastro` usa `auth.signUp` + a edge `register-customer` (service role, não passa por RLS) · `/pending-approval` lê `clientes` já logado · a config pública do portal vem da RPC `get_public_config`, que não depende dessas policies. As policies de `authenticated` e de staff seguem intactas |
+| 104 | — | `AGUARDANDO` | **SQL criado** — `supabase/migrations/20260802140000_fechar_leitura_anonima.sql`, com os 19 DROP POLICY e, no rodapé, a consulta de conferência em `pg_policies` (tem que voltar vazia). **Falta o dono rodar** |
+
 ### Correção dos 3 riscos que sobraram (02/ago)
 
 | # | Hora | Estado | O que |
