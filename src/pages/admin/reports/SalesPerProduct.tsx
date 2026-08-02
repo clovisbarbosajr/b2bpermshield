@@ -7,6 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency } from "@/lib/export-csv";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { toast } from "sonner";
 import { canonicalStatus } from "@/lib/orderStatuses";
 
 const SalesPerProduct = () => {
@@ -19,15 +21,22 @@ const SalesPerProduct = () => {
   useEffect(() => {
     const fetch = async () => {
       setLoading(true);
-      const [ordRes, itemRes] = await Promise.all([
-        supabase.from("pedidos").select("id, created_at, status"),
-        supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, subtotal"),
+      // Paginado: sem isto o PostgREST corta em 1000 linhas sem erro e o
+      // relatório mostra um total plausível e errado.
+      const [ord, its] = await Promise.all([
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, created_at, status").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, subtotal").range(f, t)),
       ]);
-      setOrders(ordRes.data ?? []);
-      setItems(itemRes.data ?? []);
+      setOrders(ord);
+      setItems(its);
       setLoading(false);
-    };
-    fetch();
+    };    fetch().catch((e) => {
+      // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
+      // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
+      console.error(e);
+      toast.error("Could not load this report. Try again.");
+      setLoading(false);
+    });
   }, []);
 
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

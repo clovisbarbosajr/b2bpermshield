@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,15 +24,21 @@ const ProductsByOrderStatus = () => {
   useEffect(() => {
     const fetch = async () => {
       setLoading(true);
-      const [ordRes, itemRes] = await Promise.all([
-        supabase.from("pedidos").select("id, status"),
-        supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal"),
+      // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
+      const [ord, its] = await Promise.all([
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, status").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal").range(f, t)),
       ]);
-      setOrders(ordRes.data ?? []);
-      setItems(itemRes.data ?? []);
+      setOrders(ord);
+      setItems(its);
       setLoading(false);
-    };
-    fetch();
+    };    fetch().catch((e) => {
+      // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
+      // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
+      console.error(e);
+      toast.error("Could not load this report. Try again.");
+      setLoading(false);
+    });
   }, []);
 
   const reportData = useMemo(() => {

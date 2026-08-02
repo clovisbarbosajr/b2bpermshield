@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,17 +25,23 @@ const CustomerProductSales = () => {
   useEffect(() => {
     const fetch = async () => {
       setLoading(true);
-      const [ordRes, itemRes, cliRes] = await Promise.all([
-        supabase.from("pedidos").select("id, cliente_id, status"),
-        supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal"),
-        supabase.from("clientes").select("id, nome, empresa"),
+      // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
+      const [ord, its, cli] = await Promise.all([
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, cliente_id, status").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("clientes").select("id, nome, empresa").range(f, t)),
       ]);
-      setOrders(ordRes.data ?? []);
-      setItems(itemRes.data ?? []);
-      setCustomers(cliRes.data ?? []);
+      setOrders(ord);
+      setItems(its);
+      setCustomers(cli);
       setLoading(false);
-    };
-    fetch();
+    };    fetch().catch((e) => {
+      // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
+      // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
+      console.error(e);
+      toast.error("Could not load this report. Try again.");
+      setLoading(false);
+    });
   }, []);
 
   const reportData = useMemo(() => {

@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,19 +28,25 @@ const OrdersSummary = () => {
   useEffect(() => {
     const fetch = async () => {
       setLoading(true);
-      const [ordRes, cliRes, itemRes] = await Promise.all([
-        supabase.from("pedidos").select("*").order("created_at", { ascending: false }),
-        supabase.from("clientes").select("id, nome, empresa"),
-        supabase.from("pedido_itens").select("pedido_id"),
+      // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
+      const [ord, cli, its] = await Promise.all([
+        fetchAllRows((f, t) => supabase.from("pedidos").select("*").order("created_at", { ascending: false }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("clientes").select("id, nome, empresa").range(f, t)),
+        fetchAllRows<{ pedido_id: string }>((f, t) => supabase.from("pedido_itens").select("pedido_id").range(f, t) as any),
       ]);
-      setOrders(ordRes.data ?? []);
-      setCustomers(cliRes.data ?? []);
+      setOrders(ord);
+      setCustomers(cli);
       const counts: Record<string, number> = {};
-      (itemRes.data ?? []).forEach((i) => { counts[i.pedido_id] = (counts[i.pedido_id] || 0) + 1; });
+      its.forEach((i) => { counts[i.pedido_id] = (counts[i.pedido_id] || 0) + 1; });
       setItemsCount(counts);
       setLoading(false);
-    };
-    fetch();
+    };    fetch().catch((e) => {
+      // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
+      // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
+      console.error(e);
+      toast.error("Could not load this report. Try again.");
+      setLoading(false);
+    });
   }, []);
 
   const custMap = useMemo(() => {

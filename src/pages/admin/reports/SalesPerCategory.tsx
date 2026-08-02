@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -19,19 +21,25 @@ const SalesPerCategory = () => {
   useEffect(() => {
     const fetch = async () => {
       setLoading(true);
-      const [ordRes, itemRes, prodRes, catRes] = await Promise.all([
-        supabase.from("pedidos").select("id, created_at, status"),
-        supabase.from("pedido_itens").select("pedido_id, produto_id, subtotal"),
-        supabase.from("produtos").select("id, categoria_id"),
-        supabase.from("categorias").select("id, nome"),
+      // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
+      const [ord, its, prod, cat] = await Promise.all([
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, created_at, status").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, subtotal").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("produtos").select("id, categoria_id").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("categorias").select("id, nome").range(f, t)),
       ]);
-      setOrders(ordRes.data ?? []);
-      setItems(itemRes.data ?? []);
-      setProducts(prodRes.data ?? []);
-      setCategories(catRes.data ?? []);
+      setOrders(ord);
+      setItems(its);
+      setProducts(prod);
+      setCategories(cat);
       setLoading(false);
-    };
-    fetch();
+    };    fetch().catch((e) => {
+      // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
+      // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
+      console.error(e);
+      toast.error("Could not load this report. Try again.");
+      setLoading(false);
+    });
   }, []);
 
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

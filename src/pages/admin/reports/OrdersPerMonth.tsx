@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -13,10 +15,17 @@ const OrdersPerMonth = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.from("pedidos").select("id, total, created_at, status").then(({ data }) => {
-      setOrders(data ?? []);
-      setLoading(false);
-    });
+    // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro, e os meses
+    // mais antigos simplesmente desapareciam do gráfico.
+    fetchAllRows((f, t) => supabase.from("pedidos").select("id, total, created_at, status").range(f, t))
+      .then((data) => { setOrders(data); setLoading(false); })
+      .catch((e) => {
+        // Antes só desligava o spinner em silêncio: o gráfico ficava vazio e
+        // parecia "não houve pedido", não "a busca falhou".
+        console.error(e);
+        toast.error("Could not load this report. Try again.");
+        setLoading(false);
+      });
   }, []);
 
   const monthlyData = useMemo(() => {

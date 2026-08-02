@@ -21,7 +21,9 @@ export function exportToCSV(data: Record<string, any>[], filename: string, colum
   a.href = url;
   a.download = `${filename}_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
-  URL.revokeObjectURL(url);
+  // Revogar na linha seguinte ao click cancelava o download em alguns navegadores
+  // (o blob morria antes de a grava\u00E7\u00E3o come\u00E7ar).
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 export function formatCurrency(value: number) {

@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,17 +49,25 @@ const InventoryControl = () => {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
-      const [prodRes, itemsRes, catRes] = await Promise.all([
-        supabase.from("produtos").select("id, sku, nome, custo, estoque_total, estoque_reservado, categoria_id, updated_at"),
-        supabase.from("pedido_itens").select("produto_id, quantidade, subtotal, pedidos(status)"),
-        supabase.from("categorias").select("id, nome").order("nome"),
+      // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro, e o
+      // "sold qty" saía plausível e errado.
+      const [prod, its, cat] = await Promise.all([
+        fetchAllRows<Product>((f, t) => supabase.from("produtos").select("id, sku, nome, custo, estoque_total, estoque_reservado, categoria_id, updated_at").range(f, t) as any),
+        fetchAllRows<OrderItem>((f, t) => supabase.from("pedido_itens").select("produto_id, quantidade, subtotal, pedidos(status)").range(f, t) as any),
+        fetchAllRows<Category>((f, t) => supabase.from("categorias").select("id, nome").order("nome").range(f, t) as any),
       ]);
-      setProducts(prodRes.data ?? []);
-      setOrderItems(itemsRes.data ?? []);
-      setCategories(catRes.data ?? []);
+      setProducts(prod);
+      setOrderItems(its);
+      setCategories(cat);
       setLoading(false);
     };
-    fetchData();
+    fetchData().catch((e) => {
+      // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
+      // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
+      console.error(e);
+      toast.error("Could not load this report. Try again.");
+      setLoading(false);
+    });
   }, []);
 
   const soldMap = useMemo(() => {
