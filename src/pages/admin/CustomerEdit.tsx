@@ -783,16 +783,22 @@ const CustomerEdit = () => {
                       <TableCell>{ct.nome}</TableCell>
                       <TableCell className="text-muted-foreground text-sm">{ct.email}</TableCell>
                       <TableCell className="text-center">
+                        {/* Checa o erro ANTES de marcar na tela. Sem isso, uma gravação
+                            barrada (RLS/rede) deixava o admin vendo a permissão ligada
+                            enquanto no banco ela continuava desligada — e "pode confirmar
+                            pedido" é justamente o que libera o funcionário a comprar. */}
                         <Checkbox checked={ct.can_confirm_order} onCheckedChange={async (v) => {
                           const val = v === true;
-                          await supabase.from("clientes").update({ can_confirm_order: val }).eq("id", ct.id);
+                          const { error } = await supabase.from("clientes").update({ can_confirm_order: val }).eq("id", ct.id);
+                          if (error) { toast.error("Could not change permission: " + error.message); return; }
                           setContacts(prev => prev.map(c => c.id === ct.id ? { ...c, can_confirm_order: val } : c));
                         }} />
                       </TableCell>
                       <TableCell className="text-center">
                         <Checkbox checked={ct.can_view_full_history} onCheckedChange={async (v) => {
                           const val = v === true;
-                          await supabase.from("clientes").update({ can_view_full_history: val }).eq("id", ct.id);
+                          const { error } = await supabase.from("clientes").update({ can_view_full_history: val }).eq("id", ct.id);
+                          if (error) { toast.error("Could not change permission: " + error.message); return; }
                           setContacts(prev => prev.map(c => c.id === ct.id ? { ...c, can_view_full_history: val } : c));
                         }} />
                       </TableCell>
@@ -800,7 +806,8 @@ const CustomerEdit = () => {
                         <Badge variant={ct.ativo ? "default" : "secondary"} className="cursor-pointer"
                           onClick={async () => {
                             const next = ct.ativo ? "inativo" : "ativo";
-                            await supabase.from("clientes").update({ status: next, is_active: !ct.ativo }).eq("id", ct.id);
+                            const { error } = await supabase.from("clientes").update({ status: next, is_active: !ct.ativo }).eq("id", ct.id);
+                            if (error) { toast.error("Could not change status: " + error.message); return; }
                             setContacts(prev => prev.map(c => c.id === ct.id ? { ...c, ativo: !c.ativo } : c));
                           }}>
                           {ct.ativo ? "Active" : "Inactive"}
@@ -939,7 +946,12 @@ const CustomerEdit = () => {
             {cliente?.status === "pendente" && (
               <>
                 <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={async () => {
-                  await supabase.from("clientes").update({ status: "ativo", is_active: true } as any).eq("id", cliente.id);
+                  // Checa o erro ANTES de seguir: sem isso, uma aprovação barrada
+                  // ainda dava papel de cliente, marcava "aprovado" na tela e
+                  // DISPARAVA o e-mail de boas-vindas — o cliente recebia o aviso
+                  // e continuava sem conseguir entrar.
+                  const { error: apErr } = await supabase.from("clientes").update({ status: "ativo", is_active: true } as any).eq("id", cliente.id);
+                  if (apErr) { toast.error("Could not approve: " + apErr.message); return; }
                   // Ensure user can log in to portal — add cliente role if not already set
                   if (cliente.user_id) {
                     await (supabase.from("user_roles") as any).upsert(
@@ -991,7 +1003,10 @@ const CustomerEdit = () => {
                 </Button>
                 <Button size="sm" variant="destructive" onClick={async () => {
                   if (!confirm("Reject this customer? They will receive a rejection email.")) return;
-                  await supabase.from("clientes").update({ status: "rejeitado", is_active: false } as any).eq("id", cliente.id);
+                  // Idem aprovação: sem checar, o e-mail de recusa saía mesmo com a
+                  // gravação falhando — cliente recebia a recusa e continuava pendente.
+                  const { error: rjErr } = await supabase.from("clientes").update({ status: "rejeitado", is_active: false } as any).eq("id", cliente.id);
+                  if (rjErr) { toast.error("Could not reject: " + rjErr.message); return; }
                   setCliente({ ...cliente, status: "rejeitado", is_active: false });
                   toast.info("Customer rejected");
                   supabase.functions.invoke("send-email", {

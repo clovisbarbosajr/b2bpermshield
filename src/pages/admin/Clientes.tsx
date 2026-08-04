@@ -130,7 +130,11 @@ const AdminClientes = () => {
   const handleToggleActive = async (e: React.MouseEvent, c: any) => {
     e.stopPropagation();
     const newActive = !c.is_active;
-    await supabase.from("clientes").update({ is_active: newActive }).eq("id", c.id);
+    // Sem checar o erro, uma gravação barrada mostrava "Customer activated" e o
+    // `fetchData()` logo depois trazia o valor ANTIGO — a linha voltava sozinha,
+    // com a mensagem de sucesso ainda na tela.
+    const { error } = await supabase.from("clientes").update({ is_active: newActive }).eq("id", c.id);
+    if (error) { toast.error("Could not change status: " + error.message); return; }
     toast.success(newActive ? "Customer activated" : "Customer deactivated");
     fetchData();
   };
