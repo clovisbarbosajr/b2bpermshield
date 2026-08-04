@@ -79,19 +79,19 @@ const PaymentOptions = () => {
       gateway_type: form.gateway_type === "none" ? null : form.gateway_type,
       gateway_config: form.gateway_config,
     };
-    if (editing) {
-      await supabase.from("payment_options").update(payload).eq("id", editing.id);
-      toast.success("Updated");
-    } else {
-      await supabase.from("payment_options").insert(payload);
-      toast.success("Created");
-    }
-    setSaving(false); setListView(true); fetchData();
+    const { error } = editing
+      ? await supabase.from("payment_options").update(payload).eq("id", editing.id)
+      : await supabase.from("payment_options").insert(payload);
+    setSaving(false);
+    if (error) { toast.error("Could not save: " + error.message); return; }
+    toast.success(editing ? "Updated" : "Created");
+    setListView(true); fetchData();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this payment option?")) return;
-    await supabase.from("payment_options").delete().eq("id", id);
+    const { error } = await supabase.from("payment_options").delete().eq("id", id);
+    if (error) { toast.error("Could not delete: " + error.message); return; }
     toast.success("Deleted");
     fetchData();
   };

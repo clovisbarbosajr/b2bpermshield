@@ -28,10 +28,19 @@ const Coupons = () => {
 
   const handleSave = async () => {
     setSaving(true);
-    const payload = { ...form, valor: Number(form.valor), uso_maximo: form.uso_maximo || null, data_inicio: form.data_inicio || null, data_fim: form.data_fim || null };
-    if (editing) { await supabase.from("coupons").update(payload).eq("id", editing.id); toast.success("Updated"); }
-    else { await supabase.from("coupons").insert(payload); toast.success("Created"); }
-    setSaving(false); setDialogOpen(false); fetchData();
+    // `data_fim` e uma data ("2026-08-10") gravada numa coluna com hora: virava
+    // 00:00 e as duas validacoes (`data_fim >= now()` no trigger e no checkout)
+    // matavam o cupom na VIRADA do dia 10 — um dia inteiro antes do que o admin
+    // configurou. Grava o fim do dia. `data_inicio` continua 00:00, que e o certo.
+    const fimDoDia = form.data_fim ? `${form.data_fim}T23:59:59` : null;
+    const payload = { ...form, valor: Number(form.valor), uso_maximo: form.uso_maximo || null, data_inicio: form.data_inicio || null, data_fim: fimDoDia };
+    const { error } = editing
+      ? await supabase.from("coupons").update(payload).eq("id", editing.id)
+      : await supabase.from("coupons").insert(payload);
+    setSaving(false);
+    if (error) { toast.error("Could not save: " + error.message); return; }
+    toast.success(editing ? "Updated" : "Created");
+    setDialogOpen(false); fetchData();
   };
 
   return (
@@ -42,7 +51,7 @@ const Coupons = () => {
       </div>
       {loading ? <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div> : (
         <Card><Table><TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Type</TableHead><TableHead>Value</TableHead><TableHead>Usage</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader>
-          <TableBody>{items.map(r => (<TableRow key={r.id}><TableCell className="font-mono font-medium">{r.codigo}</TableCell><TableCell>{r.tipo === "percentual" ? "%" : "$"}</TableCell><TableCell>{r.tipo === "percentual" ? `${r.valor}%` : `$${Number(r.valor).toFixed(2)}`}</TableCell><TableCell>{r.uso_atual ?? 0}{r.uso_maximo ? ` / ${r.uso_maximo}` : ""}</TableCell><TableCell><Badge variant={r.ativo ? "default" : "secondary"}>{r.ativo ? "Active" : "Inactive"}</Badge></TableCell><TableCell className="text-right space-x-1"><Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={async () => { if (!confirm(`Delete coupon "${r.codigo}"?`)) return; await supabase.from("coupons").delete().eq("id", r.id); fetchData(); }}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></Card>
+          <TableBody>{items.map(r => (<TableRow key={r.id}><TableCell className="font-mono font-medium">{r.codigo}</TableCell><TableCell>{r.tipo === "percentual" ? "%" : "$"}</TableCell><TableCell>{r.tipo === "percentual" ? `${r.valor}%` : `$${Number(r.valor).toFixed(2)}`}</TableCell><TableCell>{r.uso_atual ?? 0}{r.uso_maximo ? ` / ${r.uso_maximo}` : ""}</TableCell><TableCell><Badge variant={r.ativo ? "default" : "secondary"}>{r.ativo ? "Active" : "Inactive"}</Badge></TableCell><TableCell className="text-right space-x-1"><Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={async () => { if (!confirm(`Delete coupon "${r.codigo}"?`)) return; const { error } = await supabase.from("coupons").delete().eq("id", r.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchData(); }}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></Card>
       )}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent><DialogHeader><DialogTitle>{editing ? "Edit Coupon" : "New Coupon"}</DialogTitle></DialogHeader>
         <div className="space-y-3">

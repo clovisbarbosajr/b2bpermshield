@@ -82,14 +82,22 @@ const ApiKeys = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this API key? This cannot be undone.")) return;
-    await supabase.from("api_keys").delete().eq("id", id);
+    // Chave de API e credencial de acesso: dizer "Key deleted" sem ter apagado
+    // deixa o admin acreditando que revogou um acesso que continua valendo.
+    const { error } = await supabase.from("api_keys").delete().eq("id", id);
+    if (error) { toast.error("Could not delete the key: " + error.message); return; }
     fetchKeys();
     toast.success("Key deleted");
   };
 
   const handleToggleActive = async (key: any) => {
-    await supabase.from("api_keys").update({ ativo: !key.ativo }).eq("id", key.id);
+    // Idem: desativar uma chave e ela continuar ativa e falha de seguranca, nao
+    // so de interface. Antes o erro passava batido e o `fetchKeys` repintava o
+    // estado antigo, como se o clique nao tivesse pegado.
+    const { error } = await supabase.from("api_keys").update({ ativo: !key.ativo }).eq("id", key.id);
+    if (error) { toast.error("Could not change the key status: " + error.message); return; }
     fetchKeys();
+    toast.success(key.ativo ? "Key disabled" : "Key enabled");
   };
 
   const copyKey = (val: string) => {

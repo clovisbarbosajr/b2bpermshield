@@ -71,7 +71,8 @@ const CompanyActivities = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this activity?")) return;
-    await supabase.from("company_activities").delete().eq("id", id);
+    const { error } = await supabase.from("company_activities").delete().eq("id", id);
+    if (error) { toast.error("Could not delete: " + error.message); return; }
     toast.success("Deleted");
     fetchData();
   };

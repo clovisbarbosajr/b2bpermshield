@@ -74,7 +74,11 @@ const ProductStatuses = () => {
                     <Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
                       if (!confirm("Delete this status?")) return;
-                      await supabase.from("product_statuses").delete().eq("id", r.id); fetchData();
+                      // Status em uso por produto tem FK: sem checar, o clique nao
+                      // fazia nada e a linha continuava ali, sem explicacao.
+                      const { error } = await supabase.from("product_statuses").delete().eq("id", r.id);
+                      if (error) { toast.error("Could not delete: " + error.message); return; }
+                      fetchData();
                     }}><Trash2 className="h-4 w-4" /></Button>
                   </TableCell>
                 </TableRow>

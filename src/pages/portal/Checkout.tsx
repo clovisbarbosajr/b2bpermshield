@@ -83,6 +83,9 @@ const Checkout = () => {
   const [discount, setDiscount] = useState(0);
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  // Pais do cliente, usado nas REGRAS DE FRETE por zona. Sem isto, a comparacao
+  // era com o literal "United States" e toda regra de Canada/UK era descartada.
+  const [customerCountry, setCustomerCountry] = useState("");
   const [subCannotOrder, setSubCannotOrder] = useState(false);
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [stripePublishableKey, setStripePublishableKey] = useState("");
@@ -104,7 +107,7 @@ const Checkout = () => {
 
       // Traz JÁ os campos de endereço + grupo de imposto na MESMA query — evita
       // 2 buscas redundantes depois (endereço da empresa e tax_customer_group_id).
-      const cols = "id, nome, empresa, email, telefone, parent_customer_id, can_confirm_order, endereco, cidade, estado, cep, tax_customer_group_id";
+      const cols = "id, nome, empresa, email, telefone, pais, parent_customer_id, can_confirm_order, endereco, cidade, estado, cep, tax_customer_group_id";
       const clienteQuery = impersonatedCustomer?.id
         ? supabase.from("clientes").select(cols).eq("id", impersonatedCustomer.id).maybeSingle()
         : supabase.from("clientes").select(cols).eq("user_id", user!.id).maybeSingle();
@@ -117,6 +120,7 @@ const Checkout = () => {
         setCustomerCompany(cliente.empresa || "");
         setCustomerEmail(cliente.email || "");
         setCustomerPhone((cliente as any).telefone || "");
+        setCustomerCountry(((cliente as any).pais || "").trim());
         // Sub-customer sem permissão de confirmar não finaliza (espelha a trava do banco).
         setSubCannotOrder(!!(cliente as any).parent_customer_id && (cliente as any).can_confirm_order === false);
         // Endereço puxa da conta da EMPRESA: sub-usuário usa os endereços do pai.
@@ -167,7 +171,11 @@ const Checkout = () => {
       // Frete e pagamento em PARALELO (eram 2 buscas sequenciais).
       const [{ data: ship }, { data: pay }] = await Promise.all([
         supabase.from("shipping_options").select("*").eq("ativo", true).order("ordem"),
-        supabase.from("payment_options").select("*").eq("ativo", true).order("ordem"),
+        // Colunas EXPLICITAS: `select("*")` trazia `gateway_config`, onde a tela do
+        // admin permite guardar CHAVE SECRETA do gateway. A RLS e por linha, nao por
+        // coluna, entao qualquer cliente logado baixava a chave junto com a opcao de
+        // pagamento. O checkout nunca precisou desse campo.
+        supabase.from("payment_options").select("id, nome, descricao, instrucoes, ativo, privado, ordem").eq("ativo", true).order("ordem"),
       ]);
       setShippingOptions((ship ?? []).filter((s: any) => s.show_to_customers !== false && canSee(s, allowedShip)));
       setPaymentOptions((pay ?? []).filter((p: any) => canSee(p, allowedPay)));
@@ -418,7 +426,13 @@ const Checkout = () => {
     if (conds.length > 0) {
       // Find best matching condition: country matches + (province matches OR province is "All") + from_net_value <= subtotal
       const matching = conds.filter(c => {
-        const countryOk = !c.country || c.country === "United States";
+        // Compara com o pais DO CLIENTE. Antes era `c.country === "United States"`
+        // fixo: qualquer regra de Canada/United Kingdom (opcoes que a propria tela
+        // do admin oferece) era descartada, caindo no fallback `opt.preco` = 0 —
+        // frete GRATIS nessas zonas. Sem pais no cadastro, assume US, que e o
+        // default do sistema para cliente novo.
+        const paisCliente = (customerCountry || "United States").toLowerCase();
+        const countryOk = !c.country || String(c.country).toLowerCase() === paisCliente;
         const provinceOk = !c.province || c.province === "All" || c.province.toLowerCase() === customerState.toLowerCase();
         const minOk = (c.from_net_value ?? 0) <= total;
         return countryOk && provinceOk && minOk;
@@ -433,7 +447,7 @@ const Checkout = () => {
     }
     // Fallback to option's flat preco
     setShippingCost(Number(opt.preco) || 0);
-  }, [shippingId, shippingOptions, total, selectedEndereco]);
+  }, [shippingId, shippingOptions, total, selectedEndereco, customerCountry]);
 
   // Aviso PROATIVO de estoque no checkout — se um item esgotar enquanto o cliente
   // está aqui, desabilita o botão ANTES do clique. Polling 10s + realtime + foco.

@@ -28,8 +28,12 @@ const QuickLinks = () => {
   const handleSave = async () => {
     setSaving(true);
     const payload = { ...form, icone: form.icone || null };
-    if (editing) { await supabase.from("quick_links").update(payload).eq("id", editing.id); toast.success("Updated"); }
-    else { await supabase.from("quick_links").insert(payload); toast.success("Created"); }
+    // Checa o erro antes de dizer que salvou (antes dizia "Updated" mesmo falhando).
+    const { error } = editing
+      ? await supabase.from("quick_links").update(payload).eq("id", editing.id)
+      : await supabase.from("quick_links").insert(payload);
+    if (error) { setSaving(false); toast.error("Could not save: " + error.message); return; }
+    toast.success(editing ? "Updated" : "Created");
     setSaving(false); setDialogOpen(false); fetchData();
   };
 
@@ -41,7 +45,7 @@ const QuickLinks = () => {
       </div>
       {loading ? <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div> : (
         <Card><Table><TableHeader><TableRow><TableHead>Title</TableHead><TableHead>URL</TableHead><TableHead>Order</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader>
-          <TableBody>{items.map(r => (<TableRow key={r.id}><TableCell className="font-medium">{r.titulo}</TableCell><TableCell className="text-muted-foreground text-xs truncate max-w-[200px]">{r.url}</TableCell><TableCell>{r.ordem}</TableCell><TableCell><Badge variant={r.ativo ? "default" : "secondary"}>{r.ativo ? "Active" : "Inactive"}</Badge></TableCell><TableCell className="text-right space-x-1"><Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={async () => { await supabase.from("quick_links").delete().eq("id", r.id); fetchData(); }}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></Card>
+          <TableBody>{items.map(r => (<TableRow key={r.id}><TableCell className="font-medium">{r.titulo}</TableCell><TableCell className="text-muted-foreground text-xs truncate max-w-[200px]">{r.url}</TableCell><TableCell>{r.ordem}</TableCell><TableCell><Badge variant={r.ativo ? "default" : "secondary"}>{r.ativo ? "Active" : "Inactive"}</Badge></TableCell><TableCell className="text-right space-x-1"><Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={async () => { const { error } = await supabase.from("quick_links").delete().eq("id", r.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchData(); }}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></Card>
       )}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent><DialogHeader><DialogTitle>{editing ? "Edit" : "New"} Quick Link</DialogTitle></DialogHeader>
         <div className="space-y-3">

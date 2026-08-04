@@ -44,7 +44,8 @@ const MeasurementUnit = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete?")) return;
-    await supabase.from("measurement_units").delete().eq("id", id);
+    const { error } = await supabase.from("measurement_units").delete().eq("id", id);
+    if (error) { toast.error("Could not delete: " + error.message); return; }
     toast.success("Deleted"); fetch();
   };
 

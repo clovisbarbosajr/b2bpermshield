@@ -18,7 +18,8 @@ const PrivacyGroups = () => {
   const [saving, setSaving] = useState(false);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("privacy_groups").select("*").order("nome");
+    const { data, error } = await supabase.from("privacy_groups").select("*").order("nome");
+    if (error) toast.error("Could not load privacy groups.");
     setItems(data ?? []);
     setLoading(false);
   };
@@ -34,19 +35,22 @@ const PrivacyGroups = () => {
   const handleSave = async () => {
     setSaving(true);
     const payload = { nome: form.nome, default_for_new_customers: form.default_for_new_customers, ativo: true };
-    if (editing) {
-      await supabase.from("privacy_groups").update(payload).eq("id", editing.id);
-      toast.success("Updated");
-    } else {
-      await supabase.from("privacy_groups").insert(payload);
-      toast.success("Created");
-    }
-    setSaving(false); setListView(true); fetchData();
+    // Checa o erro antes de dizer que salvou. Grupo de privacidade decide QUEM VE
+    // QUAL produto/categoria: dizer "Created" sem ter criado deixa o admin achando
+    // que restringiu o catalogo quando nao restringiu.
+    const { error } = editing
+      ? await supabase.from("privacy_groups").update(payload).eq("id", editing.id)
+      : await supabase.from("privacy_groups").insert(payload);
+    setSaving(false);
+    if (error) { toast.error("Could not save: " + error.message); return; }
+    toast.success(editing ? "Updated" : "Created");
+    setListView(true); fetchData();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this privacy group?")) return;
-    await supabase.from("privacy_groups").delete().eq("id", id);
+    const { error } = await supabase.from("privacy_groups").delete().eq("id", id);
+    if (error) { toast.error("Could not delete: " + error.message); return; }
     toast.success("Deleted");
     fetchData();
   };

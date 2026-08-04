@@ -53,53 +53,67 @@ const SalesTax = () => {
   useEffect(() => { fetchAll(); }, []);
 
   // Save handlers
+  // Marcar como default aqui NAO desmarcava os outros (a tela de frete faz certo,
+  // ShippingOptions:105-106). Com DOIS defaults, o checkout usa `.maybeSingle()` e
+  // ERRA -> a tela mostra imposto ZERO; o trigger do banco usa `LIMIT 1`, escolhe
+  // um e CALCULA o imposto; o checkout entao cobra o total do banco. Resultado: o
+  // cliente paga mais do que viu na tela.
+  const limparOutrosDefault = async (tabela: "tax_classes" | "tax_customer_groups", exceto?: string) => {
+    let q = supabase.from(tabela).update({ is_default: false } as any).eq("is_default", true);
+    if (exceto) q = q.neq("id", exceto);
+    const { error } = await q;
+    return error;
+  };
+
   const saveClass = async () => {
     setSaving(true);
-    if (editingClass) {
-      await supabase.from("tax_classes").update(classForm).eq("id", editingClass.id);
-      toast.success("Updated");
-    } else {
-      await supabase.from("tax_classes").insert(classForm);
-      toast.success("Created");
+    const { data, error } = editingClass
+      ? await supabase.from("tax_classes").update(classForm).eq("id", editingClass.id).select("id").maybeSingle()
+      : await supabase.from("tax_classes").insert(classForm).select("id").maybeSingle();
+    if (error) { setSaving(false); toast.error("Could not save: " + error.message); return; }
+    if ((classForm as any).is_default) {
+      const e2 = await limparOutrosDefault("tax_classes", data?.id ?? editingClass?.id);
+      if (e2) { setSaving(false); toast.error("Saved, but could not clear the previous default: " + e2.message); fetchAll(); return; }
     }
+    toast.success(editingClass ? "Updated" : "Created");
     setSaving(false); setClassDialog(false); fetchAll();
   };
 
   const saveGroup = async () => {
     setSaving(true);
-    if (editingGroup) {
-      await supabase.from("tax_customer_groups").update(groupForm).eq("id", editingGroup.id);
-      toast.success("Updated");
-    } else {
-      await supabase.from("tax_customer_groups").insert(groupForm);
-      toast.success("Created");
+    const { data, error } = editingGroup
+      ? await supabase.from("tax_customer_groups").update(groupForm).eq("id", editingGroup.id).select("id").maybeSingle()
+      : await supabase.from("tax_customer_groups").insert(groupForm).select("id").maybeSingle();
+    if (error) { setSaving(false); toast.error("Could not save: " + error.message); return; }
+    if ((groupForm as any).is_default) {
+      const e2 = await limparOutrosDefault("tax_customer_groups", data?.id ?? editingGroup?.id);
+      if (e2) { setSaving(false); toast.error("Saved, but could not clear the previous default: " + e2.message); fetchAll(); return; }
     }
+    toast.success(editingGroup ? "Updated" : "Created");
     setSaving(false); setGroupDialog(false); fetchAll();
   };
 
   const saveRate = async () => {
     setSaving(true);
     const payload = { nome: rateForm.nome, estado: rateForm.estado, regiao: rateForm.estado, percentual: rateForm.percentual, ordem: rateForm.ordem, tax_class_id: classes[0]?.id ?? "" };
-    if (editingRate) {
-      await supabase.from("tax_rates").update({ nome: rateForm.nome, estado: rateForm.estado, regiao: rateForm.estado, percentual: rateForm.percentual, ordem: rateForm.ordem }).eq("id", editingRate.id);
-      toast.success("Updated");
-    } else {
-      await supabase.from("tax_rates").insert(payload);
-      toast.success("Created");
-    }
-    setSaving(false); setRateDialog(false); fetchAll();
+    const { error } = editingRate
+      ? await supabase.from("tax_rates").update({ nome: rateForm.nome, estado: rateForm.estado, regiao: rateForm.estado, percentual: rateForm.percentual, ordem: rateForm.ordem }).eq("id", editingRate.id)
+      : await supabase.from("tax_rates").insert(payload);
+    setSaving(false);
+    if (error) { toast.error("Could not save: " + error.message); return; }
+    toast.success(editingRate ? "Updated" : "Created");
+    setRateDialog(false); fetchAll();
   };
 
   const saveRule = async () => {
     setSaving(true);
-    if (editingRule) {
-      await supabase.from("tax_rules").update(ruleForm).eq("id", editingRule.id);
-      toast.success("Updated");
-    } else {
-      await supabase.from("tax_rules").insert(ruleForm);
-      toast.success("Created");
-    }
-    setSaving(false); setRuleDialog(false); fetchAll();
+    const { error } = editingRule
+      ? await supabase.from("tax_rules").update(ruleForm).eq("id", editingRule.id)
+      : await supabase.from("tax_rules").insert(ruleForm);
+    setSaving(false);
+    if (error) { toast.error("Could not save: " + error.message); return; }
+    toast.success(editingRule ? "Updated" : "Created");
+    setRuleDialog(false); fetchAll();
   };
 
   const BoolIcon = ({ val }: { val: boolean }) => val ? <Check className="h-4 w-4 text-green-500" /> : <X className="h-4 w-4 text-destructive" />;
@@ -142,7 +156,7 @@ const SalesTax = () => {
                     }}><Pencil className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
                       if (!confirm("Delete this tax rule?")) return;
-                      await supabase.from("tax_rules").delete().eq("id", r.id); fetchAll();
+                      const { error } = await supabase.from("tax_rules").delete().eq("id", r.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchAll();
                     }}><Trash2 className="h-4 w-4" /></Button>
                   </TableCell>
                 </TableRow>
@@ -176,7 +190,7 @@ const SalesTax = () => {
                       }}><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
                         if (!confirm("Delete this tax class?")) return;
-                        await supabase.from("tax_classes").delete().eq("id", c.id); fetchAll();
+                        const { error } = await supabase.from("tax_classes").delete().eq("id", c.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchAll();
                       }}><Trash2 className="h-4 w-4" /></Button>
                     </TableCell>
                   </TableRow>
@@ -206,7 +220,7 @@ const SalesTax = () => {
                       }}><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
                         if (!confirm("Delete this customer group?")) return;
-                        await supabase.from("tax_customer_groups").delete().eq("id", g.id); fetchAll();
+                        const { error } = await supabase.from("tax_customer_groups").delete().eq("id", g.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchAll();
                       }}><Trash2 className="h-4 w-4" /></Button>
                     </TableCell>
                   </TableRow>
@@ -237,7 +251,7 @@ const SalesTax = () => {
                       }}><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
                         if (!confirm("Delete this tax rate?")) return;
-                        await supabase.from("tax_rates").delete().eq("id", r.id); fetchAll();
+                        const { error } = await supabase.from("tax_rates").delete().eq("id", r.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchAll();
                       }}><Trash2 className="h-4 w-4" /></Button>
                     </TableCell>
                   </TableRow>
