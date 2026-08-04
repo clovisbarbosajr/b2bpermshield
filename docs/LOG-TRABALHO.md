@@ -262,6 +262,38 @@ Lovable.
 | 169 | — | `FEITO` | **Ruído, conforme o cético — NÃO mexi**: P6 (o `toggleAll` está errado, mas `selected` **não é consumido por nada** — a coluna de checkbox é decorativa; o achado real é UI morta), E4 (a causa concreta já foi fechada em `20260706120000`), P7 (`p.total || p.subtotal` só engana com cupom de 100% e sem frete), I4-parcial |
 | 170 | — | `FEITO` | **Validado**: `npm run typecheck` (comando CERTO) 0 erros · 46 testes · `npm run build` (agora typechecando) limpo |
 
+### Configurações — varredura com 2 caçadores + cético (03/ago)
+
+| # | Hora | Estado | O que |
+|---|---|---|---|
+| 171 | — |  | 2 caçadores (notificações/e-mail e imposto/frete/pagamento/cupom) + 1 cético. **Cético derrubou 2 de 20**; os outros 18 se sustentaram. Ele revisou também as MINHAS correções — nenhuma quebrou lógica |
+| 172 | — |  | **IMPOSTO (cobrança errada)** — marcar classe/grupo como padrão não desmarcava os outros. Com 2 padrões, o checkout usa , ERRA, e a tela mostra imposto ZERO; o trigger usa , calcula, e o checkout cobra o total do banco → **cliente pagava mais do que via**. Dono conferiu no banco: 1 e 1, **nunca chegou a acontecer**. Correção é preventiva |
+| 173 | — |  | **FRETE GRÁTIS POR ENGANO** —  comparava país com o literal ; regra de Canada/UK nunca casava e caía no fallback = 0. Agora compara com  |
+| 174 | — |  | **FRETE NÃO ERA VALIDADO NO SERVIDOR** () — o trigger só calculava frete pra opção SEM condições, e toda opção criada pela tela TEM (o form nasce com uma linha). Na prática 100% do frete vinha do navegador. **Reprovado na 1ª revisão**: recalcular em todo UPDATE re-precificaria pedido JÁ PAGO e apagaria o frete manual do admin. Corrigido com guarda de UPDATE + desempate determinístico () + estado só do endereço de entrega + . **2ª revisão: aprovado** |
+| 175 | — |  | **REGRA DE IMPOSTO EM CLASSE ERRADA = imposto zero em silêncio.** Diálogo agora lista só a classe padrão. **O cético pegou que a minha 1ª correção CRIARIA o bug**: o preset era  (ordem por nome), não a padrão. A classe da regra atual continua visível ao editar, marcada como não usada |
+| 176 | — |  | **CUPOM morria 1 dia antes** — data final virava 00:00. Agora grava fim do dia |
+| 177 | — |  | **9 telas com save/delete MUDO** (diziam "Updated"/"Deleted" sem checar erro): SalesTax, Coupons, PaymentOptions, PrivacyGroups, QuickLinks, MeasurementUnit, ApiKeys, CompanyActivities, ProductStatuses. As 2 que mais pesam: **grupo de privacidade** (decide quem vê o quê) e **chave de API** (achar que revogou acesso que continua valendo) |
+| 178 | — |  | **Dono corrigiu uma premissa minha**: pagamento por lá não processa nada, o cliente só escolhe a forma. Então  não guarda segredo — o achado de vazamento vira precaução. Mantida a restrição de colunas no  do checkout |
+| 179 | — |  | **Dono rodou os 2 SQL** ( desfazer conclusão +  frete) e as verificações de dados voltaram vazias. **Falta o publish** |
+
+### ⚠️ CONFIRMADO E NÃO CORRIGIDO (mudam comportamento — decisão do dono)
+
+| # | O que |
+|---|---|
+| N1 | **Aba Events não controla os e-mails de pedido.** Desmarcar "Email"/"Notify customer" em New order salva e não para nada — os e-mails saem por outro caminho (), que só lê  |
+| N2 | **Campos de SMTP da tela são decorativos** —  só lê os secrets do Supabase. Trocar de servidor pela tela é impossível |
+| N3 | **Remetente da aba Channels** só vale pra low_stock/teste; e-mail de pedido usa  |
+| N4 | **Religar o canal Email ressuscita os 5 gatilhos** que o admin tinha desmarcado |
+| N5 | **"Send test" não testa o caminho real** (só Resend, sem o fallback Office365) |
+| N6 | **"Rule Type" do frete (por item) é gravado e ignorado** — configura "por item $10" e cobra $10 num pedido de 20 itens |
+| N7 | **Taxa de pagamento (% ou valor), , ** — gravados, nunca entram no total |
+| N8 | **"Set default" do frete** grava , que o checkout não lê |
+| N9 | Cartão cobra o total do BANCO sem avisar se diferir do exibido (janela estreita; valor cobrado é o correto) |
+| N10 | Tela do pedido mostra frete manual que o trigger descartou (número gravado certo, tela mente) |
+
+### 🔍 NUNCA VARRIDOS
+Profile · UsersManagement · ExtraFields · SetupApp · WarehouseSettings · B2BWaveSync · OauthApplications · ActivityLogs · edge functions além de  ·  · 
+
 ### 🔴 CARRINHO QUEBRADO PRA TODO MUNDO — erro meu, achado pelo agente
 
 | # | Hora | Estado | O que |
