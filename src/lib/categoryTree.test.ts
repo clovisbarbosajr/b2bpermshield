@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { catalogCategoryButtons, rootCategories, type CatNode } from "@/lib/categoryTree";
+import { catalogCategoryButtons, rootCategories, descendantIds, ancestorChain, type CatNode } from "@/lib/categoryTree";
 
 // Árvore igual à da tela do dono:
 //   Accessories - FL  (raiz)
@@ -133,3 +133,78 @@ describe("catalogCategoryButtons", () => {
     expect(r.length).toBeGreaterThan(0);
   });
 });
+
+// P2 — o ciclo derrubava o catalogo com tela branca (sem ErrorBoundary no projeto).
+// O admin permitia criar: o select de pai excluia so a propria categoria.
+describe("descendantIds — guarda de ciclo (P2)", () => {
+  it("arvore normal: a propria + todos os descendentes", () => {
+    expect(descendantIds(cats, "union").sort()).toEqual(["character", "oneplus", "union"]);
+    expect(descendantIds(cats, "permtread")).toEqual(["permtread"]);
+  });
+
+  it("CICLO direto (A pai de B, B pai de A) NAO trava", () => {
+    const ciclo: CatNode[] = [
+      { id: "a", nome: "A", parent_id: "b" },
+      { id: "b", nome: "B", parent_id: "a" },
+    ];
+    const r = descendantIds(ciclo, "a");
+    expect(r).toContain("a");
+    expect(r).toContain("b");
+    expect(r.length).toBeLessThan(10); // terminou
+  });
+
+  it("CICLO de 3 nos nao trava e nao repete", () => {
+    const ciclo: CatNode[] = [
+      { id: "a", nome: "A", parent_id: "c" },
+      { id: "b", nome: "B", parent_id: "a" },
+      { id: "c", nome: "C", parent_id: "b" },
+    ];
+    const r = descendantIds(ciclo, "a");
+    expect(new Set(r).size).toBe(r.length); // sem duplicata
+    expect(r.length).toBe(3);
+  });
+
+  it("categoria que nao existe devolve so ela mesma", () => {
+    expect(descendantIds(cats, "fantasma")).toEqual(["fantasma"]);
+  });
+
+  it("serve pra barrar pai invalido no admin: descendente esta na lista", () => {
+    // "Accessories - FL" nao pode ter "PermTread" (filha dela) como pai.
+    expect(descendantIds(cats, "acc")).toContain("permtread");
+    expect(descendantIds(cats, "acc")).toContain("acc");
+    // Mas "Union NJ" pode, porque nao e descendente.
+    expect(descendantIds(cats, "acc")).not.toContain("union");
+  });
+});
+
+describe("ancestorChain — breadcrumb com guarda de ciclo (P2)", () => {
+  it("devolve do topo ate a categoria", () => {
+    expect(ids(ancestorChain(cats, "character"))).toEqual(["union", "oneplus", "character"]);
+  });
+
+  it("raiz devolve so ela", () => {
+    expect(ids(ancestorChain(cats, "acc"))).toEqual(["acc"]);
+  });
+
+  it("sem id devolve vazio", () => {
+    expect(ancestorChain(cats, null)).toEqual([]);
+    expect(ancestorChain(cats, undefined)).toEqual([]);
+  });
+
+  it("CICLO no parent_id NAO trava (era a tela branca)", () => {
+    const ciclo: CatNode[] = [
+      { id: "a", nome: "A", parent_id: "b" },
+      { id: "b", nome: "B", parent_id: "a" },
+    ];
+    const r = ancestorChain(ciclo, "a");
+    expect(r.length).toBeLessThan(10);
+    expect(new Set(ids(r)).size).toBe(r.length); // sem repetir
+  });
+
+  it("pai que sumiu da lista para a corrente sem quebrar", () => {
+    const orfa: CatNode[] = [{ id: "f", nome: "Filha", parent_id: "sumiu" }];
+    expect(ids(ancestorChain(orfa, "f"))).toEqual(["f"]);
+  });
+});
+
+

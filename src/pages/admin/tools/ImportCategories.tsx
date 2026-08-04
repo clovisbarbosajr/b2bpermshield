@@ -73,12 +73,19 @@ const ImportCategories = () => {
         }
       }
 
+      // `ordem` é NOT NULL DEFAULT 0 (20260318182853:4). Mandar `null` quando a
+      // coluna vem em branco no CSV fazia o insert falhar com "null value in
+      // column ordem violates not-null constraint" — e como a coluna é OPCIONAL
+      // na planilha, bastava não preenchê-la pra importação inteira morrer.
+      // Omitir a chave deixa o DEFAULT agir. `parseInt` inválido ("abc") também
+      // vira omissão, em vez de NaN.
+      const ordemParsed = parseInt(String(r["ordem"] ?? "").trim(), 10);
       const { error } = await (supabase.from("categorias") as any).upsert(
         {
           nome: name,
           descricao: r["description"] || null,
           parent_id: categoriaPaiId,
-          ordem: r["ordem"] ? parseInt(r["ordem"]) : null,
+          ...(Number.isFinite(ordemParsed) ? { ordem: ordemParsed } : {}),
           ativo: true,
         },
         { onConflict: "nome" }

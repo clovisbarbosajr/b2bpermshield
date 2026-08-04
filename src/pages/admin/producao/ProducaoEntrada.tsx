@@ -52,7 +52,10 @@ const ProducaoEntrada = () => {
     const topId = (catId: string | null): string | null => {
       let cur = catId ? catById.get(catId) : undefined;
       if (!cur) return null;
-      while (cur.parent_id && catById.get(cur.parent_id)) cur = catById.get(cur.parent_id)!;
+      // `guard`: sem ele, um `parent_id` circular travava esta tela (o `catById.get`
+      // sempre acha e o laço não sai). Mesma correção do ProducaoDashboard.
+      let guard = 0;
+      while (cur.parent_id && catById.get(cur.parent_id) && guard++ < 12) cur = catById.get(cur.parent_id)!;
       return cur.id;
     };
     // Caminho "Pai › Filho" do topo até a categoria imediata.

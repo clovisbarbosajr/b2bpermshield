@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { descendantIds } from "@/lib/categoryTree";
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Check, Monitor, Lock, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -160,8 +161,19 @@ const AdminCategorias = () => {
     if (rows.length > 0) await (supabase as any).from("categoria_cliente_acesso").insert(rows as any);
   };
 
+  // Categorias que NÃO podem ser pai da que está sendo editada: ela mesma e todos
+  // os descendentes. Vazio ao criar uma nova (não tem descendente ainda).
+  const parentesProibidos = new Set(editing ? descendantIds(categorias, editing.id) : []);
+
   const handleSave = async () => {
     if (!form.nome.trim()) { toast.error("Name is required"); return; }
+    // Trava também no salvar, não só no select: o `form.parent_id` pode ter sido
+    // escolhido antes de trocar de categoria no diálogo, e um ciclo gravado
+    // derruba o catálogo do cliente (tela branca) e trava o RLS recursivo.
+    if (form.parent_id && parentesProibidos.has(form.parent_id)) {
+      toast.error("A category cannot be placed inside itself or one of its own sub-categories.");
+      return;
+    }
     setSaving(true);
     const payload = {
       nome: form.nome,
@@ -417,7 +429,11 @@ const AdminCategorias = () => {
                 <SelectTrigger><SelectValue placeholder="None (root)" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None (root)</SelectItem>
-                  {categorias.filter((c) => c.id !== editing?.id).map((c) => (
+                  {/* Exclui a própria categoria E TODOS os descendentes dela. Antes
+                      excluía só a própria: dava pra pôr "Accessories - FL" como filha
+                      de "PermTread", que é filha dela — o ciclo derrubava o catálogo
+                      do cliente com tela branca e travava o RLS recursivo. */}
+                  {categorias.filter((c) => !parentesProibidos.has(c.id)).map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.parent_id ? `↳ ${c.nome}` : c.nome}
                     </SelectItem>

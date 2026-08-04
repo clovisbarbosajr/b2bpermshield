@@ -13,7 +13,7 @@ import { useCart } from "@/contexts/CartContext";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice, PriceResult } from "@/lib/pricing";
-import { catalogCategoryButtons } from "@/lib/categoryTree";
+import { catalogCategoryButtons, descendantIds, ancestorChain } from "@/lib/categoryTree";
 
 type Produto = {
   id: string; nome: string; descricao: string | null; preco: number; sku: string;
@@ -107,7 +107,21 @@ const Catalogo = () => {
         return !(st && st.permite_visualizar === false);
       };
 
-      const filtered = allProducts.filter(isVisible);
+      // Produto de categoria DESATIVADA sai do catálogo. Antes ele aparecia na home
+      // (onde não há filtro de categoria) e SUMIA ao clicar na categoria-pai — o
+      // mesmo produto estava e não estava à venda, dependendo de onde o cliente
+      // clicou. `categorias` já vem filtrada por `ativo = true`, então "categoria
+      // que não está na lista" = desativada. Produto SEM categoria continua
+      // aparecendo (não está em categoria desativada nenhuma).
+      // Só aplica o filtro se a lista de categorias veio de verdade. `cats` vazio
+      // (erro na query, timeout) NÃO significa "tudo desativado" — sem esta
+      // guarda, uma falha ali esconderia todo produto com categoria e o cliente
+      // veria "No products found" com o banco cheio.
+      const catsAtivas = new Set(cats.map((c) => c.id));
+      const filtraPorCategoria = !catRes.error && cats.length > 0;
+      const filtered = allProducts.filter(
+        (p) => isVisible(p) && (!filtraPorCategoria || !p.categoria_id || catsAtivas.has(p.categoria_id)),
+      );
       setProdutos(filtered);
       setLoading(false);
     };
@@ -160,23 +174,22 @@ const Catalogo = () => {
   // Category hierarchy
   const childrenOf = (parentId: string) => categorias.filter(c => c.parent_id === parentId);
 
-  const getDescendantIds = (catId: string): string[] => {
-    const children = childrenOf(catId);
-    return [catId, ...children.flatMap(c => getDescendantIds(c.id))];
-  };
-
   const selectedCategory = categoryParam ? categorias.find(c => c.id === categoryParam) : null;
-  const categoryIds = categoryParam ? getDescendantIds(categoryParam) : null;
-
-  // Breadcrumb
-  const breadcrumb: Categoria[] = [];
-  if (selectedCategory) {
-    let current: Categoria | undefined = selectedCategory;
-    while (current) {
-      breadcrumb.unshift(current);
-      current = current.parent_id ? categorias.find(c => c.id === current!.parent_id) : undefined;
-    }
-  }
+  // `descendantIds` e `ancestorChain` têm guarda de ciclo. A recursão e o `while`
+  // que existiam aqui não tinham: um `parent_id` circular (o admin permitia criar)
+  // estourava a pilha e o portal ficava com a TELA BRANCA, sem ErrorBoundary pra
+  // segurar.
+  //
+  // URL com categoria que não existe mais (desativada, privada, link antigo — o
+  // botão "View as" do admin em `Categorias.tsx:376` leva direto a isso):
+  // `categoryIds = []` **não casa com nada**. Passar `null` aqui significaria
+  // "sem filtro" e despejaria o CATÁLOGO INTEIRO numa tela que diz estar dentro
+  // de uma categoria. O aviso abaixo explica o vazio.
+  const categoriaInvalida = !!categoryParam && !selectedCategory;
+  const categoryIds = selectedCategory
+    ? descendantIds(categorias, selectedCategory.id)
+    : (categoriaInvalida ? [] : null);
+  const breadcrumb: Categoria[] = ancestorChain(categorias, selectedCategory?.id) as Categoria[];
 
   // Categoria FOLHA passa a mostrar as IRMÃS em vez de nada (regra em
   // catalogCategoryButtons, coberta por teste em src/lib/categoryTree.test.ts).
@@ -312,9 +325,16 @@ const Catalogo = () => {
           <h2 className="font-display text-xl sm:text-2xl font-semibold">
             {selectedCategory ? selectedCategory.nome : "Product Catalog"}
           </h2>
-          {categoryParam && (
+          {/* Guard em `selectedCategory`, não em `categoryParam`: com o param cru a
+              frase renderizava "…sub-categories in " e terminava no nada. */}
+          {selectedCategory && (
             <p className="text-sm text-muted-foreground mt-1">
-              You are currently browsing products and sub-categories in {selectedCategory?.nome}
+              You are currently browsing products and sub-categories in {selectedCategory.nome}
+            </p>
+          )}
+          {categoriaInvalida && (
+            <p className="text-sm text-destructive mt-1">
+              This category is no longer available. <button onClick={() => navigate("/portal/catalogo")} className="underline">See the full catalog</button>
             </p>
           )}
         </div>

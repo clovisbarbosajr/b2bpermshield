@@ -89,7 +89,12 @@ const ProducaoDashboard = () => {
     const topName = (catId: string | null): string => {
       let cur = catId ? catById.get(catId) : undefined;
       if (!cur) return "Unassigned";
-      while (cur.parent_id && catById.get(cur.parent_id)) cur = catById.get(cur.parent_id)!;
+      // `guard`: com `parent_id` circular (A pai de B, B pai de A) o `catById.get`
+      // SEMPRE acha e este laço nunca saía — a tela de Produção congelava. Aqui é
+      // pior que no portal: staff passa antes da checagem recursiva do banco, então
+      // as linhas do ciclo chegam mesmo.
+      let guard = 0;
+      while (cur.parent_id && catById.get(cur.parent_id) && guard++ < 12) cur = catById.get(cur.parent_id)!;
       return cur.nome;
     };
     const map = new Map<string, Loc>();

@@ -64,6 +64,49 @@ export function catalogCategoryButtons(cats: CatNode[], categoriaId: string | nu
   return atual.parent_id ? childrenOf(atual.parent_id) : roots;
 }
 
+/**
+ * IDs da categoria `id` e de TODOS os descendentes dela.
+ *
+ * Serve pra duas coisas:
+ *  - saber quais categorias não podem ser escolhidas como PAI dela (senão vira
+ *    ciclo: A pai de B e B pai de A);
+ *  - filtrar produtos por uma categoria incluindo as subcategorias.
+ *
+ * Tem guarda de profundidade e de nó já visitado: se um ciclo já existir no
+ * banco (dado antigo, importação, edição direta), esta função **para** em vez de
+ * recorrer pra sempre. Sem isso, o catálogo do portal derrubava a página inteira
+ * com "Maximum call stack size exceeded" — e não há ErrorBoundary no projeto.
+ */
+export function descendantIds(cats: CatNode[], id: string): string[] {
+  const out: string[] = [];
+  const visto = new Set<string>();
+  const walk = (cur: string, depth: number) => {
+    if (depth > 20 || visto.has(cur)) return; // ciclo ou árvore absurda: para aqui
+    visto.add(cur);
+    out.push(cur);
+    for (const c of cats) if (c.parent_id === cur) walk(c.id, depth + 1);
+  };
+  walk(id, 0);
+  return out;
+}
+
+/**
+ * Caminho do topo até a categoria (para breadcrumb), com guarda de ciclo.
+ * Devolve do ancestral mais alto até a própria categoria.
+ */
+export function ancestorChain(cats: CatNode[], id: string | null | undefined): CatNode[] {
+  const byId = new Map(cats.map((c) => [c.id, c]));
+  const chain: CatNode[] = [];
+  const visto = new Set<string>();
+  let cur = id ? byId.get(id) : undefined;
+  while (cur && !visto.has(cur.id) && chain.length < 20) {
+    visto.add(cur.id);
+    chain.unshift(cur);
+    cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+  }
+  return chain;
+}
+
 export function categoryTreeOptions(cats: CatNode[]): { id: string; label: string }[] {
   const sorted = (list: CatNode[]) =>
     [...list].sort((a, b) => ((a.ordem ?? 0) - (b.ordem ?? 0)) || a.nome.localeCompare(b.nome));

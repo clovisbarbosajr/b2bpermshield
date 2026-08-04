@@ -649,7 +649,9 @@ const ProductEdit = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Price List</TableHead><TableHead>From Qty</TableHead>
+                      {/* Obrigatório: desconto por quantidade é SEMPRE por tabela de
+                          preço (decisão do cliente, 03/ago). Não existe "vale pra todas". */}
+                      <TableHead>Price List *</TableHead><TableHead>From Qty</TableHead>
                       <TableHead>Percentage (%)</TableHead><TableHead>Date From</TableHead>
                       <TableHead>Date To</TableHead><TableHead>Final Price</TableHead><TableHead />
                     </TableRow>
@@ -659,7 +661,9 @@ const ProductEdit = () => {
                       <TableRow key={i}>
                         <TableCell>
                           <Select value={d.tabela_preco_id} onValueChange={v => { const nd = [...discounts]; nd[i].tabela_preco_id = v; setDiscounts(nd); }}>
-                            <SelectTrigger className="w-40"><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectTrigger className={`w-40 ${d.tabela_preco_id ? "" : "border-destructive"}`}>
+                              <SelectValue placeholder="Select" />
+                            </SelectTrigger>
                             <SelectContent>{tabelasPreco.map(tp => <SelectItem key={tp.id} value={tp.id}>{tp.nome}</SelectItem>)}</SelectContent>
                           </Select>
                         </TableCell>

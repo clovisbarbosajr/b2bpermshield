@@ -89,7 +89,7 @@ export async function getProductPrice({
     }
   }
 
-  // 3) produto_descontos — with tabela_preco_id or global (null)
+  // 3) produto_descontos — SEMPRE amarrado a uma tabela de preço (decisão do cliente)
   const discountResult = await resolveDiscount(productId, tabelaPrecoId, quantity, basePrice);
   if (discountResult) {
     return discountResult;
@@ -122,16 +122,17 @@ async function resolveDiscount(
     .order("quantidade_minima", { ascending: false })
     .limit(50);
 
-  // `tabela_preco_id` é NOT NULL na tabela, então a perna `.is.null` nunca casa —
-  // desconto "global" (pra todas as tabelas) é inexpressável no schema atual. Fica
-  // no OR de propósito: se um dia a coluna virar nullable, isto passa a funcionar
-  // sem precisar mexer aqui. Cliente SEM tabela de preço não tem desconto por
-  // quantidade nenhum — é consequência do schema, não deste código.
-  if (tabelaPrecoId) {
-    query = query.or(`tabela_preco_id.eq.${tabelaPrecoId},tabela_preco_id.is.null`);
-  } else {
-    query = query.is("tabela_preco_id", null);
-  }
+  // DECISÃO DO CLIENTE (03/ago/2026): desconto por quantidade é SEMPRE amarrado a
+  // uma tabela de preço. Não existe desconto "global, vale pra todas as tabelas".
+  //
+  // Antes havia aqui uma perna `tabela_preco_id.is.null` (o "global"), que nunca
+  // casava — a coluna é NOT NULL (20260318202244:57, confirmado no schema vivo em
+  // types.ts:1970). Era código morto que dava a entender que a opção existia.
+  //
+  // Consequência assumida: cliente SEM tabela de preço não recebe desconto por
+  // quantidade. É o comportamento pedido, não uma falha.
+  if (!tabelaPrecoId) return null;
+  query = query.eq("tabela_preco_id", tabelaPrecoId);
 
   const { data: descontos, error } = await query;
 
@@ -139,13 +140,9 @@ async function resolveDiscount(
 
   if (!descontos || descontos.length === 0) return null;
 
-  // Prefer specific (tabela_preco_id match) over global (null)
-  const specific = descontos.filter((d) => d.tabela_preco_id === tabelaPrecoId);
-  const candidates = specific.length > 0 ? specific : descontos;
-
-  if (candidates.length === 0) return null;
-
-  const best = candidates[0];
+  // Já vem ordenado por `quantidade_minima` desc: a primeira é a melhor faixa que
+  // a quantidade alcança.
+  const best = descontos[0];
 
   if (best.preco_final != null && Number(best.preco_final) > 0) {
     return { price: Number(best.preco_final), source: "discount" };

@@ -13,6 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice } from "@/lib/pricing";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import { formatOpcao } from "@/lib/variants";
+import { ancestorChain } from "@/lib/categoryTree";
 
 type Produto = {
   id: string; nome: string; descricao: string | null; preco: number; sku: string;
@@ -153,14 +154,11 @@ const ProdutoDetalhe = () => {
     ? (!!selectedVariante && (statusInfo ? statusInfo.permite_comprar : true) && (effectiveDisponivel > 0 || isPreOrder))
     : canBuy;
 
-  const breadcrumb: Categoria[] = [];
-  if (categoria) {
-    let current: Categoria | undefined = categoria;
-    while (current) {
-      breadcrumb.unshift(current);
-      current = current.parent_id ? categorias.find(c => c.id === current!.parent_id) : undefined;
-    }
-  }
+  // Mesma guarda de ciclo do catálogo. Este `while` não tinha nenhuma: com um
+  // `parent_id` circular no banco (A pai de B, B pai de A) o `find` sempre achava
+  // e o laço nunca saía — e por ser laço, e não recursão, não era tela branca:
+  // era o array crescendo até **congelar a aba**. Pior que o sintoma do catálogo.
+  const breadcrumb: Categoria[] = ancestorChain(categorias, categoria?.id) as Categoria[];
 
   const handleAdd = () => {
     if (!produto || !effectiveCanBuy) return;

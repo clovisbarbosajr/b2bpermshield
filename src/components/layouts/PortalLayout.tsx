@@ -70,8 +70,12 @@ const PortalLayout = ({ children }: { children: React.ReactNode }) => {
 
   const isCatalogPage = location.pathname.includes("/catalogo") || location.pathname.includes("/produto/");
 
-  const renderCatItem = (cat: Categoria) => {
-    const children = childrenOf(cat.id);
+  // `depth` é guarda de ciclo: com `parent_id` circular (A pai de B, B pai de A) a
+  // recursão aqui não terminava. Como a expansão é manual, não estourava sozinha,
+  // mas bastava o usuário ir abrindo os níveis. 12 é bem mais fundo que qualquer
+  // árvore real do catálogo.
+  const renderCatItem = (cat: Categoria, depth = 0) => {
+    const children = depth < 12 ? childrenOf(cat.id) : [];
     const hasChildren = children.length > 0;
     const isExpanded = expandedCats.has(cat.id);
 
@@ -98,7 +102,7 @@ const PortalLayout = ({ children }: { children: React.ReactNode }) => {
         </div>
         {hasChildren && isExpanded && (
           <div className="pl-4 bg-muted/20">
-            {children.map(child => renderCatItem(child))}
+            {children.map(child => renderCatItem(child, depth + 1))}
           </div>
         )}
       </div>
