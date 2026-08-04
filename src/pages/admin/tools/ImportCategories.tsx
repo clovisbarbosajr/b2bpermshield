@@ -73,31 +73,47 @@ const ImportCategories = () => {
         }
       }
 
-      // `ordem` é NOT NULL DEFAULT 0 (20260318182853:4). Mandar `null` quando a
-      // coluna vem em branco no CSV fazia o insert falhar com "null value in
-      // column ordem violates not-null constraint" — e como a coluna é OPCIONAL
-      // na planilha, bastava não preenchê-la pra importação inteira morrer.
-      // Omitir a chave deixa o DEFAULT agir. `parseInt` inválido ("abc") também
-      // vira omissão, em vez de NaN.
+      // ANTES: `.upsert({...}, { onConflict: "nome" })`. Isso NUNCA funcionou —
+      // `categorias` só tem o índice da chave primária (`categorias_pkey` em `id`),
+      // sem UNIQUE em `nome` (confirmado no banco de produção em 03/ago). Sem o
+      // índice, o Postgres rejeita TODA linha com 42P10 ("no unique or exclusion
+      // constraint matching the ON CONFLICT specification") — a importação de
+      // categorias estava 100% quebrada, não só quando `ordem` vinha vazia.
+      //
+      // E criar o UNIQUE em `nome` seria ERRADO: o sistema tem categorias
+      // homônimas de propósito, em locais diferentes ("One Plus" em 3 estados) —
+      // o próprio código de Produção comenta isso. Nome não identifica categoria;
+      // nome + pai identifica.
+      //
+      // Então: procura por (nome, pai) e faz UPDATE ou INSERT. `ordem` em branco
+      // é OMITIDA no insert (deixa o `DEFAULT 0` agir, `NOT NULL` em
+      // 20260318182853:4) e não é tocada no update (preserva o valor atual).
       const ordemParsed = parseInt(String(r["ordem"] ?? "").trim(), 10);
-      const { error } = await (supabase.from("categorias") as any).upsert(
-        {
-          nome: name,
-          descricao: r["description"] || null,
-          parent_id: categoriaPaiId,
-          ...(Number.isFinite(ordemParsed) ? { ordem: ordemParsed } : {}),
-          ativo: true,
-        },
-        { onConflict: "nome" }
-      );
+      const temOrdem = Number.isFinite(ordemParsed);
+
+      const buscaExistente = supabase.from("categorias").select("id").eq("nome", name);
+      const { data: existente } = categoriaPaiId
+        ? await buscaExistente.eq("parent_id", categoriaPaiId).maybeSingle()
+        : await buscaExistente.is("parent_id", null).maybeSingle();
+
+      const campos: any = {
+        nome: name,
+        descricao: r["description"] || null,
+        parent_id: categoriaPaiId,
+        ativo: true,
+        ...(temOrdem ? { ordem: ordemParsed } : {}),
+      };
+
+      const { data: gravada, error } = existente?.id
+        ? await supabase.from("categorias").update(campos).eq("id", existente.id).select("id").maybeSingle()
+        : await supabase.from("categorias").insert(campos).select("id").maybeSingle();
 
       if (error) {
         res.push({ row: i + 2, name, status: "error", message: error.message });
       } else {
-        // Update nameMap so subsequent rows can use this new category as a parent
-        const { data: newCat } = await supabase.from("categorias").select("id").eq("nome", name).single();
-        if (newCat) nameMap[name.toLowerCase()] = newCat.id;
-        res.push({ row: i + 2, name, status: "ok", message: "Upserted" });
+        // Deixa a categoria disponível como PAI para as linhas seguintes do CSV.
+        if (gravada?.id) nameMap[name.toLowerCase()] = gravada.id;
+        res.push({ row: i + 2, name, status: "ok", message: existente?.id ? "Updated" : "Created" });
       }
     }
 

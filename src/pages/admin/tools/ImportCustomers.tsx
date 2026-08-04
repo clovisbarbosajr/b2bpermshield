@@ -98,11 +98,29 @@ const ImportCustomers = () => {
         payload.is_active = false;
       }
 
-      const { error } = await supabase.from("clientes").upsert(payload, { onConflict: "email" });
+      // ANTES: `.upsert(payload, { onConflict: "email" })`. Mesmo defeito da
+      // importação de categorias (confirmado no banco em 03/ago): `clientes` NÃO
+      // tem UNIQUE em `email` — a única UNIQUE da tabela é `clientes_user_id_unique`
+      // (20260331183125:21). A `UNIQUE (email)` que existe nas migrations é da
+      // `company_contacts`, tabela DROPADA em 20260622000000. Sem o índice, o
+      // Postgres rejeita toda linha com 42P10 e a importação de clientes estava
+      // quebrada por inteiro.
+      //
+      // Não dá pra criar o UNIQUE sem decidir o que fazer com e-mails duplicados
+      // que já existam na base — então aqui é UPDATE ou INSERT explícito, usando
+      // o `existingEmails` que a tela já carregou acima.
+      let error: any = null;
+      if (isExisting) {
+        const r2 = await supabase.from("clientes").update(payload).ilike("email", email);
+        error = r2.error;
+      } else {
+        const r2 = await supabase.from("clientes").insert(payload);
+        error = r2.error;
+      }
       if (error) {
         res.push({ row: i + 2, email, status: "error", message: error.message });
       } else {
-        res.push({ row: i + 2, email, status: "ok", message: "Imported" });
+        res.push({ row: i + 2, email, status: "ok", message: isExisting ? "Updated" : "Created" });
       }
     }
 
