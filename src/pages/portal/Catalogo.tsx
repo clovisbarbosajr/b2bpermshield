@@ -13,6 +13,7 @@ import { useCart } from "@/contexts/CartContext";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice, PriceResult } from "@/lib/pricing";
+import { catalogCategoryButtons } from "@/lib/categoryTree";
 
 type Produto = {
   id: string; nome: string; descricao: string | null; preco: number; sku: string;
@@ -157,7 +158,6 @@ const Catalogo = () => {
   const getPrice = (p: Produto) => prices[p.id]?.price ?? p.preco;
 
   // Category hierarchy
-  const rootCats = categorias.filter(c => !c.parent_id);
   const childrenOf = (parentId: string) => categorias.filter(c => c.parent_id === parentId);
 
   const getDescendantIds = (catId: string): string[] => {
@@ -178,7 +178,9 @@ const Catalogo = () => {
     }
   }
 
-  const subCategories = categoryParam ? childrenOf(categoryParam) : rootCats;
+  // Categoria FOLHA passa a mostrar as IRMÃS em vez de nada (regra em
+  // catalogCategoryButtons, coberta por teste em src/lib/categoryTree.test.ts).
+  const subCategories = catalogCategoryButtons(categorias, categoryParam);
 
   const filtered = produtos.filter((p) => {
     const matchSearch = !search || p.nome.toLowerCase().includes(search.toLowerCase()) || (p.sku ?? "").toLowerCase().includes(search.toLowerCase());

@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 import { ShoppingCart, Package, ClipboardList, User, Home, LogOut, Shield, Menu, ChevronRight, FileText, Users } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { rootCategories } from "@/lib/categoryTree";
 import { supabase } from "@/integrations/supabase/client";
 import { useCart } from "@/contexts/CartContext";
 
@@ -54,7 +55,9 @@ const PortalLayout = ({ children }: { children: React.ReactNode }) => {
     fetch();
   }, [impersonatedCustomer]);
 
-  const rootCats = categorias.filter(c => !c.parent_id);
+  // Conta categoria ORFA como raiz: a lista vem filtrada (ativo + visibilidade),
+  // entao desativar a categoria-pai fazia a arvore inteira da sidebar sumir.
+  const rootCats = rootCategories(categorias);
   const childrenOf = (parentId: string) => categorias.filter(c => c.parent_id === parentId);
 
   const toggleExpand = (id: string) => {
