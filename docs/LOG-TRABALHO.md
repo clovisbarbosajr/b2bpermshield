@@ -245,6 +245,21 @@ Lovable.
 | 139 | — | `CORRIGIDO NO TEXTO` | **Ressalva do cético à minha entrada 127(d)**: a guarda de `depth` que pus no `PortalLayout.renderCatItem` é **inalcançável** — `rootCategories()` já exclui nó de ciclo da raiz da sidebar. É inofensiva, mas **não conta como correção**. Deixei no código como defesa em profundidade, registrando aqui que não é o que resolve |
 | 140 | — | `FEITO` | **Validado depois das correções**: `tsc --noEmit` limpo · 46 testes passando · `vite build` limpo · `grep` confirma que **não sobrou nenhum `while` de categoria sem guarda** em `src/` |
 
+### 🔴 CARRINHO QUEBRADO PRA TODO MUNDO — erro meu, achado pelo agente
+
+| # | Hora | Estado | O que |
+|---|---|---|---|
+| 147 | — | `FEITO` | **Dono relatou: no "View as" não consegue adicionar nada ao carrinho.** Não era do view-as: **o carrinho estava quebrado para TODOS** — cliente real, sub-login, todo mundo. Ele é admin e testa por ali, então foi por ali que apareceu |
+| 148 | — | `FEITO` | **CAUSA — erro meu no commit `b3d7a59`.** Ao mover `cartKey` pra `@/lib/stock`, escrevi `export { cartKey } from "@/lib/stock"` no `CartContext`. Re-export **repassa o símbolo pra quem importa, mas NÃO cria binding local** (regra da spec ESM). O `cartKey` usado DENTRO do próprio arquivo (`addItem`, `removeItem`, `updateQuantity`) virou global inexistente → `ReferenceError: cartKey is not defined` a cada clique |
+| 149 | — | `FEITO` | **Por que ninguém viu erro na tela**: `handleAdd` é `async`, então o ReferenceError vira **unhandled rejection** — não derruba nada, não mostra nada. E o `toast.success` está **depois** do `addItem`, então o aviso verde nunca aparecia. Botão habilitado, clique, e nada acontece. O contador do carrinho ficava em 0 |
+| 150 | — | `FEITO` | **PROVA no bundle de produção**: no `dist`, tudo minificado em letras únicas **menos `cartKey`**, que sobrou com o nome cru porque o bundler o tratou como global externo. Não era teoria — era o código rodando |
+| 151 | — | `EDITADO` | **Corrigido**: `import { cartKey } from "@/lib/stock"; export { cartKey };`. Precisa das duas linhas — o `import` cria o binding local, o `export` mantém `Carrinho.tsx`/`Checkout.tsx` funcionando. Conferido no bundle novo: `grep -c cartKey dist/assets/*.js` → **0** (agora minifica junto) |
+| 152 | — | `FEITO` | **CAUSA RAIZ DE EU NÃO TER PEGO: meu `npx tsc --noEmit` não verificava NADA.** O `tsconfig.json` da raiz tem `"files": []` + `references`, então ele sai com **exit 0 sem compilar uma linha**. Eu venho reportando "typecheck limpo" há dias com base nisso. O comando real é `tsc -p tsconfig.app.json --noEmit` — e ele acusava **14 erros**, incluindo os 5 do `cartKey` |
+| 153 | — | `EDITADO` | **Fechada a causa raiz**: `package.json` → `"build": "tsc -p tsconfig.app.json --noEmit && vite build"` e novo script `"typecheck"`. Antes o build era só `vite build`, que **não typecheca** — por isso um `ReferenceError` garantido foi pro ar |
+| 154 | — | `EDITADO` | **Zerados os 14 erros.** Meus: `cartKey` (5), `PortalLayout:198` (`CatNode` × `Categoria`), `Checkout:600` e `Pedidos:130-138` (`variante_id` não está nos types gerados — a migration `20260802130000` rodou mas o `types.ts` não foi regerado). Pré-existentes: `CustomerEdit:195` (enum de `status`) e `Relatorios:53` (acumulador do `reduce` inferido do `{}` vazio) |
+| 155 | — | `AGUARDANDO` | **Regerar `src/integrations/supabase/types.ts`** contra o schema atual — hoje ele não conhece `pedido_itens.variante_id` e por isso precisei de `as any` em 2 pontos. Não é urgente, mas o cast esconde erro de verdade |
+| 156 | — | `FEITO` | **Validado com o comando CERTO**: `tsc -p tsconfig.app.json --noEmit` **0 erros** · `npm run build` (agora com typecheck) limpo · 46 testes passando |
+
 ### P5 confirmada pelo banco — as DUAS importações estavam quebradas
 
 | # | Hora | Estado | O que |

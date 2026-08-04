@@ -46,11 +46,14 @@ const AdminRelatorios = () => {
     if (!acc[key]) acc[key] = { label: d.toLocaleDateString("en-US", { year: "numeric", month: "short" }), total: 0 };
     acc[key].total += Number(p.total);
     return acc;
-  }, {});
+  }, {} as Record<string, { label: string; total: number }>);
+  // O tipo do acumulador precisa vir do valor INICIAL: só anotar o parâmetro fazia
+  // o `reduce` inferir o retorno do `{}` vazio, e o `Object.entries` abaixo saía
+  // como `unknown` (`v.label`/`v.total` não existiam).
   const salesData = Object.entries(salesByMonth)
     .sort(([a], [b]) => a.localeCompare(b))            // cronológico
     .slice(-12)                                        // 12 meses MAIS RECENTES
-    .map(([, v]) => ({ month: v.label, total: v.total }));
+    .map(([, v]) => ({ month: (v as { label: string; total: number }).label, total: (v as { label: string; total: number }).total }));
 
   // Orders by status
   const statusCounts = pedidos.reduce((acc: Record<string, number>, p) => {

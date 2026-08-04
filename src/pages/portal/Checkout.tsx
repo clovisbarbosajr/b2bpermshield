@@ -597,7 +597,9 @@ const Checkout = () => {
       subtotal: i.preco * i.quantidade,
     }));
 
-    const { error: itensError } = await supabase.from("pedido_itens").insert(itens);
+    // `as any`: `variante_id` entrou em 20260802130000 e os types gerados do
+    // Supabase ainda não foram regerados contra o schema novo.
+    const { error: itensError } = await supabase.from("pedido_itens").insert(itens as any);
 
     if (itensError) {
       // A reserva atômica (trigger) pode rejeitar em corrida pelo último item.

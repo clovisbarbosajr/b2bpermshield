@@ -124,7 +124,10 @@ const Pedidos = () => {
     const varMap = new Map((vars ?? []).map((v: any) => [v.id, v]));
     let added = 0;
     const perdidos: string[] = [];
-    for (const item of itens) {
+    // `as any`: `variante_id` foi adicionada em 20260802130000 e os types gerados
+    // do Supabase (src/integrations/supabase/types.ts) ainda não foram regerados
+    // contra o schema novo. Sem o cast, o tsc reclama de coluna inexistente.
+    for (const item of (itens as any[])) {
       const prod = prodMap.get(item.produto_id);
       if (!prod) continue;
       const v = item.variante_id ? varMap.get(item.variante_id) : null;

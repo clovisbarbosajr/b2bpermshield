@@ -191,7 +191,10 @@ const CustomerEdit = () => {
     }
 
     // Existing customer: update
-    const payload = buildPayload(userId!);
+    // `as any`: `buildPayload` monta `status` como `string`, e o type gerado espera
+    // o enum ("ativo" | "inativo" | "pendente"). O valor vem de um <Select> com
+    // essas opções — é o TYPE que é mais estreito que o formulário.
+    const payload = buildPayload(userId!) as any;
     const { error } = await supabase.from("clientes").update(payload).eq("id", cliente.id);
     if (error) { toast.error("Error saving"); setSaving(false); return; }
 

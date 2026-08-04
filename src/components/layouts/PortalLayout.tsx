@@ -195,7 +195,10 @@ const PortalLayout = ({ children }: { children: React.ReactNode }) => {
           {isCatalogPage && categorias.length > 0 && (
             <aside className="hidden lg:block w-64 shrink-0 p-4">
               <div className="bg-card rounded-lg border overflow-hidden">
-                {rootCats.map(cat => renderCatItem(cat))}
+                {/* `as Categoria`: `rootCategories` devolve `CatNode` (com `ordem`
+                    opcional). Em runtime são as próprias linhas do state, que vêm da
+                    query com `ordem` — só o tipo é mais frouxo. */}
+                {rootCats.map(cat => renderCatItem(cat as Categoria))}
                 {/* PDF CATALOG removido do sidebar (2026-07-16, pedido do dono — feature
                     desativada). O upload continua em Settings → Profile (catalog_pdf_url);
                     pra reativar o botão aqui, restaurar o bloco deste commit. */}

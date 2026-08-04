@@ -17,9 +17,18 @@ export type CartItem = {
 };
 
 // Identidade de uma linha do carrinho = produto + variante. A definição mora em
-// "@/lib/stock" (módulo puro, sem arrastar o cliente Supabase junto) e é
-// re-exportada aqui para não quebrar os imports existentes.
-export { cartKey } from "@/lib/stock";
+// "@/lib/stock" (módulo puro, sem arrastar o cliente Supabase junto).
+//
+// PRECISA ser `import` + `export`, NÃO `export { cartKey } from "..."`.
+// O re-export repassa o símbolo pra quem importa este módulo, mas **não cria
+// binding local** — é regra da spec ESM. Com o re-export, o `cartKey` usado aqui
+// dentro (addItem/removeItem/updateQuantity) virava um global inexistente e
+// `addItem` lançava `ReferenceError: cartKey is not defined` a CADA clique em
+// "Add to order". Como `handleAdd` é async, virava unhandled rejection: o botão
+// não fazia nada, sem erro na tela, e o toast de sucesso (que vem depois) nunca
+// aparecia. O carrinho ficou quebrado pra TODO MUNDO, não só no "View as".
+import { cartKey } from "@/lib/stock";
+export { cartKey };
 
 interface CartContextType {
   items: CartItem[];
