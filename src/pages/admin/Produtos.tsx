@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { descendantIds } from "@/lib/categoryTree";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,27 +56,46 @@ const AdminProdutos = () => {
 
   useEffect(() => {
     const fetchAll = async () => {
-      const [p, c, b, pg, pl, pa] = await Promise.all([
-        // Ordena por data de cadastro (mais recente primeiro) para espelhar o B2BWave (clone).
-        supabase.from("produtos").select("*").order("created_at", { ascending: false }),
-        supabase.from("categorias").select("id, nome, parent_id, ordem").order("nome"),
-        supabase.from("brands").select("id, nome").order("nome"),
-        supabase.from("privacy_groups").select("id, nome").eq("ativo", true),
-        supabase.from("tabelas_preco").select("id, nome").eq("ativo", true).order("nome"),
-        supabase.from("produto_acesso").select("produto_id, grupo_nome"),
-      ]);
-      setProdutos((p.data as Produto[]) ?? []);
-      setCategorias(c.data ?? []);
-      setBrands(b.data ?? []);
-      setPrivacyGroups(pg.data ?? []);
-      setPriceLists(pl.data ?? []);
-      const map: Record<string, Set<string>> = {};
-      for (const row of (pa.data ?? []) as any[]) {
-        if (!row.grupo_nome) continue;
-        (map[row.produto_id] ??= new Set()).add(row.grupo_nome);
+      try {
+        // `fetchAllRows`: o PostgREST corta em 1000 SEM erro. `produto_acesso` tem
+        // uma linha por produto×grupo e estoura antes do catálogo — com o mapa
+        // truncado, o filtro de privacidade escondia produto válido.
+        const [p, c, b, pg, pl, pa] = await Promise.all([
+          // Ordena por data de cadastro (mais recente primeiro) para espelhar o B2BWave (clone).
+          fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("*").order("created_at", { ascending: false }).range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("categorias").select("id, nome, parent_id, ordem").order("nome").range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("brands").select("id, nome").order("nome").range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("privacy_groups").select("id, nome").eq("ativo", true).range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("tabelas_preco").select("id, nome").eq("ativo", true).order("nome").range(f, t) as any),
+          // Traz o ID do grupo, não só o nome — ver o mapa abaixo.
+          fetchAllRows<any>((f, t) => supabase.from("produto_acesso").select("produto_id, privacy_group_id, grupo_nome").range(f, t) as any),
+        ]);
+        setProdutos(p);
+        setCategorias(c);
+        setBrands(b);
+        setPrivacyGroups(pg);
+        setPriceLists(pl);
+        // O filtro compara com o **id** do grupo (o `<SelectItem value={g.id}>`),
+        // mas o mapa era montado só com `grupo_nome` — `Set{"Dealers"}.has("<uuid>")`
+        // nunca casava e escolher qualquer grupo dava "No products found".
+        // Agora indexa pelos DOIS: `privacy_group_id` (linhas novas) e o nome
+        // resolvido pra id (linhas antigas, gravadas antes da coluna existir).
+        const idPorNome = new Map<string, string>(pg.map((g: any) => [String(g.nome).toLowerCase(), g.id]));
+        const map: Record<string, Set<string>> = {};
+        for (const row of pa) {
+          const gid = row.privacy_group_id ?? (row.grupo_nome ? idPorNome.get(String(row.grupo_nome).toLowerCase()) : null);
+          if (!gid) continue;
+          (map[row.produto_id] ??= new Set()).add(gid);
+        }
+        setAcessoMap(map);
+      } catch (e: any) {
+        // Antes o erro era engolido e a tela dizia "No products found", igual a
+        // catálogo vazio — o admin concluía que tinha perdido os produtos.
+        console.error(e);
+        toast.error("Could not load products. Please try again.");
+      } finally {
+        setLoading(false);
       }
-      setAcessoMap(map);
-      setLoading(false);
     };
     fetchAll();
   }, []);
@@ -94,7 +115,13 @@ const AdminProdutos = () => {
   const filtered = produtos.filter(p => {
     if (filters.name && !p.nome.toLowerCase().includes(filters.name.toLowerCase())) return false;
     if (filters.code && !(p.sku ?? "").toLowerCase().includes(filters.code.toLowerCase())) return false;
-    if (filters.category && p.categoria_id !== filters.category) return false;
+    // Inclui as SUBCATEGORIAS. O dropdown mostra a árvore inteira, então escolher
+    // uma categoria-pai comparando exato devolvia quase nada — enquanto o portal,
+    // na mesma escolha, mostra dezenas (`Catalogo.tsx` usa `descendantIds`).
+    if (filters.category) {
+      const alvo = new Set(descendantIds(categorias as any, filters.category));
+      if (!p.categoria_id || !alvo.has(p.categoria_id)) return false;
+    }
     if (filters.isActive === "Active" && !p.ativo) return false;
     if (filters.isActive === "Inactive" && p.ativo) return false;
     if (filters.status && p.status_produto !== filters.status) return false;

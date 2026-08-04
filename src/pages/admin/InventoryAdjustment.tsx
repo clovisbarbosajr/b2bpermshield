@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import { useAuth } from "@/contexts/AuthContext";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import AdminLayout from "@/components/layouts/AdminLayout";
@@ -46,15 +47,28 @@ const InventoryAdjustment = () => {
   const [memo, setMemo] = useState("");
   // Nova quantidade por produto (string vazia = não mexe nessa linha).
   const [newQty, setNewQty] = useState<Record<string, string>>({});
+  // Linhas que não entraram no último Save — ficam listadas na tela em vez de
+  // sumirem com um toast que nomeava só a primeira.
+  const [falhas, setFalhas] = useState<string[]>([]);
 
   const fetchData = async () => {
-    const [prod, cat] = await Promise.all([
-      supabase.from("produtos").select("id, nome, sku, categoria_id, estoque_total").eq("ativo", true).order("nome"),
-      supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true),
-    ]);
-    setProdutos((prod.data as Produto[]) ?? []);
-    setCategorias((cat.data as Categoria[]) ?? []);
-    setLoading(false);
+    // Pagina de verdade: esta tela lista TUDO sem paginação de UI, entao acima de
+    // 1000 produtos ativos os ultimos sumiam da contagem e nao podiam ser
+    // ajustados, sem nenhum aviso. E o erro passa a aparecer, em vez de virar
+    // "No products found".
+    try {
+      const [prod, cat] = await Promise.all([
+        fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("id, nome, sku, categoria_id, estoque_total, estoque_reservado").eq("ativo", true).order("nome").range(f, t) as any),
+        fetchAllRows<Categoria>((f, t) => supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).range(f, t) as any),
+      ]);
+      setProdutos(prod);
+      setCategorias(cat);
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Could not load products. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => { fetchData(); }, []);
 
@@ -110,6 +124,21 @@ const InventoryAdjustment = () => {
     setSaving(true);
     let ok = 0; const failed: string[] = [];
     for (const { p, q, diff } of changes) {
+      // Rele o estoque AGORA. A contagem fisica pode levar horas: com o update
+      // ABSOLUTO sobre o valor carregado no mount, todo pedido concluido no
+      // intervalo tinha sua baixa DESFEITA — e o estoque_log registrava um
+      // "quantidade_anterior" que nunca foi verdade.
+      const { data: atual, error: reErr } = await supabase.from("produtos")
+        .select("estoque_total, estoque_reservado").eq("id", p.id).maybeSingle();
+      if (reErr || !atual) { failed.push(`${p.nome}: could not re-read stock`); continue; }
+      if (atual.estoque_total !== p.estoque_total) {
+        failed.push(`${p.nome}: stock changed to ${atual.estoque_total} while you were counting (was ${p.estoque_total})`);
+        continue;
+      }
+      if (q < (atual.estoque_reservado ?? 0)) {
+        failed.push(`${p.nome}: ${atual.estoque_reservado} unit(s) reserved by open orders`);
+        continue;
+      }
       const { error } = await supabase.from("produtos").update({ estoque_total: q }).eq("id", p.id);
       if (error) { failed.push(`${p.nome}: ${error.message}`); continue; }
       // Histórico de estoque (mesma tabela que o ajuste unitário da tela Inventory usa).
@@ -127,10 +156,21 @@ const InventoryAdjustment = () => {
       ok++;
     }
     setSaving(false);
-    if (failed.length) toast.error(`${failed.length} failed: ${failed[0]}`);
+    if (failed.length) {
+      // Antes mostrava so o PRIMEIRO que falhou e limpava a grade inteira: as
+      // linhas que nao entraram voltavam ao valor antigo, sem marcacao, e o dono
+      // nao tinha como saber quais foram.
+      setFalhas(failed);
+      toast.error(`${failed.length} line(s) failed — see the list above the table.`);
+    } else {
+      setFalhas([]);
+    }
     if (ok > 0) {
       toast.success(`${ok} product(s) adjusted.`);
-      setNewQty({}); setReference(""); setMemo("");
+      // So limpa o que REALMENTE entrou; o que falhou continua digitado.
+      const idsOk = new Set(changes.filter((c) => !failed.some((f) => f.startsWith(c.p.nome + ":"))).map((c) => c.p.id));
+      setNewQty((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !idsOk.has(id))));
+      if (failed.length === 0) { setReference(""); setMemo(""); }
       fetchData();
     }
   };
@@ -161,6 +201,16 @@ const InventoryAdjustment = () => {
         </div>
       </Card>
 
+      {falhas.length > 0 && (
+        <Card className="mb-4 border-destructive/50 p-4">
+          <p className="mb-2 text-sm font-semibold text-destructive">
+            {falhas.length} line(s) were NOT saved — the quantity you typed is still in the table:
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {falhas.map((f, i) => <li key={i}>{f}</li>)}
+          </ul>
+        </Card>
+      )}
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>
       ) : (

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import { useAuth } from "@/contexts/AuthContext";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import AdminLayout from "@/components/layouts/AdminLayout";
@@ -26,9 +27,18 @@ const AdminEstoque = () => {
   const [logs, setLogs] = useState<any[]>([]);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("produtos").select("id, nome, sku, estoque_total, estoque_reservado").order("nome");
-    setProdutos(data ?? []);
-    setLoading(false);
+    // Pagina de verdade (o PostgREST corta em 1000 sem erro) e mostra o erro em
+    // vez de virar lista vazia com cara de banco sem produto.
+    try {
+      const data = await fetchAllRows<any>((f, t) => supabase.from("produtos")
+        .select("id, nome, sku, estoque_total, estoque_reservado").order("nome").range(f, t) as any);
+      setProdutos(data);
+    } catch (e: any) {
+      console.error(e);
+      toast.error("Could not load stock. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -52,6 +62,30 @@ const AdminEstoque = () => {
 
   const handleAjuste = async () => {
     if (!selected) return;
+    // Validações que faltavam aqui e que a OUTRA tela de estoque
+    // (`InventoryAdjustment.tsx:101,189`) já fazia — duas telas gravando a mesma
+    // coluna com regras opostas. Não há CHECK no banco segurando isso.
+    if (!Number.isFinite(novaQtd) || novaQtd < 0) {
+      toast.error("Quantity cannot be negative.");
+      return;
+    }
+    // Relê o estoque AGORA: o diálogo trabalha com um retrato tirado no `openAjuste`,
+    // e o update é ABSOLUTO. Se um pedido foi concluído com o diálogo aberto, salvar
+    // sem mudar nada regravava o valor velho e DESFAZIA a baixa.
+    const { data: atual, error: reErr } = await supabase.from("produtos")
+      .select("estoque_total, estoque_reservado").eq("id", selected.id).maybeSingle();
+    if (reErr || !atual) { toast.error("Could not re-read current stock. Try again."); return; }
+    if (atual.estoque_total !== selected.estoque_total) {
+      toast.error(`Stock changed to ${atual.estoque_total} while this window was open (was ${selected.estoque_total}). Reopen the adjustment.`);
+      setSelected(null);
+      fetchData();
+      return;
+    }
+    const reservado = atual.estoque_reservado ?? 0;
+    if (novaQtd < reservado) {
+      toast.error(`There are ${reservado} unit(s) already reserved by open orders — the total cannot be lower than that.`);
+      return;
+    }
     setSaving(true);
     // O UPDATE vem PRIMEIRO e é checado: antes, o estoque_log e o activity log
     // eram gravados mesmo quando o update falhava (RLS/rede) e a tela dizia
@@ -63,10 +97,13 @@ const AdminEstoque = () => {
       toast.error("Failed to update stock: " + updErr.message);
       return;
     }
-    await supabase.from("estoque_log").insert({
+    // O histórico também é checado: sem isso, um insert barrado deixava o ajuste
+    // aplicado e o History sem registro — buraco silencioso na auditoria.
+    const { error: logErr } = await supabase.from("estoque_log").insert({
       produto_id: selected.id, quantidade_anterior: selected.estoque_total,
       quantidade_nova: novaQtd, motivo: motivo || null, usuario_id: user?.id ?? null,
     });
+    if (logErr) toast.warning("Stock saved, but the history entry failed: " + logErr.message);
     // Também no Activity Logs (Settings → Activity Logs), com detalhes.
     log("updated", "inventory", selected.id, selected.sku ? `${selected.nome} (${selected.sku})` : selected.nome, {
       qty_before: selected.estoque_total, qty_after: novaQtd,
@@ -118,7 +155,17 @@ const AdminEstoque = () => {
           <DialogHeader><DialogTitle>Adjust Stock — {selected?.nome}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Current quantity</Label><Input value={selected?.estoque_total ?? 0} disabled /></div>
-            <div><Label>New quantity</Label><Input type="number" value={novaQtd} onChange={(e) => setNovaQtd(parseInt(e.target.value) || 0)} /></div>
+            {/* `min={0}`: sem isso a setinha pra baixo passava de zero e salvava
+                estoque NEGATIVO (não há CHECK no banco). */}
+            <div>
+              <Label>New quantity</Label>
+              <Input type="number" min={0} value={novaQtd} onChange={(e) => setNovaQtd(Math.max(0, parseInt(e.target.value) || 0))} />
+              {selected?.estoque_reservado > 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selected.estoque_reservado} unit(s) reserved by open orders — the total can't go below that.
+                </p>
+              )}
+            </div>
             <div><Label>Reason</Label><Input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="e.g. Receiving, Inventory..." /></div>
             <Button onClick={handleAjuste} disabled={saving} className="w-full">{saving ? "Saving..." : "Confirm Adjustment"}</Button>
             {logs.length > 0 && (

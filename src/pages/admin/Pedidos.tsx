@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { descendantIds } from "@/lib/categoryTree";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -38,7 +40,6 @@ const emptyFilters = {
   country: "",
   state: "",
   purchaseOrder: "",
-  hasInvoice: "",
   salesRep: "",
   submittedBy: "",
   withBackorderedItems: "",
@@ -56,41 +57,75 @@ const AdminPedidos = () => {
   const [paymentOpts, setPaymentOpts] = useState<any[]>([]);
   const [shippingOpts, setShippingOpts] = useState<any[]>([]);
   const [reps, setReps] = useState<any[]>([]);
+  // produto_id -> categoria_id, pro filtro de categoria (que inclui subcategorias).
+  const [prodCategoria, setProdCategoria] = useState<Record<string, string | null>>({});
 
   const fetchData = useCallback(async () => {
-    const [{ data }, { data: cats }, { data: payOpts }, { data: shipOpts }, { data: repData }] = await Promise.all([
-      supabase.from("pedidos").select("*, clientes(nome, empresa, email, telefone)").order("created_at", { ascending: false }),
-      supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("nome"),
-      supabase.from("payment_options").select("id, nome").eq("ativo", true).order("ordem"),
-      supabase.from("shipping_options").select("id, nome").eq("ativo", true).order("ordem"),
-      supabase.from("representantes").select("id, nome").eq("ativo", true).order("nome"),
-    ]);
-    const orderList = data ?? [];
-    // Fetch real item quantities for all orders
-    if (orderList.length > 0) {
-      const ids = orderList.map((o: any) => o.id);
-      // Fetch in batches of 200 to avoid query limits
-      const qtyMap: Record<string, number> = {};
-      for (let i = 0; i < ids.length; i += 200) {
-        const batch = ids.slice(i, i + 200);
-        const { data: items } = await supabase
-          .from("pedido_itens")
-          .select("pedido_id, quantidade")
-          .in("pedido_id", batch);
-        (items ?? []).forEach((it: any) => {
-          qtyMap[it.pedido_id] = (qtyMap[it.pedido_id] ?? 0) + (it.quantidade ?? 0);
+    try {
+      // `fetchAllRows` (já usado nos 13 relatórios): o PostgREST corta em 1000
+      // linhas SEM erro. Como a paginação desta tela é toda no navegador, acima
+      // de 1000 pedidos os MAIS ANTIGOS sumiam da lista, da busca, do contador de
+      // páginas e do Export — sem nenhum aviso. A base já tem ~884 pedidos.
+      const [orderList, cats, payOpts, shipOpts, repData] = await Promise.all([
+        fetchAllRows((f, t) => supabase.from("pedidos")
+          .select("*, clientes(nome, empresa, email, telefone)")
+          .order("created_at", { ascending: false }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("nome").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("payment_options").select("id, nome").eq("ativo", true).order("ordem").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("shipping_options").select("id, nome").eq("ativo", true).order("ordem").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("representantes").select("id, nome").eq("ativo", true).order("nome").range(f, t)),
+      ]);
+
+      // Quantidade e SKUs reais por pedido. Antes o lote era de 200 pedidos com a
+      // query SEM paginar: 200 pedidos × 6 itens estoura as 1000 linhas e o
+      // "Total Quantity" saía menor que o real. Agora pagina de verdade, e de
+      // quebra traz `sku`/`backorder` pros filtros que não funcionavam.
+      if (orderList.length > 0) {
+        const ids = orderList.map((o: any) => o.id);
+        const qtyMap: Record<string, number> = {};
+        const skuMap: Record<string, string[]> = {};
+        const prodMap: Record<string, string[]> = {};
+        const backorderIds = new Set<string>();
+        for (let i = 0; i < ids.length; i += 200) {
+          const batch = ids.slice(i, i + 200);
+          const items = await fetchAllRows<any>((f, t) => supabase
+            .from("pedido_itens")
+            .select("pedido_id, produto_id, quantidade, sku, backorder")
+            .in("pedido_id", batch).range(f, t) as any);
+          items.forEach((it: any) => {
+            qtyMap[it.pedido_id] = (qtyMap[it.pedido_id] ?? 0) + (it.quantidade ?? 0);
+            if (it.sku) (skuMap[it.pedido_id] ??= []).push(String(it.sku).toLowerCase());
+            if (it.produto_id) (prodMap[it.pedido_id] ??= []).push(it.produto_id);
+            if (it.backorder) backorderIds.add(it.pedido_id);
+          });
+        }
+        orderList.forEach((o: any) => {
+          o._real_qty = qtyMap[o.id] ?? 0;
+          o._skus = skuMap[o.id] ?? [];
+          o._produtos = prodMap[o.id] ?? [];
+          o._has_backorder = backorderIds.has(o.id);
         });
       }
-      orderList.forEach((o: any) => {
-        o._real_qty = qtyMap[o.id] ?? 0;
-      });
+
+      // Categoria de cada produto, pro filtro por categoria (que inclui as
+      // subcategorias, igual ao portal).
+      const prods = await fetchAllRows<any>((f, t) =>
+        supabase.from("produtos").select("id, categoria_id").range(f, t) as any);
+      setProdCategoria(Object.fromEntries(prods.map((p: any) => [p.id, p.categoria_id])));
+
+      setPedidos(orderList);
+      setCategories(cats as any[]);
+      setPaymentOpts(payOpts as any[]);
+      setShippingOpts(shipOpts as any[]);
+      setReps(repData as any[]);
+    } catch (e: any) {
+      // Antes o erro era ignorado: a tela mostrava "No orders found" com cara de
+      // banco vazio, sem nada no console pro dono ver.
+      console.error(e);
+      toast.error("Could not load orders. Please try again.");
+    } finally {
+      setLoading(false);
     }
-    setPedidos(orderList);
-    setCategories(cats ?? []);
-    setPaymentOpts(payOpts ?? []);
-    setShippingOpts(shipOpts ?? []);
-    setReps(repData ?? []);
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -98,6 +133,19 @@ const AdminPedidos = () => {
   }, [fetchData]);
 
   const handleStatusChange = async (pedidoId: string, newStatus: string) => {
+    // Concluir/desconcluir MEXE NO ESTOQUE (trigger fn_adjust_stock_on_order_status).
+    // Este select fica dentro da LINHA da tabela, então é fácil errar de pedido —
+    // e a baixa é imediata. Confirma antes.
+    const atual = pedidos.find((p) => p.id === pedidoId);
+    const virandoDone = canonicalStatus(newStatus) === "complete";
+    const saindoDeDone = canonicalStatus(atual?.status ?? "") === "complete";
+    if (virandoDone || saindoDeDone) {
+      const numero = atual?.numero ?? "";
+      const msg = virandoDone
+        ? `Mark order #${numero} as Complete? This deducts the ordered quantities from stock.`
+        : `Move order #${numero} out of Complete? This puts the ordered quantities back into stock.`;
+      if (!confirm(msg)) return;
+    }
     const { error } = await supabase.from("pedidos").update({ status: newStatus as any }).eq("id", pedidoId);
     if (error) {
       toast.error("Error updating status");
@@ -146,6 +194,28 @@ const AdminPedidos = () => {
     if (f.paymentOption && p.payment_option_id !== f.paymentOption) return false;
     if (f.state && !(p.clientes?.estado ?? "").toLowerCase().includes(f.state.toLowerCase())) return false;
     if (f.country && f.country !== "__all__" && !(p.clientes?.pais ?? "").toLowerCase().includes(f.country.toLowerCase())) return false;
+
+    // ===== FILTROS QUE APARECIAM NA TELA E NÃO FILTRAVAM NADA =====
+    // Estavam renderizados mas não entravam neste `filtered`. Pior que não existir:
+    // o admin selecionava "Is paid? No", via a lista igual e tirava conclusão
+    // errada — e o Export come este mesmo `filtered`, então o CSV saía junto.
+    if (f.isPaid === "yes" && !p.is_paid) return false;
+    if (f.isPaid === "no" && p.is_paid) return false;
+    if (f.withBackorderedItems === "yes" && !p._has_backorder) return false;
+    if (f.withBackorderedItems === "no" && p._has_backorder) return false;
+    const skus: string[] = p._skus ?? [];
+    if (f.productSku && !skus.some((s) => s === f.productSku.trim().toLowerCase())) return false;
+    if (f.containsProductSku && !skus.some((s) => s.includes(f.containsProductSku.trim().toLowerCase()))) return false;
+    if (f.category) {
+      // Inclui as SUBCATEGORIAS, igual ao portal (`Catalogo.tsx` usa `descendantIds`).
+      // Sem isso, escolher a categoria-pai devolvia quase nada.
+      const alvo = new Set(descendantIds(categories as any, f.category));
+      const temNaCategoria = (p._produtos ?? []).some((pid: string) => {
+        const cat = prodCategoria[pid];
+        return cat && alvo.has(cat);
+      });
+      if (!temNaCategoria) return false;
+    }
     return true;
   });
 
@@ -243,13 +313,11 @@ const AdminPedidos = () => {
           <div><Label className="text-xs text-primary">Full Name</Label><Input value={filters.fullName} onChange={(e) => setFilter("fullName", e.target.value)} className="h-8" /></div>
           <div><Label className="text-xs text-primary">State</Label><Input value={filters.state} onChange={(e) => setFilter("state", e.target.value)} className="h-8" /></div>
           <div><Label className="text-xs text-primary">Purchase order</Label><Input value={filters.purchaseOrder} onChange={(e) => setFilter("purchaseOrder", e.target.value)} className="h-8" /></div>
-          <div>
-            <Label className="text-xs text-primary">Has Invoice?</Label>
-            <Select value={filters.hasInvoice || "__all__"} onValueChange={(v) => setFilter("hasInvoice", v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8"><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent><SelectItem value="__all__">All</SelectItem><SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem></SelectContent>
-            </Select>
-          </div>
+          {/* "Has Invoice?" REMOVIDO: não existe dado de nota por pedido. O único
+              campo de invoice é `configuracoes.enable_invoice`, que é global do
+              sistema. O controle estava na tela sem nunca filtrar nada — não era
+              filtro esquecido, era filtro impossível. Se um dia existir
+              `pedidos.invoice_*`, é aqui que ele volta. */}
           <div>
             <Label className="text-xs text-primary">With backordered items</Label>
             <Select value={filters.withBackorderedItems || "__all__"} onValueChange={(v) => setFilter("withBackorderedItems", v === "__all__" ? "" : v)}>
