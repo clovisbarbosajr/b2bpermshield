@@ -95,7 +95,7 @@ const SalesTax = () => {
 
   const saveRate = async () => {
     setSaving(true);
-    const payload = { nome: rateForm.nome, estado: rateForm.estado, regiao: rateForm.estado, percentual: rateForm.percentual, ordem: rateForm.ordem, tax_class_id: classes[0]?.id ?? "" };
+    const payload = { nome: rateForm.nome, estado: rateForm.estado, regiao: rateForm.estado, percentual: rateForm.percentual, ordem: rateForm.ordem, tax_class_id: (classes.find((c: any) => c.is_default) ?? classes[0])?.id ?? "" };
     const { error } = editingRate
       ? await supabase.from("tax_rates").update({ nome: rateForm.nome, estado: rateForm.estado, regiao: rateForm.estado, percentual: rateForm.percentual, ordem: rateForm.ordem }).eq("id", editingRate.id)
       : await supabase.from("tax_rates").insert(payload);
@@ -165,7 +165,7 @@ const SalesTax = () => {
           </Table>
           <Button size="sm" className="mt-3 gap-1" onClick={() => {
             setEditingRule(null);
-            setRuleForm({ tax_class_id: classes[0]?.id ?? "", tax_customer_group_id: groups[0]?.id ?? "", tax_rate_id: rates[0]?.id ?? "" });
+            setRuleForm({ tax_class_id: (classes.find((c: any) => c.is_default) ?? classes[0])?.id ?? "", tax_customer_group_id: groups[0]?.id ?? "", tax_rate_id: rates[0]?.id ?? "" });
             setRuleDialog(true);
           }}><Plus className="h-4 w-4" /> New Sales Tax rule</Button>
         </CardContent>
@@ -309,10 +309,31 @@ const SalesTax = () => {
           <div className="space-y-3">
             <div>
               <Label>Sales Tax Product Class</Label>
+              {/* So a classe PADRAO. O calculo do imposto — tanto no checkout
+                  (Checkout.tsx, `.eq("is_default", true)`) quanto no trigger
+                  (`WHERE is_default LIMIT 1`) — so procura regra na classe padrao.
+                  Deixar escolher outra criava uma regra que aparece ativa na tela e
+                  resulta em imposto ZERO no pedido, sem nenhum aviso. */}
               <Select value={ruleForm.tax_class_id} onValueChange={v => setRuleForm({ ...ruleForm, tax_class_id: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{classes.map(c => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}</SelectContent>
+                <SelectTrigger><SelectValue placeholder="Select a class" /></SelectTrigger>
+                <SelectContent>
+                  {classes
+                    // A classe da regra ATUAL entra na lista mesmo se nao for a
+                    // padrao — senao o Select ficava EM BRANCO ao editar uma regra
+                    // antiga e o admin nem via qual classe estava quebrada.
+                    .filter(c => c.is_default || c.id === ruleForm.tax_class_id)
+                    .map(c => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.nome}{c.is_default ? "" : " (not used in calculation)"}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
               </Select>
+              {classes.some(c => !c.is_default) && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Tax is calculated using the <strong>default</strong> product class only. A rule on any other class results in zero tax.
+                </p>
+              )}
             </div>
             <div>
               <Label>Sales Tax Customer Group</Label>
