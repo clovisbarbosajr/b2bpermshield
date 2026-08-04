@@ -260,6 +260,9 @@ Lovable.
 | 155 | — | `AGUARDANDO` | **Regerar `src/integrations/supabase/types.ts`** contra o schema atual — hoje ele não conhece `pedido_itens.variante_id` e por isso precisei de `as any` em 2 pontos. Não é urgente, mas o cast esconde erro de verdade |
 | 156 | — | `FEITO` | **Validado com o comando CERTO**: `tsc -p tsconfig.app.json --noEmit` **0 erros** · `npm run build` (agora com typecheck) limpo · 46 testes passando |
 
+| 157 | — | `FEITO` | **Dono publicou ANTES do fix** (o publish pegou o commit `6ca86cd`, ainda com o carrinho quebrado). Avisado na hora; ele republicou com o `b11fcc3`. **Publish atual = b11fcc3** |
+| 158 | — | `AGUARDANDO` | **Confirmar em produção que o carrinho voltou**: adicionar produto → aviso verde + contador subindo. Junto, o que foi ao ar neste publish e nunca foi testado: barra de subcategorias na folha, guarda de ciclo, produto de categoria desativada, importação de categorias e de clientes (as duas estavam 100% quebradas), estoque por variante, re-order com variante, validação do ProductEdit |
+
 ### P5 confirmada pelo banco — as DUAS importações estavam quebradas
 
 | # | Hora | Estado | O que |
