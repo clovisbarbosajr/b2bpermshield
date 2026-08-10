@@ -60,7 +60,8 @@ const EMAIL_ORDER_VARIABLES = [
   { var: '{{poNumber}}',        desc: 'PO Number' },
   { var: '{{deliveryDate}}',    desc: 'Requested delivery date' },
   { var: '{{customerCompany}}', desc: 'Customer company name' },
-  { var: '{{customerName}}',    desc: 'Customer contact name' },
+  { var: '{{customerName}}',    desc: 'Customer display name (company, falls back to contact)' },
+  { var: '{{customerContact}}', desc: 'Customer contact person' },
   { var: '{{customerEmail}}',   desc: 'Customer email' },
   { var: '{{customerAddress}}', desc: 'Delivery address' },
   { var: '{{itemsTable}}',      desc: 'HTML table of order items (auto-generated)' },
@@ -129,13 +130,13 @@ const EMAIL_TYPE_DEFS: Array<{ tipo: string; label: string; vars: Array<{ v: str
     tipo: 'new_order_admin', label: 'New order (sent to ADMIN)',
     vars: [
       { v: '{{orderNumber}}', d: 'Order number' }, { v: '{{customerCompany}}', d: 'Customer company' },
-      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{customerEmail}}', d: 'Customer email' },
+      { v: '{{customerName}}', d: 'Customer display name (company first)' }, { v: '{{customerContact}}', d: 'Customer contact person' }, { v: '{{customerEmail}}', d: 'Customer email' },
       { v: '{{grossTotal}}', d: 'Gross total' }, { v: '{{subtotal}}', d: 'Subtotal' },
       { v: '{{itemsTable}}', d: 'Items table (auto)' }, { v: '{{notes}}', d: 'Order notes' },
       { v: '{{companyName}}', d: 'Your company' },
     ],
     sample: {
-      orderNumber: '2611', customerCompany: 'TRD Floor Supplies', customerName: 'Account manager',
+      orderNumber: '2611', customerCompany: 'TRD Floor Supplies', customerName: 'TRD Floor Supplies', customerContact: 'Account manager',
       customerEmail: 'sales@trdfloorsupplies.com', grossTotal: '$396.02', subtotal: '$359.45',
       itemsTable: '<table style="width:100%;border-collapse:collapse;"><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Total</th></tr><tr><td style="padding:4px 8px;">72 Black Rolls - Crate</td><td style="padding:4px 8px;">Moisture Barrier 6mil</td><td style="padding:4px 8px;text-align:right;">$91.00</td></tr></table>',
       notes: 'Deliver to dock B.', companyName: 'Zap Supplies, LLC',
@@ -145,14 +146,14 @@ const EMAIL_TYPE_DEFS: Array<{ tipo: string; label: string; vars: Array<{ v: str
     tipo: 'order_status_change', label: 'Order status update (sent to customer)',
     vars: [
       { v: '{{orderNumber}}', d: 'Order number' }, { v: '{{newStatus}}', d: 'New status' },
-      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{companyName}}', d: 'Your company' },
+      { v: '{{customerName}}', d: 'Customer display name (company first)' }, { v: '{{customerContact}}', d: 'Customer contact person' }, { v: '{{companyName}}', d: 'Your company' },
     ],
-    sample: { orderNumber: '2611', newStatus: 'Shipped', customerName: 'TRD Floor Supplies', companyName: 'Zap Supplies, LLC' },
+    sample: { orderNumber: '2611', newStatus: 'Shipped', customerName: 'TRD Floor Supplies', customerContact: 'Account manager', companyName: 'Zap Supplies, LLC' },
   },
   {
     tipo: 'new_registration_admin', label: 'New customer registration (sent to ADMIN)',
     vars: [
-      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{customerEmail}}', d: 'Customer email' },
+      { v: '{{customerName}}', d: 'Customer name (contact person)' }, { v: '{{customerEmail}}', d: 'Customer email' },
       { v: '{{customerCompany}}', d: 'Customer company' }, { v: '{{companyName}}', d: 'Your company' },
     ],
     sample: { customerName: 'John Doe', customerEmail: 'john@company.com', customerCompany: 'Doe Flooring', companyName: 'Zap Supplies, LLC' },
@@ -168,7 +169,7 @@ const EMAIL_TYPE_DEFS: Array<{ tipo: string; label: string; vars: Array<{ v: str
   {
     tipo: 'approval', label: 'Account approved (sent to customer)',
     vars: [
-      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{customerEmail}}', d: 'Customer email' },
+      { v: '{{customerName}}', d: 'Customer name (contact person)' }, { v: '{{customerEmail}}', d: 'Customer email' },
       { v: '{{loginUrl}}', d: 'Login link' }, { v: '{{companyName}}', d: 'Your company' },
     ],
     sample: { customerName: 'John Doe', customerEmail: 'john@company.com', loginUrl: 'https://example.com/customers-login', companyName: 'Zap Supplies, LLC' },
@@ -176,7 +177,7 @@ const EMAIL_TYPE_DEFS: Array<{ tipo: string; label: string; vars: Array<{ v: str
   {
     tipo: 'rejection', label: 'Application rejected (sent to customer)',
     vars: [
-      { v: '{{customerName}}', d: 'Customer name' }, { v: '{{companyName}}', d: 'Your company' },
+      { v: '{{customerName}}', d: 'Customer name (contact person)' }, { v: '{{companyName}}', d: 'Your company' },
       { v: '{{companyEmail}}', d: 'Your contact email' },
     ],
     sample: { customerName: 'John Doe', companyName: 'Zap Supplies, LLC', companyEmail: 'jess@zapsupplies.com' },
@@ -516,17 +517,27 @@ export default function Notificacoes() {
     ).join('');
     const itemsTable = `<table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#f5f5f5;"><th style="padding:6px 8px;text-align:left;">SKU</th><th style="padding:6px 8px;text-align:left;">Product</th><th style="padding:6px 8px;text-align:right;">Price</th><th style="padding:6px 8px;text-align:right;">Qty</th><th style="padding:6px 8px;text-align:right;">Total</th></tr></thead><tbody>${itemsRows}</tbody></table>`;
     const fmt = (d: string) => d ? new Date(d).toLocaleDateString('en-US') : '-';
+    // O envio real escapa estes campos; o preview nao escapava e roda dentro de um
+    // iframe no proprio painel. `observacoes` e `po_number` sao texto LIVRE do
+    // cliente — mesmo vetor que foi fechado no send-email.
+    const esc = (v: any) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const vars: Record<string, string> = {
       companyName: cfg?.nome_empresa ?? '', companyAddress: cfg?.endereco ?? '', companyEmail: cfg?.email_contato ?? '',
-      orderNumber: String(pedido.numero ?? ''), orderDate: fmt(pedido.created_at), poNumber: pedido.po_number ?? '',
+      orderNumber: String(pedido.numero ?? ''), orderDate: fmt(pedido.created_at), poNumber: esc(pedido.po_number),
       deliveryDate: pedido.delivery_date ? fmt(pedido.delivery_date) : '-',
-      customerCompany: cliente?.empresa ?? '', customerName: cliente?.nome ?? '', customerEmail: cliente?.email ?? '',
-      customerAddress: [cliente?.endereco, cliente?.cidade, cliente?.estado].filter(Boolean).join(', '),
+      customerCompany: esc(cliente?.empresa),
+      // MESMA regra do envio real (empresa primeiro). Sem isto o preview mostrava
+      // "Dear John Doe" e o email chegava "Dear DOE FLOORING" — e {{customerContact}}
+      // aparecia literal, porque o preview so troca as chaves que existem aqui.
+      customerName: esc(cliente?.empresa || cliente?.nome || ''),
+      customerContact: esc(cliente?.nome),
+      customerEmail: esc(cliente?.email),
+      customerAddress: esc([cliente?.endereco, cliente?.cidade, cliente?.estado].filter(Boolean).join(', ')),
       itemsTable, subtotal: `$${Number(pedido.subtotal ?? 0).toFixed(2)}`,
       discount: pedido.desconto ? `-$${Number(pedido.desconto).toFixed(2)}` : '$0.00',
       shippingCosts: pedido.shipping_costs ? `$${Number(pedido.shipping_costs).toFixed(2)}` : '$0.00',
       salesTax: pedido.sales_tax ? `$${Number(pedido.sales_tax).toFixed(2)}` : '$0.00',
-      grossTotal: `$${Number(pedido.total ?? 0).toFixed(2)}`, notes: pedido.observacoes ?? '',
+      grossTotal: `$${Number(pedido.total ?? 0).toFixed(2)}`, notes: esc(pedido.observacoes),
     };
     const rendered = Object.entries(vars).reduce((html, [key, val]) => html.split(`{{${key}}}`).join(val), tpl);
     setEmailOrderPreviewHtml(buildLogoHeaderHtml() + rendered);
@@ -846,7 +857,7 @@ export default function Notificacoes() {
                   <p className="text-xs font-medium">Preview (most recent order)</p>
                   <Button variant="ghost" size="sm" onClick={() => setEmailOrderPreviewHtml('')}>Close</Button>
                 </div>
-                <iframe srcDoc={emailOrderPreviewHtml} className="w-full rounded border border-border bg-white" style={{ height: 500 }} title="Email Preview" />
+                <iframe sandbox="" srcDoc={emailOrderPreviewHtml} className="w-full rounded border border-border bg-white" style={{ height: 500 }} title="Email Preview" />
               </div>
             )}
           </Card>
@@ -905,7 +916,7 @@ export default function Notificacoes() {
                         <p className="text-xs font-medium">Preview (sample data)</p>
                         <Button variant="ghost" size="sm" onClick={() => setTypeTplPreview(null)}>Close</Button>
                       </div>
-                      <iframe srcDoc={typeTplPreview.html} className="w-full rounded border border-border bg-white" style={{ height: 380 }} title="Template Preview" />
+                      <iframe sandbox="" srcDoc={typeTplPreview.html} className="w-full rounded border border-border bg-white" style={{ height: 380 }} title="Template Preview" />
                     </div>
                   )}
                 </Card>

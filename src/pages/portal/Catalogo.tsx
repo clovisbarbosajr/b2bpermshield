@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { Search, ShoppingCart, LayoutGrid, List, ChevronRight } from "lucide-rea
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCart } from "@/contexts/CartContext";
+import { cartKey } from "@/lib/stock";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice, PriceResult } from "@/lib/pricing";
@@ -33,7 +34,7 @@ const Catalogo = () => {
   // Abre em LISTA por padrão (pedido do dono).
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [sortBy, setSortBy] = useState("default");
-  const { addItem } = useCart();
+  const { addItem, updateQuantity, updatePrice, items: cartItems } = useCart();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const categoryParam = searchParams.get("category");
@@ -245,9 +246,28 @@ const Catalogo = () => {
     return { label: "Available", cls: green };
   };
 
-  // Quantidade escolhida por produto no grid/lista (default = quantidade mínima).
+  // Linha do carrinho para este produto (sem variante — produto com variante vai
+  // pra pagina do produto). O catalogo nao indicava que o item JA estava no
+  // carrinho: o cliente adicionava de novo e a quantidade dobrava sem ele notar.
+  // MESMA formula do CartContext (`addItem` 1a insercao e `updateQuantity`):
+  // `max(minimo, min(pedido, disponivel))`. Precisa ser identica, senao a tela
+  // calcula um numero e o carrinho grava outro — ex.: minimo 10 com 4 em estoque,
+  // a tela dizia 4 e o carrinho gravava 10.
+  const clampQty = (qtd: number, min?: number | null, avail?: number | null) => {
+    const piso = Math.max(min ?? 1, 1);
+    const teto = (typeof avail === "number" && avail > 0) ? Math.min(qtd, avail) : qtd;
+    return Math.max(piso, teto);
+  };
+
+  const noCarrinho = (p: Produto) => cartItems.find((i: any) => i.produto_id === p.id && !i.variante_id);
+
+  // Quantidade escolhida por produto no grid/lista. Se o produto JA esta no
+  // carrinho, o campo mostra a quantidade que esta la (igual ao B2BWave), e nao
+  // o minimo — assim o botao "Update quantity" faz o que diz.
   const [qtys, setQtys] = useState<Record<string, number>>({});
-  const qtyOf = (p: Produto) => qtys[p.id] ?? Math.max(p.quantidade_minima || 1, 1);
+  // Produtos com clique em andamento (ver `handleAdd`).
+  const addingRef = useRef<Set<string>>(new Set());
+  const qtyOf = (p: Produto) => qtys[p.id] ?? noCarrinho(p)?.quantidade ?? Math.max(p.quantidade_minima || 1, 1);
   const setQty = (p: Produto, v: number) => {
     const min = Math.max(p.quantidade_minima || 1, 1);
     setQtys((prev) => ({ ...prev, [p.id]: Math.max(min, Math.floor(v) || min) }));
@@ -255,33 +275,86 @@ const Catalogo = () => {
 
   const handleAdd = async (p: Produto) => {
     if (!canBuy(p)) return;
+    // Clique duplo rapido: no MESMO tick o `cartItems` ainda nao refletiu o
+    // primeiro clique, entao os dois caiam no ramo de INSERCAO e o `addItem`
+    // SOMAVA — quantidade dobrada sem o cliente pedir, e a guarda do
+    // `updatePrice` descartava a correcao de preco em silencio.
+    if (addingRef.current.has(p.id)) return;
+    addingRef.current.add(p.id);
+    setTimeout(() => addingRef.current.delete(p.id), 400);
+    // Ja esta no carrinho: DEFINE a quantidade (nao soma). Somar era o
+    // comportamento antigo e fazia o total dobrar a cada clique.
+    const jaNoCarrinho = noCarrinho(p);
+    if (jaNoCarrinho && !variantProductIds.has(p.id)) {
+      // O `updateQuantity` CLAMPA por estoque e minimo. Sem repetir o clamp aqui, o
+      // aviso dizia "updated to 50" com 5 no carrinho, e o campo continuava exibindo
+      // 50 pra sempre (o `qtys` nunca era limpo) — tela e carrinho discordando.
+      const alvo = qtyOf(p);
+      const nova = clampQty(alvo, jaNoCarrinho.quantidade_minima, jaNoCarrinho.estoque_disponivel);
+      const chave = cartKey(jaNoCarrinho);
+      updateQuantity(chave, nova);
+      // Limpa o valor digitado: o campo volta a ESPELHAR o carrinho.
+      setQtys((prev) => { const n = { ...prev }; delete n[p.id]; return n; });
+      // O clamp pode CORTAR (estoque) ou SUBIR (quantidade minima) — a mensagem
+      // precisa dizer qual dos dois, senao "only 5 available" aparecia quando o
+      // pedido minimo ELEVOU a quantidade.
+      if (nova === alvo) toast.success(`${p.nome} updated to ${nova}`);
+      else if (nova < alvo) toast.warning(`${p.nome}: only ${nova} available — quantity set to ${nova}`);
+      else toast.warning(`${p.nome}: minimum order is ${nova} — quantity set to ${nova}`);
+      // Mudar a quantidade pode cruzar faixa de desconto. Recalcula em segundo plano
+      // (o Checkout recalcula de novo na finalizacao; isto e so pra o carrinho ja
+      // mostrar o preco certo).
+      if (clienteId) {
+        getProductPrice({ productId: p.id, customerId: clienteId, quantity: nova })
+          .then((r) => { if (typeof r?.price === "number") updatePrice(chave, r.price, nova); })
+          .catch(() => {});
+      }
+      return;
+    }
     // Produto com variante: não dá pra escolher a opção no grid → manda pra página do produto.
     if (variantProductIds.has(p.id)) {
       navigate(`/portal/produto/${p.id}`);
       return;
     }
-    // Preço da VITRINE é calculado com quantidade 1; ao adicionar, recalcula com a
-    // quantidade REAL pra pegar as faixas de desconto por quantidade. Sem isto o
-    // carrinho mostrava o preço de 1 unidade e o checkout (que recalcula na
-    // finalização) cobrava outro valor — cliente via um preço e pagava outro.
-    let calculatedPrice = getPrice(p);
-    if (clienteId) {
-      try {
-        const r = await getProductPrice({ productId: p.id, customerId: clienteId, quantity: qtyOf(p) });
-        if (typeof r?.price === "number") calculatedPrice = r.price;
-      } catch { /* mantém o preço da vitrine */ }
-    }
     // Preço $0 (não configurado / "contact us") PODE ser adicionado ao carrinho — o
     // vendedor ajusta o preço depois. (Sem trava de preço zero aqui.)
-    const isPreOrder = getStatusInfo(p).nome.toLowerCase() === "pre-order";
-    const qty = qtyOf(p);
-    addItem({
-      produto_id: p.id, nome: p.nome, sku: p.sku, preco: calculatedPrice,
+    const preOrder = isPreOrder(p);
+    const pedido = qtyOf(p);
+    // Clampa AQUI com a mesma regra do `addItem`. Sem isto: o toast dizia "50 ×"
+    // com 10 no carrinho, o campo seguia mostrando 50, e a guarda do `updatePrice`
+    // (que compara com a quantidade real da linha) bloqueava a correcao de preco —
+    // a linha ficava com o preco de 1 unidade, em silencio.
+    const qty = clampQty(pedido, p.quantidade_minima, preOrder ? 0 : disponivel(p));
+    const item = {
+      produto_id: p.id, nome: p.nome, sku: p.sku, preco: getPrice(p),
       quantidade: qty, unidade_venda: p.unidade_venda,
-      quantidade_minima: p.quantidade_minima, estoque_disponivel: isPreOrder ? 999999 : disponivel(p),
+      quantidade_minima: p.quantidade_minima, estoque_disponivel: preOrder ? 999999 : disponivel(p),
       imagem_url: p.imagem_url,
-    });
-    toast.success(`${qty} × ${p.nome} ${isPreOrder ? "added as back order" : "added to cart"}`);
+    };
+    // Entra no carrinho NA HORA, com o preço da vitrine. Antes esta função
+    // ESPERAVA o `getProductPrice` (até 5 idas ao banco) ANTES de adicionar e antes
+    // do aviso — em conexão ruim o cliente clicava e ficava quase um minuto sem
+    // ver nada acontecer, achando que o botão não pegou.
+    addItem(item);
+    // Campo volta a espelhar o carrinho (igual ao ramo de update).
+    setQtys((prev) => { const n = { ...prev }; delete n[p.id]; return n; });
+    if (qty === pedido) toast.success(`${qty} × ${p.nome} ${preOrder ? "added as back order" : "added to cart"}`);
+    else if (qty < pedido) toast.warning(`${p.nome}: only ${qty} available — added ${qty}`);
+    else toast.warning(`${p.nome}: minimum order is ${qty} — added ${qty}`);
+
+    // O preço da vitrine é calculado com quantidade 1. A faixa de desconto por
+    // quantidade só aparece com a quantidade REAL — então recalcula EM SEGUNDO
+    // PLANO e corrige a linha se mudar. O checkout recalcula de novo na
+    // finalização (é ele quem manda), isto é só pra o carrinho já mostrar certo.
+    if (clienteId) {
+      getProductPrice({ productId: p.id, customerId: clienteId, quantity: qty })
+        .then((r) => {
+          if (typeof r?.price === "number" && r.price !== item.preco) {
+            updatePrice(cartKey(item), r.price, qty);
+          }
+        })
+        .catch(() => { /* mantém o preço da vitrine */ });
+    }
   };
 
   return (
@@ -406,13 +479,17 @@ const Catalogo = () => {
                 {/* Quantidade + adicionar (produto com variante vai pra página do produto) */}
                 <div className="mt-3 flex gap-2" onClick={(e) => e.stopPropagation()}>
                   {!variantProductIds.has(p.id) && (
-                    <Input type="number" min={Math.max(p.quantidade_minima || 1, 1)} value={qtyOf(p)}
+                    <Input type="number" min={Math.max(p.quantidade_minima || 1, 1)}
+                      max={isPreOrder(p) || disponivel(p) <= 0 ? undefined : Math.max(disponivel(p), Math.max(p.quantidade_minima || 1, 1))}
+                      value={qtyOf(p)}
                       disabled={!canBuy(p) || isViewer}
                       onChange={(e) => setQty(p, parseInt(e.target.value))}
                       className="h-9 w-20 shrink-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                   )}
-                  <Button className="flex-1 gap-2 h-9" size="sm" disabled={!canBuy(p) || isViewer} onClick={(e) => { e.stopPropagation(); handleAdd(p); }}>
-                    <ShoppingCart className="h-4 w-4" /> {getStatusInfo(p).nome.toLowerCase() === "pre-order" ? "Back Order" : "Add to Cart"}
+                  <Button className={`flex-1 gap-2 h-9 ${noCarrinho(p) ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
+                    size="sm" disabled={!canBuy(p) || isViewer} onClick={(e) => { e.stopPropagation(); handleAdd(p); }}>
+                    <ShoppingCart className="h-4 w-4" />
+                    {noCarrinho(p) ? "Update quantity" : (getStatusInfo(p).nome.toLowerCase() === "pre-order" ? "Back Order" : "Add to Cart")}
                   </Button>
                 </div>
               </CardContent>
@@ -464,14 +541,22 @@ const Catalogo = () => {
                     </TableCell>
                     <TableCell className="text-center" onClick={(e) => e.stopPropagation()}>
                       {canBuy(p) && !isViewer && !variantProductIds.has(p.id) ? (
-                        <Input type="number" min={Math.max(p.quantidade_minima || 1, 1)} value={qtyOf(p)}
+                        <Input type="number" min={Math.max(p.quantidade_minima || 1, 1)}
+                          max={isPreOrder(p) || disponivel(p) <= 0 ? undefined : Math.max(disponivel(p), Math.max(p.quantidade_minima || 1, 1))}
+                          value={qtyOf(p)}
                           onChange={(e) => setQty(p, parseInt(e.target.value))}
                           className="h-9 w-20 mx-auto [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                       ) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <Button size="sm" className="gap-1 whitespace-nowrap" disabled={!canBuy(p) || isViewer} onClick={() => handleAdd(p)}>
-                        <ShoppingCart className="h-4 w-4" /> {isPreOrder(p) ? "Back Order" : "Add to order"}
+                      {/* Ja no carrinho -> botao VERDE "Update quantity" (padrao B2BWave).
+                          Antes nada indicava que o item ja estava la e o cliente somava
+                          sem perceber. */}
+                      <Button size="sm"
+                        className={`gap-1 whitespace-nowrap ${noCarrinho(p) ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
+                        disabled={!canBuy(p) || isViewer} onClick={() => handleAdd(p)}>
+                        <ShoppingCart className="h-4 w-4" />
+                        {noCarrinho(p) ? "Update quantity" : (isPreOrder(p) ? "Back Order" : "Add to order")}
                       </Button>
                     </TableCell>
                   </TableRow>

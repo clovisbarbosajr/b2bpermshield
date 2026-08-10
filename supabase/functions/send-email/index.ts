@@ -444,7 +444,7 @@ function templateOrderStatusChange(order: any, customer: any, newStatus: string)
   };
   return wrapTemplate(`
 <h2 style="color:#1a7fbd;">Order Status Update</h2>
-<p>Hello ${esc(customer.nome || customer.empresa || "")},</p>
+<p>Hello ${esc(customer.empresa || customer.nome || "")},</p>
 <p>Your order <strong>#${esc(order.numero || order.id)}</strong> status has been updated to: <strong>${esc(statusLabel[newStatus] || newStatus)}</strong></p>
 <p><a href="${COMPANY_SITE}" style="display:inline-block;background:#1a7fbd;color:#fff;padding:10px 24px;border-radius:4px;text-decoration:none;font-weight:bold;">View My Orders</a></p>
 `);
@@ -1004,9 +1004,15 @@ Deno.serve(async (req) => {
       const fmtDateAdm = (d: string) => d ? new Date(d).toLocaleDateString("en-US") : "-";
       const adminVars: Record<string, string> = {
         orderNumber: String(order.numero || order.id || ""), orderDate: fmtDateAdm(order.created_at),
-        poNumber: order.po_number ?? "", deliveryDate: order.delivery_date ? fmtDateAdm(order.delivery_date) : "-",
-        customerCompany: esc(customer.empresa ?? ""), customerName: esc(customer.nome ?? ""), customerEmail: esc(customer.email ?? ""),
-        customerAddress: [customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", "),
+        poNumber: esc(order.po_number ?? ""), deliveryDate: order.delivery_date ? fmtDateAdm(order.delivery_date) : "-",
+        customerCompany: esc(customer.empresa ?? ""),
+        // MESMA regra do email do cliente: o admin recebe o MESMO template
+        // (email_order_template), entao sem isto a copia do cliente chegava
+        // "Dear BIG FLOORING SUPPLIES" e a do admin "Dear Permshield".
+        customerName: esc(customer.empresa || customer.nome || ""),
+        customerContact: esc((customer.empresa && customer.nome && customer.nome !== customer.empresa) ? customer.nome : ""),
+        customerEmail: esc(customer.email ?? ""),
+        customerAddress: esc([customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", ")),
         grossTotal: `$${Number(order.total ?? 0).toFixed(2)}`, subtotal: `$${Number(order.subtotal ?? 0).toFixed(2)}`,
         discount: order.desconto ? `-$${Number(order.desconto).toFixed(2)}` : "$0.00",
         shippingCosts: order.shipping_costs ? `$${Number(order.shipping_costs).toFixed(2)}` : "$0.00",
@@ -1056,14 +1062,27 @@ Deno.serve(async (req) => {
         const vars: Record<string, string> = {
           companyName, companyAddress, companyEmail: companyEmailAddr,
           orderNumber: String(order.numero ?? order.id ?? ""), orderDate: fmtDate(order.created_at),
-          poNumber: order.po_number ?? "", deliveryDate: order.delivery_date ? fmtDate(order.delivery_date) : "-",
-          customerCompany: customer.empresa ?? "", customerName: customer.nome ?? "", customerEmail: customer.email ?? "",
-          customerAddress: [customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", "),
+          poNumber: esc(order.po_number ?? ""), deliveryDate: order.delivery_date ? fmtDate(order.delivery_date) : "-",
+          // `esc()`: estas vars vinham CRUAS do cadastro pro HTML (as do admin ja
+          // eram escapadas). Nome de empresa com `<` ou `&` quebrava o email.
+          customerCompany: esc(customer.empresa ?? ""),
+          // `customerName` e o nome de EXIBICAO do comprador: a EMPRESA primeiro.
+          // O template padrao sauda com {{customerName}}, e vinha de `clientes.nome`,
+          // que costuma guardar o nome do contato (ou um nome herdado da migracao) —
+          // o email chegava "Dear Permshield" no pedido da BIG FLOORING SUPPLIES.
+          // Quem quiser a PESSOA tem {{customerContact}}.
+          customerName: esc(customer.empresa || customer.nome || ""),
+          customerContact: esc((customer.empresa && customer.nome && customer.nome !== customer.empresa) ? customer.nome : ""),
+          customerEmail: esc(customer.email ?? ""),
+          customerAddress: esc([customer.endereco, customer.cidade, customer.estado].filter(Boolean).join(", ")),
           itemsTable, subtotal: `$${Number(order.subtotal ?? 0).toFixed(2)}`,
           discount: order.desconto ? `-$${Number(order.desconto).toFixed(2)}` : "$0.00",
           shippingCosts: order.shipping_costs ? `$${Number(order.shipping_costs).toFixed(2)}` : "$0.00",
           salesTax: order.sales_tax ? `$${Number(order.sales_tax).toFixed(2)}` : "$0.00",
-          grossTotal: `$${Number(order.total ?? 0).toFixed(2)}`, notes: order.observacoes ?? "",
+          grossTotal: `$${Number(order.total ?? 0).toFixed(2)}`,
+          // `observacoes` e texto LIVRE digitado pelo cliente no checkout — o campo
+          // de maior risco deste objeto, e era o unico que entrava cru no HTML.
+          notes: esc(order.observacoes ?? ""),
         };
         // (logo prependada centralmente antes do envio — igual aos outros tipos)
         html = renderVars(customTemplateCfg.email_order_template, vars);
@@ -1092,7 +1111,11 @@ Deno.serve(async (req) => {
       ({ subject, html } = customOr("order_status_change", {
         orderNumber: String(order.numero || order.id || ""),
         newStatus: statusLabels[newStatus] || esc(newStatus ?? ""),
-        customerName: esc(customer.nome ?? customer.empresa ?? ""),
+        // Prioridade IGUAL a da confirmacao (empresa primeiro) — o mesmo cliente era
+        // saudado de dois jeitos em dois emails do mesmo pedido. `||` em vez de `??`
+        // porque `??` nao cobre string vazia (saia "Dear ,").
+        customerName: esc(customer.empresa || customer.nome || ""),
+        customerContact: esc((customer.empresa && customer.nome && customer.nome !== customer.empresa) ? customer.nome : ""),
         companyName: config?.nome_empresa || COMPANY_NAME,
       }, `Order #${order.numero || order.id} status update – ${config?.nome_empresa || COMPANY_NAME}`,
         templateOrderStatusChange(order, customer, newStatus)));

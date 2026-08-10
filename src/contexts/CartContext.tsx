@@ -35,6 +35,7 @@ interface CartContextType {
   addItem: (item: CartItem) => void;
   removeItem: (key: string) => void;       // key = cartKey(item)
   updateQuantity: (key: string, quantidade: number) => void;
+  updatePrice: (key: string, preco: number, quantidadeEsperada?: number) => void;
   clearCart: () => void;
   total: number;
 }
@@ -79,6 +80,7 @@ const CartContext = createContext<CartContextType>({
   addItem: () => {},
   removeItem: () => {},
   updateQuantity: () => {},
+  updatePrice: () => {},
   clearCart: () => {},
   total: 0,
 });
@@ -179,6 +181,23 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
     );
   };
 
+  // Ajusta SO o preco de uma linha ja existente. Serve pro catalogo adicionar na
+  // hora (preco da vitrine) e corrigir depois, em segundo plano, com o preco da
+  // faixa de desconto — sem fazer o cliente esperar a consulta antes de ver o
+  // item entrar no carrinho.
+  const updatePrice = (key: string, preco: number, quantidadeEsperada?: number) => {
+    if (!Number.isFinite(preco)) return;
+    setItems((prev) => prev.map((i) => {
+      if (cartKey(i) !== key) return i;
+      // `quantidadeEsperada`: o preco foi calculado PRA UMA quantidade. Se ela mudou
+      // enquanto a consulta estava no ar (o cliente clicou "Update quantity"), o
+      // preco que voltou e de outra faixa de desconto — aplicar deixaria o carrinho
+      // com um total errado, que so se corrigiria na finalizacao.
+      if (quantidadeEsperada !== undefined && i.quantidade !== quantidadeEsperada) return i;
+      return { ...i, preco };
+    }));
+  };
+
   const clearCart = () => {
     setItems([]);
     // Precisa apagar a chave EFETIVA. Usando `storageKey(userId)` aqui, um
@@ -190,7 +209,7 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   const total = items.reduce((sum, i) => sum + i.preco * i.quantidade, 0);
 
   return (
-    <CartContext.Provider value={{ items, addItem, removeItem, updateQuantity, clearCart, total }}>
+    <CartContext.Provider value={{ items, addItem, removeItem, updateQuantity, updatePrice, clearCart, total }}>
       {children}
     </CartContext.Provider>
   );
