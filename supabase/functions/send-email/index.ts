@@ -738,9 +738,7 @@ Deno.serve(async (req) => {
 
     const provider = config?.email_provider || "";
     const apiKey = config?.email_api_key || "";
-    // Fallback quando `configuracoes.email_from` esta vazio. O valor QUE VALE em
-    // producao e o do banco — este so entra se ninguem configurou.
-    const fromEmail = config?.email_from || "noreply@zapsupplies.com";
+    const fromEmail = config?.email_from || "noreply@permshield.com";
     const replyTo = config?.email_reply_to || "";
 
     // Resend é o primário; Office365/SMTP é o fallback. Basta UM estar disponível.

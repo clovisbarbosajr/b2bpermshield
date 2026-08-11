@@ -15,7 +15,7 @@ type Db = any;
 
 export async function dispatchOne(channel: string, to: string, subject: string, message: string, ch: Record<string, any>) {
   switch (channel) {
-    case "email": return sendEmail(to, subject, message, ch.email?.config?.from ?? "Zap Supplies <noreply@zapsupplies.com>");
+    case "email": return sendEmail(to, subject, message, ch.email?.config?.from ?? "B2B <onboarding@resend.dev>");
     case "sms": return sendSms(to, message, ch.sms?.config?.from_number ?? "");
     case "whatsapp": return sendWhatsapp(to, message, ch.whatsapp?.config?.from_number ?? "");
     default: return { ok: false, error: `Unknown channel '${channel}'` };
