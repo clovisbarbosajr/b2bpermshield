@@ -376,20 +376,67 @@ const ProductEdit = () => {
     // criar/editar/excluir variante na tela, o Save dizia "Product saved" e NADA
     // era gravado — o trabalho sumia ao recarregar. Linha sem `codigo` é ignorada
     // (coluna NOT NULL no banco).
-    await delOrFail("produto_variantes", "variants");
-    const variantRows = variants
-      .filter(v => (v.codigo ?? "").trim())
-      .map(v => ({
-        produto_id: pid,
-        codigo: String(v.codigo).trim(),
-        ativo: v.ativo ?? true,
-        quantidade: Number(v.quantidade) || 0,
-        imagem_url: v.imagem_url || null,
-        valores_opcao: v.valores_opcao ?? [],
-      }));
-    if (variantRows.length > 0) {
-      const { error: varErr } = await supabase.from("produto_variantes").insert(variantRows);
-      if (varErr) throw new Error("Failed to save variants: " + varErr.message);
+    // NAO usa delete+insert como as outras filhas. `pedido_itens.variante_id`
+    // referencia esta tabela com ON DELETE SET NULL (20260802130000:29): apagar e
+    // recriar gera `id` NOVO e ZERA o vinculo dos pedidos daquele produto — a cada
+    // Save. Era por isso que `pedido_itens.variante_id` estava 100% nulo em
+    // producao (o sync fazia o mesmo, de hora em hora, e ja foi corrigido).
+    //
+    // Casamento por `id` (a linha carregada do banco no fetchProduct ja o traz),
+    // NAO por `codigo`: assim o admin pode RENOMEAR o codigo de uma variante sem
+    // que ela seja tratada como "apagou uma, criou outra" — o vinculo do pedido
+    // sobrevive ao rename.
+    const variantesValidas = variants.filter(v => (v.codigo ?? "").trim());
+    const campos = (v: any) => ({
+      codigo: String(v.codigo).trim(),
+      ativo: v.ativo ?? true,
+      quantidade: Number(v.quantidade) || 0,
+      imagem_url: v.imagem_url || null,
+      valores_opcao: v.valores_opcao ?? [],
+    });
+
+    // Apaga só as que o admin REMOVEU da tela (sumiram da lista de ids).
+    const idsNaTela = new Set(variantesValidas.map(v => v.id).filter(Boolean));
+    const { data: varExistentes, error: varLerErr } = await supabase
+      .from("produto_variantes").select("id").eq("produto_id", pid);
+    if (varLerErr) throw new Error("Failed to read variants: " + varLerErr.message);
+    const varObsoletas = (varExistentes ?? []).map((v: any) => v.id).filter((id: string) => !idsNaTela.has(id));
+    if (varObsoletas.length > 0) {
+      const { error } = await supabase.from("produto_variantes").delete().in("id", varObsoletas);
+      if (error) throw new Error("Failed to remove variants: " + error.message);
+    }
+
+    // O `id` da variante recem-criada volta pro state. Sem isso, ela continua sem
+    // `id` na memoria: um SEGUNDO Save na MESMA sessao a trataria como "nova" de
+    // novo -> ela cairia em `varObsoletas`, seria apagada e recriada com id novo,
+    // e o vinculo do pedido quebraria — exatamente o bug que este bloco corrige.
+    // Chave = a PROPRIA LINHA (referencia do objeto), nunca a posicao. Os inputs da
+    // tabela nao ficam desabilitados durante o save, entao o admin pode apagar ou
+    // editar uma linha no meio das gravacoes; por indice, o id novo acabaria colado
+    // numa linha que JA tem id — duas linhas com o mesmo id, pior que o bug
+    // original. Por referencia, no maximo o id se perde (a linha sumiu).
+    // `filter` preserva a referencia e os handlers mutam o objeto in-place, entao a
+    // identidade sobrevive a digitacao.
+    const idsNovos = new Map<any, string>();
+    // `finally`: aplica os ids JA obtidos mesmo se um insert falhar no meio. Sem
+    // isso, as variantes ja inseridas ficavam sem id no state e o proximo Save as
+    // DUPLICARIA (nao ha UNIQUE em produto_id+codigo).
+    try {
+      for (const v of variantesValidas) {
+        if (v.id) {
+          const { error } = await supabase.from("produto_variantes").update(campos(v)).eq("id", v.id);
+          if (error) throw new Error("Failed to save variants: " + error.message);
+        } else {
+          const { data, error } = await supabase.from("produto_variantes")
+            .insert({ produto_id: pid, ...campos(v) }).select("id").single();
+          if (error) throw new Error("Failed to save variants: " + error.message);
+          if (data?.id) idsNovos.set(v, data.id as string);
+        }
+      }
+    } finally {
+      if (idsNovos.size > 0) {
+        setVariants((prev: any[]) => prev.map((v: any) => idsNovos.has(v) ? { ...v, id: idsNovos.get(v) } : v));
+      }
     }
 
     // Access: grupos (em privacy_group_id + grupo_nome p/ compat) e grant/exclude por cliente.

@@ -717,6 +717,19 @@ const SettingsProfile = () => {
 
         {/* === APPLICATION CONFIGURATION === */}
         <TabsContent value="app_configuration">
+          {/* Estes campos sao GRAVADOS em `configuracoes` e NENHUM codigo do portal
+              ou das edge functions os le (confirmado por grep). Ficam visiveis porque
+              o dado ja existe no banco, mas com o aviso — antes o admin marcava,
+              lia "Settings saved" e nada mudava, sem como distinguir de bug. */}
+          <div className="mb-6 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+              Not connected yet.
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The options below are saved, but the storefront does <strong>not</strong> use them yet.
+            </p>
+          </div>
+
           <p className="text-sm text-muted-foreground mb-6">
             These are the features/functions that should be displayed to your customers or upon registration:
           </p>
@@ -745,10 +758,10 @@ const SettingsProfile = () => {
         {/* === CUSTOMER REGISTRATION FIELDS === */}
         <TabsContent value="registration_fields">
           <div className="max-w-2xl">
-            <p className="text-sm text-muted-foreground mb-4">
-              These are the fields that should be displayed when customers sign-up/register:
-            </p>
-            <label className="flex items-center gap-2 text-sm mb-4">
+            {/* Este checkbox FUNCIONA (RPC `registration_is_open`, lida pela tela
+                publica e pela edge `register-customer`). Fica ACIMA do aviso — que
+                vale so pra lista de campos abaixo. */}
+            <label className="flex items-center gap-2 text-sm mb-2">
               <input
                 type="checkbox"
                 checked={config?.permite_cadastro_aberto ?? true}
@@ -756,6 +769,26 @@ const SettingsProfile = () => {
               />
               <span className="font-medium">Allow open customer registration</span>
             </label>
+            <p className="mb-6 text-xs text-muted-foreground">
+              When unchecked, the public sign-up page stops accepting new registrations.
+              To block sign-ups completely, also turn off “Allow new users to sign up” in your Supabase Auth settings.
+            </p>
+
+            {/* Daqui pra baixo é a lista de CAMPOS do formulário — gravada em
+                `configuracoes.registration_fields` e lida por NINGUÉM (confirmado por
+                grep). O aviso fica aqui, e não no topo da aba, pra não dar a entender
+                que o checkbox acima também é decorativo. */}
+            <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+              <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                Not connected yet.
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                The field list below is saved, but the sign-up page does <strong>not</strong> use it yet.
+              </p>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              These are the fields that should be displayed when customers sign-up/register:
+            </p>
             <div className="grid grid-cols-2 gap-2">
               {REGISTRATION_FIELDS.map((field) => (
                 <label key={field.key} className="flex items-center gap-2 text-sm">
@@ -805,6 +838,19 @@ const SettingsProfile = () => {
 
         {/* === ADVANCED === */}
         <TabsContent value="advanced">
+          {/* Estes campos sao GRAVADOS em `configuracoes` e NENHUM codigo do portal
+              ou das edge functions os le (confirmado por grep). Ficam visiveis porque
+              o dado ja existe no banco, mas com o aviso — antes o admin marcava,
+              lia "Settings saved" e nada mudava, sem como distinguir de bug. */}
+          <div className="mb-6 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+              Not connected yet.
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The options below are saved, but the storefront does <strong>not</strong> use them yet.
+            </p>
+          </div>
+
           <div className="space-y-4">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -1154,9 +1200,19 @@ const SettingsProfile = () => {
 
             <div className="border-t pt-4">
               <h3 className="text-lg font-semibold mb-2">Webhooks</h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                By defining webhooks, your endpoints will be automatically updated when new orders are added or updated.
-              </p>
+              {/* O texto anterior prometia disparo AUTOMATICO em pedido novo/alterado.
+                  Nada dispara: `webhook_create_order`/`webhook_update_order` sao
+                  gravados e o unico leitor e o botao "Test" logo abaixo. O admin
+                  configurava, testava, via 200 e concluia que a integracao existia. */}
+              <div className="mb-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                  Automatic delivery is not implemented yet.
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  These endpoints are saved, but orders are <strong>not</strong> posted to them automatically.
+                  Only the manual “Test” button below sends a request.
+                </p>
+              </div>
               <div className="space-y-4 max-w-lg">
                 <div>
                   <Label>Create order webhook</Label>

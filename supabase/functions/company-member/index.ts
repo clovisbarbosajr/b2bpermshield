@@ -110,6 +110,35 @@ Deno.serve(async (req) => {
     if (!email || typeof email !== "string" || !email.includes("@")) return json({ error: "Valid email is required" }, 400);
     const canConfirm = body.can_confirm_order === true;
     const canHistory = body.can_view_full_history === true;
+    const emailLcPre = email.trim().toLowerCase();
+
+    // CHECAGEM ANTES do createUser. Ela existia, mas SÓ dentro do ramo de falha —
+    // ou seja, só quando o e-mail já tinha login. Para um cliente MIGRADO (tem
+    // ficha em `clientes`, ainda sem login) o `createUser` dava certo e o fluxo
+    // seguia direto pro insert: o sistema criava um login para o e-mail da vítima,
+    // mandava "set your password" e gravava uma ficha com `parent_customer_id` da
+    // empresa que cadastrou. Ao entrar pelo link, a vítima virava FUNCIONÁRIA
+    // dessa empresa (o AuthContext acha essa ficha pelo `user_id`), com acesso à
+    // tabela de preço e ao histórico dela — e a própria ficha ficava órfã.
+    // Procura PRIMEIRO na propria empresa: `clientes` nao tem UNIQUE em `email`,
+    // entao o mesmo endereco pode ter mais de uma linha (ex.: ex-funcionario que
+    // tambem tem ficha propria de cliente). Sem essa preferencia, o `.limit(1)`
+    // devolvia uma linha arbitraria e podia RECUSAR a reativacao legitima de um
+    // ex-funcionario desta mesma empresa — fluxo que funciona hoje.
+    const { data: daEmpresa } = await db.from("clientes")
+      .select("id, empresa, parent_customer_id")
+      .ilike("email", likeEscape(emailLcPre)).eq("parent_customer_id", companyId).limit(1).maybeSingle();
+    const { data: qualquer } = daEmpresa ? { data: null } : await db.from("clientes")
+      .select("id, empresa, parent_customer_id")
+      .ilike("email", likeEscape(emailLcPre)).limit(1).maybeSingle();
+    const preExistente = daEmpresa ?? qualquer;
+    if (preExistente && preExistente.parent_customer_id !== companyId) {
+      return json({
+        error: preExistente.parent_customer_id
+          ? `This email is already registered as an employee of another company ("${preExistente.empresa || "unknown"}"). Please use a different email, or contact support to move it.`
+          : `This email already belongs to the customer account "${preExistente.empresa || emailLcPre}" — it can't also be added as an employee.`,
+      });
+    }
 
     const { data: newUser, error: createErr } = await db.auth.admin.createUser({
       email, email_confirm: true, user_metadata: { nome: nome || "" },
@@ -144,7 +173,10 @@ Deno.serve(async (req) => {
       const { data: elsewhere } = await db.from("clientes")
         .select("id, empresa, parent_customer_id").ilike("email", likeEscape(emailLc)).limit(1).maybeSingle();
       if (elsewhere?.parent_customer_id) {
-        return json({ error: `This email is already an employee of another company ("${elsewhere.empresa || "unknown"}"). Remove it there first, or use a different email.` });
+        // Ramo INALCANCAVEL hoje: o pre-check no topo usa o mesmo filtro e ja retornou.
+        // Mantido por seguranca, com o MESMO texto do pre-check — o antigo mandava
+        // "remova de la primeiro", coisa que o sistema nao faz (o delete so inativa).
+        return json({ error: `This email is already registered as an employee of another company ("${elsewhere.empresa || "unknown"}"). Please use a different email, or contact support to move it.` });
       }
       if (elsewhere) {
         return json({ error: `This email already belongs to the customer account "${elsewhere.empresa || emailLc}" — it can't also be added as an employee.` });

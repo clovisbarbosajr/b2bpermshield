@@ -28,6 +28,14 @@ Deno.serve(async (req) => {
     const emailLc = String(email ?? "").trim().toLowerCase();
     if (!emailLc || !emailLc.includes("@")) return json({ error: "valid email required" }, 400);
 
+    // 0) Cadastro aberto? A tela publica ja barra, mas o front sozinho nao
+    //    protege nada — quem chamar esta funcao direto tem que bater na mesma
+    //    trava. Fail-open: erro na leitura NAO fecha o cadastro.
+    const { data: aberto, error: abertoErr } = await db.rpc("registration_is_open");
+    if (!abertoErr && aberto === false) {
+      return json({ ok: true, skipped: "registration closed" });
+    }
+
     // 1) O auth user com esse email existe? (senão não cria ficha pra email aleatório)
     const { data: uid } = await db.rpc("auth_user_id_by_email", { _email: emailLc });
     if (!uid) return json({ ok: true, skipped: "no auth user yet" });

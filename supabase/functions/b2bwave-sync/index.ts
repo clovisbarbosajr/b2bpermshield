@@ -674,25 +674,70 @@ Deno.serve(async (req) => {
       }
 
       // ----- Variantes / opções de produto (Size/Color etc.) -----
-      // B2BWave: product.product_variants[] = { code, option_values }. A sync é dona
-      // total das variantes -> apaga e reinsere por produto que as possui (idempotente).
+      // B2BWave: product.product_variants[] = { code, option_values }.
+      //
+      // ANTES ERA delete + insert por produto. Parecia idempotente e NÃO era: o
+      // insert gera `id` NOVO (DEFAULT gen_random_uuid()), e
+      // `pedido_itens.variante_id` referencia esta tabela com ON DELETE SET NULL
+      // (20260802130000:29). Como este laço percorre o feed INTEIRO (não só o que
+      // mudou) e o cron `b2bwave-cron-products` roda de hora em hora
+      // (20260618200824:3), TODO `variante_id` de pedido virava NULL no minuto :10
+      // da hora seguinte — o re-order voltava a perder tamanho/cor, e o carrinho
+      // abandonado passava a bloquear o item como "sem estoque" com estoque cheio
+      // (o Checkout relê a variante por id e não acha).
+      //
+      // Agora casa por (produto_id, codigo): ATUALIZA quem continua no feed (o `id`
+      // fica estável, o vínculo do pedido sobrevive), INSERE quem é novo e apaga só
+      // quem sumiu. Não precisa de índice único novo — o casamento é feito aqui.
       let variantRows = 0;
       for (const p of allProducts) {
         const variants = Array.isArray(p.product_variants) ? p.product_variants : [];
         if (variants.length === 0) continue;
         const localProdId = b2bIdToProdId.get(String(p.id));
         if (!localProdId) continue;
-        await adminClient.from("produto_variantes").delete().eq("produto_id", localProdId);
-        const vrows = variants.map((v: any) => ({
-          produto_id: localProdId,
-          codigo: v.code || v.sku || `${p.id}-var`,
-          valores_opcao: v.option_values ?? [],
-          ativo: v.is_active !== false,
-          quantidade: parseInt(v.quantity || "0") || 0,
-          imagem_url: v.image_url || null,
-        }));
-        const { error } = await adminClient.from("produto_variantes").insert(vrows);
-        if (!error) variantRows += vrows.length;
+
+        const { data: existentes, error: exErr } = await adminClient
+          .from("produto_variantes").select("id, codigo").eq("produto_id", localProdId);
+        // Falha na leitura: NÃO mexe nas variantes deste produto. Apagar sem saber o
+        // que existe é justamente o que causava a perda de vínculo.
+        if (exErr) continue;
+
+        const porCodigo = new Map<string, string>();
+        for (const e of (existentes ?? [])) porCodigo.set(String(e.codigo), e.id as string);
+
+        const vistos = new Set<string>();
+        for (const v of variants) {
+          // `.trim()`: o admin grava `codigo` com trim (ProductEdit). Sem o trim aqui, um
+          // codigo com espaco nas pontas nao casaria com a linha ja salva pelo admin e
+          // o par viraria insert + delete — de volta ao id novo.
+          const codigo = String(v.code || v.sku || `${p.id}-var`).trim();
+          // Código repetido no mesmo produto (o fallback `${p.id}-var` colide quando
+          // falta `code` em mais de uma): trata a primeira e ignora as demais, em vez
+          // de duplicar linha a cada sync.
+          if (vistos.has(codigo)) continue;
+          vistos.add(codigo);
+
+          const campos = {
+            valores_opcao: v.option_values ?? [],
+            ativo: v.is_active !== false,
+            quantidade: parseInt(v.quantity || "0") || 0,
+            imagem_url: v.image_url || null,
+          };
+          const jaExiste = porCodigo.get(codigo);
+          const { error } = jaExiste
+            ? await adminClient.from("produto_variantes").update(campos).eq("id", jaExiste)
+            : await adminClient.from("produto_variantes").insert({ produto_id: localProdId, codigo, ...campos });
+          if (!error) variantRows++;
+        }
+
+        // Some do feed -> some daqui. Só estas perdem o vínculo, o que é correto:
+        // a variante deixou de existir no B2BWave.
+        const obsoletas = (existentes ?? [])
+          .filter((e: any) => !vistos.has(String(e.codigo)))
+          .map((e: any) => e.id);
+        if (obsoletas.length > 0) {
+          await adminClient.from("produto_variantes").delete().in("id", obsoletas);
+        }
       }
 
       // RELATED / BUNDLED PRODUCTS: o sync NÃO gerencia mais isto.

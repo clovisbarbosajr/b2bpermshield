@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -14,11 +14,25 @@ const Cadastro = () => {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  // "Allow open customer registration" (Settings) era um checkbox MORTO: nada no
+  // caminho publico lia a flag. Comeca `true` e so fecha se a RPC disser que nao —
+  // fail-open, pra ligar esta trava nunca fechar o cadastro por acidente.
+  const [aberto, setAberto] = useState(true);
+
+  useEffect(() => {
+    (supabase as any).rpc("registration_is_open")
+      .then(({ data, error }: any) => { if (!error && data === false) setAberto(false); })
+      .catch(() => { /* mantem aberto */ });
+  }, []);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password.length < 8) {
       toast.error("Password must be at least 8 characters");
+      return;
+    }
+    if (!aberto) {
+      toast.error("Registration is currently closed. Please contact us to open an account.");
       return;
     }
     setLoading(true);
