@@ -266,7 +266,7 @@ function buildOrderItems(orderProducts: any[], productSkuToId: Map<string, strin
   return { rows, qty, sum };
 }
 
-type ExistingOrder = { id: string; status: string; total: number; subtotal: number; quantidade_total: number };
+type ExistingOrder = { id: string; status: string; total: number; subtotal: number; quantidade_total: number; data_origem: string | null };
 
 // Insere OU atualiza um pedido (espelha status/cancelamento/edição/total). Nunca apaga.
 // Retorna "created" | "updated" | "skipped" | "error".
@@ -329,9 +329,17 @@ async function upsertOrder(
   const ex = existing.get(numero);
   if (ex) {
     // Só escreve se algo mudou (evita writes inúteis a cada ciclo do cron).
+    // `precisaReparar`: o backfill calou TODO pedido importado que existia antes
+    // da coluna. Sem esta condicao, pedido estavel nunca mais seria revisitado
+    // (o comparador so olha status/total/subtotal/quantidade) e ficaria calado
+    // PARA SEMPRE — inclusive um pedido legitimo de hoje.
+    //
+    // Com ela, o primeiro ciclo do sync grava a data real da origem e devolve a
+    // voz a quem merece. Custa um UPDATE por pedido, uma unica vez.
+    const precisaReparar = submittedAt !== null && !ex.data_origem;
     const changed = ex.status !== status || Number(ex.total) !== total ||
       Number(ex.subtotal) !== subtotal || (ex.quantidade_total ?? 0) !== quantidade;
-    if (!changed) return "skipped";
+    if (!changed && !precisaReparar) return "skipped";
     const pago = pickPago(o);
     const upd = await db.from("pedidos").update({
       status, subtotal, total, quantidade_total: quantidade,
@@ -481,10 +489,10 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
   // Casa por b2bwave_order_id (NÃO por numero — que colide com o serial dos pedidos
   // do app). Pedido nativo do app (b2bwave_order_id NULL) nunca entra aqui.
   const b2bIds = slice.map((it: any) => parseInt((it.order || it).id) || 0).filter((n: number) => n > 0);
-  const { data: existingOrders } = await db.from("pedidos").select("id, b2bwave_order_id, status, total, subtotal, quantidade_total").in("b2bwave_order_id", b2bIds);
+  const { data: existingOrders } = await db.from("pedidos").select("id, b2bwave_order_id, status, total, subtotal, quantidade_total, data_origem").in("b2bwave_order_id", b2bIds);
   const existing = new Map<number, ExistingOrder>();
   for (const e of existingOrders || []) {
-    existing.set(e.b2bwave_order_id, { id: e.id, status: e.status, total: Number(e.total), subtotal: Number(e.subtotal), quantidade_total: e.quantidade_total ?? 0 });
+    existing.set(e.b2bwave_order_id, { id: e.id, status: e.status, total: Number(e.total), subtotal: Number(e.subtotal), quantidade_total: e.quantidade_total ?? 0, data_origem: (e as any).data_origem ?? null });
   }
   const [clientesTodos, produtosTodos] = await Promise.all([
     lerTudo("clientes", "id, email", db),

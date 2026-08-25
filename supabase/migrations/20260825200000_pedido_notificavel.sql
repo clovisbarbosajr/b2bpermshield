@@ -42,11 +42,15 @@ COMMENT ON COLUMN public.pedidos.data_origem IS
 -- importado ontem escapava do backfill, ficava `notificavel = true` com data
 -- falsa-recente, e virava exatamente o SMS retroativo que estamos evitando.
 --
--- NAO e permanente, e isso e de proposito: quando o sync voltar a ver o pedido
--- com data real da origem, ele grava `data_origem` e reabilita. Na mesma
--- sentenca — entao o gatilho ja avalia a idade contra a data VERDADEIRA e
--- continua barrando o que e antigo. Reabilitar mil pedidos de uma vez nao gera
--- nenhuma mensagem.
+-- REVERSAO: o sync devolve a voz ao pedido no primeiro ciclo em que o vir com
+-- data real da origem — inclusive quando NADA mais mudou nele (ha uma condicao
+-- `precisaReparar` no `b2bwave-sync` exatamente para isso; sem ela, pedido
+-- estavel nunca seria revisitado e ficaria calado para sempre, inclusive um
+-- pedido legitimo de hoje).
+--
+-- Reabilitar em massa NAO gera mensagem: `data_origem` e `notificavel` vao na
+-- MESMA sentenca de UPDATE, entao quando o gatilho avalia a idade ja e contra a
+-- data verdadeira, e o antigo continua barrado.
 -- ---------------------------------------------------------------------------
 UPDATE public.pedidos
 SET notificavel = false
@@ -73,6 +77,23 @@ BEGIN
 
   -- TRAVA A1 — marca explicita. Nao depende de data nenhuma.
   IF NEW.notificavel IS NOT TRUE THEN
+    -- Deixa rastro. Sem isto, depois do backfill este vira o caminho de
+    -- nao-envio MAIS COMUM do sistema e nao aparece no Notifications Log — o
+    -- proprio projeto tem a regra de que todo nao-envio deixa rastro.
+    -- Uma linha por hora, nao uma por pedido: em lote isso seriam milhares.
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM public.notification_log
+        WHERE event = 'order_status_calado' AND created_at > now() - interval '1 hour'
+      ) THEN
+        INSERT INTO public.notification_log (event, channel, recipient, status, error, payload)
+        VALUES ('order_status_calado', '-', '-', 'failed',
+                'pedido marcado como nao-notificavel (importado sem data de origem) — ver coluna pedidos.notificavel',
+                jsonb_build_object('pedido', NEW.numero, 'status', NEW.status));
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'log de A1 falhou (ignorado): %', SQLERRM;
+    END;
     RETURN NEW;
   END IF;
 
@@ -83,6 +104,19 @@ BEGIN
 
   _idade := COALESCE(NEW.data_origem, NEW.created_at);
   IF _idade IS NULL OR _idade < now() - make_interval(days => COALESCE(_max_dias, 7)) THEN
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM public.notification_log
+        WHERE event = 'order_status_retroativo' AND created_at > now() - interval '1 hour'
+      ) THEN
+        INSERT INTO public.notification_log (event, channel, recipient, status, error, payload)
+        VALUES ('order_status_retroativo', '-', '-', 'failed',
+                format('pedido com mais de %s dias — nada retroativo', _max_dias),
+                jsonb_build_object('pedido', NEW.numero, 'data', _idade, 'status', NEW.status));
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'log de A2 falhou (ignorado): %', SQLERRM;
+    END;
     RETURN NEW;
   END IF;
 

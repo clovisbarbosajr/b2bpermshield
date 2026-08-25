@@ -374,16 +374,24 @@ export default function Notificacoes() {
     if (!to || !to.includes('@')) { toast.error('Enter a valid destination email.'); return; }
 
     const handleResp = (data: any, error: any, extra = '') => {
-      if (data?.skipped) { toast.error(`Not sent — ${data.reason}. Enable the Email channel first.`); return; }
+      // O motivo vem do servidor e pode ser vários (canal desligado, teto,
+      // pedido retroativo). Colar "Enable the Email channel first" em todos
+      // mandava o admin arrumar a coisa errada.
+      if (data?.skipped) { toast.error(`Not sent — ${data.reason}`); return; }
       if (error || data?.error) { toast.error(`Failed: ${data?.error || error?.message || 'unknown error'}`); return; }
       toast.success(`Real "${EVENT_LABELS[ev.id] ?? ev.id}" email sent to ${to}${extra}`);
     };
 
     if (ev.id === 'new_order' || ev.id === 'order_status') {
       // Usa o pedido mais recente como dado real (igual ao Preview).
+      // Pega o pedido mais recente que AINDA PODE notificar. O mais recente de
+      // todos pode ser importado do B2BWave e estar marcado como
+      // nao-notificavel — aí o teste era bloqueado e o admin ficava sem
+      // conseguir testar o template, sem entender por quê.
       const { data: pedido } = await sb.from('pedidos').select('*, pedido_itens(*)')
+        .eq('notificavel', true)
         .order('created_at', { ascending: false }).limit(1).maybeSingle();
-      if (!pedido) { toast.error('No orders found — place an order first.'); return; }
+      if (!pedido) { toast.error('No notifiable orders found — place an order first.'); return; }
       const { data: cliente } = await sb.from('clientes').select('*').eq('id', pedido.cliente_id).maybeSingle();
       const customer = { ...(cliente ?? {}), email: to };
       if (ev.id === 'new_order') {

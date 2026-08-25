@@ -1385,8 +1385,11 @@ Deno.serve(async (req) => {
       //
       // Meu comentario no `_shared/dispatch.ts` afirmava que "aquele tem a sua
       // propria checagem". Nao tinha. Agora tem.
+      // Exatamente os tipos que existem e carregam `body.order`. Eu tinha
+      // incluido `order_receipt`, que NAO existe no sistema — confianca
+      // fabricada dentro de uma barreira de seguranca.
       const TIPOS_DE_PEDIDO = new Set([
-        "order_status_change", "new_order_customer", "new_order_admin", "order_receipt",
+        "order_status_change", "new_order_customer", "new_order_admin",
       ]);
       if (TIPOS_DE_PEDIDO.has(type)) {
         const pid = (body as any)?.order?.id ?? null;
