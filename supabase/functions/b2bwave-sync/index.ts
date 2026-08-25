@@ -490,13 +490,25 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
 // deploy, erro nao tratado), a supressao expira sozinha em vez de deixar o
 // cliente sem aviso para sempre.
 async function suprimirNotificacao(db: any, ligar: boolean, minutos = 30) {
+  // `.rpc()` do supabase-js NAO LANCA em erro — resolve com `{ error }`. Um
+  // try/catch aqui nunca dispararia, e o sync seguiria achando que esta
+  // suprimido quando nao esta: o mesmo tipo de "protecao desligada por omissao"
+  // que causou o incidente. Por isso o erro e lido explicitamente.
+  let msg: string | null = null;
   try {
-    await db.rpc("set_suppress_order_notify", { _on: ligar, _minutos: minutos });
+    const { error } = await db.rpc("set_suppress_order_notify", { _on: ligar, _minutos: minutos });
+    if (error) msg = error.message ?? String(error);
   } catch (e) {
-    // Nao derruba o sync: se a RPC nao existir (SQL ainda nao rodado), o teto do
-    // gatilho continua valendo como segunda linha de defesa.
-    console.warn("[b2bwave-sync] set_suppress_order_notify falhou:", String((e as any)?.message ?? e));
+    msg = String((e as any)?.message ?? e);
   }
+  if (!msg) return;
+
+  console.error("[b2bwave-sync] set_suppress_order_notify falhou:", msg);
+  // LIGAR que falha ABORTA a operacao: rodar um lote sem supressao e o cenario
+  // exato do incidente. Melhor o lote nao rodar do que rodar disparando SMS.
+  // DESLIGAR que falha nao aborta — nao ha nada a proteger, e a supressao expira
+  // sozinha pela validade.
+  if (ligar) throw new Error("supressao de notificacao indisponivel — lote abortado: " + msg);
 }
 
 async function logRun(db: any, action: string, s: { created?: number; updated?: number; skipped?: number; errors?: number; samples?: string[] }) {

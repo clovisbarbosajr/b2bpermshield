@@ -31,6 +31,24 @@ export async function dispatchOne(channel: string, to: string, subject: string, 
   }
 }
 
+// TORNEIRA + TETO. Consultado antes de CADA envio, sem excecao e sem bypass.
+//
+// Falha FECHADO: se a RPC nao responder, NAO envia. Depois de 25/ago a ordem de
+// prioridade e essa — melhor uma notificacao perdida do que mil disparadas.
+async function podeEnviar(db: Db, canal: string): Promise<{ ok: boolean; motivo?: string }> {
+  const c = canal === "email" ? "email" : "sms";
+  try {
+    const { data, error } = await db.rpc("envio_permitido", { _canal: c });
+    if (error) return { ok: false, motivo: "checagem de teto falhou: " + error.message };
+    if (!data || (data as any).ok !== true) {
+      return { ok: false, motivo: (data as any)?.motivo ?? "bloqueado pelo teto" };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, motivo: "checagem de teto indisponivel: " + String((e as any)?.message ?? e) };
+  }
+}
+
 async function logRow(db: Db, event: string, channel: string, recipient: string,
   result: { ok: boolean; error?: string }, vars: Record<string, unknown>) {
   await db.from("notification_log").insert({
@@ -154,6 +172,14 @@ export async function dispatchEvent(db: Db, event: string, vars: Record<string, 
       // (O loop de skips abaixo já registra no notification_log.)
       results.push({ ...t, ok: false, error: "channel disabled" });
       skips.push({ channel: t.channel, who: t.to, reason: "channel disabled" });
+      continue;
+    }
+    // TORNEIRA + TETO, imediatamente antes de gastar. Nao ha caminho que pule
+    // isto: vale para qualquer evento, qualquer canal, qualquer destinatario.
+    const permissao = await podeEnviar(db, t.channel);
+    if (!permissao.ok) {
+      results.push({ ...t, ok: false, error: permissao.motivo });
+      skips.push({ channel: t.channel, who: t.to, reason: permissao.motivo ?? "bloqueado" });
       continue;
     }
     const template = t.channel === "email" ? evt.template_email

@@ -1368,6 +1368,35 @@ Deno.serve(async (req) => {
       }
     }
 
+    // TORNEIRA + TETO — antes de QUALQUER envio, inclusive o fallback
+    // Office365/SMTP. Isto e importante: o que sai pelo SMTP NAO aparece no
+    // painel do Resend, entao era justamente o caminho que passava despercebido
+    // numa auditoria. Agora os dois provedores respeitam o mesmo limite.
+    //
+    // Falha FECHADO: se a checagem nao responder, nao envia.
+    {
+      let bloqueio: string | null = null;
+      try {
+        const { data: perm, error: permErr } = await (adminClient as any)
+          .rpc("envio_permitido", { _canal: "email" });
+        if (permErr) bloqueio = "checagem de teto falhou: " + permErr.message;
+        else if (!perm || (perm as any).ok !== true) bloqueio = (perm as any)?.motivo ?? "bloqueado pelo teto";
+      } catch (e) {
+        bloqueio = "checagem de teto indisponivel: " + String((e as any)?.message ?? e);
+      }
+      if (bloqueio) {
+        await adminClient.from("notification_log").insert({
+          event: type, channel: "email",
+          recipient: Array.isArray(to) ? to.join(", ") : String(to),
+          status: "failed", error: "NAO ENVIADO — " + bloqueio, payload: { bloqueado: true },
+        });
+        console.warn(`[send-email] BLOQUEADO "${type}": ${bloqueio}`);
+        return new Response(JSON.stringify({ blocked: true, reason: bloqueio, type }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const result = await sendEmailResilient(
       config, fromEmail, to, subject, html, replyTo || undefined, bcc || undefined,
       orderPdfAttachment ? [orderPdfAttachment] : undefined,
