@@ -66,6 +66,31 @@ Deno.serve(async (req) => {
     if (!owner || owner.parent_customer_id) {
       return json({ error: "Only the account owner can manage the team" }, 403);
     }
+
+    // CONTA PRECISA ESTAR APROVADA (A5).
+    //
+    // O dono da conta era so "quem nao tem pai" — sem olhar a situacao da ficha.
+    // Com cadastro ABERTO, uma conta recem-criada e ainda `pendente` montava
+    // equipe: criava login para terceiros e gravava fichas embaixo dela.
+    //
+    // `cliente_conta_liberada()` NAO serve aqui: ela responde sobre QUEM CHAMA, e
+    // no "view as" quem chama e o staff. A pergunta certa e sobre a EMPRESA-alvo,
+    // entao a checagem e sobre a linha do `owner`.
+    //
+    // Mesma denylist do resto do sistema (20260825280000, 20260623020000):
+    // conservadora, status desconhecido nao bloqueia.
+    {
+      const BLOQUEADOS = new Set([
+        "pendente", "inativo", "rejeitado", "suspenso",
+        "pending", "inactive", "rejected", "suspended", "blocked",
+      ]);
+      const { data: sit } = await db.from("clientes")
+        .select("status, is_active").eq("id", owner.id).maybeSingle();
+      if (sit?.is_active === false || BLOQUEADOS.has(String(sit?.status ?? "").toLowerCase().trim())) {
+        console.log(`[company-member] conta ${owner.id} nao aprovada tentou gerenciar equipe`);
+        return json({ error: "Your account needs to be approved before you can add team members." }, 403);
+      }
+    }
     const companyId = owner.id;
 
     // ── Listar a equipe (sub-clientes desta conta) ──
@@ -133,10 +158,18 @@ Deno.serve(async (req) => {
       .ilike("email", likeEscape(emailLcPre)).limit(1).maybeSingle();
     const preExistente = daEmpresa ?? qualquer;
     if (preExistente && preExistente.parent_customer_id !== companyId) {
+      // MENSAGEM SEM O NOME DA EMPRESA (A5).
+      //
+      // Antes o erro devolvia o nome da empresa dona daquele e-mail. Somado ao
+      // formulario de "adicionar funcionario", isso era uma varredura da base de
+      // clientes: digite um e-mail, leia de quem ele e. O nome do concorrente e
+      // com quem ele trabalha nao e informacao de quem esta cadastrando.
+      //
+      // As duas situacoes tambem passam a responder IGUAL: distinguir
+      // "funcionario de outra empresa" de "conta de cliente" ja e meia resposta.
+      console.log(`[company-member] e-mail ${emailLcPre} ja pertence a ${preExistente.parent_customer_id ? "outra empresa" : "uma conta de cliente"} (${preExistente.empresa || "?"})`);
       return json({
-        error: preExistente.parent_customer_id
-          ? `This email is already registered as an employee of another company ("${preExistente.empresa || "unknown"}"). Please use a different email, or contact support to move it.`
-          : `This email already belongs to the customer account "${preExistente.empresa || emailLcPre}" — it can't also be added as an employee.`,
+        error: "This email is already in use in our system. Please use a different address, or contact us so we can help.",
       });
     }
 

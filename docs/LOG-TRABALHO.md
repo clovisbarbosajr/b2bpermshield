@@ -1051,3 +1051,25 @@ olha `src/`, e o Deno nao esta instalado aqui.
   servico, bastaria cadastrar em massa para impedir o aviso de cliente de
   verdade. Falha de leitura NAO bloqueia: a ficha ja foi criada, e engolir o
   aviso por erro nosso e pior que um aviso a mais.
+
+### 25/08 (noite, cont. 16) - LEVA A / A5 - LEVA A FECHADA
+
+- **JA ESTAVA CORRIGIDO** - o abuso principal (criar login para e-mail de
+  terceiro e captura-lo como funcionario) ja tinha sido fechado: a checagem
+  passou a rodar ANTES do `createUser`.
+- **FEITO** - a mensagem de erro devolvia o NOME DA EMPRESA dona do e-mail.
+  Somado ao formulario de "adicionar funcionario", era varredura da base:
+  digite um e-mail, leia de quem ele e. Agora as duas situacoes respondem igual
+  e sem nome — distinguir "funcionario de outra empresa" de "conta de cliente"
+  ja e meia resposta.
+- **FEITO** - conta `pendente` montava equipe. O "dono da conta" era so "quem nao
+  tem pai", sem olhar a situacao. Com cadastro aberto, uma conta recem-criada
+  criava login para terceiros e gravava fichas embaixo dela. Nao usei
+  `cliente_conta_liberada()` porque ela responde sobre QUEM CHAMA, e no "view as"
+  quem chama e o staff — a pergunta certa e sobre a EMPRESA-alvo.
+
+**LEVA A (acesso e segredo) FECHADA:** A1 catalogo do pendente, A2 segredos,
+A3 sequestro de ficha, A4 oraculo+amplificador, A5 equipe, A6 satelites (SQL
+pronto desde antes), A7 stripe, A8 PDF alheio, A9 reset de senha, A10
+enumeracao. Falta so o que depende do PAINEL do dono: "Confirm email" e
+"Secure password change".
