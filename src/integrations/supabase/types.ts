@@ -3009,6 +3009,13 @@ export type Database = {
         Args: { _desc: string; _name: string; _value: string }
         Returns: undefined
       }
+      activity_log_users: {
+        Args: never
+        Returns: {
+          user_email: string
+          user_name: string
+        }[]
+      }
       auth_user_id_by_email: { Args: { _email: string }; Returns: string }
       categoria_visivel_para: {
         Args: { _cat_id: string; _cli_id: string }
