@@ -454,3 +454,22 @@ Profile · UsersManagement · ExtraFields · SetupApp · WarehouseSettings · B2
   E a unica protecao que nao depende deste codigo estar certo.
 - **AGUARDANDO** - revisao da 2a versao antes de qualquer SQL ser rodado.
 
+### 25/08 - Varredura ampla (notificacoes, seguranca, carrinho)
+
+- **FEITO** - item 1 (barreira de idade / nada retroativo) FECHADO apos 7 rodadas
+  de cacador+cetico e 10 versoes minhas reprovadas. Ressalva do cetico registrada:
+  a marca `notificavel` e pegajosa, o teto de 7 dias protege o MOMENTO da
+  importacao e nao a vida do pedido. Falta a prova real (um ciclo de sync com zero
+  envios no log).
+- **FEITO** - `docs/PENDENCIAS-2026-08-25.md` com a fila completa, 11 itens.
+- **CONFIRMADO NO BANCO** - vazamento de `produto_descontos` e satelites: qualquer
+  cadastrado le a regua de desconto e o preco final de TODAS as tabelas de preco.
+  A migration de isolamento de price list esqueceu essa tabela.
+- **CONFIRMADO** - validacao de cupom morta em 100% dos pedidos (elegibilidade so
+  checada no INSERT, e o recalculo de subtotal reaplica sem conferir).
+- **CONFIRMADO** - preco exibido pode divergir do cobrado; sem comparacao antes do
+  Stripe.
+- **NOTA DO DONO** - o sistema NAO esta no ar ainda. Nada esta sangrando hoje;
+  tudo vira prejuizo no lancamento.
+- **PROXIMO** - item 2: fechar o vazamento das tabelas satelite.
+
