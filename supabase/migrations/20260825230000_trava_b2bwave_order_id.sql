@@ -51,7 +51,20 @@ RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
   -- `service_role` = edge function (o sync). `auth.role()` devolve o papel do
   -- JWT; para chamada com service key vem 'service_role'.
-  IF auth.role() = 'service_role' THEN
+  --
+  -- `IS NULL` = conexao DIRETA (SQL editor do Lovable, psql), que nao passa por
+  -- PostgREST e por isso nao tem claim de role. Toda chamada pela API tem role
+  -- (`anon`, `authenticated` ou `service_role`), entao NULL nao e alcancavel
+  -- pela web — e quem ja esta com conexao direta ao banco nao precisa desta
+  -- trava para nada.
+  --
+  -- Sem este escape a trava vira uma armadilha: o ramo de UPDATE abaixo
+  -- RESTAURA o valor antigo, entao `UPDATE pedidos SET b2bwave_order_id = NULL`
+  -- rodado no SQL editor seria silenciosamente revertido — e o SQL editor e o
+  -- unico caminho que o dono usa. A propria consulta de diagnostico no topo
+  -- deste arquivo manda procurar pedidos forjados; sem o escape, nao haveria
+  -- como limpa-los depois.
+  IF auth.role() IS NULL OR auth.role() = 'service_role' THEN
     RETURN NEW;
   END IF;
 

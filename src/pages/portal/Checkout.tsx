@@ -592,6 +592,24 @@ const Checkout = () => {
     const addr = await resolveEnderecoEntregaId();
     if (!addr.ok) { setLoading(false); return; }
 
+    // Desfaz um pedido recem-criado quando um passo POSTERIOR falha.
+    //
+    // Antes isto era `.delete()` / `.update({status:"cancelled"})` direto na
+    // tabela — e nao funcionava: o cliente nao tem policy de DELETE nem de
+    // UPDATE em `pedidos`, e o supabase-js nao levanta erro quando a RLS filtra
+    // tudo (afeta zero linhas e volta sem `error`). Toda falha deixava um pedido
+    // ORFAO, com o total que o navegador mandou e nenhum item.
+    //
+    // A RPC roda com service role e confere posse + idade + itens no banco.
+    const desfazerPedido = async (pedidoId: string) => {
+      const { error: rbErr } = await supabase.rpc("pedido_rollback_checkout" as any, {
+        _pedido_id: pedidoId,
+      });
+      // Erro aqui e problema NOSSO, nao do cliente — ele ja esta vendo o toast
+      // do motivo real. Nao empilha uma segunda mensagem tecnica na tela.
+      if (rbErr) console.error("[checkout] rollback falhou", pedidoId, rbErr);
+    };
+
     const { data: pedido, error } = await supabase.from("pedidos").insert({
       cliente_id: clienteId,
       subtotal: recalcSubtotal,
@@ -637,7 +655,7 @@ const Checkout = () => {
     if (itensError) {
       // A reserva atômica (trigger) pode rejeitar em corrida pelo último item.
       // Remove o pedido órfão (sem itens) e avisa claramente.
-      await supabase.from("pedidos").delete().eq("id", pedido.id);
+      await desfazerPedido(pedido.id);
       // Distingue os dois motivos que hoje compartilham o mesmo ERRCODE
       // (`check_violation`): falta de estoque e item sem variante. Sem isto o
       // cliente via a mensagem CRUA do banco na tela.
@@ -696,7 +714,7 @@ const Checkout = () => {
         const msg = piData?.error || piError?.message || "Failed to create payment intent";
         toast.error("Payment error: " + msg);
         // Mark order as failed — leave it in DB so admin can see
-        await supabase.from("pedidos").update({ status: "cancelled" } as any).eq("id", pedido.id);
+        await desfazerPedido(pedido.id);
         setLoading(false);
         return;
       }
@@ -709,7 +727,7 @@ const Checkout = () => {
 
       if (confirmError) {
         toast.error("Payment failed: " + confirmError.message);
-        await supabase.from("pedidos").update({ status: "cancelled" } as any).eq("id", pedido.id);
+        await desfazerPedido(pedido.id);
         setLoading(false);
         return;
       }

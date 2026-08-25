@@ -498,3 +498,53 @@ Profile · UsersManagement · ExtraFields · SetupApp · WarehouseSettings · B2
 - **AGUARDANDO** - cacador na trava (auth.role() em cada caminho, ordem dos
   triggers BEFORE, e busca por OUTRA coluna com o mesmo problema).
 - Commit `daf5595`, empurrado. Migration NAO rodada ainda.
+
+### 25/08 (noite, cont.) - O cacador achou 2 furos MAIORES na mesma porta
+
+O furo do `b2bwave_order_id` era um sintoma. A doenca e a policy de INSERT do
+cliente em `pedidos`: ela so valida "o pedido e meu" e nao diz NADA sobre quais
+colunas. O Checkout manda um conjunto educado; um POST cru manda o que quiser.
+
+- **CRITICO** - `is_paid` gravavel no INSERT: pedido NASCE PAGO. Nenhum trigger
+  le ou escreve essa coluna (procurado nas 158 migrations). Agrava: o
+  `stripe-checkout` e idempotente por `.eq("is_paid", false)`, entao o webhook
+  legitimo vira no-op e nao da nem para reconciliar depois.
+- **CRITICO** - `status` gravavel no INSERT: pedido NASCE 'complete'. E
+  `fn_adjust_stock_on_order_status` e AFTER **UPDATE** — nascer completo nunca
+  dispara a baixa, e a reserva feita no item fica presa PARA SEMPRE.
+  As revisoes anteriores olharam o caminho de UPDATE dessas duas colunas e
+  concluiram "a RLS bloqueia" (e bloqueia). Ninguem olhou o INSERT.
+- **FEITO** - `20260825240000_trava_colunas_pedido.sql`: BEFORE INSERT que forca
+  is_paid=false, payment_intent_id=NULL, status='recebido', notificavel=true,
+  data_origem=NULL, tracking_number/admin_notes=NULL, created_at=now().
+  Isenta service_role, conexao direta e admin/manager (a tela de admin cria com
+  status 'submitted' de proposito). O Checkout do cliente nao manda essas
+  colunas, entao o caminho legitimo do portal nao muda.
+
+- **FURO NA MINHA PROPRIA TRAVA** - `auth.role()` e NULL no SQL editor do Lovable
+  (conexao direta nao passa por PostgREST). O ramo de UPDATE da 20260825230000
+  RESTAURA o valor antigo, entao `UPDATE pedidos SET b2bwave_order_id = NULL`
+  rodado no editor seria silenciosamente revertido — e o editor e o unico
+  caminho que o dono usa. A trava viraria armadilha: a propria consulta de
+  diagnostico manda procurar pedidos forjados e depois nao deixaria limpa-los.
+  Corrigido com `auth.role() IS NULL OR auth.role() = 'service_role'`.
+
+- **CONFIRMADO POR MIM (grep nas 11 policies)** - o desfazer do checkout NUNCA
+  funcionou. `Checkout.tsx` fazia `.delete()` e `.update({status:'cancelled'})`
+  direto na tabela em 3 pontos; o cliente nao tem policy de DELETE nem de UPDATE
+  em `pedidos`, e o supabase-js nao levanta erro quando a RLS filtra tudo.
+  Toda falha no insert dos itens deixava um PEDIDO ORFAO com o total que o
+  navegador mandou e zero itens, visivel no historico e na lista do admin.
+  E ficou mais provavel com o `trg_item_exige_variante` de hoje.
+- **FEITO** - `20260825250000_rollback_checkout.sql`: RPC
+  `pedido_rollback_checkout` (SECURITY DEFINER) que confere posse, idade < 30min
+  e contagem de itens; apaga o pedido vazio, ou marca 'cancelled' JUNTO com
+  `notificavel = false` — senao o cancelamento dispararia SMS para o cliente que
+  esta parado na tela de erro. Checkout religado nos 3 pontos.
+
+- **VIGIA PROVADA (mutantes)** - plantei 2 defeitos em `src/lib/stock.ts:123`:
+  (1) protecao desligada (`else if (false)`) -> 1 teste acendeu;
+  (2) condicao invertida -> 4 testes acenderam, incluindo os de CONTROLE que
+  provam que produto sem opcao continua passando. Arquivo restaurado, 68 verdes.
+
+- **AGUARDANDO** - cetico nas migrations 230000 e 240000.
