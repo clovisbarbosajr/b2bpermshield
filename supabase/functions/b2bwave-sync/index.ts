@@ -1353,6 +1353,103 @@ Deno.serve(async (req) => {
     }
 
     // ========== SYNC ALL ORDERS (no date filter - full history) ==========
+    // COMPARACAO SO DE LEITURA entre o B2BWave e o nosso banco.
+    //
+    // NAO ESCREVE NADA. Nao chama processOrderSlice, nao toca em pedidos, nao
+    // dispara notificacao. Existe para responder uma pergunta antes de religar
+    // qualquer coisa: "a sincronizacao esta identica?"
+    //
+    // Devolve, por diferenca, ate 20 exemplos — o suficiente para julgar sem
+    // despejar 1.147 linhas na tela.
+    if (action === "diff_orders") {
+      const inicio = Date.now();
+      const ORCAMENTO = body.budget_ms || 100_000;
+
+      // 1) Tudo que existe no B2BWave.
+      const naOrigem = new Map<number, any>();
+      let pagina = 1;
+      let paginasLidas = 0;
+      let truncado = false;
+      for (;;) {
+        if (Date.now() - inicio > ORCAMENTO) { truncado = true; break; }
+        const d = await fetchOrdersPage(username, apiKey, pagina);
+        if (!Array.isArray(d) || d.length === 0) break;
+        for (const it of d) {
+          const o = (it as any).order || it;
+          const n = parseInt(o.id) || 0;
+          if (n > 0) naOrigem.set(n, o);
+        }
+        paginasLidas++;
+        if (d.length < ORDERS_PER_PAGE) break;
+        pagina++;
+      }
+
+      // 2) Tudo que existe aqui (paginado — o PostgREST corta em 1000).
+      const aqui = new Map<number, any>();
+      let de = 0;
+      for (;;) {
+        const { data, error } = await adminClient.from("pedidos")
+          .select("b2bwave_order_id, status, total, subtotal, quantidade_total, is_paid, data_origem, notificavel")
+          .not("b2bwave_order_id", "is", null)
+          .order("b2bwave_order_id", { ascending: true })
+          .range(de, de + 999);
+        if (error) throw new Error("falha ao ler pedidos: " + error.message);
+        const p = data ?? [];
+        for (const r of p) aqui.set(Number((r as any).b2bwave_order_id), r);
+        if (p.length === 0) break;
+        de += p.length;
+      }
+
+      // 3) Diferencas.
+      const faltando: number[] = [];        // esta la, nao esta aqui
+      const sobrando: number[] = [];        // esta aqui, nao esta la
+      const statusDiferente: any[] = [];
+      const totalDiferente: any[] = [];
+      const pagamentoDiferente: any[] = [];
+
+      for (const [n, o] of naOrigem) {
+        const local = aqui.get(n);
+        if (!local) { if (faltando.length < 20) faltando.push(n); continue; }
+
+        const statusOrigem = statusMap[(o.status_order_name || o.status || "submitted").trim().toLowerCase()] || "submitted";
+        if (statusOrigem !== local.status && statusDiferente.length < 20) {
+          statusDiferente.push({ pedido: n, la: o.status_order_name ?? null, aqui: local.status, esperado: statusOrigem });
+        }
+
+        const totalOrigem = pickNum(o, ["gross_total", "total_after_vat", "total", "total_before_vat", "grand_total", "order_total", "amount"]);
+        if (totalOrigem > 0 && Math.abs(totalOrigem - Number(local.total)) > 0.01 && totalDiferente.length < 20) {
+          totalDiferente.push({ pedido: n, la: totalOrigem, aqui: Number(local.total) });
+        }
+
+        const pagoOrigem = pickPago(o);
+        if (pagoOrigem !== undefined && pagoOrigem !== local.is_paid && pagamentoDiferente.length < 20) {
+          pagamentoDiferente.push({ pedido: n, la: pagoOrigem, aqui: local.is_paid });
+        }
+      }
+      for (const n of aqui.keys()) {
+        if (!naOrigem.has(n) && sobrando.length < 20) sobrando.push(n);
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        SO_LEITURA: "nenhum dado foi alterado",
+        truncado,
+        paginas_lidas: paginasLidas,
+        no_b2bwave: naOrigem.size,
+        aqui: aqui.size,
+        identico: faltando.length === 0 && sobrando.length === 0
+          && statusDiferente.length === 0 && totalDiferente.length === 0 && pagamentoDiferente.length === 0,
+        diferencas: {
+          faltando_aqui: faltando,
+          sobrando_aqui: sobrando,
+          status_diferente: statusDiferente,
+          total_diferente: totalDiferente,
+          pagamento_diferente: pagamentoDiferente,
+        },
+        segundos: Math.round((Date.now() - inicio) / 1000),
+      }, null, 2), { headers: jsonHeaders });
+    }
+
     // Mede como a API de pedidos pagina. O backfill voltou "done" com 1 pagina de
     // 9 pedidos, com 1.147 no banco — ou seja, `orders.json?page=N` sozinho NAO
     // varre o historico. Outros endpoints deste mesmo sync usam

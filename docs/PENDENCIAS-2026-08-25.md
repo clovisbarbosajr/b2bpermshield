@@ -144,6 +144,97 @@ evita o e-mail cair em spam), quando apontar um domínio próprio.
 
 ---
 
+---
+
+# LEVAS DE CORREÇÃO
+
+Agrupadas por natureza: cada leva vai inteira ao caçador e ao cético. Ordem por
+risco real, considerando que o sistema **ainda não está no ar**.
+
+## Leva A — Acesso e segredo (bloqueia o go-live)
+
+- **A1** Cadastro auto-aprovado vê o catálogo inteiro com preços. `handle_new_user`
+  dá papel `cliente` a todo `signUp`, então o gate de `/pending-approval` nunca
+  dispara e nenhuma rota do portal confere `clientes.status`.
+- **A2** `warehouse`/`manager` leem a linha inteira de `configuracoes` — onde estão
+  `stripe_secret_key`, `stripe_webhook_secret`, `smtp_password`, `email_api_key`.
+- **A3** Sequestro de ficha migrada: `ensure_my_cliente_record` vincula por e-mail
+  sem exigir e-mail confirmado.
+- **A4** `register-customer` é oráculo público — respostas distintas revelam se um
+  e-mail é staff, cliente ou inexistente.
+- **A5** `company-member`: cliente não aprovado cria login para e-mail de terceiro
+  e o captura como funcionário. Mensagens de erro revelam nome de empresa.
+- **A6** Vazamento das tabelas satélite (`produto_descontos` e cia.) — SQL escrito,
+  em revisão.
+- **A7** `stripe-checkout` sem autenticação nenhuma (só importa ao ligar o Stripe).
+- **A8** `send-email` monta PDF de pedido alheio a partir de IDs do body.
+- **A9** `/reset-password` troca senha com qualquer sessão, não só a de recuperação.
+- **A10** Enumeração de e-mail pelo cooldown do `request_magic_link`.
+
+## Leva B — Dinheiro
+
+- **B1** Validação de cupom morta em 100% dos pedidos.
+- **B2** Preço exibido ≠ preço cobrado, sem comparação antes do Stripe.
+- **B3** Taxa de pagamento (`taxa_percentual`, `taxa_valor`) nunca cobrada.
+- **B4** `clientes.discount` nunca aplicado.
+- **B5** Pedido mínimo não existe (nem global nem por cliente).
+- **B6** `disable_ordering` não bloqueia nada.
+- **B7** Frete: `tipo_regra` ("Per Item") ignorado — sempre cobra por pedido.
+- **B8** Cupom com validade deslocada por fuso; `Max Uses = 0` vira ilimitado.
+- **B9** Re-order usa preço base em vez da cascata de preço.
+- **B10** `preco_final = 0` vira null no ProductEdit.
+
+## Leva C — Dado perdido / corrompido
+
+- **C1** Salvar produto regrava `estoque_total` com valor obsoleto — apaga
+  recebimento de produção.
+- **C2** `CustomerEdit`: delete+insert de privacidade/pagamento/frete sem checar
+  erro. Apagar pagamento em silêncio **libera todos** os métodos.
+- **C3** `ImportRelatedProducts` apaga vínculos antes de saber se vai recriar.
+- **C4** `SetupApp`/`Profile` gravam a linha inteira de `configuracoes` e
+  sobrescrevem o SMTP configurado em outra tela.
+- **C5** `ImportCustomers` duplica cadastro (dedupe cortado em 1000, sem UNIQUE).
+- **C6** Estoque de variante nunca dá baixa — oversell de tamanho/cor.
+- **C7** `pedido_itens` aceita produto desativado ou privado.
+- **C8** Pedido órfão se a aba morrer entre os dois inserts do checkout.
+- **C9** `ImportOrders`: `quantity` sem validação — "abc" vira 1.
+
+## Leva D — Ação silenciosa ("diz que fez e não fez")
+
+12 telas com `await supabase...` sem checar erro seguido de `toast.success`
+incondicional: `UsersManagement` (revogar acesso de staff, criar usuário,
+localidades), `ShippingOptions` (padrão e delete), `OauthApplications`,
+`Clientes` (deletar login), `CustomerEdit` (papéis e endereços), e os 7
+importadores que descartam o log de auditoria.
+
+## Leva E — Funcionalidade fantasma
+
+Telas inteiras que não fazem nada: `ApiKeys` (a API real usa outro token),
+`OauthApplications` (não existe endpoint OAuth), `ExtraFields`, `QuickLinks`,
+`MeasurementUnit`, `PdfCatalog` (o gerador só aceita `pedido_id`). Mais 5 filtros
+de `Clientes` que não filtram, `moeda`/`fuso_horario` sem leitor, e
+`ImportProductVariants` que descarta preço e nome.
+
+**Decisão necessária do dono:** implementar ou remover da tela. Manter é pior que
+os dois — hoje ele acredita que tem controles que não existem.
+
+## Leva F — Volume e paginação
+
+Catálogo do cliente, export de produtos, e ~15 leituras de admin sem
+`fetchAllRows`. Acima de 1000 linhas cortam em silêncio.
+
+## Leva G — Rótulo e conversão
+
+`ProductStatuses` com checkbox rotulado errado que **esconde produtos da loja**;
+"Quantity" significando coisas diferentes em duas telas; datas com fuso
+divergente entre portal e admin; `ImportsLog` lendo colunas que não existem.
+
+## Leva H — Cabeçalhos de segurança
+
+CSP, clickjacking e `Cache-Control` no `vercel.json`.
+
+---
+
 ## Com o dono, não comigo
 
 - **Trocar a senha do admin `jess@zapsupplies.com`** — está legível em
