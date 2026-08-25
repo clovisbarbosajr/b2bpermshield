@@ -56,8 +56,51 @@ Deno.serve(async (req) => {
       return json({ ok: result.ok, error: result.error });
     }
 
-    // ---- Evento (qualquer logado/cron; destinatários vêm da config) -------
+    // ---- Evento (destinatários vêm da config) -----------------------------
     if (!event) return json({ error: "Missing 'event'" }, 400);
+
+    // QUAIS eventos um não-admin pode disparar.
+    //
+    // A proteção de destinatário abaixo já impedia mandar SMS pra número
+    // arbitrário, mas o EVENTO em si era livre: qualquer sessão autenticada — e o
+    // cadastro é aberto — podia disparar quantos "new_order" quisesse, com os
+    // `vars` que quisesse, direto pros `notification_recipients` do admin. Isso
+    // queima crédito Twilio e afoga o alerta real no meio do lixo.
+    //
+    // Só o Checkout do cliente dispara evento sem ser admin, e só `new_order`
+    // (as outras chamadas — account_approved, order_status, testes — vêm de telas
+    // de admin).
+    const EVENTOS_DO_CLIENTE = new Set(["new_order"]);
+    if (!isAdmin && !viaCron) {
+      if (!EVENTOS_DO_CLIENTE.has(String(event))) {
+        return json({ error: "Not authorized for this event" }, 403);
+      }
+      // O pedido citado precisa EXISTIR. Sem isto dava pra repetir a chamada à
+      // vontade inventando número; com isto, cada alerta corresponde a um pedido
+      // real no banco.
+      //
+      // Fail-open de propósito quando NÃO dá pra resolver a ficha do chamador:
+      // parte da base é migrada e nem toda ficha está ligada a um login. Bloquear
+      // aí faria o admin PARAR de receber aviso de pedido novo — pior que o spam
+      // que estamos evitando. Se a ficha resolve e o pedido é de OUTRO cliente, aí
+      // sim recusa.
+      const ref = String((vars as any)?.order_id ?? "").trim();
+      if (!ref) return json({ error: "Missing 'vars.order_id'" }, 400);
+      const numero = /^\d+$/.test(ref) ? Number(ref) : null;
+      const q = db.from("pedidos").select("id, cliente_id").limit(1);
+      const { data: ped } = numero !== null
+        ? await q.eq("numero", numero).maybeSingle()
+        : await q.eq("id", ref).maybeSingle();
+      if (!ped) return json({ error: "Unknown order" }, 403);
+
+      if (callerUserId) {
+        const { data: minhaFicha } = await db.from("clientes")
+          .select("id").eq("user_id", callerUserId).maybeSingle();
+        if (minhaFicha && ped.cliente_id && minhaFicha.id !== ped.cliente_id) {
+          return json({ error: "Order does not belong to caller" }, 403);
+        }
+      }
+    }
     // SEGURANÇA: chamador não-admin NÃO escolhe o destino. Ignora o `customer`
     // do body e usa o cliente do próprio usuário logado (evita SMS/email pra
     // número/endereço arbitrário = fraude de toll). Admin/cron mantêm o controle.

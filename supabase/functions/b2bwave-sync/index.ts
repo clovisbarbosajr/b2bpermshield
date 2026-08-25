@@ -14,6 +14,41 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? "";
 
+// Le uma tabela INTEIRA do Supabase. O PostgREST corta a resposta em
+// `db-max-rows` (1000 neste projeto) SEM erro e SEM aviso — `error` vem null e a
+// lista volta curta. Aqui isso nao e detalhe de performance, e corrupcao:
+//
+//   - `clientes` truncado => o cliente #1001 nao entra no mapa de existentes e o
+//     sync o INSERE de novo A CADA CICLO do cron (nao ha UNIQUE em
+//     clientes.email pra segurar), enchendo a base de fichas duplicadas;
+//   - `produtos` truncado => preco por tabela e variantes nao sao gravados, em
+//     silencio, e item de pedido fica sem produto_id.
+//
+// `.order("id")`: paginacao por OFFSET sem ORDER BY nao tem ordem definida no
+// Postgres — com escrita concorrente a mesma linha pode vir duas vezes ou
+// nenhuma. Avanca pelo que VEIO e so para na pagina vazia: se o `db-max-rows`
+// for menor que o pedaco pedido, parar no "veio menos que pedi" deixaria o resto
+// pra tras achando que acabou.
+async function lerTudo(
+  tabela: string,
+  colunas: string,
+  db: any,
+  pedaco = 1000,
+): Promise<any[]> {
+  const out: any[] = [];
+  let de = 0;
+  for (;;) {
+    const { data, error } = await db.from(tabela).select(colunas)
+      .order("id", { ascending: true }).range(de, de + pedaco - 1);
+    if (error) throw new Error(`falha ao ler ${tabela}: ${error.message}`);
+    const pagina = data ?? [];
+    out.push(...pagina);
+    if (pagina.length === 0) break;
+    de += pagina.length;
+  }
+  return out;
+}
+
 async function b2bwaveFetch(endpoint: string, username: string, apiKey: string, maxRetries = 3) {
   let cleanEndpoint = endpoint.replace(/\.json/g, '');
   cleanEndpoint = cleanEndpoint.replace(/price_lists/g, 'pricelists');
@@ -194,8 +229,18 @@ async function upsertOrder(
     }).eq("id", ex.id);
     if (upd.error) return "error";
     if (itemRows.length > 0) {
-      await db.from("pedido_itens").delete().eq("pedido_id", ex.id);
-      await db.from("pedido_itens").insert(itemRows.map((r) => ({ ...r, pedido_id: ex.id })));
+      // delete + insert sao DUAS chamadas HTTP, ou seja, duas transacoes: nao ha
+      // rollback. Se o insert falhar e o erro for descartado, o pedido fica com
+      // ZERO itens e a funcao ainda retorna "updated".
+      //
+      // E nao se auto-cura: o comparador `changed` acima so olha
+      // status/total/subtotal/quantidade_total, que nao mudaram — o proximo
+      // ciclo devolve "skipped" e os itens nunca voltam. Ficaria um pedido com
+      // total certo e nenhuma linha, para sempre.
+      const del = await db.from("pedido_itens").delete().eq("pedido_id", ex.id);
+      if (del.error) return "error";
+      const insItens = await db.from("pedido_itens").insert(itemRows.map((r) => ({ ...r, pedido_id: ex.id })));
+      if (insItens.error) return "error";
     }
     return "updated";
   }
@@ -281,10 +326,12 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
   for (const e of existingOrders || []) {
     existing.set(e.b2bwave_order_id, { id: e.id, status: e.status, total: Number(e.total), subtotal: Number(e.subtotal), quantidade_total: e.quantidade_total ?? 0 });
   }
-  const [clientesRes, productsRes] = await Promise.all([
-    db.from("clientes").select("id, email"),
-    db.from("produtos").select("id, sku, nome"),
+  const [clientesTodos, produtosTodos] = await Promise.all([
+    lerTudo("clientes", "id, email", db),
+    lerTudo("produtos", "id, sku, nome", db),
   ]);
+  const clientesRes = { data: clientesTodos };
+  const productsRes = { data: produtosTodos };
   const clienteEmailToId = new Map<string, string>();
   for (const c of clientesRes.data || []) clienteEmailToId.set((c.email || "").toLowerCase(), c.id);
   const productSkuToId = new Map<string, string>();
@@ -293,7 +340,9 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
     // Só indexa sku PREENCHIDO — sku vazio no índice casaria o produto errado
     // (qualquer código "startsWith" de string vazia é true).
     if (p.sku) productSkuToId.set(p.sku.toLowerCase(), p.id);
-    productNameToId.set((p.nome || "").toLowerCase(), p.id);
+    // Mesma guarda do sku: `(p.nome || "")` indexava a chave "" e um item sem
+    // nome casava com qualquer produto de nome vazio.
+    if (p.nome) productNameToId.set(p.nome.toLowerCase(), p.id);
   }
   let created = 0, updated = 0, skipped = 0, errors = 0;
   for (const item of slice) {
@@ -526,7 +575,7 @@ Deno.serve(async (req) => {
       // Load existing products for comparison. O casamento agora é por B2BWAVE_ID
       // (a identidade real) — o sku deixou de ser chave: é OPCIONAL (igual ao
       // B2BWave) e NÃO é mais auto-gerado ("b2b-123"/sufixos) quando não existe.
-      const { data: existingProds } = await adminClient.from("produtos").select("id, sku, nome, preco, ativo, imagem_url, estoque_total, estoque_reservado, created_at, b2bwave_id");
+      const existingProds = await lerTudo("produtos", "id, sku, nome, preco, ativo, imagem_url, estoque_total, estoque_reservado, created_at, b2bwave_id", adminClient);
       const existingMap = new Map<string, any>();          // por b2bwave_id
       const existingBySku = new Map<string, any>();        // fallback p/ linhas legadas sem b2bwave_id
       for (const p of existingProds || []) {
@@ -647,7 +696,7 @@ Deno.serve(async (req) => {
       }
 
       // Mapa produto b2b id -> local id (reaproveitado p/ preços, variantes e stale).
-      const { data: allProds } = await adminClient.from("produtos").select("id, sku, b2bwave_id");
+      const allProds = await lerTudo("produtos", "id, sku, b2bwave_id", adminClient);
       const b2bIdToProdId = new Map<string, string>();
       for (const p of allProds || []) {
         if (p.b2bwave_id) b2bIdToProdId.set(String(p.b2bwave_id), p.id);
@@ -852,7 +901,8 @@ Deno.serve(async (req) => {
       for (const r of localReps || []) repEmailToId.set(r.email.toLowerCase(), r.id);
 
       // Load existing customers for comparison
-      const { data: existingCustomers } = await adminClient.from("clientes").select("id, email, nome, empresa, telefone, status, tabela_preco_id, representante_id, endereco, cidade, cep, created_at, discount, parent_customer_id");
+      // PAGINADO: truncar aqui fazia o sync reinserir cliente a cada ciclo.
+      const existingCustomers = await lerTudo("clientes", "id, email, nome, empresa, telefone, status, tabela_preco_id, representante_id, endereco, cidade, cep, created_at, discount, parent_customer_id", adminClient);
       const existingMap = new Map<string, any>();
       for (const c of existingCustomers || []) existingMap.set(c.email.toLowerCase(), c);
 

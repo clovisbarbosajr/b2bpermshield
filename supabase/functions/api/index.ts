@@ -103,6 +103,9 @@ serve(async (req) => {
             return json({ data });
           }
           const { data, error, count } = await supabase.from("produtos").select("*, categorias(nome), brands(nome)", { count: "exact" }).range(offset, offset + perPage - 1).order("nome");
+          // Sem isto uma falha de banco virava 200 com data:null, e a integracao
+          // do outro lado concluia "nao ha produtos" em vez de "a consulta falhou".
+          if (error) return json({ error: error.message }, 500);
           return json({ data, total: count, page, per_page: perPage });
         }
         if (req.method === "PUT" && resourceId) {
@@ -127,6 +130,7 @@ serve(async (req) => {
           let query = supabase.from("pedidos").select("*, clientes(nome, email, empresa), pedido_itens(count)", { count: "exact" });
           if (status) query = query.eq("status", status);
           const { data, error, count } = await query.range(offset, offset + perPage - 1).order("created_at", { ascending: false });
+          if (error) return json({ error: error.message }, 500);
           return json({ data, total: count, page, per_page: perPage });
         }
         if (req.method === "PUT" && resourceId) {
@@ -148,6 +152,7 @@ serve(async (req) => {
             return json({ data });
           }
           const { data, error, count } = await supabase.from("clientes").select("*", { count: "exact" }).range(offset, offset + perPage - 1).order("nome");
+          if (error) return json({ error: error.message }, 500);
           return json({ data, total: count, page, per_page: perPage });
         }
         if (req.method === "PUT" && resourceId) {
@@ -190,16 +195,21 @@ serve(async (req) => {
       // ============ INVENTORY ============
       case "inventory": {
         if (req.method === "GET") {
-          const { data, count } = await supabase.from("produtos").select("id, sku, nome, estoque_total, estoque_reservado, rastrear_estoque", { count: "exact" }).eq("rastrear_estoque", true).range(offset, offset + perPage - 1).order("nome");
+          const { data, error, count } = await supabase.from("produtos").select("id, sku, nome, estoque_total, estoque_reservado, rastrear_estoque", { count: "exact" }).eq("rastrear_estoque", true).range(offset, offset + perPage - 1).order("nome");
+          if (error) return json({ error: error.message }, 500);
           return json({ data, total: count, page, per_page: perPage });
         }
         if (req.method === "PUT" && resourceId) {
           const body = await req.json();
           if (body.estoque_total !== undefined) {
             const { data: old } = await supabase.from("produtos").select("estoque_total").eq("id", resourceId).single();
-            await supabase.from("estoque_log").insert({ produto_id: resourceId, quantidade_anterior: old?.estoque_total || 0, quantidade_nova: body.estoque_total, motivo: body.motivo || "API update" });
+            // O UPDATE vem ANTES do log: gravando o log primeiro, um update que
+            // falha deixava a auditoria afirmando um ajuste de estoque que nunca
+            // aconteceu.
             const { data, error } = await supabase.from("produtos").update({ estoque_total: body.estoque_total }).eq("id", resourceId).select().single();
             if (error) return json({ error: error.message }, 400);
+            const logErr = (await supabase.from("estoque_log").insert({ produto_id: resourceId, quantidade_anterior: old?.estoque_total || 0, quantidade_nova: body.estoque_total, motivo: body.motivo || "API update" })).error;
+            if (logErr) console.error("estoque_log falhou:", logErr.message);
             return json({ data });
           }
         }

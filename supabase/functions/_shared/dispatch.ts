@@ -55,7 +55,13 @@ async function alertAdmin(db: Db, event: string, vars: Record<string, unknown>, 
 }
 
 export async function dispatchEvent(db: Db, event: string, vars: Record<string, unknown>, customer?: Record<string, unknown>) {
-  const { data: channels } = await db.from("notification_channels").select("*");
+  // Erro aqui NAO pode ser tratado como "nenhum canal ligado": com `ch = {}`
+  // todo destino cai em "channel disabled", que por decisao e SKIP e nao
+  // FAILURE — entao `failures` fica vazio, o alerta ao admin nao dispara, e a
+  // funcao devolve ok:true/sent:0. Ou seja, ninguem receberia nada e ninguem
+  // seria avisado, com o canal visivelmente ligado na tela.
+  const { data: channels, error: chErr } = await db.from("notification_channels").select("*");
+  if (chErr) throw new Error("falha ao ler notification_channels: " + chErr.message);
   const ch = Object.fromEntries((channels ?? []).map((c: any) => [c.id, c]));
 
   const { data: evt } = await db.from("notification_events").select("*").eq("id", event).maybeSingle();

@@ -18,6 +18,11 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// `_` e `%` sao CURINGAS no ILIKE do Postgres, e `_` e comum em e-mail. Sem
+// escapar, "a_b@x.com" casa tambem com "aXb@x.com": a consulta pode achar a
+// ficha de OUTRA pessoa. Mesmo helper que o `company-member` ja usa.
+const likeEscape = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const json = (d: any, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -48,7 +53,7 @@ Deno.serve(async (req) => {
     const { data: byUser } = await db.from("clientes").select("id").eq("user_id", uid).limit(1).maybeSingle();
     if (byUser) return json({ ok: true, existing: true });
 
-    const { data: byEmail } = await db.from("clientes").select("id, user_id").ilike("email", emailLc).limit(1).maybeSingle();
+    const { data: byEmail } = await db.from("clientes").select("id, user_id").ilike("email", likeEscape(emailLc)).limit(1).maybeSingle();
     if (byEmail) {
       if (!byEmail.user_id) await db.from("clientes").update({ user_id: uid }).eq("id", byEmail.id).is("user_id", null);
       return json({ ok: true, linked: true });

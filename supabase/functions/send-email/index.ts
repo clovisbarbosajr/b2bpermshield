@@ -672,6 +672,21 @@ async function sendEmailResilient(
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────
+// `_` e `%` sao CURINGAS no ILIKE do Postgres, e `_` e comum em e-mail. Sem
+// escapar, "a_b@x.com" casa tambem com "aXb@x.com": a consulta pode achar a
+// ficha de OUTRA pessoa. Mesmo helper que o `company-member` ja usa.
+const likeEscape = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
+
+// Mantem viva uma promessa disparada DEPOIS do `return`. Sem isto o isolate da
+// Edge Function pode ser encerrado assim que a resposta sai, e o alerta ao admin
+// ("o Resend falhou") nunca chega nem vira linha em `notification_log` — some
+// justamente o mecanismo que existe pra tornar a falha visivel.
+const emSegundoPlano = (p: Promise<unknown>) => {
+  const er = (globalThis as any).EdgeRuntime;
+  if (er?.waitUntil) er.waitUntil(p);
+  return p;
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -1208,7 +1223,7 @@ Deno.serve(async (req) => {
         // cliente ATIVO) e tenta de novo. Senão, silêncio genérico (não revela).
         const { data: cliRow } = await adminClient.from("clientes")
           .select("id, status, is_active, user_id")
-          .ilike("email", resetEmailNorm).limit(1).maybeSingle();
+          .ilike("email", likeEscape(resetEmailNorm)).limit(1).maybeSingle();
         if (cliRow && cliRow.status === "ativo" && cliRow.is_active !== false) {
           const { data: created, error: cErr } = await adminClient.auth.admin.createUser({ email: resetEmailNorm, email_confirm: true });
           if (!cErr && created?.user) {
@@ -1233,7 +1248,7 @@ Deno.serve(async (req) => {
       const { data: customerData } = await adminClient
         .from("clientes")
         .select("nome")
-        .ilike("email", resetEmailNorm)
+        .ilike("email", likeEscape(resetEmailNorm))
         .limit(1)
         .maybeSingle();
       const custName = customerData?.nome || "";
@@ -1255,7 +1270,7 @@ Deno.serve(async (req) => {
 
       const { data: cli } = await adminClient.from("clientes")
         .select("id, nome, status, is_active, user_id")
-        .ilike("email", emailReq).limit(1).maybeSingle();
+        .ilike("email", likeEscape(emailReq)).limit(1).maybeSingle();
       if (!cli || cli.status !== "ativo" || cli.is_active === false) {
         console.log(`[send-email] request_magic_link: no active customer for ${emailReq}`);
         return generic();
@@ -1384,14 +1399,16 @@ Deno.serve(async (req) => {
           : `<p>❌ O <b>fallback Office365 também falhou</b> — o destinatário NÃO recebeu este email.</p>`) +
         `<p>Verifique a conta/limite/billing do Resend.</p>`;
       // Chama o envio resiliente direto (não o handler) p/ não re-disparar alerta. Não bloqueia.
-      sendEmailResilient(config, fromEmail, adminTo, `⚠ Resend falhou ao enviar "${type}"`, alertHtml)
-        .then((r) => adminClient.from("notification_log").insert({
-          event: "resend_failure_alert", channel: "email",
-          recipient: Array.isArray(adminTo) ? adminTo.join(", ") : String(adminTo),
-          status: r.ok ? "sent" : "failed", error: r.error ?? null,
-          payload: { about: type, resend_error: result.resendError },
-        }))
-        .catch(() => {});
+      emSegundoPlano(
+        sendEmailResilient(config, fromEmail, adminTo, `⚠ Resend falhou ao enviar "${type}"`, alertHtml)
+          .then((r) => adminClient.from("notification_log").insert({
+            event: "resend_failure_alert", channel: "email",
+            recipient: Array.isArray(adminTo) ? adminTo.join(", ") : String(adminTo),
+            status: r.ok ? "sent" : "failed", error: r.error ?? null,
+            payload: { about: type, resend_error: result.resendError },
+          }))
+          .catch(() => {}),
+      );
     }
 
     // Se NENHUM provedor enviou e não houve erro específico do Resend (ex.: Resend nem
@@ -1404,14 +1421,16 @@ Deno.serve(async (req) => {
         `<p>❌ Nenhum provedor conseguiu enviar o email "<b>${type}</b>" para <b>${toDisplay}</b> — o destinatário NÃO recebeu.</p>` +
         `<p><b>Erro:</b> <code>${result.error ?? "nenhum provedor de email disponível"}</code></p>` +
         `<p>Verifique a configuração de email (Resend / Office365 / SMTP).</p>`;
-      sendEmailResilient(config, fromEmail, adminTo, `⚠ Email NÃO enviado: "${type}"`, alertHtml)
-        .then((r) => adminClient.from("notification_log").insert({
-          event: "email_failure_alert", channel: "email",
-          recipient: Array.isArray(adminTo) ? adminTo.join(", ") : String(adminTo),
-          status: r.ok ? "sent" : "failed", error: r.error ?? null,
-          payload: { about: type },
-        }))
-        .catch(() => {});
+      emSegundoPlano(
+        sendEmailResilient(config, fromEmail, adminTo, `⚠ Email NÃO enviado: "${type}"`, alertHtml)
+          .then((r) => adminClient.from("notification_log").insert({
+            event: "email_failure_alert", channel: "email",
+            recipient: Array.isArray(adminTo) ? adminTo.join(", ") : String(adminTo),
+            status: r.ok ? "sent" : "failed", error: r.error ?? null,
+            payload: { about: type },
+          }))
+          .catch(() => {}),
+      );
     }
 
     if (!result.ok) {
