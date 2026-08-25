@@ -92,6 +92,25 @@ async function fetchPage(endpoint: string, username: string, apiKey: string, pag
   return await b2bwaveFetch(`${endpoint}${separator}page=${page}`, username, apiKey);
 }
 
+// Tamanho de pagina dos PEDIDOS. Precisa bater com os testes de "acabou?"
+// espalhados pelo arquivo (`length < ORDERS_PER_PAGE`), por isso e constante.
+const ORDERS_PER_PAGE = 500;
+
+// Busca uma pagina de pedidos SEMPRE na forma paginada.
+//
+// `orders.json?page=N` sozinho IGNORA o `page`: medido na API real (acao
+// `debug_orders_paging`) — pagina 1 e pagina 2 devolviam os MESMOS 9 pedidos.
+// Como todo o codigo testa `length < 500` para decidir que acabou, uma resposta
+// de 9 encerrava o laco na primeira pagina. Efeito: o cron diario so enxergava
+// os 9 pedidos mais recentes, e qualquer alteracao feita no B2BWave num pedido
+// mais antigo nunca chegava aqui.
+//
+// Com `paginated=1&per_page=500` a API pagina de verdade: pagina 1 = ids
+// 2821..2300, pagina 2 = 2299..1787.
+async function fetchOrdersPage(username: string, apiKey: string, page: number) {
+  return await fetchPage(`orders.json?paginated=1&per_page=${ORDERS_PER_PAGE}`, username, apiKey, page);
+}
+
 async function fetchAllPages(endpoint: string, username: string, apiKey: string) {
   const allData: any[] = [];
   let page = 1;
@@ -507,7 +526,7 @@ Deno.serve(async (req) => {
 
     if (action === "debug_orders") {
       const page = body.page || 1;
-      const data = await fetchPage("orders.json", username, apiKey, page);
+      const data = await fetchOrdersPage(username, apiKey, page);
       if (!Array.isArray(data) || data.length === 0) {
         return new Response(JSON.stringify({ success: true, count: 0, message: "No data" }), { headers: jsonHeaders });
       }
@@ -529,7 +548,7 @@ Deno.serve(async (req) => {
     // de cada) — nao despeja o pedido inteiro no log.
     if (action === "debug_order_fields") {
       const page = body.page || 1;
-      const data = await fetchPage("orders.json", username, apiKey, page);
+      const data = await fetchOrdersPage(username, apiKey, page);
       if (!Array.isArray(data) || data.length === 0) {
         return new Response(JSON.stringify({ success: true, message: "No data" }), { headers: jsonHeaders });
       }
@@ -1109,7 +1128,7 @@ Deno.serve(async (req) => {
       const offset = body.offset || 0;
       const limit = 50;
       
-      const data = await fetchPage("orders.json", username, apiKey, pageNum);
+      const data = await fetchOrdersPage(username, apiKey, pageNum);
       if (!Array.isArray(data) || data.length === 0) {
         return new Response(JSON.stringify({ success: true, hasMore: false, message: `Page ${pageNum}: no data`, synced: 0, errors: 0 }), { headers: jsonHeaders });
       }
@@ -1117,7 +1136,7 @@ Deno.serve(async (req) => {
       const slice = data.slice(offset, offset + limit);
       if (slice.length === 0) {
         return new Response(JSON.stringify({ 
-          success: true, hasMore: data.length >= 500, 
+          success: true, hasMore: data.length >= ORDERS_PER_PAGE, 
           nextPage: pageNum + 1, nextOffset: 0,
           synced: 0, message: `Page ${pageNum} offset ${offset}: done, move to next page`
         }), { headers: jsonHeaders });
@@ -1131,7 +1150,7 @@ Deno.serve(async (req) => {
       });
       if (allPre2025) {
         const moreInThisPage = offset + limit < data.length;
-        const morePages = data.length >= 500;
+        const morePages = data.length >= ORDERS_PER_PAGE;
         return new Response(JSON.stringify({
           success: true,
           hasMore: moreInThisPage || morePages,
@@ -1147,7 +1166,7 @@ Deno.serve(async (req) => {
       const { created, updated, skipped, errors } = await processOrderSlice(adminClient, slice, true, false);
 
       const moreInThisPage = offset + limit < data.length;
-      const morePages = data.length >= 500;
+      const morePages = data.length >= ORDERS_PER_PAGE;
 
       return new Response(JSON.stringify({
         success: true,
@@ -1222,7 +1241,7 @@ Deno.serve(async (req) => {
       while (Date.now() - inicio < ORCAMENTO_MS) {
         let data: any;
         try {
-          data = await fetchPage("orders.json", username, apiKey, page);
+          data = await fetchOrdersPage(username, apiKey, page);
         } catch (_e) {
           errors++;
           break;   // retoma do mesmo cursor na proxima chamada
@@ -1235,7 +1254,7 @@ Deno.serve(async (req) => {
         created += r.created; updated += r.updated; skipped += r.skipped; errors += r.errors;
         paginas++;
 
-        const ultima = data.length < 500;
+        const ultima = data.length < ORDERS_PER_PAGE;
         page++;
         await adminClient.from("sync_state").upsert({ key: CHAVE, value: { page } }, { onConflict: "key" });
         if (ultima) { done = true; break; }
@@ -1258,7 +1277,7 @@ Deno.serve(async (req) => {
       const offset = body.offset || 0;
       const limit = 50;
       
-      const data = await fetchPage("orders.json", username, apiKey, pageNum);
+      const data = await fetchOrdersPage(username, apiKey, pageNum);
       if (!Array.isArray(data) || data.length === 0) {
         return new Response(JSON.stringify({ success: true, hasMore: false, message: `Page ${pageNum}: no data`, synced: 0, errors: 0 }), { headers: jsonHeaders });
       }
@@ -1266,7 +1285,7 @@ Deno.serve(async (req) => {
       const slice = data.slice(offset, offset + limit);
       if (slice.length === 0) {
         return new Response(JSON.stringify({ 
-          success: true, hasMore: data.length >= 500, 
+          success: true, hasMore: data.length >= ORDERS_PER_PAGE, 
           nextPage: pageNum + 1, nextOffset: 0,
           synced: 0, message: `Page ${pageNum} offset ${offset}: done, move to next page`
         }), { headers: jsonHeaders });
@@ -1276,7 +1295,7 @@ Deno.serve(async (req) => {
       const { created, updated, skipped, errors } = await processOrderSlice(adminClient, slice, false, false);
 
       const moreInThisPage = offset + limit < data.length;
-      const morePages = data.length >= 500;
+      const morePages = data.length >= ORDERS_PER_PAGE;
 
       return new Response(JSON.stringify({
         success: true,
@@ -1304,7 +1323,7 @@ Deno.serve(async (req) => {
       for (let i = 0; i < PAGES_PER_TICK; i++) {
         let data: any;
         try {
-          data = await fetchPage("orders.json", username, apiKey, page);
+          data = await fetchOrdersPage(username, apiKey, page);
         } catch (e) {
           errors++;
           break; // erro de rede não aborta o cron; retoma do mesmo cursor no próximo tick
