@@ -56,8 +56,10 @@ async function podeEnviar(db: Db, canal: string): Promise<{ ok: boolean; motivo?
 // passa por gatilho nenhum e tem `notify_customer = true`. Pedido antigo
 // inserido pelo sync mandava "novo pedido" para o CELULAR DO CLIENTE.
 //
-// NAO cobre `send-email` chamado direto (OrderDetail, Checkout) — aquele tem a
-// sua propria checagem. Nao presuma cobertura universal a partir daqui.
+// O `send-email` chamado direto (OrderDetail, Checkout) tem a MESMA checagem,
+// duplicada la — ver `TIPOS_DE_PEDIDO` em `send-email/index.ts`. Sao dois
+// portoes independentes de proposito: `order_status` e SMS por aqui e e-mail por
+// la, entao um so nao cobriria o cliente inteiro.
 //
 // TUDO falha FECHADO: sem `order_id`, pedido inexistente, numero ambiguo,
 // consulta com erro, ou pedido marcado `notificavel = false` => NAO notifica.

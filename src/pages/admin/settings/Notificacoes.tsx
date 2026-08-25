@@ -722,7 +722,7 @@ export default function Notificacoes() {
           <p className="text-sm text-muted-foreground">
             Write the SMS / WhatsApp message sent for each event. Email content moved to the
             dedicated <strong>Email</strong> tab. Available variables:&nbsp;
-            <code className="text-xs">{'{order_id} {status} {total} {date} {items} {customer_name} {customer_company} {customer_email} {customer_phone} {product_name} {quantity}'}</code>
+            <code className="text-xs">{'{order_numero} {status} {total} {date} {items} {customer_name} {customer_company} {customer_email} {customer_phone} {product_name} {quantity}'}</code>
           </p>
           {events.map((ev) => (
             <Card key={ev.id} className="p-4 space-y-3">

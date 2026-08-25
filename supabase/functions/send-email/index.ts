@@ -1375,6 +1375,62 @@ Deno.serve(async (req) => {
     //
     // Falha FECHADO: se a checagem nao responder, nao envia.
     {
+      // BARREIRA DE IDADE tambem AQUI.
+      //
+      // O `dispatchEvent` cobre os eventos que passam por ele, mas metade do
+      // canal de status do cliente sai por aqui: `order_status_change` e chamado
+      // DIRETO pelo OrderDetail (o notify-dispatch e SMS-only para esse evento).
+      // Sem esta checagem, mudar o status de um pedido de 2024 manda e-mail ao
+      // cliente sobre a compra antiga — o mesmo defeito, so que por e-mail.
+      //
+      // Meu comentario no `_shared/dispatch.ts` afirmava que "aquele tem a sua
+      // propria checagem". Nao tinha. Agora tem.
+      const TIPOS_DE_PEDIDO = new Set([
+        "order_status_change", "new_order_customer", "new_order_admin", "order_receipt",
+      ]);
+      if (TIPOS_DE_PEDIDO.has(type)) {
+        const pid = (body as any)?.order?.id ?? null;
+        const pnum = (body as any)?.order?.numero ?? null;
+        let motivo: string | null = null;
+        try {
+          const { data: cfgIdade } = await adminClient.from("sync_state")
+            .select("value").eq("key", "order_notify_max_age_days").maybeSingle();
+          const bruto = (cfgIdade?.value as any)?.n;
+          const maxDias = typeof bruto === "number" ? bruto : 7;
+
+          const sel = adminClient.from("pedidos")
+            .select("created_at, data_origem, notificavel", { count: "exact" });
+          const { data: peds, error: pedErr, count } = pid
+            ? await sel.eq("id", String(pid))
+            : (pnum !== null ? await sel.eq("numero", Number(pnum)) : { data: null, error: null, count: 0 } as any);
+
+          if (pedErr) motivo = "nao foi possivel checar o pedido: " + pedErr.message;
+          else if (!peds || peds.length === 0) motivo = "pedido nao encontrado";
+          else if ((count ?? peds.length) > 1) motivo = "numero de pedido ambiguo";
+          else {
+            const ped: any = peds[0];
+            if (ped.notificavel === false) motivo = "pedido marcado como nao-notificavel";
+            else {
+              const quando = ped.data_origem ?? ped.created_at;
+              const dias = quando ? (Date.now() - new Date(quando).getTime()) / 86_400_000 : Infinity;
+              if (dias > maxDias) motivo = `pedido com ${Math.floor(dias)} dias (limite ${maxDias}) — nada retroativo`;
+            }
+          }
+        } catch (e) {
+          motivo = "checagem de idade indisponivel: " + String((e as any)?.message ?? e);
+        }
+        if (motivo) {
+          await adminClient.from("notification_log").insert({
+            event: type, channel: "email",
+            recipient: Array.isArray(to) ? to.join(", ") : String(to),
+            status: "failed", error: "NAO ENVIADO — " + motivo, payload: { bloqueado: true, retroativo: true },
+          });
+          return new Response(JSON.stringify({ skipped: true, blocked: true, reason: motivo, type }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
       // Reset de senha e magic link tem contador PROPRIO: se o provedor cair e
       // as notificacoes queimarem o orcamento da hora, o cliente ainda consegue
       // entrar no portal. Trancar o cliente para fora seria trocar um problema

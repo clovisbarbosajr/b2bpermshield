@@ -13,8 +13,9 @@
 --   notificavel = false  ->  este pedido NUNCA gera notificacao, ponto.
 --
 -- Quem marca: o sync, quando importa um pedido sem data de origem confiavel.
--- Nao ha como um pedido assim voltar a ser notificavel por acidente — so por
--- UPDATE deliberado.
+-- O sync reabilita automaticamente se a origem passar a informar a data — e
+-- tudo bem, porque nesse momento ele grava a data REAL junto, e a trava de
+-- idade passa a avaliar contra ela.
 -- ============================================================================
 
 ALTER TABLE public.pedidos
@@ -31,15 +32,26 @@ COMMENT ON COLUMN public.pedidos.data_origem IS
 -- ---------------------------------------------------------------------------
 -- BACKFILL DEFENSIVO
 --
--- Os pedidos ja importados com data falsa nao dao para distinguir agora. O que
--- da para fazer e nao deixar os antigos notificarem: qualquer pedido do B2BWave
--- com mais de 7 dias fica marcado como nao-notificavel de forma PERMANENTE.
--- Sem isto, cada linha dessas e um SMS retroativo esperando o status mudar.
+-- Criterio: `data_origem IS NULL`. Neste instante a coluna acabou de ser criada,
+-- entao ela e NULA em 100% das linhas — o UPDATE cala TODO pedido importado que
+-- ja existe. E deterministico e nao depende de adivinhar nada.
+--
+-- A versao anterior usava `created_at < now() - 7 dias`, o que era o MESMO erro
+-- que esta migration passa 40 linhas denunciando: em linha importada,
+-- `created_at` e a data da IMPORTACAO, nao a da compra. O pedido de 2025
+-- importado ontem escapava do backfill, ficava `notificavel = true` com data
+-- falsa-recente, e virava exatamente o SMS retroativo que estamos evitando.
+--
+-- NAO e permanente, e isso e de proposito: quando o sync voltar a ver o pedido
+-- com data real da origem, ele grava `data_origem` e reabilita. Na mesma
+-- sentenca — entao o gatilho ja avalia a idade contra a data VERDADEIRA e
+-- continua barrando o que e antigo. Reabilitar mil pedidos de uma vez nao gera
+-- nenhuma mensagem.
 -- ---------------------------------------------------------------------------
 UPDATE public.pedidos
 SET notificavel = false
 WHERE b2bwave_order_id IS NOT NULL
-  AND created_at < now() - interval '7 days';
+  AND data_origem IS NULL;
 
 -- ---------------------------------------------------------------------------
 -- O gatilho de status passa a olhar a marca ANTES da idade.
