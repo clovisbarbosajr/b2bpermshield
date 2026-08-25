@@ -457,6 +457,24 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
 }
 
 // Grava o status de uma execução em sync_log (persiste; a tela lê daqui).
+// Liga/desliga a supressao de notificacao de status durante operacao em massa.
+//
+// SEM ISTO A TRAVA NAO EXISTE: a funcao no banco existia mas ninguem chamava.
+// Foi o pior achado da revisao — a protecao estava desligada por omissao.
+//
+// O `_minutos` e validade: se esta funcao morrer no meio (timeout da edge,
+// deploy, erro nao tratado), a supressao expira sozinha em vez de deixar o
+// cliente sem aviso para sempre.
+async function suprimirNotificacao(db: any, ligar: boolean, minutos = 30) {
+  try {
+    await db.rpc("set_suppress_order_notify", { _on: ligar, _minutos: minutos });
+  } catch (e) {
+    // Nao derruba o sync: se a RPC nao existir (SQL ainda nao rodado), o teto do
+    // gatilho continua valendo como segunda linha de defesa.
+    console.warn("[b2bwave-sync] set_suppress_order_notify falhou:", String((e as any)?.message ?? e));
+  }
+}
+
 async function logRun(db: any, action: string, s: { created?: number; updated?: number; skipped?: number; errors?: number; samples?: string[] }) {
   try {
     await db.from("sync_log").insert({
@@ -1232,6 +1250,11 @@ Deno.serve(async (req) => {
       const ORCAMENTO_MS = body.budget_ms || 100_000;   // folga sob o limite da Edge Function
       const inicio = Date.now();
 
+      // Reconciliacao em massa: NENHUMA notificacao de status. Foi exatamente
+      // este caminho que mandou 1281 SMS em 25/ago.
+      await suprimirNotificacao(adminClient, true, 30);
+      try {
+
       const { data: est } = await adminClient.from("sync_state").select("value").eq("key", CHAVE).maybeSingle();
       let page = Number((est?.value as any)?.page) || 1;
 
@@ -1270,6 +1293,12 @@ Deno.serve(async (req) => {
         created, updated, skipped, errors,
         segundos: Math.round((Date.now() - inicio) / 1000),
       }), { headers: jsonHeaders });
+
+      } finally {
+        // `finally`: libera mesmo se o laco lancar. Se o processo morrer antes
+        // disto, a validade de 30 min desliga sozinha.
+        await suprimirNotificacao(adminClient, false);
+      }
     }
 
     if (action === "sync_orders_all") {
@@ -1292,7 +1321,16 @@ Deno.serve(async (req) => {
       }
 
       // Upsert (cria novos, ATUALIZA existentes). Histórico completo (sem filtro de data).
-      const { created, updated, skipped, errors } = await processOrderSlice(adminClient, slice, false, false);
+      // Acao MANUAL de historico completo: suprime notificacao de status, como o
+      // backfill. Quem varre historico nao esta comunicando novidade a ninguem.
+      await suprimirNotificacao(adminClient, true, 10);
+      let created = 0, updated = 0, skipped = 0, errors = 0;
+      try {
+        const r = await processOrderSlice(adminClient, slice, false, false);
+        created = r.created; updated = r.updated; skipped = r.skipped; errors = r.errors;
+      } finally {
+        await suprimirNotificacao(adminClient, false);
+      }
 
       const moreInThisPage = offset + limit < data.length;
       const morePages = data.length >= ORDERS_PER_PAGE;
