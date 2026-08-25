@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { contaLiberada } from "@/lib/contaCliente";
 
 export type AppRole = "admin" | "cliente" | "warehouse" | "manager";
 
@@ -26,6 +27,13 @@ interface AuthContextType {
   canPlaceOrders: boolean;
   // É um sub-usuário (tem parent_customer_id)? Só o DONO da conta gerencia a equipe.
   isSubUser: boolean;
+  // Conta de cliente aprovada? `false` manda para /pending-approval.
+  //
+  // O portão de verdade é o BANCO (`cliente_conta_liberada`, 20260825280000):
+  // conta pendente enxerga catálogo VAZIO mesmo chamando a API direto. Isto aqui
+  // é só a tela — existe para o cliente ver "aguardando aprovação" em vez de uma
+  // loja vazia sem explicação.
+  contaAprovada: boolean;
   signOut: () => Promise<void>;
   clearViewAs: (dest?: string) => void;
 }
@@ -38,6 +46,7 @@ const AuthContext = createContext<AuthContextType>({
   hasPermission: () => false,
   loading: true,
   isDemo: false,
+  contaAprovada: true,
   impersonatedCustomer: null,
   canPlaceOrders: true,
   isSubUser: false,
@@ -81,6 +90,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [impersonatedCustomer, setImpersonatedCustomer] = useState<ViewAsCustomer | null>(null);
   const [canPlaceOrders, setCanPlaceOrders] = useState<boolean>(true);
   const [isSubUser, setIsSubUser] = useState<boolean>(false);
+  const [contaAprovada, setContaAprovada] = useState<boolean>(true);
 
   // Admin always has full access; for others check the permissions map
   const hasPermission = (key: string): boolean => {
@@ -103,6 +113,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setPermissions((data as any).permissions || {});
       setCanPlaceOrders(true);
       setIsSubUser(false);
+      setContaAprovada(true);
       return dbRole;
     }
 
@@ -113,13 +124,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRole("cliente");
       setPermissions((data as any).permissions || {});
       // Sub-usuário SEM "confirmar pedido sem aprovação" não finaliza compra (igual B2BWave).
-      const { data: me } = await supabase
+      const { data: me, error: meErr } = await supabase
         .from("clientes")
-        .select("parent_customer_id, can_confirm_order")
+        .select("id, parent_customer_id, can_confirm_order, status, is_active")
         .eq("user_id", userId)
         .maybeSingle();
       setCanPlaceOrders(!(me?.parent_customer_id && me?.can_confirm_order === false));
       setIsSubUser(!!me?.parent_customer_id);
+
+      // Sub-usuário herda a situação da conta da EMPRESA — empresa suspensa
+      // suspende o funcionário. Mesma regra do `cliente_conta_liberada` no banco.
+      let dono: any = me;
+      if (me?.parent_customer_id) {
+        const { data: pai } = await supabase
+          .from("clientes")
+          .select("status, is_active")
+          .eq("id", me.parent_customer_id)
+          .maybeSingle();
+        if (pai) dono = pai;
+      }
+
+      // FALHA DE LEITURA NÃO BLOQUEIA. O banco já é o portão real; travar a tela
+      // por um erro de rede transformaria uma falha nossa em cliente legítimo
+      // trancado do lado de fora.
+      setContaAprovada(meErr ? true : contaLiberada(dono));
       return "cliente";
     }
 
@@ -128,6 +156,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPermissions({});
     setCanPlaceOrders(true);
     setIsSubUser(false);
+    setContaAprovada(false);
     return null;
   };
 
@@ -324,6 +353,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         impersonatedCustomer,
         canPlaceOrders,
         isSubUser,
+        contaAprovada,
         signOut,
         clearViewAs,
       }}

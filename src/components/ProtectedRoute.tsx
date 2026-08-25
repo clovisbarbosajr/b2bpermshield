@@ -10,7 +10,7 @@ interface Props {
 }
 
 const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Props) => {
-  const { user, role, loading, isDemo, hasPermission } = useAuth();
+  const { user, role, loading, isDemo, hasPermission, contaAprovada, impersonatedCustomer } = useAuth();
 
   if (loading) {
     return (
@@ -26,6 +26,23 @@ const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Props) =
 
   // Real user with no role → pending approval (customers only)
   if (!isDemo && !role) {
+    return <Navigate to="/pending-approval" replace />;
+  }
+
+  // Cliente com ficha PENDENTE/INATIVA → aprovação.
+  //
+  // Sem isto, `/pending-approval` era código morto: `handle_new_user` dá o papel
+  // `cliente` a todo `signUp`, então `role` nunca é nulo e o teste acima nunca
+  // dispara. Qualquer pessoa se cadastrava e caía direto no catálogo.
+  //
+  // Isto é a TELA. O portão real é o banco (`cliente_conta_liberada`), que faz a
+  // conta pendente enxergar catálogo vazio mesmo chamando a API direto — a chave
+  // anon está no bundle, então guarda de rota sozinha não protege nada.
+  //
+  // `impersonatedCustomer` sai fora: no "View As" quem está logado é o staff, e
+  // ele precisa poder abrir a conta de um cliente pendente justamente para
+  // resolver a situação dele.
+  if (!isDemo && role === "cliente" && !impersonatedCustomer && !contaAprovada) {
     return <Navigate to="/pending-approval" replace />;
   }
 

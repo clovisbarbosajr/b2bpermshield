@@ -755,3 +755,32 @@ eu ter lido em vez de perguntar.
   `sessionStorage`, a sessao continua sendo a do staff, entao um pedido feito
   pelo admin em nome do cliente cai em ROLLBACK_DENIED e volta a virar orfao.
   Nao e regressao; e caso que a correcao nao cobre.
+
+### 25/08 (noite, cont. 9) - LEVA A / A1: conta pendente via o catalogo inteiro
+
+- **CONFIRMADO POR MIM** - `handle_new_user` da papel `cliente` a TODO `signUp`,
+  entao `ProtectedRoute` (que so olha o PAPEL) nunca redireciona, e
+  `/pending-approval` e CODIGO MORTO. E as funcoes de visibilidade
+  (`cliente_pode_ver_produto`/`_categoria`) nao olham `clientes.status`: devolvem
+  `true` para todo produto nao privado. Cadastro aberto => qualquer um ve o
+  catalogo inteiro COM PRECO em 30 segundos. Ficha pendente fica sem tabela de
+  preco, entao ve a tabela BASE.
+- **FEITO** - `20260825280000_conta_pendente_nao_ve_catalogo.sql`. Helper
+  `cliente_conta_liberada()` + a checagem nas DUAS funcoes de visibilidade, logo
+  depois do atalho de staff. Denylist igual a de
+  `fn_block_order_inactive_customer`, para as travas concordarem: hoje o sistema
+  BARRA o pedido do pendente e MOSTRA o catalogo para ele.
+- **PROVA MECANICA** - script comparou os corpos das duas funcoes contra as
+  versoes vivas: IDENTICOS fora da checagem nova. Nao reescrevi logica por
+  acidente.
+- **FEITO** - `src/lib/contaCliente.ts` com a MESMA regra, testavel sem React;
+  `AuthContext` expoe `contaAprovada` (sub-usuario herda a situacao da EMPRESA);
+  `ProtectedRoute` redireciona cliente nao aprovado. Falha de LEITURA nao
+  bloqueia — o banco ja e o portao real, e travar a tela por erro de rede
+  trancaria cliente legitimo do lado de fora.
+- **VIGIA PROVADA (3 mutantes)** - denylist vazia -> 3 testes acendem; condicao
+  invertida -> 6 acendem (incluindo os 3 de CONTROLE, que provam que cliente
+  ativo continua entrando); ignorar `is_active` -> 1 acende. Arquivo restaurado,
+  76 testes verdes.
+- **DECLARADO** - a guarda de rota e SO tela. O portao e o banco: a chave anon
+  esta no bundle, entao guarda de rota sozinha nao protege nada.
