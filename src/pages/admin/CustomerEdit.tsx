@@ -418,13 +418,30 @@ const CustomerEdit = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label>Discount</Label>
-                  <div className="flex items-center gap-1">
-                    <Input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: parseFloat(e.target.value) || 0 }))} className="max-w-[100px]" />
-                    <span className="text-sm text-muted-foreground">%</span>
-                  </div>
-                </div>
+                {/* CAMPO REMOVIDO DA TELA em 25/ago/2026, por decisao do dono.
+                  *
+                  * `clientes.discount` NUNCA foi aplicado a preco nenhum: nao e
+                  * lido por gatilho, nem pelo checkout, nem por `pricing.ts`.
+                  * Era um controle que o dono acreditava ter — o pior tipo de
+                  * tela fantasma, porque ele acha que deu 10% e nao deu.
+                  *
+                  * A COLUNA CONTINUA NO BANCO e continua sendo sincronizada do
+                  * B2BWave (`b2bwave-sync`), entao nenhum dado se perde e a
+                  * migracao de volta e so descomentar isto.
+                  *
+                  * PARA VOLTAR: descomente este bloco E implemente a aplicacao
+                  * do desconto no servidor (`fn_pedido_total_appside` e
+                  * `preco_autoritativo`). Sem a segunda parte, volta a ser
+                  * fantasma.
+                  *
+                  * <div>
+                  *   <Label>Discount</Label>
+                  *   <div className="flex items-center gap-1">
+                  *     <Input type="number" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: parseFloat(e.target.value) || 0 }))} className="max-w-[100px]" />
+                  *     <span className="text-sm text-muted-foreground">%</span>
+                  *   </div>
+                  * </div>
+                  */}
                 <div><Label>Minimum order value</Label><Input value={form.minimum_order_value} onChange={e => setForm(f => ({ ...f, minimum_order_value: e.target.value }))} /></div>
                 <div><Label>Phone</Label><Input value={form.telefone} onChange={e => setForm(f => ({ ...f, telefone: e.target.value }))} /></div>
                 <div><Label>Admin comments</Label><Textarea value={form.admin_comments} onChange={e => setForm(f => ({ ...f, admin_comments: e.target.value }))} rows={3} /></div>

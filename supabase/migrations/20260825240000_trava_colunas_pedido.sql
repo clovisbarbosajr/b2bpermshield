@@ -14,7 +14,7 @@
 -- mas um POST cru na API manda o que quiser.
 --
 --   `is_paid`  -> PEDIDO NASCE PAGO. Nenhum trigger le ou escreve essa coluna
---                 (procurado nas 158 migrations). O admin ve "pago" na tela e o
+--                 (procurado em TODAS as migrations do repo). O admin ve "pago" na tela e o
 --                 Stripe nunca foi chamado. Pior: `stripe-checkout` e idempotente
 --                 por `.eq("is_paid", false)`, entao o webhook legitimo vira
 --                 no-op — nem da para reconciliar depois.
@@ -73,21 +73,22 @@ BEGIN
   END IF;
 END $gate$;
 
-CREATE OR REPLACE FUNCTION public.fn_lock_pedido_cols()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  -- Chamador NAO identificado = `service_role` (a service key nao carrega `sub`,
-  -- entao `auth.uid()` e NULL) ou conexao DIRETA ao banco (SQL editor do
-  -- Lovable, psql), que nem passa por PostgREST.
+  -- ISENTOS: `service_role` (o sync) e a conexao DIRETA ao banco — SQL editor do
+  -- Lovable, psql — que nao passa por PostgREST e por isso nao tem claim de role
+  -- (`auth.role()` NULL).
   --
-  -- Testar `auth.uid()` e nao `auth.role()` de proposito: e a forma que a outra
-  -- trava do repo usa (`fn_lock_privileged_cliente_cols`,
-  -- 20260801130000:167-170) — escopa a restricao a quem FOI identificado, em vez
-  -- de isentar por ausencia de um claim. Nao depende de nenhuma afirmacao minha
-  -- sobre o que o PostgREST garante no JWT.
+  -- Fail-CLOSED por omissao: so estes dois casos passam. `anon`, `authenticated`
+  -- e qualquer papel futuro que eu nao conheca caem na restricao.
   --
-  -- Mesmo criterio da 20260825230000.
-  IF auth.uid() IS NULL THEN
+  -- HONESTIDADE: eu NAO consigo provar por este repositorio que o PostgREST
+  -- sempre preenche `role` no JWT — e afirmacao sobre a infra, nao sobre este
+  -- codigo. O que sustenta a trava e outra coisa: a barreira primaria e a RLS
+  -- (toda policy de INSERT em `pedidos` exige `auth.uid()`, e sem JWT nao ha
+  -- `auth.uid()`), e este gatilho e a segunda camada.
+  --
+  -- Ja tentei `auth.uid() IS NULL` aqui. E MAIS permissivo, nao menos: isentaria
+  -- tambem o papel `anon`. Voltei.
+  IF auth.role() = 'service_role' OR auth.role() IS NULL THEN
     RETURN NEW;
   END IF;
 
@@ -160,7 +161,11 @@ COMMIT;
 -- `cliente_id`: preso pela propria policy de INSERT.
 --
 -- UPDATE: o cliente nao tem policy de UPDATE nem DELETE em `pedidos` (11
--- policies conferidas). Por isso este trigger e so BEFORE INSERT.
+-- policies vivas conferidas). Por isso este trigger e so BEFORE INSERT.
+--
+-- (A RPC `pedido_rollback_checkout`, de 20260825250000, e a UNICA excecao: ela e
+-- SECURITY DEFINER e alcanca DELETE/UPDATE, mas so no pedido do proprio
+-- chamador, com menos de 30 min, nao pago, e o DELETE so com zero itens.)
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------

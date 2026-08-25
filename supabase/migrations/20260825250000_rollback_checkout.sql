@@ -3,12 +3,14 @@
 --
 -- `src/pages/portal/Checkout.tsx` tenta desfazer o pedido em TRES pontos:
 --
---   :640  await supabase.from("pedidos").delete().eq("id", pedido.id)
---   :699  await supabase.from("pedidos").update({ status: "cancelled" })
---   :712  idem
+--   - apos falha no insert dos itens: `.delete().eq("id", pedido.id)`
+--   - apos falha ao criar o payment intent: `.update({ status: "cancelled" })`
+--   - apos `confirmCardPayment` recusar: idem
+-- (sem numero de linha de proposito: o arquivo muda, e citacao de linha velha
+--  faz o revisor conferir a linha errada)
 --
 -- Nenhum dos tres funciona. O cliente NAO tem policy de DELETE nem de UPDATE em
--- `pedidos` — conferidas as 11 policies existentes: `Clients can read own`
+-- `pedidos` — conferidas as 10 policies vivas: `Clients can read own`
 -- (SELECT), `Clients can insert` (INSERT), `Contacts read/insert company`,
 -- `Sub-customer reads parent history`, `Parent reads sub-customer orders`,
 -- `Warehouse read` (SELECT), `Warehouse update` (UPDATE, papel warehouse),
@@ -41,10 +43,14 @@
 
 BEGIN;
 
--- PORTAO: depende de `notificavel` (20260825200000). Sem ela, o UPDATE de
--- status abaixo dispararia `trg_order_status_notify` e MANDARIA SMS/e-mail de
--- "pedido cancelado" para um cliente que esta parado na tela de checkout —
--- exatamente o tipo de disparo que o incidente de 25/ago existiu para impedir.
+-- PORTAO: depende de `notificavel` (20260825200000).
+--
+-- HOJE o `trg_order_status_notify` esta DESLIGADO (`DISABLE TRIGGER` em
+-- 20260825180000:382) e os envios estao pausados, entao nada sairia de qualquer
+-- forma. Eu tinha escrito aqui que "mandaria SMS/e-mail" — falso no estado
+-- atual. A dependencia continua valendo para quando o gatilho for religado: sem
+-- `notificavel`, o UPDATE de status desta RPC avisaria o cliente que esta parado
+-- na tela de erro que o pedido dele foi cancelado.
 DO $gate$
 BEGIN
   IF NOT EXISTS (
@@ -74,7 +80,13 @@ BEGIN
     FROM public.pedidos p
     JOIN public.clientes c ON c.id = p.cliente_id
     WHERE p.id = _pedido_id
-      AND (c.user_id = auth.uid() OR public.is_subcustomer_of(c.id))
+      -- SO o dono da ficha. Eu tinha posto `OR is_subcustomer_of(c.id)` aqui;
+      -- isso deixaria um sub-usuario desfazer pedido do PAI, poder que o
+      -- desfazer-de-checkout nao precisa e que nem e simetrico (o pai nao
+      -- desfaria o do filho). O Checkout cria o pedido com a ficha PROPRIA
+      -- (`cliente_id = clienteId`), entao `user_id = auth.uid()` cobre 100% do
+      -- caso de uso.
+      AND c.user_id = auth.uid()
   ) INTO v_dono;
 
   IF NOT v_dono THEN
@@ -89,6 +101,24 @@ BEGIN
 
   IF v_idade > interval '30 minutes' THEN
     RAISE EXCEPTION 'ROLLBACK_TOO_OLD';
+  END IF;
+
+  -- 2b) JA PAGO nunca se desfaz por aqui.
+  --
+  -- Faltava, e o buraco era real: se o `confirmCardPayment` devolvesse erro de
+  -- REDE depois de a cobranca ter passado, o Checkout chamaria esta RPC e o
+  -- pedido pago viraria 'cancelled' — e `trg_adjust_stock_on_order_status`
+  -- devolveria a reserva de estoque de um pedido que foi cobrado. O cliente
+  -- tambem podia chamar a RPC direto no proprio pedido pago de menos de 30min.
+  --
+  -- Cancelar pedido pago e operacao de ATENDIMENTO, com estorno. Nao e desfazer
+  -- de checkout.
+  IF EXISTS (
+    SELECT 1 FROM public.pedidos
+    WHERE id = _pedido_id
+      AND (is_paid IS TRUE OR payment_intent_id IS NOT NULL)
+  ) THEN
+    RAISE EXCEPTION 'ROLLBACK_PAID';
   END IF;
 
   -- 3) Pedido VAZIO nunca existiu de verdade: apaga. Deixa-lo como 'cancelled'

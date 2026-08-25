@@ -7,9 +7,10 @@
 -- protegida contra edicao pelo cliente (`fn_lock_privileged_cliente_cols`,
 -- 20260801130000:182).
 --
--- So que NINGUEM a le. Procurada em todo o `src/`, `supabase/functions/` e nas
--- 158 migrations: nao aparece em nenhum gatilho, nem no checkout, nem em
--- policy. O dono marca "disable ordering" num inadimplente, a tela confirma, e
+-- So que ninguem a USA para decidir nada. Ela e escrita (admin, sync, e o PUT
+-- externo de `functions/api/index.ts`) e lida so para preencher formulario e
+-- filtro de lista. Em nenhum gatilho, em nenhuma policy, e — ate a mudanca irma
+-- deste lote — em nenhum ponto do checkout. O dono marca "disable ordering" num inadimplente, a tela confirma, e
 -- o cliente continua comprando normalmente.
 --
 -- E o caso mais perigoso de funcionalidade fantasma: nao e uma tela que nao faz

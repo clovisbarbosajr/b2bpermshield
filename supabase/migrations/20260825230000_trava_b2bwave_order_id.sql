@@ -46,27 +46,30 @@
 
 BEGIN;
 
-CREATE OR REPLACE FUNCTION public.fn_pedido_b2bwave_id_so_servidor()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  -- Chamador NAO identificado = `service_role` (a service key nao carrega `sub`,
-  -- entao `auth.uid()` e NULL) ou conexao DIRETA ao banco (SQL editor do
-  -- Lovable, psql), que nem passa por PostgREST.
+  -- ISENTOS: `service_role` (o sync) e a conexao DIRETA ao banco — SQL editor do
+  -- Lovable, psql — que nao passa por PostgREST e por isso nao tem claim de role
+  -- (`auth.role()` NULL).
   --
-  -- Testar `auth.uid()` e nao `auth.role()` de proposito: e a forma que a outra
-  -- trava do repo usa (`fn_lock_privileged_cliente_cols`,
-  -- 20260801130000:167-170) — escopa a restricao a quem FOI identificado, em vez
-  -- de isentar por ausencia de um claim. Nao depende de nenhuma afirmacao minha
-  -- sobre o que o PostgREST garante no JWT.
+  -- Fail-CLOSED por omissao: so estes dois casos passam. `anon`, `authenticated`
+  -- e qualquer papel futuro que eu nao conheca caem na restricao.
+  --
+  -- HONESTIDADE: eu NAO consigo provar por este repositorio que o PostgREST
+  -- sempre preenche `role` no JWT — e afirmacao sobre a infra, nao sobre este
+  -- codigo. O que sustenta a trava e outra coisa: a barreira primaria e a RLS
+  -- (toda policy de INSERT em `pedidos` exige `auth.uid()`, e sem JWT nao ha
+  -- `auth.uid()`), e este gatilho e a segunda camada.
+  --
+  -- Ja tentei `auth.uid() IS NULL` aqui. E MAIS permissivo, nao menos: isentaria
+  -- tambem o papel `anon`. Voltei.
+  IF auth.role() = 'service_role' OR auth.role() IS NULL THEN
+    RETURN NEW;
+  END IF;
   --
   -- Sem este escape a trava vira armadilha: o ramo de UPDATE abaixo RESTAURA o
   -- valor antigo, entao `UPDATE pedidos SET b2bwave_order_id = NULL` rodado no
-  -- SQL editor seria silenciosamente revertido — e o SQL editor e o unico
-  -- caminho que o dono usa. A consulta de diagnostico no topo deste arquivo
-  -- manda procurar pedidos forjados; sem o escape, nao haveria como limpa-los.
-  IF auth.uid() IS NULL THEN
-    RETURN NEW;
-  END IF;
+  -- SQL editor seria revertido em silencio — e o SQL editor e o unico caminho
+  -- que o dono usa. A consulta de diagnostico no topo manda procurar pedidos
+  -- forjados; sem o escape, nao haveria como limpa-los.
 
   -- Qualquer outro chamador IDENTIFICADO (cliente, staff pela tela) NAO define
   -- este campo. O SQL do admin nao cai aqui — ele e o caso isento acima. Zera em silencio em vez de recusar: recusar quebraria o insert

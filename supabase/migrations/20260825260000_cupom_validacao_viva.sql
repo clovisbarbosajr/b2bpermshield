@@ -192,20 +192,26 @@ COMMIT;
 --
 -- `uso_maximo` continua sendo um limite HONESTO, nao imposto. Quem consome o
 -- cupom e `increment_coupon_usage`, chamada pelo NAVEGADOR
--- (`src/pages/portal/Checkout.tsx:741` e `:768`). Um cliente que simplesmente
+-- (`src/pages/portal/Checkout.tsx`, helper `bumpCouponUsage`). Um cliente que simplesmente
 -- nao faca essa chamada nunca incrementa `uso_atual`, e reusa um cupom de uso
 -- unico quantas vezes quiser.
 --
 -- NAO movi o incremento para dentro deste gatilho DE PROPOSITO: a chamada esta
 -- no fim do fluxo por decisao anterior e deliberada — antes ela rodava no
 -- submit, e cartao recusado queimava o cupom sem venda nenhuma (o comentario
--- em Checkout.tsx:684-687 registra isso). Trazer para o INSERT reintroduziria
+-- que precede `bumpCouponUsage` registra isso). Trazer para o INSERT reintroduziria
 -- aquele bug.
 --
 -- O conserto certo e um consumo idempotente por pedido (marcar no proprio
 -- pedido que o cupom ja foi contado), e e mudanca maior que esta. Fica na fila
 -- COMO ITEM PROPRIO — o preco, que e o dinheiro de verdade, esta correto a
 -- partir daqui.
+--
+-- SEGUNDO CAMINHO QUE FICA ABERTO: o ramo de UPDATE continua sem validar. Quem
+-- TEM policy de UPDATE em `pedidos` — `warehouse`, `manager`, `admin` — grava
+-- `coupon_id` de cupom expirado num pedido existente e o desconto entra cheio.
+-- E risco INTERNO (exige papel de staff), diferente do risco do cliente que
+-- esta fechado aqui. Anotado.
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------

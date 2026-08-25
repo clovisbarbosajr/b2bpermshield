@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import PortalLayout from "@/components/layouts/PortalLayout";
@@ -75,6 +75,11 @@ const Checkout = () => {
   const [poNumber, setPoNumber] = useState("");
   const [selectedEndereco, setSelectedEndereco] = useState<any>(null);
   const [taxRate, setTaxRate] = useState(0);
+  // A guarda de preco compara o total da tela com o do banco. Se a busca da
+  // aliquota FALHAR, `taxRate` fica 0, o banco cobra o imposto de verdade e a
+  // guarda barraria TODOS os pedidos. Falha de leitura nossa nao pode virar
+  // checkout parado — entao a guarda so vale quando o imposto foi lido de fato.
+  const [taxLookupOk, setTaxLookupOk] = useState(true);
   const [salesTax, setSalesTax] = useState(0);
   const [couponCode, setCouponCode] = useState("");
   const [coupon, setCoupon] = useState<any>(null);
@@ -206,14 +211,16 @@ const Checkout = () => {
 
         if (customerGroupId && taxClassId) {
           // Find matching rule
-          const { data: rule } = await supabase.from("tax_rules")
+          const { data: rule, error: ruleErr } = await supabase.from("tax_rules")
             .select("tax_rate_id")
             .eq("tax_class_id", taxClassId)
             .eq("tax_customer_group_id", customerGroupId)
             .maybeSingle();
+          if (ruleErr) setTaxLookupOk(false);
 
           if (rule?.tax_rate_id) {
-            const { data: rate } = await supabase.from("tax_rates").select("percentual").eq("id", rule.tax_rate_id).maybeSingle();
+            const { data: rate, error: rateErr } = await supabase.from("tax_rates").select("percentual").eq("id", rule.tax_rate_id).maybeSingle();
+            if (rateErr) setTaxLookupOk(false);
             if (rate) {
               const pct = Number(rate.percentual) || 0;
               setTaxRate(pct);
@@ -224,13 +231,15 @@ const Checkout = () => {
           // Customer has no group assigned - find default group rule
           const { data: defaultGroup } = await supabase.from("tax_customer_groups").select("id").eq("is_default", true).maybeSingle();
           if (defaultGroup) {
-            const { data: rule } = await supabase.from("tax_rules")
+            const { data: rule, error: ruleErr } = await supabase.from("tax_rules")
               .select("tax_rate_id")
               .eq("tax_class_id", taxClassId)
               .eq("tax_customer_group_id", defaultGroup.id)
               .maybeSingle();
+            if (ruleErr) setTaxLookupOk(false);
             if (rule?.tax_rate_id) {
-              const { data: rate } = await supabase.from("tax_rates").select("percentual").eq("id", rule.tax_rate_id).maybeSingle();
+              const { data: rate, error: rateErr } = await supabase.from("tax_rates").select("percentual").eq("id", rule.tax_rate_id).maybeSingle();
+              if (rateErr) setTaxLookupOk(false);
               if (rate) {
                 const pct = Number(rate.percentual) || 0;
                 setTaxRate(pct);
@@ -430,16 +439,23 @@ const Checkout = () => {
   const totalQuantity = items.reduce((sum, i) => sum + i.quantidade, 0);
 
   // Recalculate shipping cost whenever the selected option or subtotal changes
-  useEffect(() => {
-    if (!shippingId) { setShippingCost(0); return; }
+  // Frete como FUNCAO do subtotal, nao do estado do carrinho.
+  //
+  // Antes isto vivia solto dentro do useEffect e usava `total` (o subtotal do
+  // CARRINHO, com precos possivelmente velhos). No submit o subtotal e
+  // RECALCULADO com o preco atual do banco — e o banco calcula o frete contra
+  // esse subtotal fresco. Com `percentage_upcharge` ou faixa de `from_net_value`,
+  // os dois davam numeros diferentes e a guarda de preco desfazia pedido
+  // LEGITIMO. Agora o submit chama esta mesma funcao com o subtotal fresco.
+  const calcShippingCost = useCallback((base: number): number => {
+    if (!shippingId) return 0;
     const opt = shippingOptions.find(s => s.id === shippingId);
-    if (!opt) { setShippingCost(0); return; }
+    if (!opt) return 0;
 
     const conds: any[] = Array.isArray(opt.condicoes) ? opt.condicoes : [];
     const customerState = selectedEndereco?.estado ?? "";
 
     if (conds.length > 0) {
-      // Find best matching condition: country matches + (province matches OR province is "All") + from_net_value <= subtotal
       const matching = conds.filter(c => {
         // Compara com o pais DO CLIENTE. Antes era `c.country === "United States"`
         // fixo: qualquer regra de Canada/United Kingdom (opcoes que a propria tela
@@ -449,20 +465,30 @@ const Checkout = () => {
         const paisCliente = (customerCountry || "United States").toLowerCase();
         const countryOk = !c.country || String(c.country).toLowerCase() === paisCliente;
         const provinceOk = !c.province || c.province === "All" || c.province.toLowerCase() === customerState.toLowerCase();
-        const minOk = (c.from_net_value ?? 0) <= total;
+        const minOk = (c.from_net_value ?? 0) <= base;
         return countryOk && provinceOk && minOk;
       });
       if (matching.length > 0) {
-        // Pick the one with highest from_net_value (most specific rule)
+        // Maior `from_net_value` (regra mais especifica). `sort` do JS e ESTAVEL,
+        // entao em empate fica a PRIMEIRA do array — o banco desempata igual,
+        // com `ORDER BY ... , ord ASC`.
         const best = matching.sort((a, b) => (b.from_net_value ?? 0) - (a.from_net_value ?? 0))[0];
-        const cost = (best.price ?? 0) + (total * (best.percentage_upcharge ?? 0) / 100);
-        setShippingCost(cost);
-        return;
+        // `round(...,2)` para casar com o banco, que arredonda o upcharge.
+        return Math.round(((best.price ?? 0) + (base * (best.percentage_upcharge ?? 0) / 100)) * 100) / 100;
       }
     }
-    // Fallback to option's flat preco
-    setShippingCost(Number(opt.preco) || 0);
-  }, [shippingId, shippingOptions, total, selectedEndereco, customerCountry]);
+
+    // Sem condicao que case: preco fixo da opcao — MAS o banco zera acima do
+    // limiar de frete gratis, e o front nunca lia esse campo. A tela cobrava um
+    // frete que o pedido nao tinha.
+    const gratis = (opt as any).gratis_acima_de;
+    if (gratis != null && base >= Number(gratis)) return 0;
+    return Number(opt.preco) || 0;
+  }, [shippingId, shippingOptions, selectedEndereco, customerCountry]);
+
+  useEffect(() => {
+    setShippingCost(calcShippingCost(total));
+  }, [calcShippingCost, total]);
 
   // Aviso PROATIVO de estoque no checkout — se um item esgotar enquanto o cliente
   // está aqui, desabilita o botão ANTES do clique. Polling 10s + realtime + foco.
@@ -606,7 +632,11 @@ const Checkout = () => {
         : Math.min(Number(coupon.valor), recalcSubtotal)
       : 0;
     const recalcTax = (recalcSubtotal - recalcDiscount) * taxRate / 100;
-    const recalcGrossTotal = recalcSubtotal - recalcDiscount + recalcTax + shippingCost;
+    // Frete recalculado com o subtotal FRESCO, igual ao banco faz. Usar o
+    // `shippingCost` do estado (calculado sobre o carrinho) e o que fazia a
+    // guarda de preco barrar pedido legitimo quando um preco mudava.
+    const recalcShipping = calcShippingCost(recalcSubtotal);
+    const recalcGrossTotal = recalcSubtotal - recalcDiscount + recalcTax + recalcShipping;
 
     // Pedido minimo por cliente. Confere contra o subtotal RECALCULADO (preco
     // atual do banco), nao contra o que a tela somou — carrinho velho pode ter
@@ -656,7 +686,7 @@ const Checkout = () => {
       total: recalcGrossTotal,
       desconto: recalcDiscount > 0 ? recalcDiscount : null,
       sales_tax: recalcTax > 0 ? recalcTax : null,
-      shipping_costs: shippingCost > 0 ? shippingCost : null,
+      shipping_costs: recalcShipping > 0 ? recalcShipping : null,
       coupon_id: coupon?.id ?? null,
       endereco_entrega_id: addr.id,
       shipping_option_id: shippingId || null,
@@ -736,7 +766,11 @@ const Checkout = () => {
     //
     // Tolerancia de 1 centavo: `total` e NUMERIC(12,2) no banco e float aqui;
     // sem isso um 30.599999999999998 contra 30.60 barraria pedido legitimo.
-    if (finalTotal - recalcGrossTotal > 0.01) {
+    // Tolerancia de 3 centavos, nao 1: o banco faz TRES `round(...,2)`
+    // independentes (desconto, frete, imposto) contra aritmetica float aqui.
+    // No pior caso os tres arredondam para o mesmo lado e a diferenca legitima
+    // passa de um centavo. 3 centavos ainda pega qualquer divergencia de regra.
+    if (taxLookupOk && finalTotal - recalcGrossTotal > 0.03) {
       await desfazerPedido(pedido.id);
       toast.error(
         `The price changed while you were checking out ($${recalcGrossTotal.toFixed(2)} → $${finalTotal.toFixed(2)}). ` +

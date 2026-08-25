@@ -259,8 +259,24 @@ const PaymentOptions = () => {
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ativo} onChange={e => setForm({ ...form, ativo: e.target.checked })} /> Active</label>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.privado} onChange={e => setForm({ ...form, privado: e.target.checked })} /> Private</label>
           <div><Label>View order</Label><Input type="number" value={form.ordem} onChange={e => setForm({ ...form, ordem: parseInt(e.target.value) || 0 })} /></div>
-          <div><Label>Payment Fee Percentage</Label><Input type="number" step="0.01" value={form.taxa_percentual} onChange={e => setForm({ ...form, taxa_percentual: parseFloat(e.target.value) || 0 })} /></div>
-          <div><Label>Payment Fee Amount</Label><Input type="number" step="0.01" value={form.taxa_valor} onChange={e => setForm({ ...form, taxa_valor: parseFloat(e.target.value) || 0 })} /></div>
+          {/* CAMPOS REMOVIDOS DA TELA em 25/ago/2026, por decisao do dono.
+            *
+            * `taxa_percentual` e `taxa_valor` sao gravados e NUNCA entram no
+            * total: `fn_pedido_total_appside` calcula desconto, frete, imposto e
+            * total, e nao le nenhum dos dois. Configurar "taxa de 3% no cartao"
+            * nao cobrava nada. Ja estava registrado como N9 no log de trabalho.
+            *
+            * AS COLUNAS CONTINUAM NO BANCO com os valores atuais — nada se
+            * perde.
+            *
+            * PARA VOLTAR: descomente este bloco E some a taxa no servidor,
+            * dentro de `fn_pedido_total_appside` (decidindo se incide sobre o
+            * subtotal ou sobre o total ja com imposto e frete). Sem a segunda
+            * parte, volta a ser fantasma.
+            *
+            * <div><Label>Payment Fee Percentage</Label><Input type="number" step="0.01" value={form.taxa_percentual} onChange={e => setForm({ ...form, taxa_percentual: parseFloat(e.target.value) || 0 })} /></div>
+            * <div><Label>Payment Fee Amount</Label><Input type="number" step="0.01" value={form.taxa_valor} onChange={e => setForm({ ...form, taxa_valor: parseFloat(e.target.value) || 0 })} /></div>
+            */}
           <div className="flex gap-2 pt-4">
             <Button variant="outline" onClick={() => setListView(true)}>Back</Button>
             <Button onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>

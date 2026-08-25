@@ -639,3 +639,63 @@ colunas. O Checkout manda um conjunto educado; um POST cru manda o que quiser.
   pagamento MUDAM O VALOR COBRADO. Nao da para adivinhar se o desconto do cliente
   compoe com a tabela de preco ou a substitui, nem se a taxa incide antes ou
   depois do imposto. Perguntar antes de implementar.
+
+### 25/08 (noite, cont. 5) - Cetico rodada 2: aprovou 3, ressalvou 3
+
+- **APROVADO SEM RESSALVA** - 230000 (trava b2bwave_order_id), 240000 (trava de
+  colunas, correcao do status conferida completa) e 260000 (cupom; o cetico
+  refez o diff e confirmou: um unico hunk, so o bloco do cupom; e
+  `coupons.valor` e NOT NULL, entao nao existe cupom legitimo com `_d` NULL).
+- **REVERTI a sugestao da rodada 1** - o cetico tinha pedido `auth.uid() IS NULL`
+  no lugar de `auth.role() = 'service_role' OR auth.role() IS NULL`, e na rodada
+  2 ele mesmo mostrou que minha justificativa citava a linha errada: a funcao de
+  referencia (`fn_lock_privileged_cliente_cols:168-170`) usa `auth.role()`, nao
+  `auth.uid()`. Fui conferir: e verdade. E `auth.uid() IS NULL` e MAIS permissivo
+  — isentaria tambem o papel `anon`. Voltei ao original, que e fail-closed
+  (papel desconhecido cai na restricao), e reescrevi o comentario dizendo
+  honestamente que NAO consigo provar por este repo o que o PostgREST garante no
+  JWT, e que a barreira primaria e a RLS.
+- **CORRIGIDO, ERA FURO REAL (250000)** - a RPC de rollback nao olhava pagamento.
+  Se `confirmCardPayment` devolvesse erro de REDE depois de a cobranca passar, o
+  pedido pago viraria 'cancelled' e o gatilho de status DEVOLVERIA a reserva de
+  estoque de um pedido cobrado. E o cliente podia chamar a RPC direto no proprio
+  pedido pago de <30min. Adicionado `ROLLBACK_PAID`.
+- **CORRIGIDO (250000)** - tirei `is_subcustomer_of` da checagem de posse:
+  ampliava sem caso de uso (sub-usuario desfazendo pedido do PAI) e nem era
+  simetrico. O Checkout cria com a ficha propria.
+- **CORRIGIDO, ERA FURO REAL (Checkout)** - a guarda de preco comparava o total
+  da tela (frete calculado sobre o subtotal do CARRINHO) com o do banco (frete
+  sobre o subtotal FRESCO). Com `percentage_upcharge` ou faixa de
+  `from_net_value`, uma mudanca de preco entre o carrinho e o checkout barraria
+  pedido LEGITIMO. Extrai o calculo de frete numa funcao `calcShippingCost(base)`
+  e o submit passa a chamar com o subtotal fresco, igual ao banco.
+- **DE BRINDE** - a mesma funcao passou a ler `gratis_acima_de`, que o front
+  NUNCA lia: a tela cobrava frete que o pedido nao tinha.
+- **CORRIGIDO (Checkout)** - tolerancia de 0.01 -> 0.03. O banco faz TRES
+  `round(...,2)` independentes (desconto, frete, imposto); no pior caso os tres
+  arredondam para o mesmo lado e a diferenca legitima passa de um centavo.
+- **CORRIGIDO (Checkout)** - se a busca da aliquota FALHAR, `taxRate` fica 0, o
+  banco cobra o imposto de verdade e a guarda barraria TODOS os pedidos. Agora a
+  guarda so vale com `taxLookupOk` — falha de leitura nossa nao vira checkout
+  parado.
+- **CORRIGIDAS 9 afirmacoes falsas de cabecalho** - contagem de migrations (158
+  -> nao citar numero), contagem de policies (11 -> 10), referencias de linha do
+  Checkout que ja tinham mudado (passei a citar o helper pelo nome, nao a linha),
+  "trg_order_status_notify mandaria SMS" (esta DESLIGADO hoje), e a citacao
+  errada da funcao de referencia.
+- **RESSALVA OPERACIONAL REGISTRADA (270000)** - ligar `disable_ordering` bloqueia
+  NA HORA todo cliente ja marcado, inclusive os que vieram marcados do B2BWave.
+  A query de diagnostico no arquivo e OBRIGATORIA antes de rodar.
+
+### 25/08 (noite, cont. 6) - Leva E aplicada a 2 campos fantasma
+
+Correcao minha de processo: perguntei ao dono o que fazer com `clientes.discount`
+e a taxa de pagamento, e a decisao JA ESTAVA na documentacao — regra da Leva E
+("remove tela, comenta, deixa o caminho de volta") + N9 no proprio log. Era pra
+eu ter lido em vez de perguntar.
+
+- **FEITO** - campo "Discount" removido de `CustomerEdit`, comentado no lugar,
+  com o motivo e o passo para voltar (descomentar E implementar no servidor).
+- **FEITO** - "Payment Fee Percentage/Amount" removidos de `PaymentOptions`,
+  mesmo tratamento.
+- As COLUNAS continuam no banco e continuam sincronizadas: nenhum dado se perde.
