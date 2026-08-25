@@ -1381,6 +1381,30 @@ Deno.serve(async (req) => {
       // por outro pior.
       const AUTENTICACAO = new Set(["password_reset", "magic_link", "request_magic_link", "set_password"]);
       const canalTeto = AUTENTICACAO.has(type) ? "auth" : "email";
+
+      // COOLDOWN POR DESTINATARIO para autenticacao.
+      //
+      // `request_magic_link` e `password_reset` sao chamaveis so com a anon key.
+      // Um teto GLOBAL sozinho vira negacao de servico: bastaria alguem pedir
+      // reset 60 vezes para trancar a recuperacao de conta de TODO MUNDO pelo
+      // resto da hora. O limite por e-mail resolve no alvo certo — quem abusa so
+      // bloqueia a si mesmo.
+      if (AUTENTICACAO.has(type)) {
+        const destino = (Array.isArray(to) ? to[0] : to) ?? "";
+        const { count } = await adminClient
+          .from("notification_log")
+          .select("id", { count: "exact", head: true })
+          .eq("recipient", String(destino))
+          .in("event", ["password_reset", "magic_link", "request_magic_link", "set_password"])
+          .gte("created_at", new Date(Date.now() - 15 * 60 * 1000).toISOString());
+        if ((count ?? 0) >= 3) {
+          // 200 com `skipped`, nao erro: a tela ja diz "se o e-mail existir,
+          // enviamos o link", e nao deve revelar nada a mais.
+          return new Response(JSON.stringify({
+            skipped: true, blocked: true, reason: "muitos pedidos para este e-mail — aguarde alguns minutos", type,
+          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
       let bloqueio: string | null = null;
       try {
         const { data: perm, error: permErr } = await (adminClient as any)

@@ -71,6 +71,20 @@ INSERT INTO public.sync_state (key, value) VALUES
   ('sms_counter',      jsonb_build_object('hora', NULL, 'n', 0))
 ON CONFLICT (key) DO NOTHING;
 
+-- Os tetos (nao os contadores) sao FORCADOS: o `DO NOTHING` acima nao atualiza
+-- linha existente, entao se esta migration ja tiver rodado uma vez os valores
+-- antigos permaneceriam — e o teto de SMS ficaria em 25, apertado demais para o
+-- trafego normal, calando cliente em silencio.
+UPDATE public.sync_state SET value = jsonb_build_object('n', 20) WHERE key = 'order_notify_max_per_hour';
+UPDATE public.sync_state SET value = jsonb_build_object('n', 10) WHERE key = 'low_stock_max_per_hour';
+UPDATE public.sync_state SET value = jsonb_build_object('n', 50) WHERE key = 'sms_max_per_hour';
+UPDATE public.sync_state SET value = jsonb_build_object('n', 30) WHERE key = 'email_max_per_hour';
+UPDATE public.sync_state SET value = jsonb_build_object('n', 60) WHERE key = 'auth_max_per_hour';
+
+-- Zera os contadores: o incidente deixou numeros altos gravados.
+UPDATE public.sync_state SET value = jsonb_build_object('hora', NULL, 'n', 0)
+WHERE key IN ('order_notify_counter','low_stock_counter','admin_alert_counter','email_counter','auth_counter','sms_counter');
+
 -- ---------------------------------------------------------------------------
 -- Torneira geral. Uma chamada para e outra volta.
 -- ---------------------------------------------------------------------------
@@ -358,9 +372,17 @@ DROP TRIGGER IF EXISTS trg_low_stock_notify ON public.produtos;
 CREATE TRIGGER trg_low_stock_notify
   AFTER UPDATE OF estoque_total, estoque_reservado ON public.produtos
   FOR EACH ROW EXECUTE FUNCTION public.fn_low_stock_notify();
+-- DESLIGADO como o de status: religar e passo manual, um de cada vez.
+ALTER TABLE public.produtos DISABLE TRIGGER trg_low_stock_notify;
 
 DROP TRIGGER IF EXISTS trg_order_status_notify ON public.pedidos;
 CREATE TRIGGER trg_order_status_notify
   AFTER UPDATE OF status ON public.pedidos
   FOR EACH ROW EXECUTE FUNCTION public.fn_order_status_notify();
 ALTER TABLE public.pedidos DISABLE TRIGGER trg_order_status_notify;
+
+-- ---------------------------------------------------------------------------
+-- Sai com a TORNEIRA FECHADA. Religar e uma decisao consciente:
+--   SELECT public.pausar_envios(false);
+-- ---------------------------------------------------------------------------
+SELECT public.pausar_envios(true);
