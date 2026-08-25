@@ -1375,10 +1375,16 @@ Deno.serve(async (req) => {
     //
     // Falha FECHADO: se a checagem nao responder, nao envia.
     {
+      // Reset de senha e magic link tem contador PROPRIO: se o provedor cair e
+      // as notificacoes queimarem o orcamento da hora, o cliente ainda consegue
+      // entrar no portal. Trancar o cliente para fora seria trocar um problema
+      // por outro pior.
+      const AUTENTICACAO = new Set(["password_reset", "magic_link", "request_magic_link", "set_password"]);
+      const canalTeto = AUTENTICACAO.has(type) ? "auth" : "email";
       let bloqueio: string | null = null;
       try {
         const { data: perm, error: permErr } = await (adminClient as any)
-          .rpc("envio_permitido", { _canal: "email" });
+          .rpc("envio_permitido", { _canal: canalTeto });
         if (permErr) bloqueio = "checagem de teto falhou: " + permErr.message;
         else if (!perm || (perm as any).ok !== true) bloqueio = (perm as any)?.motivo ?? "bloqueado pelo teto";
       } catch (e) {
@@ -1391,8 +1397,13 @@ Deno.serve(async (req) => {
           status: "failed", error: "NAO ENVIADO — " + bloqueio, payload: { bloqueado: true },
         });
         console.warn(`[send-email] BLOQUEADO "${type}": ${bloqueio}`);
-        return new Response(JSON.stringify({ blocked: true, reason: bloqueio, type }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        // 200, NAO 429: `supabase.functions.invoke` transforma qualquer nao-2xx
+        // num erro generico ("non-2xx status code") e o `reason` nunca chega na
+        // tela. Pior, chamadores que leem `data?.skipped` recebem `data: null` e
+        // o fluxo deles quebra em silencio. Esta e a convencao que o proprio
+        // arquivo ja usa para envio nao realizado.
+        return new Response(JSON.stringify({ skipped: true, blocked: true, reason: bloqueio, type }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     }
@@ -1428,8 +1439,14 @@ Deno.serve(async (req) => {
           : `<p>❌ O <b>fallback Office365 também falhou</b> — o destinatário NÃO recebeu este email.</p>`) +
         `<p>Verifique a conta/limite/billing do Resend.</p>`;
       // Chama o envio resiliente direto (não o handler) p/ não re-disparar alerta. Não bloqueia.
+      // Passa pelo portao como qualquer outro envio: antes ia direto ao
+      // sendEmailResilient e nao entrava em contador nenhum, dobrando o teto
+      // real de e-mail justamente pelo canal cego (Office365).
       emSegundoPlano(
-        sendEmailResilient(config, fromEmail, adminTo, `⚠ Resend falhou ao enviar "${type}"`, alertHtml)
+        (adminClient as any).rpc("envio_permitido", { _canal: "email" })
+          .then((r: any) => (r?.data?.ok === true
+            ? sendEmailResilient(config, fromEmail, adminTo, `⚠ Resend falhou ao enviar "${type}"`, alertHtml)
+            : { ok: false, error: r?.data?.motivo ?? "bloqueado pelo teto" }))
           .then((r) => adminClient.from("notification_log").insert({
             event: "resend_failure_alert", channel: "email",
             recipient: Array.isArray(adminTo) ? adminTo.join(", ") : String(adminTo),
@@ -1451,7 +1468,10 @@ Deno.serve(async (req) => {
         `<p><b>Erro:</b> <code>${result.error ?? "nenhum provedor de email disponível"}</code></p>` +
         `<p>Verifique a configuração de email (Resend / Office365 / SMTP).</p>`;
       emSegundoPlano(
-        sendEmailResilient(config, fromEmail, adminTo, `⚠ Email NÃO enviado: "${type}"`, alertHtml)
+        (adminClient as any).rpc("envio_permitido", { _canal: "email" })
+          .then((r: any) => (r?.data?.ok === true
+            ? sendEmailResilient(config, fromEmail, adminTo, `⚠ Email NÃO enviado: "${type}"`, alertHtml)
+            : { ok: false, error: r?.data?.motivo ?? "bloqueado pelo teto" }))
           .then((r) => adminClient.from("notification_log").insert({
             event: "email_failure_alert", channel: "email",
             recipient: Array.isArray(adminTo) ? adminTo.join(", ") : String(adminTo),

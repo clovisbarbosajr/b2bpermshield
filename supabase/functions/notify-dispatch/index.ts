@@ -52,6 +52,14 @@ Deno.serve(async (req) => {
     // ---- Teste (admin ou cron-secret; destino arbitrário) -----------------
     if (test?.channel && test?.to) {
       if (!isAdmin) return json({ error: "Only admins can send test notifications" }, 403);
+      // O teste tambem respeita a TORNEIRA. Era o unico caminho que chamava
+      // `dispatchOne` direto, fora do portao — com os envios pausados, o SMS de
+      // teste ainda saia. E pouco dinheiro, mas "sem bypass" tem que ser
+      // verdade, senao a torneira nao e confiavel.
+      const { data: perm } = await db.rpc("envio_permitido", { _canal: test.channel === "email" ? "email" : "sms" });
+      if (!perm || (perm as any).ok !== true) {
+        return json({ ok: false, blocked: true, reason: (perm as any)?.motivo ?? "bloqueado pelo teto" });
+      }
       const { data: channels } = await db.from("notification_channels").select("*");
       const ch = Object.fromEntries((channels ?? []).map((c) => [c.id, c]));
       const result = await dispatchOne(

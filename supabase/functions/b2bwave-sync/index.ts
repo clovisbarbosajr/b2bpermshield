@@ -709,6 +709,12 @@ Deno.serve(async (req) => {
     }
 
     // ========== SYNC PRODUCTS (incremental - compare by SKU) ==========
+    // NOTA sobre notificacao: este handler grava estoque em LOTE, o que aciona
+    // `trg_low_stock_notify`. Nao ha supressao aqui de proposito — `low_stock`
+    // tem dedup natural (so dispara na TRANSICAO acima->abaixo do limite), entao
+    // o caso normal nao repete. O risco real e o catalogo inteiro ir a zero de
+    // uma vez por resposta parcial da API, e contra isso vale o teto de 10/h no
+    // proprio gatilho, mais o teto de canal.
     if (action === "sync_products") {
       const allProducts = await fetchAllPages("products.json", username, apiKey);
       const b2bCategories = await fetchAllPages("categories.json", username, apiKey);
@@ -1217,7 +1223,17 @@ Deno.serve(async (req) => {
       }
 
       // Upsert (cria novos, ATUALIZA status/total/qtd dos existentes). skipPre2025=true.
-      const { created, updated, skipped, errors } = await processOrderSlice(adminClient, slice, true, false);
+      // Suprime como os outros caminhos de lote. Eu tinha dado este como
+      // protegido numa revisao anterior e NAO estava — a substituicao no codigo
+      // nao pegou e eu nao conferi. Por isso o grep agora esta no cabecalho.
+      await suprimirNotificacao(adminClient, true, 10);
+      let created = 0, updated = 0, skipped = 0, errors = 0;
+      try {
+        const r = await processOrderSlice(adminClient, slice, true, false);
+        created = r.created; updated = r.updated; skipped = r.skipped; errors = r.errors;
+      } finally {
+        await suprimirNotificacao(adminClient, false);
+      }
 
       const moreInThisPage = offset + limit < data.length;
       const morePages = data.length >= ORDERS_PER_PAGE;
@@ -1390,6 +1406,13 @@ Deno.serve(async (req) => {
     // Chamado pelo pg_cron com header X-Cron-Secret. Caminha pelas páginas de
     // orders.json usando um cursor persistido em sync_state, fazendo upsert.
     if (action === "cron_orders") {
+      // Suprime a notificacao de STATUS durante o tick inteiro: sao ate 6
+      // paginas x 500 pedidos, e reconciliar status em lote foi exatamente o que
+      // disparou 1281 SMS. O aviso de PEDIDO NOVO (`new_order`) continua saindo,
+      // porque so acontece em pedido criado agora e e a notificacao legitima —
+      // e o teto de canal limita o estrago se algo der errado.
+      await suprimirNotificacao(adminClient, true, 20);
+      try {
       const PAGES_PER_TICK = body.pages || 6;
       let page = await getOrdersCursor(adminClient);
       let created = 0, updated = 0, skipped = 0, errors = 0, reachedEnd = false;
@@ -1432,6 +1455,10 @@ Deno.serve(async (req) => {
         nextCursor, wrapped: reachedEnd,
         message: `cron_orders: ${created} new, ${updated} updated, ${skipped} unchanged, ${errors} errors (next cursor ${nextCursor})`
       }), { headers: jsonHeaders });
+
+      } finally {
+        await suprimirNotificacao(adminClient, false);
+      }
     }
 
     // ========== FIX PRICES: update existing orders with $0 totals from B2BWave ==========

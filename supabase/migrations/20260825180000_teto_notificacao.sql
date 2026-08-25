@@ -57,10 +57,17 @@ INSERT INTO public.sync_state (key, value) VALUES
   -- 30/h: o volume real medido no Resend foi de 0 a 26 por DIA.
   ('email_max_per_hour', jsonb_build_object('n', 30)),
   ('email_counter',      jsonb_build_object('hora', NULL, 'n', 0)),
+  -- E-mail de AUTENTICACAO tem contador PROPRIO. Sem isto, um provedor fora do
+  -- ar consumia o orcamento da hora com notificacao e trancava o cliente para
+  -- fora do portal: reset de senha e magic link deixavam de sair.
+  ('auth_max_per_hour', jsonb_build_object('n', 30)),
+  ('auth_counter',      jsonb_build_object('hora', NULL, 'n', 0)),
 
-  -- Teto GLOBAL de SMS por hora, qualquer evento.
-  -- 25/h: o volume real medido foi de 4 a 28 por DIA.
-  ('sms_max_per_hour', jsonb_build_object('n', 25)),
+  -- Teto GLOBAL de SMS por hora, contado em MENSAGENS (nao em eventos): um
+  -- pedido gera uma para o admin e uma para o cliente, entao o pico legitimo de
+  -- 10 pedidos/h ja sao ~20-25 mensagens. 50 da folga sem virar licenca — o
+  -- lote do incidente teria sido barrado no 50o em vez de 1281.
+  ('sms_max_per_hour', jsonb_build_object('n', 50)),
   ('sms_counter',      jsonb_build_object('hora', NULL, 'n', 0))
 ON CONFLICT (key) DO NOTHING;
 
@@ -68,15 +75,27 @@ ON CONFLICT (key) DO NOTHING;
 -- Torneira geral. Uma chamada para e outra volta.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.pausar_envios(_pausar boolean)
-RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  -- CHECAGEM DE PAPEL AQUI DENTRO. `SECURITY DEFINER` ignora RLS, e o cadastro
+  -- deste sistema e ABERTO: sem esta linha, qualquer pessoa que se registrasse
+  -- podia chamar a RPC e calar TODAS as notificacoes — pedido, aprovacao, reset
+  -- de senha — sem nada na tela indicando. E `envio_pausado` nao tem validade,
+  -- entao ficaria assim para sempre.
+  -- `auth.uid()` nulo = chamada com service_role (edge/cron), que e legitima.
+  IF auth.uid() IS NOT NULL AND NOT public.has_role(auth.uid(), 'admin'::app_role) THEN
+    RAISE EXCEPTION 'apenas admin pode pausar ou liberar envios';
+  END IF;
+
   INSERT INTO public.sync_state (key, value)
   VALUES ('envio_pausado', jsonb_build_object('on', _pausar))
-  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-  RETURNING CASE WHEN _pausar
-              THEN 'PAUSADO: nenhum SMS ou e-mail sai deste sistema.'
-              ELSE 'LIBERADO: envios voltaram ao normal (respeitando os tetos).'
-            END;
-$$;
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+
+  RETURN CASE WHEN _pausar
+           THEN 'PAUSADO: nenhum SMS ou e-mail sai deste sistema.'
+           ELSE 'LIBERADO: envios voltaram ao normal (respeitando os tetos).'
+         END;
+END $$;
 
 REVOKE ALL ON FUNCTION public.pausar_envios(boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.pausar_envios(boolean) TO authenticated, service_role;
@@ -94,6 +113,7 @@ BEGIN
 
   SELECT COALESCE((value->>'n')::integer, 25) INTO _teto
   FROM public.sync_state WHERE key = _canal || '_max_per_hour';
+  -- `_canal` pode ser 'sms', 'email' ou 'auth' (reset de senha / magic link).
 
   _n := public.bump_notify_counter(_canal || '_counter');
   -- Falha FECHADO: sem contador, nao envia.
@@ -332,6 +352,13 @@ END $$;
 -- Fica DESLIGADO de proposito. Religar e passo manual, depois de verificar com o
 -- canal ainda desligado que o sync nao gera enxurrada de linha no log.
 -- ---------------------------------------------------------------------------
+-- Idem para o de estoque: se foi dropado a mao durante o incidente, a funcao
+-- nova existiria sem ninguem chamar, e o alerta morreria em silencio.
+DROP TRIGGER IF EXISTS trg_low_stock_notify ON public.produtos;
+CREATE TRIGGER trg_low_stock_notify
+  AFTER UPDATE OF estoque_total, estoque_reservado ON public.produtos
+  FOR EACH ROW EXECUTE FUNCTION public.fn_low_stock_notify();
+
 DROP TRIGGER IF EXISTS trg_order_status_notify ON public.pedidos;
 CREATE TRIGGER trg_order_status_notify
   AFTER UPDATE OF status ON public.pedidos
