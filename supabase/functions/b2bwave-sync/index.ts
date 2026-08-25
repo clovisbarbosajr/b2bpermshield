@@ -1165,6 +1165,38 @@ Deno.serve(async (req) => {
     }
 
     // ========== SYNC ALL ORDERS (no date filter - full history) ==========
+    // Mede como a API de pedidos pagina. O backfill voltou "done" com 1 pagina de
+    // 9 pedidos, com 1.147 no banco — ou seja, `orders.json?page=N` sozinho NAO
+    // varre o historico. Outros endpoints deste mesmo sync usam
+    // `paginated=1&per_page=500`. Isto compara as duas formas em vez de adivinhar.
+    if (action === "debug_orders_paging") {
+      const medir = async (rotulo: string, ep: string, pagina: number) => {
+        try {
+          const d = await fetchPage(ep, username, apiKey, pagina);
+          const rows = Array.isArray(d) ? d : ((d as any)?.data ?? null);
+          return {
+            forma: rotulo, page: pagina,
+            tipo: Array.isArray(d) ? "array" : typeof d,
+            qtd: Array.isArray(rows) ? rows.length : null,
+            primeiro_id: Array.isArray(rows) && rows[0] ? ((rows[0] as any).order || rows[0]).id : null,
+            ultimo_id: Array.isArray(rows) && rows.length ? ((rows[rows.length - 1] as any).order || rows[rows.length - 1]).id : null,
+            chaves_do_envelope: Array.isArray(d) ? null : Object.keys((d as any) ?? {}),
+          };
+        } catch (e) {
+          return { forma: rotulo, page: pagina, erro: String((e as any)?.message ?? e).slice(0, 200) };
+        }
+      };
+      return new Response(JSON.stringify({
+        success: true,
+        medidas: [
+          await medir("simples", "orders.json", 1),
+          await medir("simples", "orders.json", 2),
+          await medir("paginated", "orders.json?paginated=1&per_page=500", 1),
+          await medir("paginated", "orders.json?paginated=1&per_page=500", 2),
+        ],
+      }, null, 2), { headers: jsonHeaders });
+    }
+
     // Backfill do HISTORICO INTEIRO, com cursor proprio e orcamento de tempo.
     //
     // O `sync_orders_all` processa 50 pedidos por chamada e devolve nextPage/
