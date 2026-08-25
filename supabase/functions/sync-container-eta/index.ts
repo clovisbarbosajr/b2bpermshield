@@ -71,8 +71,14 @@ Deno.serve(async (req) => {
   if (!autorizado) return json({ error: "Not authorized" }, 401);
 
   try {
-    const trackerUrl = (Deno.env.get("TRACKER_SUPABASE_URL") ?? "").replace(/\/+$/, "");
-    const trackerKey = Deno.env.get("TRACKER_SUPABASE_ANON_KEY") ?? "";
+    // `limpar`: colar o valor do .env no campo de secret costuma trazer aspas
+    // junto (`"https://..."`). O fetch morre com "Invalid URL" e o lote inteiro
+    // fica sem ETA — aconteceu na 1a configuracao. Tira aspas/apostrofos das
+    // pontas e espaco em volta antes de usar.
+    const limpar = (v: string | undefined) =>
+      (v ?? "").trim().replace(/^['"]+/, "").replace(/['"]+$/, "").trim();
+    const trackerUrl = limpar(Deno.env.get("TRACKER_SUPABASE_URL")).replace(/\/+$/, "");
+    const trackerKey = limpar(Deno.env.get("TRACKER_SUPABASE_ANON_KEY"));
     if (!trackerUrl || !trackerKey) {
       await registrar(false, "TRACKER_SUPABASE_URL/ANON_KEY nao configurados");
       return json({ error: "Tracker not configured" }, 500);
