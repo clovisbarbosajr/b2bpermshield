@@ -852,3 +852,68 @@ enxerga `has_role()` e atingiria o admin junto, quebrando a tela dele.
 `stripe-checkout` e a edge `api` leem esses tres de la, entao exige mudar as duas
 functions E o dono cadastrar os secrets no painel. Enquanto isso, eles continuam
 na tabela — mas agora so o admin le.
+
+### 25/08 (noite, cont. 11) - Cetico na A1: 2 defeitos meus no front, um grave
+
+- **CETICO CONFIRMOU** - a reescrita das duas funcoes de visibilidade e
+  verificavelmente identica as versoes vivas fora da checagem nova (ele refez o
+  diff), a denylist bate string por string, o check esta no lugar certo, e nenhum
+  caminho legitimo quebra (staff, View As, cron, anon).
+
+- **GRAVE, ERRO MEU** - o bloco do AuthContext que lia a ficha do PAI era CODIGO
+  MORTO. Sub-usuario nao consegue ler a ficha do pai: a policy que permitia
+  (`Contacts read company cliente`) morreu junto com `is_company_contact`,
+  dropada com CASCADE em 20260622000000. Conferi: nenhuma policy viva de
+  `clientes` usa `is_subcustomer_of`. A consulta voltava vazia SEM erro, entao o
+  `if (pai)` nunca disparava. Resultado: funcionario de empresa suspensa ENTRAVA
+  no portal e via loja vazia — a situacao exata que a tela existe para evitar.
+  E o comentario descrevia um comportamento que a RLS impedia de acontecer.
+- **CONSERTO PELA RAIZ** - nova RPC `minha_conta_liberada()` chama o MESMO
+  `cliente_conta_liberada()` das funcoes de visibilidade. A tela pergunta, o
+  banco responde. Apaguei `src/lib/contaCliente.ts` e os testes dele: duas copias
+  de uma regra de seguranca divergem, e o cetico ja tinha apontado 2 afirmacoes
+  falsas nascidas dessa duplicacao.
+
+- **ERRO MEU** - `contaAprovada` era resolvida ANTES de `ensureClienteRecord`.
+  Numa ficha MIGRADA (que a RPC adota pelo e-mail, ja `ativo`) a linha ainda nao
+  estava vinculada, a consulta voltava vazia, e o cliente LEGITIMO caia em
+  /pending-approval no primeiro login — justo no dia da migracao. So entrava na
+  segunda tentativa. Movido para depois.
+
+- **CORRIGIDO** - `IF NOT FOUND` no lugar de `_st IS NULL AND _act IS NULL`: a
+  segunda forma so funciona porque `status` e NOT NULL hoje, e nao distingue
+  "sem ficha" de "pai nao encontrado".
+- **CORRIGIDO** - `LEFT JOIN` no lugar de `JOIN`: com JOIN, `parent_customer_id`
+  apontando para ficha inexistente eliminaria a linha e trancaria um sub-usuario
+  legitimo. A FK impede isso hoje, mas a trava nao pode depender de constraint
+  que alguem remove pelo painel.
+- **CORRIGIDO** - o ROLLBACK dizia "rode aqueles dois arquivos de novo". Nao
+  serve: `20260622200725` tambem faz `ALTER TABLE ... ADD COLUMN` e um backfill.
+  Agora os dois corpos originais estao INLINE no rodape.
+- **CORRIGIDO** - a secao CUSTO afirmava "roda uma vez por linha, so um JOIN,
+  barato". Falso: roda ate DUAS vezes por produto e cada invocacao faz 3
+  `has_role` alem do join (`has_role` e SQL STABLE, mas chamada de dentro de
+  plpgsql nao inlina e STABLE nao memoiza). Trocado por "NAO MEDI" + o que da
+  para afirmar lendo o codigo + como medir.
+- **CORRIGIDO** - "as duas travas passam a concordar" era falso em 3 eixos
+  (`disable_ordering`, heranca de pai, isencao de warehouse). Agora o arquivo diz
+  que compartilham a LISTA e lista as diferencas, que sao de proposito.
+- **CORRIGIDO** - a consulta de BACKUP nao mostrava os sub-usuarios que perdem
+  acesso por causa do PAI. Ganhou o join.
+- **CORRIGIDO** - clausula `!impersonatedCustomer` no ProtectedRoute era
+  inalcancavel (`applyViewAsSession` liga `isDemo` junto). Removida.
+- **FAIL-OPEN AGORA E OBSERVAVEL** - o cetico argumentou que fail-open silencioso
+  nao e observavel: se a leitura falhar apos um deploy, todo mundo vira
+  "aprovado" e ninguem descobre. Mantive o fail-open (a flag so controla um
+  redirect; o dado esta fechado no banco) e adicionei `console.error`.
+
+- **NOVO NA FILA (achado do cetico)** - buraco residual: `tabela_preco_itens`,
+  `variante_precos`, `produto_precos_cliente` e `produto_descontos` escopam por
+  `tabela_preco_id` e NAO consultam `cliente_conta_liberada`. Hoje nao vaza por
+  acidente (ficha pendente fica com `tabela_preco_id` NULL). Aparece no caso
+  adjacente: admin atribui price list a um cliente e depois o SUSPENDE — ele
+  continua lendo a regua de preco inteira daquela lista.
+- **NOVO NA FILA** - o "View As" vai MENTIR: `categorias_visiveis_cliente` e
+  `produto_visivel_para` nao ganharam a checagem, entao ver como um cliente
+  pendente mostra catalogo cheio enquanto o cliente real ve zero. Nao e furo de
+  seguranca, e furo de diagnostico.

@@ -10,7 +10,7 @@ interface Props {
 }
 
 const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Props) => {
-  const { user, role, loading, isDemo, hasPermission, contaAprovada, impersonatedCustomer } = useAuth();
+  const { user, role, loading, isDemo, hasPermission, contaAprovada } = useAuth();
 
   if (loading) {
     return (
@@ -39,10 +39,11 @@ const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Props) =
   // conta pendente enxergar catálogo vazio mesmo chamando a API direto — a chave
   // anon está no bundle, então guarda de rota sozinha não protege nada.
   //
-  // `impersonatedCustomer` sai fora: no "View As" quem está logado é o staff, e
-  // ele precisa poder abrir a conta de um cliente pendente justamente para
-  // resolver a situação dele.
-  if (!isDemo && role === "cliente" && !impersonatedCustomer && !contaAprovada) {
+  // O "View As" já está coberto por `!isDemo`: `applyViewAsSession` liga `isDemo`
+  // junto com a impersonação. Eu tinha somado um `!impersonatedCustomer` aqui —
+  // cláusula que nunca decidia nada, escondida atrás de uma condição que já era
+  // suficiente. Removida.
+  if (!isDemo && role === "cliente" && !contaAprovada) {
     return <Navigate to="/pending-approval" replace />;
   }
 

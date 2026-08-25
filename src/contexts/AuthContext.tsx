@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { contaLiberada } from "@/lib/contaCliente";
 
 export type AppRole = "admin" | "cliente" | "warehouse" | "manager";
 
@@ -124,30 +123,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRole("cliente");
       setPermissions((data as any).permissions || {});
       // Sub-usuário SEM "confirmar pedido sem aprovação" não finaliza compra (igual B2BWave).
-      const { data: me, error: meErr } = await supabase
+      const { data: me } = await supabase
         .from("clientes")
-        .select("id, parent_customer_id, can_confirm_order, status, is_active")
+        .select("id, parent_customer_id, can_confirm_order")
         .eq("user_id", userId)
         .maybeSingle();
       setCanPlaceOrders(!(me?.parent_customer_id && me?.can_confirm_order === false));
       setIsSubUser(!!me?.parent_customer_id);
-
-      // Sub-usuário herda a situação da conta da EMPRESA — empresa suspensa
-      // suspende o funcionário. Mesma regra do `cliente_conta_liberada` no banco.
-      let dono: any = me;
-      if (me?.parent_customer_id) {
-        const { data: pai } = await supabase
-          .from("clientes")
-          .select("status, is_active")
-          .eq("id", me.parent_customer_id)
-          .maybeSingle();
-        if (pai) dono = pai;
-      }
-
-      // FALHA DE LEITURA NÃO BLOQUEIA. O banco já é o portão real; travar a tela
-      // por um erro de rede transformaria uma falha nossa em cliente legítimo
-      // trancado do lado de fora.
-      setContaAprovada(meErr ? true : contaLiberada(dono));
+      // `contaAprovada` NÃO é resolvida aqui — ver `initUserSession`. Dois
+      // motivos: a ficha pode ainda não existir neste ponto, e a regra mora no
+      // banco.
       return "cliente";
     }
 
@@ -177,6 +162,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Initialize a user session: fetch role first, then only ensure cliente record for customers
+  // Pergunta ao BANCO se a conta está liberada, em vez de recalcular aqui.
+  //
+  // Eu tinha escrito essa regra de novo no navegador, lendo `clientes.status` — e
+  // para sub-usuário lia a ficha do PAI. Era código morto: a policy que permitia
+  // isso (`Contacts read company cliente`) morreu junto com `is_company_contact`,
+  // dropada com CASCADE em 20260622000000. A consulta voltava vazia sem erro, e o
+  // funcionário de uma empresa suspensa entrava no portal e via loja vazia — a
+  // situação exata que a tela existia para evitar.
+  //
+  // E duas cópias de uma regra de segurança divergem. A tela pergunta, o banco
+  // responde: `minha_conta_liberada()` (20260825280000) chama o mesmo
+  // `cliente_conta_liberada()` que as funções de visibilidade usam.
+  const carregarContaAprovada = async () => {
+    const { data, error } = await (supabase as any).rpc("minha_conta_liberada");
+    if (error) {
+      // FALHA DE LEITURA NÃO BLOQUEIA — e é registrada. O banco já é o portão
+      // real (catálogo volta vazio), então travar a tela por erro de rede
+      // transformaria uma falha nossa em cliente legítimo trancado do lado de
+      // fora. Sem este log, uma falha sistemática após um deploy deixaria todo
+      // mundo "aprovado" na tela e ninguém descobriria.
+      console.error("[auth] minha_conta_liberada falhou; liberando a TELA", error);
+      setContaAprovada(true);
+      return;
+    }
+    setContaAprovada(data === true);
+  };
+
   const initUserSession = async (authUser: User) => {
     const resolvedRole = await fetchRoleAndPermissions(authUser.id);
     if (resolvedRole === "cliente" || resolvedRole === null) {
@@ -184,6 +196,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // parent_customer_id) — claim_customer_record o encontra pelo user_id e não
       // duplica. Cliente novo de verdade é criado aqui.
       await ensureClienteRecord(authUser);
+      // DEPOIS de garantir a ficha, e não antes.
+      //
+      // Lendo o status antes, uma ficha MIGRADA (que `ensure_my_cliente_record`
+      // adota pelo e-mail, já `ativo`) ainda não existia vinculada ao usuário: a
+      // consulta voltava vazia, a conta era tratada como pendente, e o cliente
+      // legítimo caía em /pending-approval no primeiro login — justamente no dia
+      // da migração. Só entrava na segunda tentativa.
+      await carregarContaAprovada();
+    } else {
+      setContaAprovada(true); // staff
     }
   };
 
