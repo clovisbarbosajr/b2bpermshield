@@ -101,8 +101,11 @@ export const DEFAULT_PERMISSIONS: Record<"warehouse" | "manager", Record<Permiss
     create_products:      true,
     edit_products:        true,
     delete_products:      true,
-    view_profile_settings:   true,
-    view_email_settings:     true,
+    // false desde 25/ago/2026: as duas telas expoem a linha inteira de
+    // `configuracoes`, onde moram api_token, chaves do Stripe e senhas de e-mail.
+    // Ver 20260825290000_segredos_so_admin.sql.
+    view_profile_settings:   false,
+    view_email_settings:     false,
     view_email_templates:    true,
     view_warehouse_settings: true,
     view_users_management:   false, // gestão de usuários = só admin (decisão do dono)

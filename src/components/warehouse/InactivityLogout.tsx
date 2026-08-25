@@ -16,11 +16,9 @@ const InactivityLogout = () => {
 
     const init = async () => {
       // Fetch inactivity settings from DB
-      const { data } = await (supabase as any)
-        .from("configuracoes")
-        .select("warehouse_popup_day, warehouse_inactivity_popup, warehouse_inactivity_default")
-        .limit(1)
-        .maybeSingle();
+      // Via RPC `config_staff` — a tabela virou admin-only (20260825290000).
+      const { data: rows } = await (supabase as any).rpc("config_staff");
+      const data = Array.isArray(rows) ? rows[0] : rows;
 
       const popupDay      = data?.warehouse_popup_day          ?? 1;   // Monday
       const popupMinutes  = data?.warehouse_inactivity_popup   ?? 5;

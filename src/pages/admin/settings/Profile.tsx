@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Save, Upload, Image as ImageIcon, Copy, ExternalLink, FileText } from "lucide-react";
 import { Link } from "react-router-dom";
 import qrCodeSvg from "@/assets/qr-permshield-app.svg";
+import { diffConfig } from "@/lib/diffConfig";
 
 const TIMEZONES = [
   "America/New_York",
@@ -114,6 +115,8 @@ const SettingsProfile = () => {
   const [webhookTestOrder, setWebhookTestOrder] = useState("");
   const [webhookTestOutput, setWebhookTestOutput] = useState("");
   const [orders, setOrders] = useState<any[]>([]);
+  // Copia do que veio do banco, para o save mandar so a DIFERENCA.
+  const [configOriginal, setConfigOriginal] = useState<any>(null);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -121,10 +124,20 @@ const SettingsProfile = () => {
         supabase.from("configuracoes").select("*").limit(1).maybeSingle(),
         supabase.from("pedidos").select("id, numero").order("numero", { ascending: false }).limit(20),
       ]);
-      if (cfgRes.data) setConfig(cfgRes.data);
-      else {
-        const { data: newConfig } = await supabase.from("configuracoes").insert({}).select().single();
+      if (cfgRes.data) {
+        setConfig(cfgRes.data);
+        setConfigOriginal(cfgRes.data);
+      } else if (cfgRes.error) {
+        // NAO cria linha quando o SELECT FALHOU. Antes, qualquer erro de leitura
+        // caia no `insert({})` e criava uma SEGUNDA linha de configuracao — e
+        // nao ha UNIQUE nenhum impedindo. A partir dai telas diferentes podiam
+        // ler linhas diferentes, porque todo mundo usa `.limit(1)` sem ordenar.
+        toast.error("Failed to load settings: " + cfgRes.error.message);
+      } else {
+        const { data: newConfig, error: insErr } = await supabase.from("configuracoes").insert({}).select().single();
+        if (insErr) toast.error("Failed to create settings: " + insErr.message);
         setConfig(newConfig);
+        setConfigOriginal(newConfig);
       }
       if (ordersRes.data) setOrders(ordersRes.data);
       setLoading(false);
@@ -166,10 +179,33 @@ const SettingsProfile = () => {
   const handleSave = async () => {
     if (!config) return;
     setSaving(true);
-    const { id, created_at, updated_at, ...payload } = config;
-    const { error } = await supabase.from("configuracoes").update(payload).eq("id", id);
-    if (error) toast.error(error.message);
-    else toast.success("Settings saved");
+    // So o que MUDOU. Antes ia a linha inteira, e o que Email Settings /
+    // Notifications / Warehouse tivessem salvado depois desta tela carregar era
+    // sobrescrito pelo valor velho que ela tinha em memoria.
+    const payload = diffConfig(configOriginal, config);
+    if (Object.keys(payload).length === 0) {
+      toast.info("Nothing to save");
+      setSaving(false);
+      return;
+    }
+    const { data: salvo, error } = await supabase
+      .from("configuracoes").update(payload as any).eq("id", (config as any).id).select();
+    if (error) {
+      toast.error(error.message);
+      setSaving(false);
+      return;
+    }
+    // A RLS de escrita e admin-only. Sem policy, o UPDATE afeta ZERO linhas e o
+    // supabase-js volta SEM erro — a tela dizia "Settings saved" e nada tinha
+    // sido salvo. Conferir a contagem e a unica forma de saber.
+    if (!salvo || salvo.length === 0) {
+      toast.error("Nothing was saved — your account does not have permission to change these settings.");
+      setSaving(false);
+      return;
+    }
+    setConfigOriginal(salvo[0]);
+    setConfig(salvo[0]);
+    toast.success("Settings saved");
     setSaving(false);
   };
 

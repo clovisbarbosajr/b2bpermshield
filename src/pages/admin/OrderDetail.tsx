@@ -88,8 +88,10 @@ const OrderDetail = () => {
     const { data: cats } = await supabase.from("categorias").select("id, nome, parent_id");
     setCategorias(cats ?? []);
     // Destinatários admin — mostrados no modal de Resend (igual ao B2BWave).
-    const { data: cfg } = await supabase.from("configuracoes")
-      .select("email_new_orders, email_contato").limit(1).maybeSingle();
+    // Via RPC `config_staff` — a tabela `configuracoes` virou admin-only
+    // (20260825290000), e esta tela e alcancada por manager e warehouse.
+    const { data: cfgRows } = await (supabase as any).rpc("config_staff");
+    const cfg: any = Array.isArray(cfgRows) ? cfgRows[0] : cfgRows;
     setAdminEmails(cfg?.email_new_orders || cfg?.email_contato || "");
     // Para criar pedido pelo admin precisamos da lista de clientes.
     if (isNew) {

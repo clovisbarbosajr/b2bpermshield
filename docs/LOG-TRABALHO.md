@@ -784,3 +784,71 @@ eu ter lido em vez de perguntar.
   76 testes verdes.
 - **DECLARADO** - a guarda de rota e SO tela. O portao e o banco: a chave anon
   esta no bundle, entao guarda de rota sozinha nao protege nada.
+
+### 25/08 (noite, cont. 10) - LEVA A / A2: segredos legiveis por manager e warehouse
+
+O cacador mudou meu plano: eu ia fazer `REVOKE SELECT (colunas)` e isso **nao
+funciona** — no Postgres, revogar privilegio de COLUNA nao revoga o de TABELA, e
+o Supabase ja concede o de tabela no bootstrap. E `admin`/`manager`/`warehouse`
+sao o MESMO papel do Postgres (`authenticated`), entao privilegio de coluna nao
+enxerga `has_role()` e atingiria o admin junto, quebrando a tela dele.
+
+- **CONFIRMADO** - a linha de `configuracoes` carrega `api_token` (bearer da edge
+  `api`, que roda com SERVICE ROLE — quem tem esse token le e escreve o banco
+  inteiro SEM RLS), `stripe_secret_key`, `stripe_webhook_secret`, `email_api_key`,
+  senhas de SMTP e Zapier, e `webhook_auth_header`. E `EmailSettings`/`Profile`
+  fazem `select("*")` em rotas que o MANAGER alcanca. O `Profile` ainda
+  RENDERIZAVA `api_token` e `zapier_password` em texto puro.
+- **FEITO** - `20260825290000_segredos_so_admin.sql`: a tabela vira admin-only, e
+  o que o staff nao-admin precisa sai por `config_staff()` — funcao que devolve
+  9 colunas nao secretas, com checagem de papel DENTRO do corpo (SECURITY DEFINER
+  ignora RLS; foi exatamente esse o erro que cometi hoje cedo com `pausar_envios`).
+- **ERRO MEU, PEGO POR MIM** - eu tinha declarado `warehouse_popup_day` como text
+  e `warehouse_inactivity_popup` como boolean no `RETURNS TABLE`. Os dois sao
+  INTEGER. Tipo errado em `RETURNS TABLE` nao falha no CREATE — falha na PRIMEIRA
+  CHAMADA, ou seja, na tela do usuario. Conferi contra
+  `20260409000004_warehouse_settings.sql:5-9`.
+- **FEITO** - 4 telas de staff passaram a ler pela RPC: `WarehouseSettings`,
+  `MondayPopup`, `InactivityLogout`, `admin/OrderDetail`.
+- **FEITO** - `Profile` e `EmailSettings` viraram ADMIN-ONLY (rota + default do
+  manager em `permissions.ts`). Nao da para "mostrar sem os segredos": RLS e por
+  linha.
+
+**C4 consertado junto (era pre-requisito):**
+
+- **CONFIRMADO** - `Profile` e `SetupApp` gravavam a LINHA INTEIRA
+  (`const { id, created_at, updated_at, ...payload } = config`). Como carregam no
+  mount e salvam minutos depois, o que Email Settings / Notifications / Warehouse
+  tivessem salvado no intervalo era sobrescrito pelo valor VELHO em memoria.
+- **FEITO** - `src/lib/diffConfig.ts`: manda so o que MUDOU. Por DIFERENCA e nao
+  por lista de colunas permitidas — lista teria que ser mantida a cada coluna
+  nova, e esquecer uma quebra o salvamento daquele campo sem aviso. Compara jsonb
+  por conteudo com chaves ordenadas, senao toda salvada acusaria mudanca e o
+  lost update voltaria inteiro.
+- **VIGIA PROVADA (2 mutantes)** - voltar a mandar a linha inteira -> 5 testes
+  acendem; nunca mandar nada -> 5 acendem, incluindo os 3 de CONTROLE que provam
+  que da para salvar de verdade.
+
+**SAVE SILENCIOSO (achado do cacador) - consertado em 3 telas:**
+
+- **CONFIRMADO** - a unica policy de ESCRITA em `configuracoes` e admin-only, mas
+  `Profile`, `EmailSettings` e `WarehouseSettings` eram rotas de MANAGER. Para
+  ele o UPDATE passava pela RLS afetando ZERO linhas, o supabase-js voltava
+  `error: null`, e a tela dava `toast.success("Settings saved")`. Ele lia tudo e
+  escrevia nada, achando que escrevia.
+- **FEITO** - as 3 telas conferem a CONTAGEM de linhas afetadas (`.select()` no
+  update) e avisam de verdade quando nada foi salvo.
+- **FEITO** - `Profile` e `SetupApp` nao criam mais linha de configuracao quando o
+  SELECT FALHA. Antes, erro de leitura caia no `insert({})` e criava uma SEGUNDA
+  linha — e nao ha UNIQUE nenhum impedindo; dai telas diferentes podiam ler
+  linhas diferentes, porque todas usam `.limit(1)` sem ordenar.
+
+- **BRECHA DE PROCESSO FECHADA** - `npm test` estava VERDE com o `npm run build`
+  VERMELHO (2 erros de tipo). Typecheck entrou no portao: `npm test` agora e
+  `check:sql && tsc --noEmit && vitest run`.
+
+**NAO FEITO, precisa do dono:** tirar `stripe_secret_key`,
+`stripe_webhook_secret` e `api_token` da TABELA e por nos secrets do Supabase.
+`stripe-checkout` e a edge `api` leem esses tres de la, entao exige mudar as duas
+functions E o dono cadastrar os secrets no painel. Enquanto isso, eles continuam
+na tabela — mas agora so o admin le.

@@ -237,8 +237,17 @@ const App = () => (
 
               {/* Settings — staff COM checagem de permissão por papel */}
               <Route path="/admin/settings/edit-password" element={<S><EditPassword /></S>} />
-              <Route path="/admin/settings/profile" element={<SP perm="view_profile_settings"><SettingsProfile /></SP>} />
-              <Route path="/admin/settings/email" element={<SP perm="view_email_settings"><EmailSettings /></SP>} />
+              {/* ADMIN-ONLY desde 25/ago/2026. As duas telas fazem `select("*")`
+                * em `configuracoes`, e a LINHA carrega `api_token` (bearer da edge
+                * `api`, que roda com service role), `stripe_secret_key`,
+                * `stripe_webhook_secret`, `email_api_key` e as senhas de SMTP/Zapier.
+                * RLS no Postgres e por LINHA: nao da para "mostrar sem os segredos".
+                * O `Profile` ainda renderizava `api_token` e `zapier_password` em
+                * TEXTO PURO na tela do manager.
+                * O banco tambem passou a recusar (20260825290000) — isto aqui evita
+                * que o manager caia numa tela quebrada em vez de nao ver o item. */}
+              <Route path="/admin/settings/profile" element={<A><SettingsProfile /></A>} />
+              <Route path="/admin/settings/email" element={<A><EmailSettings /></A>} />
               {/* Consolidado na aba "Email" de Notifications (2026-07-10) — ver docs/EMAIL-CONSOLIDACAO.md */}
               <Route path="/admin/settings/email-templates" element={<Navigate to="/admin/settings/notifications" replace />} />
               <Route path="/admin/settings/notifications" element={<A><Notificacoes /></A>} />

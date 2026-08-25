@@ -35,11 +35,12 @@ const WarehouseSettings = () => {
 
   const fetchData = async () => {
     setLoading(true);
-    const { data } = await (supabase as any)
-      .from("configuracoes")
-      .select("id, warehouse_popup_enabled, warehouse_popup_message, warehouse_popup_day, warehouse_inactivity_popup, warehouse_inactivity_default")
-      .limit(1)
-      .maybeSingle();
+    // Le pela RPC `config_staff` (20260825290000), nao pela tabela: a tabela
+    // `configuracoes` passou a ser de ADMIN porque a linha inteira carrega
+    // `api_token`, `stripe_secret_key` e as senhas de e-mail — e RLS no Postgres
+    // e por LINHA, entao quem lia a tabela levava os segredos junto.
+    const { data: rows } = await (supabase as any).rpc("config_staff");
+    const data = Array.isArray(rows) ? rows[0] : rows;
     if (data) {
       setConfigId(data.id);
       setForm({
@@ -67,15 +68,24 @@ const WarehouseSettings = () => {
       toast.error("Default inactivity timeout must be at least 1 minute."); return;
     }
     setSaving(true);
-    const { error } = await (supabase as any).from("configuracoes").update({
+    const { data: salvo, error } = await (supabase as any).from("configuracoes").update({
       warehouse_popup_enabled:      form.warehouse_popup_enabled,
       warehouse_popup_message:      form.warehouse_popup_message || null,
       warehouse_popup_day:          form.warehouse_popup_day,
       warehouse_inactivity_popup:   form.warehouse_inactivity_popup,
       warehouse_inactivity_default: form.warehouse_inactivity_default,
-    }).eq("id", configId);
-    if (error) { toast.error("Error saving: " + error.message); }
-    else { toast.success("Warehouse settings saved."); }
+    }).eq("id", configId).select();
+    if (error) { toast.error("Error saving: " + error.message); setSaving(false); return; }
+    // A unica policy de ESCRITA em `configuracoes` e admin-only. Esta tela e
+    // alcancada pelo MANAGER, e para ele o UPDATE passa pela RLS afetando ZERO
+    // linhas — o supabase-js volta SEM erro e a tela dizia "saved" sem ter
+    // salvado nada. Conferir a contagem e a unica forma de saber.
+    if (!salvo || salvo.length === 0) {
+      toast.error("Nothing was saved — only an administrator can change warehouse settings.");
+      setSaving(false);
+      return;
+    }
+    toast.success("Warehouse settings saved.");
     setSaving(false);
   };
 

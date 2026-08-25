@@ -35,11 +35,9 @@ const MondayPopup = () => {
 
     const loadAndDecide = async () => {
       // Fetch config from DB
-      const { data } = await (supabase as any)
-        .from("configuracoes")
-        .select("warehouse_popup_enabled, warehouse_popup_message, warehouse_popup_day")
-        .limit(1)
-        .maybeSingle();
+      // Via RPC `config_staff` — a tabela virou admin-only (20260825290000).
+      const { data: rows } = await (supabase as any).rpc("config_staff");
+      const data = Array.isArray(rows) ? rows[0] : rows;
 
       const cfg: Settings = {
         warehouse_popup_enabled:
