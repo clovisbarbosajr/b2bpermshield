@@ -177,7 +177,12 @@ const ImportOrders = () => {
       const { error: itensError } = await supabase.from("pedido_itens").insert(itensPayload as any);
 
       if (itensError) {
-        res.push({ row: group.rows[0].rowNum, key, status: "error", message: `Order created but items failed: ${itensError.message}` });
+        // Traduz o erro do gatilho: a mensagem crua do Postgres num relatorio de
+        // importacao nao diz ao operador o que fazer.
+        const amigavel = /ITEM_NEEDS_VARIANT/i.test(itensError.message)
+          ? "a product in this order has options (size/color) and the CSV has no variant column — import it through the product page"
+          : itensError.message;
+        res.push({ row: group.rows[0].rowNum, key, status: "error", message: `Order created but items failed: ${amigavel}` });
       } else {
         res.push({ row: group.rows[0].rowNum, key, status: "ok", message: `Order created (${items.length} item${items.length !== 1 ? "s" : ""}, total R$ ${total.toFixed(2)})` });
       }

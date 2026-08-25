@@ -351,6 +351,17 @@ const OrderDetail = () => {
   // ===== Criação de pedido pelo admin (isNew) — itens ficam em rascunho na memória =====
   const handleAddProductDraft = async (product: any) => {
     if (!selectedClienteId) { toast.error("Select a customer first"); return; }
+    // Mesma guarda do pedido existente — este caminho alimenta a tela de CRIAR
+    // pedido e nao a tinha. Sem ela o insert estoura la na frente com erro cru,
+    // depois do pedido ja criado.
+    const { data: temVar, error: varErr } = await supabase
+      .from("produto_variantes").select("id")
+      .eq("produto_id", product.id).eq("ativo", true).limit(1);
+    if (varErr) { console.error(varErr); toast.error("Could not check product options. Please try again."); return; }
+    if ((temVar ?? []).length > 0) {
+      toast.error(`"${product.nome}" has options (size/color) — it can't be added as the base product.`);
+      return;
+    }
     let price = Number(product.preco) || 0;
     try {
       const r = await getProductPrice({ productId: product.id, customerId: selectedClienteId, quantity: 1 });
@@ -409,7 +420,19 @@ const OrderDetail = () => {
     }));
     const { error: itErr } = await supabase.from("pedido_itens").insert(itens);
     setSaving(false);
-    if (itErr) { toast.error("Order created but items failed: " + itErr.message); }
+    if (itErr) {
+      // PARA AQUI. Antes so mostrava o toast e SEGUIA: o pedido ficava VAZIO e
+      // ainda assim disparava e-mail ao cliente, e-mail ao admin e SMS de
+      // "pedido novo". Mesma classe do incidente de 25/ago — notificar sobre uma
+      // coisa que nao aconteceu.
+      const amigavel = itErr.message?.includes("ITEM_NEEDS_VARIANT")
+        ? "One of the products has options (size/color) and no option was picked."
+        : itErr.message;
+      toast.error("Order created but items failed: " + amigavel);
+      log("created", "order", pedido.id, `Order #${pedido.numero || pedido.id} (ITEMS FAILED)`);
+      navigate(`/admin/orders/${pedido.id}`);
+      return;
+    }
     log("created", "order", pedido.id, `Order #${pedido.numero || pedido.id}`);
     // Notifica igual ao checkout do portal (respeita a config do evento new_order).
     const cli = allClientes.find((c) => c.id === selectedClienteId);

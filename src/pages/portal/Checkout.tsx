@@ -638,10 +638,17 @@ const Checkout = () => {
       // A reserva atômica (trigger) pode rejeitar em corrida pelo último item.
       // Remove o pedido órfão (sem itens) e avisa claramente.
       await supabase.from("pedidos").delete().eq("id", pedido.id);
-      const isStock = /insufficient_stock|check_violation|insufficient stock/i.test(itensError.message);
-      toast.error(isStock
-        ? "Sorry — an item just went out of stock. Please review your cart and try again."
-        : "Error saving order items: " + itensError.message);
+      // Distingue os dois motivos que hoje compartilham o mesmo ERRCODE
+      // (`check_violation`): falta de estoque e item sem variante. Sem isto o
+      // cliente via a mensagem CRUA do banco na tela.
+      const precisaVariante = /ITEM_NEEDS_VARIANT/i.test(itensError.message);
+      const isStock = !precisaVariante
+        && /insufficient_stock|check_violation|insufficient stock/i.test(itensError.message);
+      toast.error(precisaVariante
+        ? "One of the items needs an option (size/color) chosen. Please open the product and pick one."
+        : isStock
+          ? "Sorry — an item just went out of stock. Please review your cart and try again."
+          : "Error saving order items: " + itensError.message);
       setLoading(false);
       return;
     }

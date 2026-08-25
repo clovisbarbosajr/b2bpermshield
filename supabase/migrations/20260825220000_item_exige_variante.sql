@@ -31,12 +31,48 @@
 
 BEGIN;
 
+-- Indice: sem ele o EXISTS abaixo faz seq scan A CADA LINHA inserida —
+-- multiplicado por lote de import e pelos ~1150 pedidos do sync.
+CREATE INDEX IF NOT EXISTS produto_variantes_produto_ativo_idx
+  ON public.produto_variantes (produto_id) WHERE ativo IS TRUE;
+
 CREATE OR REPLACE FUNCTION public.fn_item_exige_variante()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  -- So checa quando a linha NAO tem variante. Linha com variante ja e validada
-  -- pela FK e pelas telas.
+  -- ISENTA O SYNC. `buildOrderItems` do b2bwave-sync NUNCA resolve variante, e o
+  -- insert e em LOTE: uma linha recusada derrubaria TODOS os itens do pedido.
+  -- Pior, o caminho de UPDATE ja apagou os itens antes de reinserir e grava
+  -- `quantidade_total: 0` no erro — entao o `changed` do proximo tick veria
+  -- diferenca, tentaria de novo, falharia de novo. Pedido VAZIO e permanente,
+  -- com o log entupido. Nao e "incompleto e visivel", e destruicao em laco.
+  --
+  -- Mesma isencao que os triggers de recalculo ja usam. Sai quando o
+  -- `buildOrderItems` passar a casar `product_code` com `produto_variantes.codigo`
+  -- — anotado na fila como o conserto de verdade.
+  IF EXISTS (
+    SELECT 1 FROM public.pedidos p
+    WHERE p.id = NEW.pedido_id AND p.b2bwave_order_id IS NOT NULL
+  ) THEN
+    RETURN NEW;
+  END IF;
+
+  -- Variante informada: confere que ela e DESTE produto. A FK garante que a
+  -- variante existe, nao que pertence ao produto da linha.
   IF NEW.variante_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.produto_variantes v
+      WHERE v.id = NEW.variante_id AND v.produto_id = NEW.produto_id
+    ) THEN
+      RAISE EXCEPTION 'ITEM_VARIANT_MISMATCH: variant % does not belong to product %',
+        NEW.variante_id, NEW.produto_id USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- `variante_id` foi ZERADO por um UPDATE: e a acao do ON DELETE SET NULL da FK
+  -- (alguem apagou a variante), nao uma escrita do app. Recusar aqui travaria a
+  -- exclusao de variante obsoleta no ProductEdit e no proprio sync.
+  IF TG_OP = 'UPDATE' AND OLD.variante_id IS NOT NULL THEN
     RETURN NEW;
   END IF;
 
@@ -44,10 +80,10 @@ BEGIN
     SELECT 1 FROM public.produto_variantes v
     WHERE v.produto_id = NEW.produto_id AND v.ativo IS TRUE
   ) THEN
-    RAISE EXCEPTION
-      'produto % tem opcoes (tamanho/cor) e o item nao especifica qual — escolha uma opcao',
-      NEW.produto_id
-      USING ERRCODE = 'check_violation';
+    -- Token reconhecivel no INICIO da mensagem: o Checkout casa por texto, nao
+    -- por codigo, e sem isto o cliente via este texto cru na tela.
+    RAISE EXCEPTION 'ITEM_NEEDS_VARIANT: product % has options (size/color) — pick one',
+      NEW.produto_id USING ERRCODE = 'check_violation';
   END IF;
 
   RETURN NEW;
@@ -65,22 +101,17 @@ COMMIT;
 -- ---------------------------------------------------------------------------
 -- IMPORTANTE — o que este gatilho NAO faz
 --
--- Ele NAO corrige as linhas historicas. Pedido antigo com item sem variante
--- continua como esta: mexer nele reescreveria pedido ja faturado, e a
--- informacao de qual variante era nao existe mais em lugar nenhum.
+-- NAO corrige linhas historicas. Pedido antigo com item sem variante continua
+-- como esta: mexer nele reescreveria pedido ja faturado, e a informacao de qual
+-- variante era nao existe mais.
 --
--- Ele TAMBEM vale para o `b2bwave-sync`, que grava `pedido_itens` com
--- `variante_id` sempre NULL (o `buildOrderItems` nunca resolve variante). Se o
--- B2BWave mandar um pedido de produto que aqui tem variante, o item sera
--- RECUSADO e o pedido ficara sem essa linha, com o contador de erro subindo no
--- sync_log.
+-- NAO vale para pedido do B2BWave (ver a isencao no topo da funcao). Enquanto o
+-- sync nao resolver `variante_id`, isentar e a unica opcao segura — sem isso o
+-- primeiro tick esvaziaria pedidos em laco.
 --
--- Isso e deliberado: melhor o pedido chegar incompleto e visivel no log do que
--- completo e errado. Mas E uma mudanca de comportamento do sync — se aparecer
--- erro em massa depois de aplicar, o `sync_log` dira, e o ROLLBACK abaixo
--- destrava na hora.
--- ---------------------------------------------------------------------------
-
+-- Ou seja: fecha o caminho do CLIENTE e do ADMIN, que e por onde o pedido errado
+-- entrava de verdade. O caminho do sync continua aberto e esta na fila.
+--
 -- ---------------------------------------------------------------------------
 -- ROLLBACK
 --
