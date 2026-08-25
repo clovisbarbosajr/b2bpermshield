@@ -130,10 +130,30 @@ async function fetchAllPaginated(endpoint: string, username: string, apiKey: str
 // min) o sync via "sent" != "enviado" e REVERTIA o status alterado pelo admin —
 // e a reversão disparava trg_order_status_notify, mandando ao cliente uma segunda
 // notificação com o valor interno cru ("Order #123: recebido").
+// `status_order_name` do B2BWave -> enum local (src/lib/orderStatuses.ts).
+// Chave sempre em minusculas.
+//
+// O mapa estava INCOMPLETO: "Ready for Pickup", "Partial" e "On Hold" existem no
+// B2BWave e no enum local, mas nao estavam aqui — caiam no fallback e o pedido
+// aparecia com status ERRADO na tela. O pedido 2820, por exemplo, estava
+// "Ready for Pickup" la e "Submitted" aqui. Nao e clone.
 const statusMap: Record<string, string> = {
-  "complete": "complete", "completed": "complete", "submitted": "submitted",
-  "received": "submitted", "processing": "on_hold", "in progress": "on_hold",
-  "shipped": "sent", "cancelled": "cancelled", "canceled": "cancelled",
+  "submitted": "submitted",
+  "received": "submitted",
+  "ready for pickup": "ready_for_pickup",
+  "ready_for_pickup": "ready_for_pickup",
+  "partial": "partial",
+  "partially shipped": "partial",
+  "on hold": "on_hold",
+  "on_hold": "on_hold",
+  "processing": "on_hold",
+  "in progress": "on_hold",
+  "shipped": "sent",
+  "sent": "sent",
+  "complete": "complete",
+  "completed": "complete",
+  "cancelled": "cancelled",
+  "canceled": "cancelled",
 };
 
 // Pagamento vindo do B2BWave. O nome do campo varia por versao/conta, entao
@@ -225,8 +245,16 @@ async function upsertOrder(
   const clienteId = clienteEmailToId.get((o.customer_email || "").toLowerCase());
   if (!clienteId) return "error";
 
-  const b2bStatus = (o.status_order_name || o.status || "submitted").toLowerCase();
-  const status = statusMap[b2bStatus] || "recebido";
+  const b2bStatus = (o.status_order_name || o.status || "submitted").trim().toLowerCase();
+  // Fallback = "submitted" (canonico). Antes era "recebido", valor LEGADO em
+  // portugues que a migration 20260622170000 ja tinha convertido no banco — o
+  // sync continuava reintroduzindo.
+  //
+  // O console registra todo status nao mapeado: se o B2BWave criar um status
+  // novo, isso aparece em vez de sumir dentro do fallback.
+  const statusMapeado = statusMap[b2bStatus];
+  if (!statusMapeado) console.warn(`[b2bwave-sync] status nao mapeado: "${b2bStatus}" (pedido ${numero}) — usando submitted`);
+  const status = statusMapeado || "submitted";
   const submittedAt = submittedRaw ? new Date(submittedRaw).toISOString() : new Date().toISOString();
   const deliveryDate = o.request_delivery_at ? new Date(o.request_delivery_at).toISOString() : null;
 
