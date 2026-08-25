@@ -1017,3 +1017,17 @@ olha `src/`, e o Deno nao esta instalado aqui.
   variavel nao existe (e escrevi um comentario afirmando que `to` so era definido
   depois — era falso, `to` ja estava definido 20 linhas acima). O
   `scripts/check-edge.mjs` acusou TS2304 na hora. Sem ele, isso ia para producao.
+
+### 25/08 (noite, cont. 14) - LEVA A / A7
+
+- **CONFIRMADO** - `stripe-checkout` roda com SERVICE ROLE e nao conferia de quem
+  era o `pedido_id`. Com cadastro ABERTO, qualquer pessoa com conta podia criar
+  intencao de cobranca sobre pedido de OUTRO cliente e, pior, chamar
+  `confirm_payment` com um `payment_intent_id` alheio e carimbar `is_paid` num
+  pedido que nao e dela.
+- **FEITO** - checagem de posse nos dois `action`. Staff (admin/manager) passa;
+  cliente so alcanca pedido da propria ficha ou da conta da EMPRESA. O caminho do
+  WEBHOOK nao foi tocado — ele e tratado antes, pela assinatura `stripe-signature`,
+  e nao tem JWT.
+- Inofensivo hoje (Stripe desligado), mas vira plataforma de teste de cartao de
+  terceiros na conta do dono no dia em que ligar. Por isso entrou antes.

@@ -109,6 +109,63 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const { action } = body;
 
+    // ----------------------------------------------------------------------
+    // POSSE DO PEDIDO (A7)
+    //
+    // Esta funcao roda com SERVICE ROLE e nao conferia de quem era o
+    // `pedido_id`. O cadastro deste sistema e ABERTO, entao qualquer pessoa com
+    // uma conta podia criar intencao de cobranca sobre o pedido de OUTRO
+    // cliente, e — pior — chamar `confirm_payment` com um `payment_intent_id`
+    // alheio e carimbar `is_paid` num pedido que nao e dela.
+    //
+    // Hoje e inofensivo porque o Stripe esta desligado (`stripe_enabled`). Vira
+    // plataforma de teste de cartao de terceiros na conta do dono no dia em que
+    // ligar — por isso entra ANTES.
+    //
+    // O caminho do WEBHOOK nao passa por aqui: ele e tratado la em cima, pela
+    // assinatura `stripe-signature`, e nao tem JWT nenhum.
+    const donoDoPedido = async (pedidoId: string): Promise<boolean> => {
+      const auth = req.headers.get("Authorization") ?? "";
+      if (!auth.toLowerCase().startsWith("bearer ")) return false;
+
+      const userClient = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: auth } } },
+      );
+      const { data: u } = await userClient.auth.getUser();
+      const uid = u?.user?.id;
+      if (!uid) return false;
+
+      // Staff resolve pedido de qualquer cliente (atendimento, cobranca manual).
+      const { data: papel } = await adminClient
+        .from("user_roles").select("role").eq("user_id", uid).maybeSingle();
+      if (papel && ["admin", "manager"].includes(String(papel.role))) return true;
+
+      // Cliente: o pedido tem que ser da ficha dele, ou da conta da EMPRESA
+      // (sub-usuario paga pedido da empresa).
+      const { data: ficha } = await adminClient
+        .from("clientes").select("id, parent_customer_id").eq("user_id", uid).maybeSingle();
+      if (!ficha) return false;
+      const raiz = ficha.parent_customer_id ?? ficha.id;
+
+      const { data: ped } = await adminClient
+        .from("pedidos")
+        .select("cliente_id, clientes:cliente_id ( id, parent_customer_id )")
+        .eq("id", pedidoId).maybeSingle();
+      if (!ped) return false;
+
+      const dono: any = (ped as any).clientes ?? {};
+      const raizDoPedido = dono.parent_customer_id ?? ped.cliente_id;
+      return String(raizDoPedido) === String(raiz);
+    };
+
+    const recusaPosse = () => new Response(
+      JSON.stringify({ error: "not allowed for this order" }),
+      { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+    // ----------------------------------------------------------------------
+
     if (action === "create_payment_intent") {
       const { currency = "usd", pedido_id, metadata = {} } = body;
 
@@ -119,6 +176,11 @@ Deno.serve(async (req) => {
           JSON.stringify({ error: "pedido_id is required" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+      }
+
+      if (!(await donoDoPedido(String(pedido_id)))) {
+        console.error(`[stripe-checkout] create_payment_intent negado para o pedido ${pedido_id}`);
+        return recusaPosse();
       }
 
       const { data: pedido, error: pedidoError } = await adminClient
@@ -171,6 +233,12 @@ Deno.serve(async (req) => {
 
       if (paymentIntent.status === "succeeded") {
         const pedidoId = paymentIntent.metadata?.pedido_id;
+        // Confere a posse ANTES de carimbar `is_paid`. Sem isto, quem tivesse um
+        // `payment_intent_id` de outra pessoa marcava o pedido dela como pago.
+        if (pedidoId && !(await donoDoPedido(String(pedidoId)))) {
+          console.error(`[stripe-checkout] confirm_payment negado para o pedido ${pedidoId}`);
+          return recusaPosse();
+        }
         if (pedidoId) {
           await adminClient
             .from("pedidos")
