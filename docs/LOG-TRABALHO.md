@@ -473,3 +473,28 @@ Profile · UsersManagement · ExtraFields · SetupApp · WarehouseSettings · B2
   tudo vira prejuizo no lancamento.
 - **PROXIMO** - item 2: fechar o vazamento das tabelas satelite.
 
+
+### 25/08 (noite) - Achado mais grave do dia: cliente escolhia o proprio preco
+
+- **ACHADO** - `pedidos.b2bwave_order_id` e gravavel pelo CLIENTE, e e o predicado
+  de isencao de meia duzia de triggers: preco autoritativo do item, recalculo de
+  subtotal, desconto/imposto/frete/total, reserva de estoque, e a nova exigencia
+  de variante. Mandando essa coluna no insert, o cliente ficava isento de TODOS os
+  recalculos: preco vira campo livre e o estoque nao e reservado.
+  Existe desde 20260622220000 - NAO e regressao minha.
+  Encontrado pelo cetico enquanto revisava OUTRA coisa (o gatilho de variante).
+- **FEITO** - `20260825230000_trava_b2bwave_order_id.sql`: trigger BEFORE
+  INSERT/UPDATE que zera o campo quando `auth.role()` nao e `service_role`.
+  Prefixo `a_` no nome para rodar antes dos demais BEFORE (ordem alfabetica),
+  senao os outros leriam o valor antes de ser zerado.
+- **FEITO** - corrigido rodape de `20260825220000`: eu tinha escrito que o gatilho
+  de variante "fecha o caminho do CLIENTE". Era falso - pela mesma isencao o
+  cliente escapava dele tambem.
+- **FEITO** - `ITEM_VARIANT_MISMATCH` traduzido no Checkout e no admin (antes caia
+  no else e mostrava a mensagem crua do banco na tela).
+- **VERIFICADO NO BANCO (dono rodou)** - `SELECT ... WHERE b2bwave_order_id IS NOT
+  NULL AND numero IS DISTINCT FROM b2bwave_order_id` = **zero linhas**. Ninguem
+  explorou a brecha; todo pedido com esse campo veio do sync.
+- **AGUARDANDO** - cacador na trava (auth.role() em cada caminho, ordem dos
+  triggers BEFORE, e busca por OUTRA coluna com o mesmo problema).
+- Commit `daf5595`, empurrado. Migration NAO rodada ainda.
