@@ -1031,3 +1031,23 @@ olha `src/`, e o Deno nao esta instalado aqui.
   e nao tem JWT.
 - Inofensivo hoje (Stripe desligado), mas vira plataforma de teste de cartao de
   terceiros na conta do dono no dia em que ligar. Por isso entrou antes.
+
+### 25/08 (noite, cont. 15) - LEVA A / A4
+
+- **CONFIRMADO** - `register-customer` e chamavel SEM SESSAO
+  (`verify_jwt = false`) e devolvia CINCO respostas distintas e mutuamente
+  exclusivas: "registration closed", "no auth user yet", "staff login",
+  `{existing:true}`, `{linked:true}`, `{created:<uuid>}`. Um `for` numa lista de
+  e-mails separava STAFF de CLIENTE de INEXISTENTE. As RPCs por tras estao
+  corretamente trancadas com REVOKE; era esta funcao publica que as reexportava
+  como oraculo.
+- **FEITO** - todo caminho responde `{ok:true}`. O motivo real vai para o log do
+  servidor. Conferi que o front IGNORA a resposta (`Cadastro.tsx:58` faz
+  `.catch(() => {})`), entao nada quebra.
+- **CONFIRMADO E CORRIGIDO** - a funcao era AMPLIFICADOR de mensagem: cada
+  chamada anonima disparava TRES envios (1 SMS + 2 e-mails), sem limite nenhum.
+  Depois do incidente dos 1508 SMS, e um botao de gastar o credito do dono ao
+  alcance de qualquer um. Limite POR E-MAIL (3/hora) — global viraria negacao de
+  servico, bastaria cadastrar em massa para impedir o aviso de cliente de
+  verdade. Falha de leitura NAO bloqueia: a ficha ja foi criada, e engolir o
+  aviso por erro nosso e pior que um aviso a mais.
