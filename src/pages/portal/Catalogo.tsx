@@ -83,12 +83,32 @@ const Catalogo = () => {
       // linha), isso vira essa funcao pesada executada uma vez POR VARIANTE do
       // catalogo todo. Filtrando pelos produtos que a RLS de `produtos` ja
       // liberou, vira acerto de indice.
+      // EM LOTES de 200: `.in()` vai na URL do GET, e mil UUIDs sao ~37 KB — o
+      // gateway corta muito antes disso. Sem lote, a request falharia e (pior)
+      // o produto COM variante iria pro carrinho SEM variante, com preco base.
       const idsVisiveis = (prodRes.data ?? []).map((p: any) => p.id);
-      const variantRes = idsVisiveis.length
-        ? await supabase.from("produto_variantes").select("produto_id").eq("ativo", true).in("produto_id", idsVisiveis)
-        : { data: [], error: null } as any;
+      const LOTE = 200;
+      const comVariante = new Set<string>();
+      let erroVariantes: any = null;
+      for (let i = 0; i < idsVisiveis.length; i += LOTE) {
+        const { data, error } = await supabase
+          .from("produto_variantes").select("produto_id")
+          .eq("ativo", true)
+          .in("produto_id", idsVisiveis.slice(i, i + LOTE));
+        if (error) { erroVariantes = error; break; }
+        (data ?? []).forEach((r: any) => comVariante.add(r.produto_id));
+      }
+      // FALHA ALTO. Degradar para "nenhum produto tem variante" e deixar o
+      // cliente adicionar direto do grid produz PEDIDO ERRADO em silencio — item
+      // sem tamanho/cor e com preco do produto-pai. Melhor a tela avisar.
+      if (erroVariantes) {
+        console.error(erroVariantes);
+        toast.error("Could not load product options. Please reload the page.");
+        setLoading(false);
+        return;
+      }
       // Produtos que têm variante: o "Add" do grid leva pra página do produto (escolher a opção).
-      setVariantProductIds(new Set((variantRes.data ?? []).map((r: any) => r.produto_id)));
+      setVariantProductIds(comVariante);
 
       // Build status map
       const sMap: Record<string, ProductStatus> = {};

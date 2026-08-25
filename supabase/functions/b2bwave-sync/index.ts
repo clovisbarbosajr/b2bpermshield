@@ -1404,7 +1404,7 @@ Deno.serve(async (req) => {
       const faltando: number[] = [];        // esta la, nao esta aqui
       const sobrando: number[] = [];        // esta aqui, nao esta la
       const statusDiferente: any[] = [];
-      const totalDiferente: any[] = [];
+      const valorDiferente: any[] = [];
       const pagamentoDiferente: any[] = [];
 
       for (const [n, o] of naOrigem) {
@@ -1416,14 +1416,39 @@ Deno.serve(async (req) => {
           statusDiferente.push({ pedido: n, la: o.status_order_name ?? null, aqui: local.status, esperado: statusOrigem });
         }
 
-        const totalOrigem = pickNum(o, ["gross_total", "total_after_vat", "total", "total_before_vat", "grand_total", "order_total", "amount"]);
-        if (totalOrigem > 0 && Math.abs(totalOrigem - Number(local.total)) > 0.01 && totalDiferente.length < 20) {
-          totalDiferente.push({ pedido: n, la: totalOrigem, aqui: Number(local.total) });
+        // MESMO CRITERIO DO `changed` do upsertOrder — senao o relatorio diria
+        // "identico" enquanto o proximo ciclo do sync reescreveria tudo por
+        // divergencia de subtotal ou quantidade. Comparar menos que o sync
+        // decide e mentir por omissao, justo na pergunta que motiva esta acao.
+        const { qty: itemsQty, sum: itemsSum } = buildOrderItems(o.order_products || [], new Map(), new Map());
+        let subtotalOrigem = pickNum(o, ["total_before_vat", "subtotal", "net_total", "total"]);
+        let totalOrigem = pickNum(o, ["gross_total", "total_after_vat", "total", "total_before_vat", "grand_total", "order_total", "amount"]);
+        // Replica os fallbacks do upsertOrder. Sem eles, pedido cujo total vem da
+        // soma dos itens ficava FORA da comparacao — escondia diferenca.
+        if (subtotalOrigem <= 0) subtotalOrigem = itemsSum;
+        if (totalOrigem <= 0) totalOrigem = itemsSum || subtotalOrigem;
+        let qtdOrigem = parseInt(o.total_quantity || "0") || 0;
+        if (qtdOrigem <= 0) qtdOrigem = itemsQty;
+
+        // Igualdade EXATA, como o sync. Uma tolerancia de centavo aqui diria
+        // "identico" onde o sync faria UPDATE.
+        const difTotal = Number(local.total) !== totalOrigem;
+        const difSub = Number(local.subtotal) !== subtotalOrigem;
+        const difQtd = (local.quantidade_total ?? 0) !== qtdOrigem;
+        if ((difTotal || difSub || difQtd) && valorDiferente.length < 20) {
+          valorDiferente.push({
+            pedido: n,
+            total: difTotal ? { la: totalOrigem, aqui: Number(local.total) } : undefined,
+            subtotal: difSub ? { la: subtotalOrigem, aqui: Number(local.subtotal) } : undefined,
+            quantidade: difQtd ? { la: qtdOrigem, aqui: local.quantidade_total ?? 0 } : undefined,
+          });
         }
 
         const pagoOrigem = pickPago(o);
         if (pagoOrigem !== undefined && pagoOrigem !== local.is_paid && pagamentoDiferente.length < 20) {
-          pagamentoDiferente.push({ pedido: n, la: pagoOrigem, aqui: local.is_paid });
+          // NOTA: `is_paid` NAO entra no `changed` do sync, entao uma diferenca
+          // aqui nao se corrige sozinha no proximo ciclo.
+          pagamentoDiferente.push({ pedido: n, la: pagoOrigem, aqui: local.is_paid, obs: "o sync nao corrige isto sozinho" });
         }
       }
       for (const n of aqui.keys()) {
@@ -1437,13 +1462,19 @@ Deno.serve(async (req) => {
         paginas_lidas: paginasLidas,
         no_b2bwave: naOrigem.size,
         aqui: aqui.size,
-        identico: faltando.length === 0 && sobrando.length === 0
-          && statusDiferente.length === 0 && totalDiferente.length === 0 && pagamentoDiferente.length === 0,
+        // `identico` EXIGE leitura completa: com `truncado`, "sobrando_aqui" e
+        // formado por pedidos legitimos que a origem so nao terminou de listar.
+        // Chamar isso de identico (ou de lixo) seria conclusao errada.
+        identico: !truncado && faltando.length === 0 && sobrando.length === 0
+          && statusDiferente.length === 0 && valorDiferente.length === 0 && pagamentoDiferente.length === 0,
+        aviso: truncado
+          ? "LEITURA INCOMPLETA — a lista da origem nao terminou. `sobrando_aqui` aqui NAO significa lixo: sao pedidos que a origem ainda nao listou. Rode de novo com budget_ms maior."
+          : null,
         diferencas: {
           faltando_aqui: faltando,
           sobrando_aqui: sobrando,
           status_diferente: statusDiferente,
-          total_diferente: totalDiferente,
+          valor_diferente: valorDiferente,
           pagamento_diferente: pagamentoDiferente,
         },
         segundos: Math.round((Date.now() - inicio) / 1000),
