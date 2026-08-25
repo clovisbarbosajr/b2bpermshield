@@ -677,6 +677,27 @@ const Checkout = () => {
       .select("subtotal, desconto, sales_tax, shipping_costs, total").eq("id", pedido.id).maybeSingle();
     const finalTotal = Number((fresh as any)?.total ?? recalcGrossTotal);
     const couponApplied = Number((fresh as any)?.desconto ?? 0) > 0;
+
+    // O banco e a AUTORIDADE do preco, e ele pode discordar da tela: cupom
+    // recusado por validade/uso (o servidor zera `coupon_id`), preco de produto
+    // alterado enquanto o carrinho estava aberto, regra de frete por zona que o
+    // front nao conhece.
+    //
+    // Cobrar mais do que a tela mostrou, em silencio, nao e opcao. Se o banco
+    // pedir MAIS, desfaz e manda o cliente reconferir. Se pedir MENOS, segue —
+    // ninguem se prejudica e parar seria so atrapalhar.
+    //
+    // Tolerancia de 1 centavo: `total` e NUMERIC(12,2) no banco e float aqui;
+    // sem isso um 30.599999999999998 contra 30.60 barraria pedido legitimo.
+    if (finalTotal - recalcGrossTotal > 0.01) {
+      await desfazerPedido(pedido.id);
+      toast.error(
+        `The price changed while you were checking out ($${recalcGrossTotal.toFixed(2)} → $${finalTotal.toFixed(2)}). ` +
+        `Nothing was charged. Please review your cart and try again.`
+      );
+      setLoading(false);
+      return;
+    }
     // Email usa os totais AUTORITATIVOS (recomputados pelos triggers), não os do insert.
     const emailOrder = { ...pedido, ...((fresh as any) || {}) };
 

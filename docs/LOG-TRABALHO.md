@@ -548,3 +548,34 @@ colunas. O Checkout manda um conjunto educado; um POST cru manda o que quiser.
   provam que produto sem opcao continua passando. Arquivo restaurado, 68 verdes.
 
 - **AGUARDANDO** - cetico nas migrations 230000 e 240000.
+
+### 25/08 (noite, cont. 2) - Leva B: cupom e preco exibido
+
+- **CONFIRMADO POR MIM (lendo a funcao viva, nao a anotacao)** - a validacao de
+  cupom estava morta em 100% dos pedidos. `fn_pedido_total_appside` so confere
+  ativo/datas/uso no ramo `TG_OP='INSERT'`. O comentario do ramo ELSE justifica
+  a ausencia com "no UPDATE o cupom JA foi consumido por este pedido" — premissa
+  falsa. Sequencia real: INSERT reprova o cupom e da desconto 0, mas deixa
+  `coupon_id` gravado; o insert dos itens dispara `fn_pedido_recompute_subtotal`,
+  que faz UPDATE em `pedidos`; esse UPDATE cai no ramo ELSE, rele o cupom SEM
+  elegibilidade e grava o desconto cheio. Todo pedido tem item, entao o passo 3
+  sempre acontece.
+- **FEITO** - `20260825260000_cupom_validacao_viva.sql`. Conserto de uma linha:
+  se o cupom for reprovado no INSERT, zera `NEW.coupon_id`. O ramo de UPDATE
+  deixa de ter o que reaplicar, e o cupom legitimamente aplicado continua valendo
+  nos UPDATEs seguintes (admin editar pedido antigo nao revoga desconto ja dado).
+  A funcao foi EXTRAIDA do arquivo 20260803130000 por script e so o bloco do
+  cupom mudou — provado por diff: 13 linhas inseridas, ZERO removidas.
+- **NAO CONSERTADO, DE PROPOSITO** - `uso_maximo` continua sendo limite honesto:
+  quem consome e `increment_coupon_usage`, chamada pelo NAVEGADOR. Cliente que
+  nao chama nunca incrementa. Nao movi para o gatilho porque a chamada esta no
+  fim do fluxo por decisao anterior e deliberada (cartao recusado queimava cupom
+  sem venda). O conserto certo e consumo idempotente por pedido - item proprio
+  na fila. O PRECO, que e o dinheiro, fica correto a partir daqui.
+- **FEITO** - guarda de preco no Checkout: depois de reler os totais
+  autoritativos, se o banco pedir MAIS que a tela mostrou (> 1 centavo), desfaz o
+  pedido e avisa o cliente com os dois valores. Se pedir MENOS, segue. Fecha a
+  pior aresta do item B2 e e o par necessario do conserto do cupom - sem ele, o
+  cupom recusado viraria cobranca silenciosa a mais.
+- 68 testes verdes, build limpo, typecheck 0.
+- **AGUARDANDO** - cetico (migrations 230000/240000) e cacador (Leva A) rodando.
