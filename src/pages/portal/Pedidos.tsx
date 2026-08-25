@@ -112,7 +112,10 @@ const Pedidos = () => {
 
   const handleReorder = async (pedidoId: string) => {
     setReordering(pedidoId);
-    const { data: itens } = await supabase.from("pedido_itens").select("*").eq("pedido_id", pedidoId);
+    const { data: itens, error: itensErr } = await supabase.from("pedido_itens").select("*").eq("pedido_id", pedidoId);
+    // Falha de consulta virava "No items found" — diagnostico falso, e o cliente
+    // conclui que o pedido dele esta vazio.
+    if (itensErr) { console.error(itensErr); toast.error("Could not load the order items. Please try again."); setReordering(null); return; }
     if (!itens || itens.length === 0) { toast.error("No items found"); setReordering(null); return; }
     const productIds = itens.map((i: any) => i.produto_id);
     // A variante agora tem coluna própria (`pedido_itens.variante_id`). Sem isso o

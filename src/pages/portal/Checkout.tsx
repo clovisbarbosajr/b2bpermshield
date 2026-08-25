@@ -457,12 +457,14 @@ const Checkout = () => {
     const ids = items.map(i => i.produto_id);
     let cancelled = false;
     const check = async () => {
-      const varIds = items.map((i: any) => i.variante_id).filter(Boolean) as string[];
       const [{ data: prods }, { data: statuses }, { data: vars }] = await Promise.all([
         supabase.from("produtos").select("id, estoque_total, estoque_reservado, status_produto").in("id", ids),
         supabase.from("product_statuses").select("nome, permite_comprar"),
-        varIds.length
-          ? supabase.from("produto_variantes").select("id, produto_id, quantidade").in("id", varIds)
+        // `ids.length`, NAO `varIds.length`: pular quando nenhuma linha tem
+        // variante e exatamente perder o caso que interessa — produto que ganhou
+        // opcao DEPOIS que o cliente o colocou no carrinho.
+        ids.length
+          ? supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", ids)
           : Promise.resolve({ data: [] as any[] }),
       ]);
       if (cancelled || !prods || !statuses) return;
@@ -528,8 +530,12 @@ const Checkout = () => {
       .select("nome, permite_comprar");
 
     // Estoque por variante relido agora — o teto da variante entra na validação final.
-    const { data: freshVariants } = variantIds.length
-      ? await supabase.from("produto_variantes").select("id, produto_id, quantidade").in("id", variantIds)
+    // POR PRODUTO, nao por id de variante: e aqui que se pega a linha SEM
+    // variante num produto que ganhou opcao depois de entrar no carrinho. Este e
+    // o portao de SAIDA, o ultimo antes de virar pedido.
+    const idsProdSubmit = [...new Set(items.map((i: any) => i.produto_id))];
+    const { data: freshVariants } = idsProdSubmit.length
+      ? await supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", idsProdSubmit)
       : { data: [] as any[] };
 
     if (freshProducts && allStatuses) {

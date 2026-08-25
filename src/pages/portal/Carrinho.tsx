@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ShoppingBag, X, Trash2, ChevronRight, Bookmark, RotateCcw, AlertTriangle } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -69,11 +69,29 @@ const Carrinho = () => {
   // salvo, e ignorava todas as guardas de variante. Item salvo antes do produto
   // ganhar variante voltava sem variante e com o preco do pai.
   const moveToCart = async (item: any) => {
+    // Trava de clique: virou async (duas idas ao banco), entao o botao fica mudo
+    // por centenas de ms e o duplo clique ficou MAIS provavel. `addItem` SOMA
+    // quando a chave ja existe — quantidade dobrada, calada. Mesmo padrao do
+    // `addingRef` do catalogo.
+    if (movendoRef.current.has(cartKey(item))) return;
+    movendoRef.current.add(cartKey(item));
+    try {
     const { data: prod, error: prodErr } = await supabase
-      .from("produtos").select("id, preco, ativo, estoque_total, estoque_reservado")
+      .from("produtos").select("id, preco, ativo")
       .eq("id", item.produto_id).maybeSingle();
     if (prodErr) { console.error(prodErr); toast.error("Could not check this product. Please try again."); return; }
     if (!prod || prod.ativo === false) { toast.error(`${item.nome} is no longer available.`); return; }
+
+    if (item.variante_id) {
+      // Variante EXISTENTE tambem precisa ser revalidada: a versao anterior so
+      // olhava quando a linha NAO tinha variante, entao variante apagada ou
+      // desativada voltava para o carrinho.
+      const { data: v, error: vErr } = await supabase
+        .from("produto_variantes").select("id, ativo")
+        .eq("id", item.variante_id).maybeSingle();
+      if (vErr) { console.error(vErr); toast.error("Could not check product options. Please try again."); return; }
+      if (!v || v.ativo === false) { toast.error("That option is no longer available."); return; }
+    }
 
     if (!item.variante_id) {
       const { data: temVar, error: varErr } = await supabase
@@ -86,11 +104,18 @@ const Carrinho = () => {
       }
     }
 
-    // Preco releito do banco: o salvo pode ter meses.
+    // Preco releito do banco: o salvo pode ter meses. E o preco BASE — o
+    // definitivo e recalculado no submit (`getProductPrice`), como no re-order.
     addItem({ ...item, preco: prod.preco ?? item.preco });
     persistSaved(savedItems.filter((s) => cartKey(s) !== cartKey(item)));
     toast.success(`${item.nome} moved to cart`);
+    } finally {
+      movendoRef.current.delete(cartKey(item));
+    }
   };
+
+  // Chaves em movimento — evita o duplo clique somar duas vezes.
+  const movendoRef = useRef(new Set<string>());
 
   const removeSaved = (key: string) => {
     persistSaved(savedItems.filter((s) => cartKey(s) !== key));
@@ -110,12 +135,14 @@ const Carrinho = () => {
       // As variantes do carrinho entram na conta: o estoque por variante existe
       // (`produto_variantes.quantidade`) e antes só a página do produto olhava —
       // dava pra entrar por lá e depois furar mudando a quantidade AQUI.
-      const varIds = items.map(i => i.variante_id).filter(Boolean) as string[];
       const [{ data: prods }, { data: statuses }, { data: vars }] = await Promise.all([
         supabase.from("produtos").select("id, estoque_total, estoque_reservado, status_produto").in("id", ids),
         supabase.from("product_statuses").select("nome, permite_comprar"),
-        varIds.length
-          ? supabase.from("produto_variantes").select("id, produto_id, quantidade").in("id", varIds)
+        // `ids.length`, NAO `varIds.length`: pular quando nenhuma linha tem
+        // variante e exatamente perder o caso que interessa — produto que ganhou
+        // opcao DEPOIS que o cliente o colocou no carrinho.
+        ids.length
+          ? supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", ids)
           : Promise.resolve({ data: [] as any[] }),
       ]);
       if (cancelled || !prods || !statuses) return;

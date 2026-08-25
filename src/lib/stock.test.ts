@@ -156,3 +156,34 @@ describe("checkCartStock — bug 35: estoque POR VARIANTE", () => {
     expect(r.insufficient.size).toBe(0);
   });
 });
+
+// Linha SEM variante num produto que TEM variante hoje.
+//
+// O carrinho vive no localStorage indefinidamente: o cliente pode ter colocado o
+// produto ANTES de ele ganhar opcao. Sem este bloqueio a linha viajava ate o
+// pedido como produto-pai, com o preco do pai, em silencio — e as guardas de
+// tela (catalogo, re-order, saved-for-later) so fecham as portas de ENTRADA.
+describe("linha sem variante em produto que ganhou variante", () => {
+  const produtos = [{ id: "p1", estoque_total: 100, estoque_reservado: 0, status_produto: "available" }];
+  const statuses = [{ nome: "available", permite_comprar: true }];
+
+  it("BLOQUEIA quando o produto tem variante ativa e a linha nao tem", () => {
+    const itens = [{ produto_id: "p1", variante_id: null, quantidade: 1 }];
+    const variantes = [{ id: "v1", produto_id: "p1", quantidade: 5 }];
+    const { blocked } = checkCartStock(itens as any, produtos as any, statuses as any, variantes as any);
+    expect(blocked.has("p1::")).toBe(true);
+  });
+
+  it("PERMITE quando o produto nao tem variante nenhuma", () => {
+    const itens = [{ produto_id: "p1", variante_id: null, quantidade: 1 }];
+    const { blocked } = checkCartStock(itens as any, produtos as any, statuses as any, []);
+    expect(blocked.has("p1::")).toBe(false);
+  });
+
+  it("PERMITE a linha que TEM a variante certa", () => {
+    const itens = [{ produto_id: "p1", variante_id: "v1", quantidade: 1 }];
+    const variantes = [{ id: "v1", produto_id: "p1", quantidade: 5 }];
+    const { blocked } = checkCartStock(itens as any, produtos as any, statuses as any, variantes as any);
+    expect(blocked.has("p1::v1")).toBe(false);
+  });
+});

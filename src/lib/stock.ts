@@ -85,6 +85,10 @@ export function checkCartStock(
   const statusMap = new Map(statuses.map((s) => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
   const prodById = new Map(produtos.map((p) => [p.id, p]));
   const varById = new Map(variantes.map((v) => [v.id, v]));
+  // Quais produtos tem QUALQUER variante ativa. Alimentado pelas variantes que o
+  // chamador ja carrega para o carrinho — ver o comentario do bloqueio abaixo.
+  const variantesPorProduto = new Map<string, boolean>();
+  for (const v of variantes) if (v.produto_id) variantesPorProduto.set(v.produto_id, true);
 
   // (b) soma pedida por produto — variantes do mesmo produto entram juntas.
   const pedidoPorProduto = new Map<string, number>();
@@ -116,6 +120,16 @@ export function checkCartStock(
       // Variante que sumiu (desativada/apagada) é bloqueio, não "estoque 0 do produto".
       if (!v) { blocked.set(key, item); continue; }
       teto = Math.min(dispProduto, v.quantidade ?? 0);
+    } else if (variantesPorProduto.get(item.produto_id)) {
+      // Linha SEM variante num produto que TEM variante hoje: bloqueia.
+      //
+      // O carrinho vive no localStorage indefinidamente. O cliente pode ter
+      // colocado o produto antes de ele ganhar opcao — e aI a linha viajava ate
+      // o pedido como produto-pai, com o preco do pai, em silencio. As guardas
+      // de tela (catalogo, re-order, saved-for-later) fecham as portas de
+      // ENTRADA; esta fecha a de SAIDA, que e a que decide.
+      blocked.set(key, item);
+      continue;
     }
 
     if (teto < 1) { blocked.set(key, item); continue; }

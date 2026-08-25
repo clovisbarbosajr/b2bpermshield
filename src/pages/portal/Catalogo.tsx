@@ -94,6 +94,11 @@ const Catalogo = () => {
       // vazio em silencio, e o cliente concluia que a loja nao tem produto.
       if (prodRes.error) {
         console.error(prodRes.error);
+        // LIMPA a lista: o efeito roda duas vezes (uma com `clienteId` nulo,
+        // outra depois que resolve). Se a segunda falhar e a lista da primeira
+        // ficar na tela, o banner nunca aparece — e em "view as" seria o
+        // catalogo NAO filtrado do admin passando por catalogo do cliente.
+        setProdutos([]);
         setErroCarga("Could not load the catalog.");
         setLoading(false);
         return;
@@ -118,6 +123,11 @@ const Catalogo = () => {
       // sem tamanho/cor e com preco do produto-pai. Melhor a tela avisar.
       if (erroVariantes) {
         console.error(erroVariantes);
+        // LIMPA a lista: o efeito roda duas vezes (uma com `clienteId` nulo,
+        // outra depois que resolve). Se a segunda falhar e a lista da primeira
+        // ficar na tela, o banner nunca aparece — e em "view as" seria o
+        // catalogo NAO filtrado do admin passando por catalogo do cliente.
+        setProdutos([]);
         setErroCarga("Could not load product options.");
         setLoading(false);
         return;

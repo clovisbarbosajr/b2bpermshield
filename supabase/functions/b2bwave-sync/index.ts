@@ -1414,12 +1414,13 @@ Deno.serve(async (req) => {
       const reparoPendente: any[] = [];
       const reparoReabre: any[] = [];
       const vaiEscreverEx: any[] = [];
+      const escreveRecenteEx: any[] = [];
       // Mesma janela do `recenteDeVerdade` do upsertOrder.
       const TETO_DIAS_IMPORTADO_MS = 7 * 24 * 60 * 60 * 1000;
       // Contadores: 20 exemplos nao distinguem 3 de 1147, que e o numero que
       // decide se da para religar.
       let nFaltando = 0, nSobrando = 0, nStatus = 0, nValor = 0, nPagamento = 0, nReparo = 0;
-      let nReabre = 0, nVaiEscrever = 0;
+      let nReabre = 0, nVaiEscrever = 0, nEscreveRecente = 0;
 
       // Mesma extracao de data do upsertOrder, para saber se o pedido vai cair
       // no `precisaReparar`.
@@ -1495,6 +1496,10 @@ Deno.serve(async (req) => {
         if (reabre) {
           nReabre++;
           if (reparoReabre.length < 20) {
+            // NOTA: este contador cobre so o reparo. `notificavel: true` tambem
+            // e gravado em QUALQUER update de pedido recente, mesmo com
+            // `data_origem` ja presente — esse caso cai em
+            // `proximo_tick_escreve_em_pedido_recente`, que e o numero a olhar.
             reparoReabre.push({ pedido: n, data_origem: dataOrigem, notificavel_hoje: local.notificavel });
           }
         }
@@ -1515,6 +1520,25 @@ Deno.serve(async (req) => {
           nVaiEscrever++;
           if (vaiEscreverEx.length < 20) {
             vaiEscreverEx.push({ pedido: n, total: { la: totalOrigem, aqui: Number(local.total) }, subtotal: { la: subtotalOrigem, aqui: Number(local.subtotal) } });
+          }
+        }
+
+        // O QUE REALMENTE IMPORTA: escrever num pedido velho e inofensivo (nao
+        // mexe em `notificavel` e ainda esbarra na trava de idade). O risco e
+        // escrever num pedido RECENTE, porque ai o `upsertOrder` grava
+        // `notificavel: true` e apaga o kill-switch do admin.
+        //
+        // `nVaiEscrever` sozinho travaria o portao para sempre: o proprio
+        // `changed` compara float cru, entao os 1.147 aparecem eternamente. Um
+        // portao que nunca fica verde e um portao que todo mundo ignora — foi o
+        // argumento que me fez tirar `nReparo`, e eu tinha reconstruido o mesmo
+        // problema aqui.
+        const recente = dataOrigem !== null
+          && (Date.now() - new Date(dataOrigem).getTime()) < TETO_DIAS_IMPORTADO_MS;
+        if (vaiEscrever && recente) {
+          nEscreveRecente++;
+          if (escreveRecenteEx.length < 20) {
+            escreveRecenteEx.push({ pedido: n, data_origem: dataOrigem, notificavel_hoje: local.notificavel, status: { la: statusOrigem, aqui: local.status } });
           }
         }
 
@@ -1543,9 +1567,13 @@ Deno.serve(async (req) => {
         // `identico` NAO exige `nReparo === 0` — pedido pre-2025 nunca sera
         // reparado e travaria o portao para sempre. Exige `nReabre` (reparo que
         // religa `notificavel`) e `nVaiEscrever` (o proximo tick escreve).
+        // Nao exige `nVaiEscrever === 0` nem `nReparo === 0`: os dois ficam
+        // eternamente diferentes de zero por ruido de float e por pedido
+        // pre-2025. Exige o que muda comportamento: escrita em pedido RECENTE
+        // (que religa `notificavel`) e divergencia real de dado.
         identico: !truncado && nFaltando === 0 && nSobrando === 0
           && nStatus === 0 && nValor === 0 && nPagamento === 0
-          && nReabre === 0 && nVaiEscrever === 0,
+          && nEscreveRecente === 0,
         // Os TOTAIS sao o que decide se da para religar. As listas abaixo sao so
         // 20 exemplos cada.
         totais: {
@@ -1557,6 +1585,7 @@ Deno.serve(async (req) => {
           reparo_pendente: nReparo,
           reparo_reabre_notificavel: nReabre,
           proximo_tick_escreve: nVaiEscrever,
+          proximo_tick_escreve_em_pedido_recente: nEscreveRecente,
         },
         aviso: truncado
           ? "LEITURA INCOMPLETA — a lista da origem nao terminou. `sobrando_aqui` aqui NAO significa lixo: sao pedidos que a origem ainda nao listou. Rode de novo com budget_ms maior."
@@ -1570,6 +1599,7 @@ Deno.serve(async (req) => {
           reparo_pendente: reparoPendente,
           reparo_reabre_notificavel: reparoReabre,
           proximo_tick_escreve: vaiEscreverEx,
+          proximo_tick_escreve_em_pedido_recente: escreveRecenteEx,
         },
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });

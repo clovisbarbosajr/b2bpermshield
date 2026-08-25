@@ -67,6 +67,15 @@ const ProdutoDetalhe = () => {
 
   // Fetch product data
   useEffect(() => {
+    // RESET COMPLETO ao trocar de `id`. A rota e a mesma, entao navegar de A para
+    // B NAO remonta o componente: sem isto a tela mostrava A inteiro (preco,
+    // estoque, breadcrumb) enquanto B carregava. Pior: se as variantes de B
+    // voltassem ANTES do produto B, `handleAdd` montava o item com o produto A.
+    setProduto(null);
+    setCategoria(null);
+    setStatusInfo(null);
+    setAccessDenied(false);
+    setLoading(true);
     const fetchData = async () => {
       const [prodRes, catsRes, statusesRes] = await Promise.all([
         supabase.from("produtos").select("*").eq("id", id).single(),
