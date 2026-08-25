@@ -136,6 +136,26 @@ const statusMap: Record<string, string> = {
   "shipped": "sent", "cancelled": "cancelled", "canceled": "cancelled",
 };
 
+// Pagamento vindo do B2BWave. O nome do campo varia por versao/conta, entao
+// tenta as chaves conhecidas — booleano, numero ou texto ("paid", "unpaid").
+//
+// Devolve `undefined` quando o B2BWave NAO informa pagamento nenhum. Isso e
+// importante: `undefined` nao entra no patch, entao o sync nao apaga o que ja
+// existe. Se a conta nao expoe pagamento, o campo local fica como esta e nada
+// muda — em vez de zerar 1066 pedidos por causa de um campo ausente.
+function pickPago(o: any): boolean | undefined {
+  for (const k of ["is_paid", "paid", "payment_status", "status_payment_name", "payment_state", "financial_status"]) {
+    const v = o?.[k];
+    if (v === undefined || v === null || v === "") continue;
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return v !== 0;
+    const t = String(v).trim().toLowerCase();
+    if (["paid", "pago", "paid in full", "complete", "completed", "settled", "true", "1", "yes"].includes(t)) return true;
+    if (["unpaid", "nao pago", "não pago", "pending", "awaiting payment", "unpaid/pending", "false", "0", "no"].includes(t)) return false;
+  }
+  return undefined;
+}
+
 // Escolhe o primeiro campo numérico > 0 dentre várias chaves possíveis da API B2BWave.
 function pickNum(obj: any, keys: string[]): number {
   for (const k of keys) {
@@ -220,8 +240,11 @@ async function upsertOrder(
     const changed = ex.status !== status || Number(ex.total) !== total ||
       Number(ex.subtotal) !== subtotal || (ex.quantidade_total ?? 0) !== quantidade;
     if (!changed) return "skipped";
+    const pago = pickPago(o);
     const upd = await db.from("pedidos").update({
       status, subtotal, total, quantidade_total: quantidade,
+      // So entra no patch quando o B2BWave realmente informou — ver pickPago.
+      ...(pago === undefined ? {} : { is_paid: pago }),
       observacoes: o.comments_customer || o.customer_comments || null,
       admin_notes: o.admin_notes || o.internal_notes || null,
       po_number: o.customer_order_reference || o.purchase_order || o.po_number || null,
@@ -257,8 +280,10 @@ async function upsertOrder(
     return "updated";
   }
 
+  const pagoNovo = pickPago(o);
   const ins = await db.from("pedidos").insert({
     numero, b2bwave_order_id: numero, cliente_id: clienteId, status, subtotal, total,
+    ...(pagoNovo === undefined ? {} : { is_paid: pagoNovo }),
     observacoes: o.comments_customer || o.customer_comments || null,
     admin_notes: o.admin_notes || o.internal_notes || null,
     po_number: o.customer_order_reference || o.purchase_order || o.po_number || null,
