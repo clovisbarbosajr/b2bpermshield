@@ -315,8 +315,9 @@ async function upsertOrder(
   // `podeNotificar`: so com data REAL da origem. Sem data, o pedido entra no
   // sistema (nao perder o pedido e mais importante), mas fica calado.
   const podeNotificar = submittedAt !== null;
-  // Mesma janela usada para decidir se avisa de pedido novo. Reaproveitada aqui
-  // para nao reabilitar pedido velho ao gravar a data da origem.
+  // 7 dias espelha o DEFAULT de `order_notify_max_age_days` (a janela do
+  // gatilho), NAO a do aviso de pedido novo — aquela e de 2 dias, mais estreita.
+  // Serve para nao reabilitar pedido velho ao gravar a data da origem.
   const recenteDeVerdade = submittedAt !== null
     && (Date.now() - new Date(submittedAt).getTime()) < 7 * 24 * 60 * 60 * 1000;
   const deliveryDate = o.request_delivery_at ? new Date(o.request_delivery_at).toISOString() : null;
@@ -422,11 +423,17 @@ async function upsertOrder(
     // preenchemos errado.
     ...(submittedAt ? { created_at: submittedAt } : {}),
     data_origem: submittedAt,
-    notificavel: podeNotificar,
+    // `recenteDeVerdade`, NAO `podeNotificar`: ter data nao basta, a data
+    // precisa ser recente. Com `podeNotificar`, pedido de jan/2025 importado
+    // hoje nascia liberado e as duas defesas viravam UMA (so o numero editavel
+    // em `sync_state`). Morde de verdade: `skipPre2025` so barra ano < 2025, e
+    // reimportar a base traria os 1.147 por este caminho — o backfill da
+    // migration ja rodou e nao alcanca pedido novo.
+    notificavel: recenteDeVerdade,
   }).select("id").single();
   if (ins.error || !ins.data) return "error";
   const orderId = ins.data.id;
-  existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: quantidade });
+    existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: quantidade, data_origem: submittedAt });
   if (itemRows.length > 0) {
     // Mesmo buraco do caminho de UPDATE, e pelo mesmo motivo: sem checar o erro,
     // um pedido NOVO ficava com zero itens e retornava "created" — e como o
@@ -1526,6 +1533,13 @@ Deno.serve(async (req) => {
         message: `cron_orders: ${created} new, ${updated} updated, ${skipped} unchanged, ${errors} errors (next cursor ${nextCursor})`
       }), { headers: jsonHeaders });
 
+      } catch (e) {
+        // Sem isto o tick que lanca some do `sync_log`: `logRun` fica DEPOIS do
+        // laco e nunca roda. Se o erro for permanente (ex.: SQL nao aplicado), o
+        // cron falha em toda tick, o cursor nao avanca, nada sincroniza — e a
+        // tela de Sync do admin mostra "nada aconteceu" em vez do erro.
+        await logRun(adminClient, "orders", { errors: 1, samples: [String((e as any)?.message ?? e).slice(0, 300)] });
+        throw e;
       } finally {
         await suprimirNotificacao(adminClient, false);
       }
