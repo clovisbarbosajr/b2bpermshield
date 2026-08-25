@@ -156,28 +156,26 @@ const statusMap: Record<string, string> = {
   "canceled": "cancelled",
 };
 
-// Pagamento vindo do B2BWave. O nome do campo varia por versao/conta, entao
-// tenta as chaves conhecidas — booleano, numero ou texto ("paid", "unpaid").
+// Pagamento vindo do B2BWave — campo `is_paid`, confirmado na API real da conta
+// (a acao `debug_order_fields` listou: payment_token, is_paid, paid_amount,
+// payment_option_name). Um SO campo, o mesmo nome dos dois lados: e dinheiro,
+// entao isto tem que ser copia, nao deducao.
 //
-// Devolve `undefined` quando o B2BWave NAO informa pagamento nenhum. Isso e
-// importante: `undefined` nao entra no patch, entao o sync nao apaga o que ja
-// existe. Se a conta nao expoe pagamento, o campo local fica como esta e nada
-// muda — em vez de zerar 1066 pedidos por causa de um campo ausente.
+// Aceita booleano, numero ou texto so porque o JSON pode serializar de
+// qualquer um desses jeitos — o CAMPO continua sendo um so.
+//
+// Devolve `undefined` quando o B2BWave nao manda o campo. `undefined` nao entra
+// no patch, entao um pedido sem a informacao NAO tem o valor local sobrescrito.
 function pickPago(o: any): boolean | undefined {
-  // ATENCAO: esta lista de chaves e PROVISORIA. Rode a acao `debug_order_fields`
-  // para ver os campos reais da sua conta B2BWave e deixe SO o campo certo aqui.
-  // Enquanto a chave real nao estiver confirmada, isto pode simplesmente nao
-  // casar com nada — e nao casar e o comportamento seguro: devolve undefined e o
-  // sync nao escreve nada em is_paid.
-  for (const k of ["is_paid", "paid", "payment_status", "status_payment_name", "payment_state", "financial_status"]) {
-    const v = o?.[k];
-    if (v === undefined || v === null || v === "") continue;
-    if (typeof v === "boolean") return v;
-    if (typeof v === "number") return v !== 0;
-    const t = String(v).trim().toLowerCase();
-    if (["paid", "pago", "paid in full", "complete", "completed", "settled", "true", "1", "yes"].includes(t)) return true;
-    if (["unpaid", "nao pago", "não pago", "pending", "awaiting payment", "unpaid/pending", "false", "0", "no"].includes(t)) return false;
-  }
+  const v = o?.is_paid;
+  if (v === undefined || v === null || v === "") return undefined;
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v !== 0;
+  const t = String(v).trim().toLowerCase();
+  if (["true", "1", "yes", "paid", "t"].includes(t)) return true;
+  if (["false", "0", "no", "unpaid", "f"].includes(t)) return false;
+  // Valor inesperado: nao adivinha. Melhor nao escrever nada do que escrever errado.
+  console.warn(`[b2bwave-sync] is_paid com valor inesperado: ${JSON.stringify(v)}`);
   return undefined;
 }
 
