@@ -1523,6 +1523,7 @@ export type Database = {
           sku: string
           status_linha: string | null
           subtotal: number
+          variante_id: string | null
         }
         Insert: {
           backorder?: boolean
@@ -1537,6 +1538,7 @@ export type Database = {
           sku: string
           status_linha?: string | null
           subtotal?: number
+          variante_id?: string | null
         }
         Update: {
           backorder?: boolean
@@ -1551,6 +1553,7 @@ export type Database = {
           sku?: string
           status_linha?: string | null
           subtotal?: number
+          variante_id?: string | null
         }
         Relationships: [
           {
@@ -1565,6 +1568,13 @@ export type Database = {
             columns: ["produto_id"]
             isOneToOne: false
             referencedRelation: "produtos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pedido_itens_variante_id_fkey"
+            columns: ["variante_id"]
+            isOneToOne: false
+            referencedRelation: "produto_variantes"
             referencedColumns: ["id"]
           },
         ]
@@ -1713,12 +1723,50 @@ export type Database = {
         }
         Relationships: []
       }
+      producao_eta_sync_log: {
+        Row: {
+          id: string
+          iniciado_em: string
+          itens_atualizados: number
+          itens_casados: number
+          itens_com_erro: number
+          itens_lidos: number
+          mensagem: string | null
+          ok: boolean
+          terminado_em: string
+        }
+        Insert: {
+          id?: string
+          iniciado_em: string
+          itens_atualizados?: number
+          itens_casados?: number
+          itens_com_erro?: number
+          itens_lidos?: number
+          mensagem?: string | null
+          ok: boolean
+          terminado_em?: string
+        }
+        Update: {
+          id?: string
+          iniciado_em?: string
+          itens_atualizados?: number
+          itens_casados?: number
+          itens_com_erro?: number
+          itens_lidos?: number
+          mensagem?: string | null
+          ok?: boolean
+          terminado_em?: string
+        }
+        Relationships: []
+      }
       producao_pedidos: {
         Row: {
           created_at: string
           created_by: string | null
           est_entrega: string | null
           est_ready: string | null
+          eta_atualizado_em: string | null
+          eta_fonte: string | null
           id: string
           notes: string | null
           numero_container: string | null
@@ -1737,6 +1785,8 @@ export type Database = {
           created_by?: string | null
           est_entrega?: string | null
           est_ready?: string | null
+          eta_atualizado_em?: string | null
+          eta_fonte?: string | null
           id?: string
           notes?: string | null
           numero_container?: string | null
@@ -1755,6 +1805,8 @@ export type Database = {
           created_by?: string | null
           est_entrega?: string | null
           est_ready?: string | null
+          eta_atualizado_em?: string | null
+          eta_fonte?: string | null
           id?: string
           notes?: string | null
           numero_container?: string | null
@@ -3024,6 +3076,7 @@ export type Database = {
         Args: { _cli_id: string }
         Returns: string[]
       }
+      registration_is_open: { Args: never; Returns: boolean }
       user_can_see_produto: { Args: { _produto_id: string }; Returns: boolean }
     }
     Enums: {
