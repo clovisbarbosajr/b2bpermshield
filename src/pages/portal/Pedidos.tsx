@@ -129,6 +129,21 @@ const Pedidos = () => {
     ]);
     const prodMap = new Map((prods ?? []).map((p: any) => [p.id, p]));
     const varMap = new Map((vars ?? []).map((v: any) => [v.id, v]));
+
+    // Quais destes produtos TEM variante hoje. Pedido importado do B2BWave nao
+    // guarda `variante_id`, entao sem esta consulta o "buy again" mandaria o
+    // produto-pai (sem tamanho/cor, com o preco do pai) sem nenhum aviso.
+    const produtosComVariante = new Set<string>();
+    const idsProd = [...prodMap.keys()] as string[];
+    if (idsProd.length) {
+      const { data: vAll, error: vErr } = await supabase
+        .from("produto_variantes").select("produto_id")
+        .eq("ativo", true).in("produto_id", idsProd.slice(0, 100));
+      // Falha aqui NAO pode virar "nenhum tem variante" — seria o pedido errado
+      // outra vez. Aborta o re-order e avisa.
+      if (vErr) { console.error(vErr); toast.error("Could not check product options. Please try again."); return; }
+      (vAll ?? []).forEach((r: any) => produtosComVariante.add(r.produto_id));
+    }
     let added = 0;
     const perdidos: string[] = [];
     // `as any`: `variante_id` foi adicionada em 20260802130000 e os types gerados
@@ -141,6 +156,13 @@ const Pedidos = () => {
       // Variante apagada ou desativada desde o pedido original: não dá pra repetir
       // essa linha (adicionar sem variante mandaria o produto errado de novo).
       if (item.variante_id && (!v || v.ativo === false)) { perdidos.push(item.nome_produto); continue; }
+      // Pedido IMPORTADO do B2BWave nao tem `variante_id` (o sync nunca grava).
+      // Se o produto tem variante hoje, repetir a linha "sem variante" manda o
+      // produto-pai, com o preco do pai — o mesmo pedido errado que a guarda
+      // acima existe para evitar, pela outra ponta.
+      if (!item.variante_id && (produtosComVariante?.has(item.produto_id) ?? false)) {
+        perdidos.push(item.nome_produto); continue;
+      }
       const dispProduto = (prod.estoque_total ?? 0) - (prod.estoque_reservado ?? 0);
       const disponivel = v ? Math.min(dispProduto, v.quantidade ?? 0) : dispProduto;
       addItem({

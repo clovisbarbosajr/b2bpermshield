@@ -39,6 +39,8 @@ const ProdutoDetalhe = () => {
   const [statusInfo, setStatusInfo] = useState<{ permite_comprar: boolean; nome: string } | null>(null);
   const [accessDenied, setAccessDenied] = useState(false); // restrito por privacy group / não-visível
   const [variantes, setVariantes] = useState<any[]>([]);
+  // Distingue "produto nao tem variante" de "nao consegui carregar as variantes".
+  const [variantesErro, setVariantesErro] = useState(false);
   const [selectedVarianteId, setSelectedVarianteId] = useState<string>("");
 
   // Fetch clienteId
@@ -97,7 +99,20 @@ const ProdutoDetalhe = () => {
       .eq("produto_id", id)
       .eq("ativo", true)
       .order("codigo")
-      .then(({ data }) => setVariantes(data ?? []));
+      .then(({ data, error }) => {
+        // FALHA ALTO. Descartando o erro, `hasVariants` virava false e o produto
+        // ia pro carrinho SEM variante e com preco do pai — pedido errado, em
+        // silencio. E esta e justamente a pagina para onde o catalogo redireciona
+        // quando o produto tem variante.
+        if (error) {
+          console.error(error);
+          toast.error("Could not load product options. Please reload the page.");
+          setVariantesErro(true);
+          return;
+        }
+        setVariantesErro(false);
+        setVariantes(data ?? []);
+      });
   }, [id]);
 
   // Checa acesso por privacy group (fecha o vazamento via URL direta /portal/produto/:id).
@@ -162,6 +177,10 @@ const ProdutoDetalhe = () => {
 
   const handleAdd = () => {
     if (!produto || !effectiveCanBuy) return;
+    // Nao sei se este produto tem variante: nao adiciona. Adicionar "sem
+    // variante" quando a lista falhou em carregar produz o pedido errado
+    // exatamente como se o produto nao tivesse opcao nenhuma.
+    if (variantesErro) { toast.error("Product options could not be loaded. Please reload the page."); return; }
     if (hasVariants && !selectedVariante) { toast.error("Please select an option first."); return; }
     // Preço $0 (não configurado / "contact us") PODE ser adicionado — vira pedido/pedido
     // de cotação; o vendedor ajusta o preço depois no admin.

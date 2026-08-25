@@ -86,8 +86,19 @@ const Catalogo = () => {
       // EM LOTES de 200: `.in()` vai na URL do GET, e mil UUIDs sao ~37 KB — o
       // gateway corta muito antes disso. Sem lote, a request falharia e (pior)
       // o produto COM variante iria pro carrinho SEM variante, com preco base.
+      // `prodRes.error` continuava sem checagem: uma falha ali virava catalogo
+      // vazio em silencio, e o cliente concluia que a loja nao tem produto.
+      if (prodRes.error) {
+        console.error(prodRes.error);
+        toast.error("Could not load the catalog. Please reload the page.");
+        setLoading(false);
+        return;
+      }
       const idsVisiveis = (prodRes.data ?? []).map((p: any) => p.id);
-      const LOTE = 200;
+      // 100 e nao 200: 200 UUIDs sao ~7,4 KB de URL, contra o buffer de ~8 KB
+      // do gateway. Estava dentro da margem do limite que a propria mudanca
+      // existe para evitar.
+      const LOTE = 100;
       const comVariante = new Set<string>();
       let erroVariantes: any = null;
       for (let i = 0; i < idsVisiveis.length; i += LOTE) {

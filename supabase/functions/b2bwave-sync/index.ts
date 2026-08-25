@@ -1373,7 +1373,12 @@ Deno.serve(async (req) => {
       for (;;) {
         if (Date.now() - inicio > ORCAMENTO) { truncado = true; break; }
         const d = await fetchOrdersPage(username, apiKey, pagina);
-        if (!Array.isArray(d) || d.length === 0) break;
+        // Resposta NAO-ARRAY nao e "acabou a lista", e uma leitura que falhou.
+        // Tratar como fim fazia o relatorio se declarar completo e transformar
+        // todo pedido nao lido em "sobrando_aqui" — sem o aviso. Mesmo erro que
+        // o truncamento, pela outra porta.
+        if (!Array.isArray(d)) { truncado = true; break; }
+        if (d.length === 0) break;
         for (const it of d) {
           const o = (it as any).order || it;
           const n = parseInt(o.id) || 0;
@@ -1406,12 +1411,26 @@ Deno.serve(async (req) => {
       const statusDiferente: any[] = [];
       const valorDiferente: any[] = [];
       const pagamentoDiferente: any[] = [];
+      const reparoPendente: any[] = [];
+      // Contadores: 20 exemplos nao distinguem 3 de 1147, que e o numero que
+      // decide se da para religar.
+      let nFaltando = 0, nSobrando = 0, nStatus = 0, nValor = 0, nPagamento = 0, nReparo = 0;
+
+      // Mesma extracao de data do upsertOrder, para saber se o pedido vai cair
+      // no `precisaReparar`.
+      const submittedDe = (o: any): string | null => {
+        const raw = o.submitted_at || o.created_at || "";
+        if (!raw) return null;
+        const d = new Date(raw);
+        return isNaN(d.getTime()) ? null : d.toISOString();
+      };
 
       for (const [n, o] of naOrigem) {
         const local = aqui.get(n);
-        if (!local) { if (faltando.length < 20) faltando.push(n); continue; }
+        if (!local) { nFaltando++; if (faltando.length < 20) faltando.push(n); continue; }
 
         const statusOrigem = statusMap[(o.status_order_name || o.status || "submitted").trim().toLowerCase()] || "submitted";
+        if (statusOrigem !== local.status) { nStatus++; }
         if (statusOrigem !== local.status && statusDiferente.length < 20) {
           statusDiferente.push({ pedido: n, la: o.status_order_name ?? null, aqui: local.status, esperado: statusOrigem });
         }
@@ -1430,11 +1449,17 @@ Deno.serve(async (req) => {
         let qtdOrigem = parseInt(o.total_quantity || "0") || 0;
         if (qtdOrigem <= 0) qtdOrigem = itemsQty;
 
-        // Igualdade EXATA, como o sync. Uma tolerancia de centavo aqui diria
-        // "identico" onde o sync faria UPDATE.
-        const difTotal = Number(local.total) !== totalOrigem;
-        const difSub = Number(local.subtotal) !== subtotalOrigem;
+        // Arredonda para 2 casas nos DOIS lados, que e como a coluna
+        // NUMERIC(12,2) guarda. Os fallbacks somam float (30.599999999999998) e
+        // o banco gravou 30.60 — comparar cru acusaria diferenca em cima de
+        // dinheiro identico, em massa, justo na populacao que o fallback
+        // alcanca. (O `changed` do upsertOrder tem o mesmo defeito e por isso
+        // reescreve esses pedidos a cada tick — anotado na fila.)
+        const cent = (v: number) => Math.round(v * 100) / 100;
+        const difTotal = cent(Number(local.total)) !== cent(totalOrigem);
+        const difSub = cent(Number(local.subtotal)) !== cent(subtotalOrigem);
         const difQtd = (local.quantidade_total ?? 0) !== qtdOrigem;
+        if (difTotal || difSub || difQtd) { nValor++; }
         if ((difTotal || difSub || difQtd) && valorDiferente.length < 20) {
           valorDiferente.push({
             pedido: n,
@@ -1444,7 +1469,19 @@ Deno.serve(async (req) => {
           });
         }
 
+        // `precisaReparar` do upsertOrder tambem faz UPDATE — e esse UPDATE pode
+        // religar `notificavel`. Sem olhar isto, o relatorio diria "identico"
+        // enquanto o proximo ciclo reescreve e reabre a marca que disparou os
+        // 1508 SMS. Eu tinha selecionado as colunas e nao olhado.
+        const temDataOrigem = local.data_origem !== null && local.data_origem !== undefined;
+        const vaiSerReparado = submittedDe(o) !== null && !temDataOrigem;
+        if (vaiSerReparado) { nReparo++; }
+        if (vaiSerReparado && reparoPendente.length < 20) {
+          reparoPendente.push({ pedido: n, motivo: "sem data_origem — o proximo ciclo do sync vai reescrever", notificavel_hoje: local.notificavel });
+        }
+
         const pagoOrigem = pickPago(o);
+        if (pagoOrigem !== undefined && pagoOrigem !== local.is_paid) { nPagamento++; }
         if (pagoOrigem !== undefined && pagoOrigem !== local.is_paid && pagamentoDiferente.length < 20) {
           // NOTA: `is_paid` NAO entra no `changed` do sync, entao uma diferenca
           // aqui nao se corrige sozinha no proximo ciclo.
@@ -1452,7 +1489,7 @@ Deno.serve(async (req) => {
         }
       }
       for (const n of aqui.keys()) {
-        if (!naOrigem.has(n) && sobrando.length < 20) sobrando.push(n);
+        if (!naOrigem.has(n)) { nSobrando++; if (sobrando.length < 20) sobrando.push(n); }
       }
 
       return new Response(JSON.stringify({
@@ -1465,8 +1502,18 @@ Deno.serve(async (req) => {
         // `identico` EXIGE leitura completa: com `truncado`, "sobrando_aqui" e
         // formado por pedidos legitimos que a origem so nao terminou de listar.
         // Chamar isso de identico (ou de lixo) seria conclusao errada.
-        identico: !truncado && faltando.length === 0 && sobrando.length === 0
-          && statusDiferente.length === 0 && valorDiferente.length === 0 && pagamentoDiferente.length === 0,
+        identico: !truncado && nFaltando === 0 && nSobrando === 0
+          && nStatus === 0 && nValor === 0 && nPagamento === 0 && nReparo === 0,
+        // Os TOTAIS sao o que decide se da para religar. As listas abaixo sao so
+        // 20 exemplos cada.
+        totais: {
+          faltando_aqui: nFaltando,
+          sobrando_aqui: nSobrando,
+          status_diferente: nStatus,
+          valor_diferente: nValor,
+          pagamento_diferente: nPagamento,
+          reparo_pendente: nReparo,
+        },
         aviso: truncado
           ? "LEITURA INCOMPLETA — a lista da origem nao terminou. `sobrando_aqui` aqui NAO significa lixo: sao pedidos que a origem ainda nao listou. Rode de novo com budget_ms maior."
           : null,
@@ -1476,6 +1523,7 @@ Deno.serve(async (req) => {
           status_diferente: statusDiferente,
           valor_diferente: valorDiferente,
           pagamento_diferente: pagamentoDiferente,
+          reparo_pendente: reparoPendente,
         },
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });
