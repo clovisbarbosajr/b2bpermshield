@@ -296,7 +296,25 @@ async function upsertOrder(
   const statusMapeado = statusMap[b2bStatus];
   if (!statusMapeado) console.warn(`[b2bwave-sync] status nao mapeado: "${b2bStatus}" (pedido ${numero}) — usando submitted`);
   const status = statusMapeado || "submitted";
-  const submittedAt = submittedRaw ? new Date(submittedRaw).toISOString() : new Date().toISOString();
+  // SEM DATA DO B2BWAVE = NAO INVENTA E NAO NOTIFICA.
+  //
+  // Antes caia em `new Date()`, e esse valor ia para DUAS coisas: o `created_at`
+  // gravado no pedido E o calculo de idade que decide se notifica. Efeito: um
+  // pedido de 2025 sem data era gravado como criado HOJE — entao a trava de
+  // "nada retroativo" passava a considera-lo recente PARA SEMPRE, e o aviso de
+  // pedido novo ia para o celular do cliente falando de uma compra velha.
+  //
+  // `new Date("lixo").toISOString()` tambem LANCA RangeError, e nao ha try/catch
+  // por item: uma data malformada derrubava o lote inteiro.
+  let submittedAt: string | null = null;
+  if (submittedRaw) {
+    const d = new Date(submittedRaw);
+    if (!isNaN(d.getTime())) submittedAt = d.toISOString();
+    else console.warn(`[b2bwave-sync] data invalida no pedido ${numero}: ${JSON.stringify(submittedRaw)}`);
+  }
+  // `podeNotificar`: so com data REAL da origem. Sem data, o pedido entra no
+  // sistema (nao perder o pedido e mais importante), mas fica calado.
+  const podeNotificar = submittedAt !== null;
   const deliveryDate = o.request_delivery_at ? new Date(o.request_delivery_at).toISOString() : null;
 
   const { rows: itemRows, qty: itemsQty, sum: itemsSum } = buildOrderItems(o.order_products || [], productSkuToId, productNameToId);
@@ -364,7 +382,10 @@ async function upsertOrder(
     delivery_date: deliveryDate,
     quantidade_total: quantidade,
     shipping_option_id: null, payment_option_id: null,
-    created_at: submittedAt,
+    // Sem data da origem, deixa o banco usar o DEFAULT. Nao inventa data de
+    // compra: data de compra errada contamina relatorio, garantia e a trava de
+    // idade.
+    ...(submittedAt ? { created_at: submittedAt } : {}),
   }).select("id").single();
   if (ins.error || !ins.data) return "error";
   const orderId = ins.data.id;
@@ -386,8 +407,8 @@ async function upsertOrder(
     }
   }
   // Notifica só pedidos NOVOS e RECENTES (evita spam de milhares na recuperação).
-  if (opts.notify && CRON_SECRET) {
-    const ageMs = Date.now() - new Date(submittedAt).getTime();
+  if (opts.notify && CRON_SECRET && podeNotificar) {
+    const ageMs = Date.now() - new Date(submittedAt as string).getTime();
     if (ageMs < 2 * 24 * 60 * 60 * 1000) {
       await fireNewOrderNotification(db, numero, total, clienteId, orderId).catch(() => {});
     }

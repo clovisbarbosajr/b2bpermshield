@@ -49,6 +49,44 @@ async function podeEnviar(db: Db, canal: string): Promise<{ ok: boolean; motivo?
   }
 }
 
+// IDADE DO PEDIDO — checagem CENTRAL, no unico ponto por onde TODOS os eventos
+// de pedido passam.
+//
+// Estava so no gatilho de status, e isso deixava `new_order` completamente
+// aberto: ele nao passa por gatilho nenhum, e tem `notify_customer = true`. Um
+// pedido antigo inserido pelo sync mandava "novo pedido" para o CELULAR DO
+// CLIENTE, sobre uma compra de meses atras. Foi o furo que a revisao achou
+// depois do incidente de 25/ago.
+//
+// Aqui e o lugar certo: `dispatchEvent` e obrigatorio para order_status,
+// new_order e qualquer evento futuro que cite um pedido.
+//
+// Falha FECHADO: pedido citado que nao existe, ou consulta que falha, NAO
+// notifica. Evento sem `order_id` (low_stock, account_approved) passa.
+async function pedidoRecenteDemaisParaCalar(db: Db, vars: Record<string, unknown>): Promise<string | null> {
+  const ref = String((vars as any)?.order_id ?? "").trim();
+  if (!ref) return null;                       // evento nao e sobre pedido
+
+  const { data: cfg } = await db.from("sync_state")
+    .select("value").eq("key", "order_notify_max_age_days").maybeSingle();
+  const maxDias = Number((cfg?.value as any)?.n) || 7;
+
+  const numero = /^\d+$/.test(ref) ? Number(ref) : null;
+  const q = db.from("pedidos").select("created_at").limit(1);
+  const { data: ped, error } = numero !== null
+    ? await q.eq("numero", numero).maybeSingle()
+    : await q.eq("id", ref).maybeSingle();
+
+  if (error) return `nao foi possivel checar a idade do pedido ${ref}: ${error.message}`;
+  if (!ped?.created_at) return `pedido ${ref} nao encontrado — notificacao recusada`;
+
+  const idadeDias = (Date.now() - new Date(ped.created_at as string).getTime()) / 86_400_000;
+  if (idadeDias > maxDias) {
+    return `pedido ${ref} tem ${Math.floor(idadeDias)} dias (limite ${maxDias}) — nada retroativo`;
+  }
+  return null;
+}
+
 async function logRow(db: Db, event: string, channel: string, recipient: string,
   result: { ok: boolean; error?: string }, vars: Record<string, unknown>) {
   await db.from("notification_log").insert({
@@ -114,6 +152,15 @@ export async function dispatchEvent(db: Db, event: string, vars: Record<string, 
     throw new Error("falha ao ler notification_channels: " + chErr.message);
   }
   const ch = Object.fromEntries((channels ?? []).map((c: any) => [c.id, c]));
+
+  // Barreira de idade ANTES de qualquer coisa: vale para todo evento que cite
+  // um pedido, por qualquer caminho (gatilho, sync, tela do admin, chamada
+  // direta). E a unica trava que sozinha impede o incidente de se repetir.
+  const retroativo = await pedidoRecenteDemaisParaCalar(db, vars);
+  if (retroativo) {
+    await logRow(db, event, "-", "-", { ok: false, error: "BLOQUEADO — " + retroativo }, vars);
+    return { ok: true, sent: 0, results: [], problems: [retroativo] };
+  }
 
   const { data: evt } = await db.from("notification_events").select("*").eq("id", event).maybeSingle();
 
