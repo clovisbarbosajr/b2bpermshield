@@ -86,6 +86,34 @@ UPDATE public.sync_state SET value = jsonb_build_object('hora', NULL, 'n', 0)
 WHERE key IN ('order_notify_counter','low_stock_counter','admin_alert_counter','email_counter','auth_counter','sms_counter');
 
 -- ---------------------------------------------------------------------------
+-- Incrementa o contador da hora corrente e devolve o novo valor.
+--
+-- `UPDATE ... RETURNING` num unico statement: atomico, e o lock de linha
+-- serializa chamadas concorrentes, entao duas transacoes nao passam do teto
+-- juntas. Vira dezenas de UPDATEs na mesma linha durante um lote — aceitavel,
+-- porque o proposito e exatamente barrar lote.
+--
+-- Vira a hora sozinho: se `hora` gravada != hora atual, reinicia em 1.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.bump_notify_counter(_chave text)
+RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  UPDATE public.sync_state
+  SET value = jsonb_build_object(
+        'hora', to_jsonb(date_trunc('hour', now())),
+        'n', CASE
+               WHEN (value->>'hora')::timestamptz = date_trunc('hour', now())
+                 THEN COALESCE((value->>'n')::integer, 0) + 1
+               ELSE 1
+             END)
+  WHERE key = _chave
+  RETURNING (value->>'n')::integer;
+$$;
+
+REVOKE ALL ON FUNCTION public.bump_notify_counter(text) FROM PUBLIC;
+-- O `_shared/dispatch` chama esta RPC para limitar o alerta de falha ao admin.
+GRANT EXECUTE ON FUNCTION public.bump_notify_counter(text) TO service_role;
+
+-- ---------------------------------------------------------------------------
 -- Torneira geral. Uma chamada para e outra volta.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.pausar_envios(_pausar boolean)
@@ -140,34 +168,6 @@ END $$;
 
 REVOKE ALL ON FUNCTION public.envio_permitido(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.envio_permitido(text) TO service_role;
-
--- ---------------------------------------------------------------------------
--- Incrementa o contador da hora corrente e devolve o novo valor.
---
--- `UPDATE ... RETURNING` num unico statement: atomico, e o lock de linha
--- serializa chamadas concorrentes, entao duas transacoes nao passam do teto
--- juntas. Vira dezenas de UPDATEs na mesma linha durante um lote — aceitavel,
--- porque o proposito e exatamente barrar lote.
---
--- Vira a hora sozinho: se `hora` gravada != hora atual, reinicia em 1.
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.bump_notify_counter(_chave text)
-RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
-  UPDATE public.sync_state
-  SET value = jsonb_build_object(
-        'hora', to_jsonb(date_trunc('hour', now())),
-        'n', CASE
-               WHEN (value->>'hora')::timestamptz = date_trunc('hour', now())
-                 THEN COALESCE((value->>'n')::integer, 0) + 1
-               ELSE 1
-             END)
-  WHERE key = _chave
-  RETURNING (value->>'n')::integer;
-$$;
-
-REVOKE ALL ON FUNCTION public.bump_notify_counter(text) FROM PUBLIC;
--- O `_shared/dispatch` chama esta RPC para limitar o alerta de falha ao admin.
-GRANT EXECUTE ON FUNCTION public.bump_notify_counter(text) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.set_suppress_order_notify(_on boolean, _minutos integer DEFAULT 30)
 RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
