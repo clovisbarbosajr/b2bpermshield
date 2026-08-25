@@ -144,6 +144,11 @@ const statusMap: Record<string, string> = {
 // existe. Se a conta nao expoe pagamento, o campo local fica como esta e nada
 // muda — em vez de zerar 1066 pedidos por causa de um campo ausente.
 function pickPago(o: any): boolean | undefined {
+  // ATENCAO: esta lista de chaves e PROVISORIA. Rode a acao `debug_order_fields`
+  // para ver os campos reais da sua conta B2BWave e deixe SO o campo certo aqui.
+  // Enquanto a chave real nao estiver confirmada, isto pode simplesmente nao
+  // casar com nada — e nao casar e o comportamento seguro: devolve undefined e o
+  // sync nao escreve nada em is_paid.
   for (const k of ["is_paid", "paid", "payment_status", "status_payment_name", "payment_state", "financial_status"]) {
     const v = o?.[k];
     if (v === undefined || v === null || v === "") continue;
@@ -490,6 +495,30 @@ Deno.serve(async (req) => {
         uniqueIds: new Set(ids).size,
         sampleEmails: emails, sampleDates: dates,
       }), { headers: jsonHeaders });
+    }
+
+    // Mostra os CAMPOS CRUS de um pedido do B2BWave. Existe porque o mapeamento
+    // de pagamento nao pode ser adivinhado: e dinheiro, e tem que ser o campo
+    // real da API, com o nome real. Devolve so as chaves (e um exemplo pequeno
+    // de cada) — nao despeja o pedido inteiro no log.
+    if (action === "debug_order_fields") {
+      const page = body.page || 1;
+      const data = await fetchPage("orders.json", username, apiKey, page);
+      if (!Array.isArray(data) || data.length === 0) {
+        return new Response(JSON.stringify({ success: true, message: "No data" }), { headers: jsonHeaders });
+      }
+      const o = (data[0] as any).order || data[0];
+      const resumo: Record<string, string> = {};
+      for (const [k, v] of Object.entries(o)) {
+        if (v === null || v === undefined) { resumo[k] = "null"; continue; }
+        if (Array.isArray(v)) { resumo[k] = `array(${v.length})`; continue; }
+        if (typeof v === "object") { resumo[k] = "object"; continue; }
+        resumo[k] = `${typeof v}: ${String(v).slice(0, 40)}`;
+      }
+      const suspeitos = Object.keys(o).filter((k) => /pay|paid|financ|balance|due|invoice/i.test(k));
+      return new Response(JSON.stringify({
+        success: true, order_id: o.id, campos: resumo, campos_de_pagamento: suspeitos,
+      }, null, 2), { headers: jsonHeaders });
     }
 
     const adminClient = createClient(
