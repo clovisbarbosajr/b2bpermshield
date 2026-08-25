@@ -52,9 +52,9 @@ const InventoryControl = () => {
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro, e o
       // "sold qty" saía plausível e errado.
       const [prod, its, cat] = await Promise.all([
-        fetchAllRows<Product>((f, t) => supabase.from("produtos").select("id, sku, nome, custo, estoque_total, estoque_reservado, categoria_id, updated_at").range(f, t) as any),
-        fetchAllRows<OrderItem>((f, t) => supabase.from("pedido_itens").select("produto_id, quantidade, subtotal, pedidos(status)").range(f, t) as any),
-        fetchAllRows<Category>((f, t) => supabase.from("categorias").select("id, nome").order("nome").range(f, t) as any),
+        fetchAllRows<Product>((f, t) => supabase.from("produtos").select("id, sku, nome, custo, estoque_total, estoque_reservado, categoria_id, updated_at").order("id", { ascending: true }).range(f, t) as any),
+        fetchAllRows<OrderItem>((f, t) => supabase.from("pedido_itens").select("produto_id, quantidade, subtotal, pedidos(status)").order("id", { ascending: true }).range(f, t) as any),
+        fetchAllRows<Category>((f, t) => supabase.from("categorias").select("id, nome").order("nome").order("id", { ascending: true }).range(f, t) as any),
       ]);
       setProducts(prod);
       setOrderItems(its);

@@ -69,11 +69,11 @@ const AdminPedidos = () => {
       const [orderList, cats, payOpts, shipOpts, repData] = await Promise.all([
         fetchAllRows((f, t) => supabase.from("pedidos")
           .select("*, clientes(nome, empresa, email, telefone)")
-          .order("created_at", { ascending: false }).range(f, t)),
-        fetchAllRows((f, t) => supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("nome").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("payment_options").select("id, nome").eq("ativo", true).order("ordem").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("shipping_options").select("id, nome").eq("ativo", true).order("ordem").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("representantes").select("id, nome").eq("ativo", true).order("nome").range(f, t)),
+          .order("created_at", { ascending: false }).order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("nome").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("payment_options").select("id, nome").eq("ativo", true).order("ordem").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("shipping_options").select("id, nome").eq("ativo", true).order("ordem").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("representantes").select("id, nome").eq("ativo", true).order("nome").order("id", { ascending: true }).range(f, t)),
       ]);
 
       // Quantidade e SKUs reais por pedido. Antes o lote era de 200 pedidos com a
@@ -91,7 +91,7 @@ const AdminPedidos = () => {
           const items = await fetchAllRows<any>((f, t) => supabase
             .from("pedido_itens")
             .select("pedido_id, produto_id, quantidade, sku, backorder")
-            .in("pedido_id", batch).range(f, t) as any);
+            .in("pedido_id", batch).order("id", { ascending: true }).range(f, t) as any);
           items.forEach((it: any) => {
             qtyMap[it.pedido_id] = (qtyMap[it.pedido_id] ?? 0) + (it.quantidade ?? 0);
             if (it.sku) (skuMap[it.pedido_id] ??= []).push(String(it.sku).toLowerCase());
@@ -110,7 +110,7 @@ const AdminPedidos = () => {
       // Categoria de cada produto, pro filtro por categoria (que inclui as
       // subcategorias, igual ao portal).
       const prods = await fetchAllRows<any>((f, t) =>
-        supabase.from("produtos").select("id, categoria_id").range(f, t) as any);
+        supabase.from("produtos").select("id, categoria_id").order("id", { ascending: true }).range(f, t) as any);
       setProdCategoria(Object.fromEntries(prods.map((p: any) => [p.id, p.categoria_id])));
 
       setPedidos(orderList);

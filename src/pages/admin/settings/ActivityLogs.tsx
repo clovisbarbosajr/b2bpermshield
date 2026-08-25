@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAllRows } from "@/lib/fetchAllRows";
 import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -86,15 +85,36 @@ const ActivityLogs = () => {
     // `.order("id")` junto do created_at: a paginacao por OFFSET precisa de
     // ordem estavel, senao pula ou repete linha entre as paginas.
     const fetchUsers = async () => {
-      const linhas = await fetchAllRows((f, t) => (supabase as any)
-        .from("activity_logs")
-        .select("user_email, user_name")
-        .not("user_email", "is", null)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: true })
-        .range(f, t));
+      // Caminho bom: RPC com DISTINCT no banco — devolve 1 linha por usuario.
+      // Varrer a tabela inteira daqui so pra montar um dropdown seria pior que o
+      // bug original: `activity_logs` so cresce, e a tela travaria abrindo
+      // centenas de requests a cada montagem.
+      const viaRpc = await (supabase as any).rpc("activity_log_users");
+      if (!viaRpc.error && Array.isArray(viaRpc.data)) {
+        setUsers(viaRpc.data
+          .filter((r: any) => r?.user_email)
+          .map((r: any) => ({ email: r.user_email, name: r.user_name ?? null }))
+          .sort((a: any, b: any) => a.email.localeCompare(b.email)));
+        return;
+      }
+      // Fallback enquanto o SQL da RPC nao tiver sido rodado: le os logs mais
+      // RECENTES, com teto. Nao e a lista completa (usuario muito antigo pode
+      // faltar), mas tem custo previsivel e nao trava a tela.
+      const TETO_PAGINAS = 6;
       const seen = new Map<string, string | null>();
-      linhas.forEach((r: any) => { if (r.user_email && !seen.has(r.user_email)) seen.set(r.user_email, r.user_name); });
+      for (let pagina = 0; pagina < TETO_PAGINAS; pagina++) {
+        const { data, error } = await (supabase as any)
+          .from("activity_logs")
+          .select("user_email, user_name")
+          .not("user_email", "is", null)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(pagina * 1000, pagina * 1000 + 999);
+        if (error) throw error;
+        const linhas = data ?? [];
+        linhas.forEach((r: any) => { if (r.user_email && !seen.has(r.user_email)) seen.set(r.user_email, r.user_name); });
+        if (linhas.length === 0) break;
+      }
       setUsers([...seen.entries()].map(([email, name]) => ({ email, name })).sort((a, b) => a.email.localeCompare(b.email)));
     };
     // Sem o catch, uma falha aqui deixava o dropdown vazio em silencio — parecia
@@ -123,7 +143,7 @@ const ActivityLogs = () => {
     // parece que a acao nunca foi feita. `toISOString()` do proprio limite do dia
     // LOCAL resolve: o navegador converte para o instante UTC correspondente.
     const inicioLocal = (d: string) => new Date(`${d}T00:00:00`).toISOString();
-    const fimLocal = (d: string) => new Date(`${d}T23:59:59.999`).toISOString();
+    const fimLocal = (d: string) => new Date(`${d}T23:59:59.999`).toISOString(); // .999: inclui o segundo inteiro
     if (filterFrom) q = q.gte("created_at", inicioLocal(filterFrom));
     if (filterTo) q = q.lte("created_at", fimLocal(filterTo));
 

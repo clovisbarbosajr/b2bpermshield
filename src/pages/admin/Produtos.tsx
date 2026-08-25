@@ -62,13 +62,13 @@ const AdminProdutos = () => {
         // truncado, o filtro de privacidade escondia produto válido.
         const [p, c, b, pg, pl, pa] = await Promise.all([
           // Ordena por data de cadastro (mais recente primeiro) para espelhar o B2BWave (clone).
-          fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("*").order("created_at", { ascending: false }).range(f, t) as any),
-          fetchAllRows<any>((f, t) => supabase.from("categorias").select("id, nome, parent_id, ordem").order("nome").range(f, t) as any),
-          fetchAllRows<any>((f, t) => supabase.from("brands").select("id, nome").order("nome").range(f, t) as any),
-          fetchAllRows<any>((f, t) => supabase.from("privacy_groups").select("id, nome").eq("ativo", true).range(f, t) as any),
-          fetchAllRows<any>((f, t) => supabase.from("tabelas_preco").select("id, nome").eq("ativo", true).order("nome").range(f, t) as any),
+          fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }).range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("categorias").select("id, nome, parent_id, ordem").order("nome").order("id", { ascending: true }).range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("brands").select("id, nome").order("nome").order("id", { ascending: true }).range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("privacy_groups").select("id, nome").eq("ativo", true).order("id", { ascending: true }).range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("tabelas_preco").select("id, nome").eq("ativo", true).order("nome").order("id", { ascending: true }).range(f, t) as any),
           // Traz o ID do grupo, não só o nome — ver o mapa abaixo.
-          fetchAllRows<any>((f, t) => supabase.from("produto_acesso").select("produto_id, privacy_group_id, grupo_nome").range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("produto_acesso").select("produto_id, privacy_group_id, grupo_nome").order("id", { ascending: true }).range(f, t) as any),
         ]);
         setProdutos(p);
         setCategorias(c);

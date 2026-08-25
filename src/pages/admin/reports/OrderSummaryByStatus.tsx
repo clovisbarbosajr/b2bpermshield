@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
-import { canonicalStatus, statusBadge } from "@/lib/orderStatuses";
+import { canonicalStatus, statusBadge, statusLabel } from "@/lib/orderStatuses";
 
 const STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 
@@ -53,7 +53,7 @@ const OrderSummaryByStatus = () => {
       // "T00:00:00" as duas pontas do filtro ficavam em fusos diferentes e o
       // "From" trazia horas do dia ANTERIOR.
       if (dateFrom && new Date(o.created_at) < new Date(dateFrom + "T00:00:00")) return false;
-      if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
+      if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59.999")) return false;
       return true;
     });
   }, [orders, dateFrom, dateTo]);
@@ -97,7 +97,7 @@ const OrderSummaryByStatus = () => {
           <div className="mb-6 grid grid-cols-2 md:grid-cols-5 gap-3">
             {statusSummary.map((s) => (
               <div key={s.status} className="rounded-md border p-4">
-                <Badge className={`mb-2 ${statusBadge(s.status)}`}>{s.status.replace(/_/g, " ")}</Badge>
+                <Badge className={`mb-2 ${statusBadge(s.status)}`}>{statusLabel(s.status)}</Badge>
                 <p className="text-2xl font-bold">{formatNumber(s.count)}</p>
                 <p className="text-sm text-muted-foreground">{formatCurrency(s.total)}</p>
                 <p className="text-xs text-muted-foreground">Avg: {formatCurrency(s.avg)}</p>
@@ -122,7 +122,7 @@ const OrderSummaryByStatus = () => {
                   const pct = totalAll > 0 ? (s.total / totalAll) * 100 : 0;
                   return (
                     <TableRow key={s.status}>
-                      <TableCell><Badge className={statusBadge(s.status)}>{s.status.replace(/_/g, " ")}</Badge></TableCell>
+                      <TableCell><Badge className={statusBadge(s.status)}>{statusLabel(s.status)}</Badge></TableCell>
                       <TableCell className="text-right">{formatNumber(s.count)}</TableCell>
                       <TableCell className="text-right">{formatCurrency(s.total)}</TableCell>
                       <TableCell className="text-right">{formatCurrency(s.avg)}</TableCell>

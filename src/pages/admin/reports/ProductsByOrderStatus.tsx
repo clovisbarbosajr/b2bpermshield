@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
-import { canonicalStatus, statusBadge } from "@/lib/orderStatuses";
+import { canonicalStatus, statusBadge, statusLabel } from "@/lib/orderStatuses";
 
 const STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 const PAGE_SIZE = 25;
@@ -110,7 +110,7 @@ const ProductsByOrderStatus = () => {
                 <TableRow key={i}>
                   <TableCell className="font-mono text-xs">{r.sku}</TableCell>
                   <TableCell className="text-primary">{r.product}</TableCell>
-                  <TableCell><Badge className={statusBadge(r.status)}>{r.status.replace(/_/g, " ")}</Badge></TableCell>
+                  <TableCell><Badge className={statusBadge(r.status)}>{statusLabel(r.status)}</Badge></TableCell>
                   <TableCell className="text-right">{formatNumber(r.qty)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(r.revenue)}</TableCell>
                 </TableRow>

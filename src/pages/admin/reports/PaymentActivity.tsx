@@ -26,7 +26,7 @@ const PaymentActivity = () => {
       setLoading(true);
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
       const [ord, cli] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedidos").select("id, numero, cliente_id, status, total, created_at, is_paid").order("created_at", { ascending: false }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, numero, cliente_id, status, total, created_at, is_paid").order("created_at", { ascending: false }).order("id", { ascending: true }).range(f, t)),
         fetchAllRows((f, t) => supabase.from("clientes").select("id, nome, empresa").order("id", { ascending: true }).range(f, t)),
       ]);
       setOrders(ord);
@@ -54,7 +54,7 @@ const PaymentActivity = () => {
       // parseado como LOCAL. Sem o "T00:00:00" as duas pontas do filtro usavam
       // fusos diferentes e o "From" puxava horas do dia ANTERIOR.
       if (dateFrom && new Date(o.created_at) < new Date(dateFrom + "T00:00:00")) return false;
-      if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
+      if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59.999")) return false;
       return true;
     });
   }, [orders, dateFrom, dateTo]);

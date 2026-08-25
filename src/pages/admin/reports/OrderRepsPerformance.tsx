@@ -52,7 +52,7 @@ const OrderRepsPerformance = () => {
       // "T00:00:00" as duas pontas do filtro ficavam em fusos diferentes e o
       // "From" trazia horas do dia ANTERIOR.
       if (dateFrom && new Date(o.created_at) < new Date(dateFrom + "T00:00:00")) return false;
-      if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
+      if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59.999")) return false;
       return true;
     });
 

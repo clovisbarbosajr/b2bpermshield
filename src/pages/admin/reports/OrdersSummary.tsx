@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
-import { canonicalStatus, statusBadge } from "@/lib/orderStatuses";
+import { canonicalStatus, statusBadge, statusLabel } from "@/lib/orderStatuses";
 
 const STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 const PAGE_SIZE = 25;
@@ -30,9 +30,9 @@ const OrdersSummary = () => {
       setLoading(true);
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
       const [ord, cli, its] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedidos").select("*").order("created_at", { ascending: false }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedidos").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }).range(f, t)),
         fetchAllRows((f, t) => supabase.from("clientes").select("id, nome, empresa").order("id", { ascending: true }).range(f, t)),
-        fetchAllRows<{ pedido_id: string }>((f, t) => supabase.from("pedido_itens").select("pedido_id").range(f, t) as any),
+        fetchAllRows<{ pedido_id: string }>((f, t) => supabase.from("pedido_itens").select("pedido_id").order("id", { ascending: true }).range(f, t) as any),
       ]);
       setOrders(ord);
       setCustomers(cli);
@@ -63,7 +63,7 @@ const OrdersSummary = () => {
       // "T00:00:00" as duas pontas do filtro ficavam em fusos diferentes e o
       // "From" trazia horas do dia ANTERIOR.
       if (dateFrom && new Date(o.created_at) < new Date(dateFrom + "T00:00:00")) return false;
-      if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
+      if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59.999")) return false;
       return true;
     });
   }, [orders, statusFilter, dateFrom, dateTo]);
@@ -147,7 +147,7 @@ const OrdersSummary = () => {
                     <TableCell className="text-primary font-mono">#{o.numero}</TableCell>
                     <TableCell>{c.nome}</TableCell>
                     <TableCell>{c.empresa}</TableCell>
-                    <TableCell><Badge className={statusBadge(o.status)}>{o.status.replace(/_/g, " ")}</Badge></TableCell>
+                    <TableCell><Badge className={statusBadge(o.status)}>{statusLabel(o.status)}</Badge></TableCell>
                     <TableCell className="text-right">{itemsCount[o.id] || 0}</TableCell>
                     <TableCell className="text-right">{formatCurrency(o.total)}</TableCell>
                     <TableCell>{new Date(o.created_at).toLocaleDateString()}</TableCell>

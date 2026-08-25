@@ -31,7 +31,7 @@ const AdminEstoque = () => {
     // vez de virar lista vazia com cara de banco sem produto.
     try {
       const data = await fetchAllRows<any>((f, t) => supabase.from("produtos")
-        .select("id, nome, sku, estoque_total, estoque_reservado").order("nome").range(f, t) as any);
+        .select("id, nome, sku, estoque_total, estoque_reservado").order("nome").order("id", { ascending: true }).range(f, t) as any);
       setProdutos(data);
     } catch (e: any) {
       console.error(e);

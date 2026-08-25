@@ -58,8 +58,8 @@ const InventoryAdjustment = () => {
     // "No products found".
     try {
       const [prod, cat] = await Promise.all([
-        fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("id, nome, sku, categoria_id, estoque_total, estoque_reservado").eq("ativo", true).order("nome").range(f, t) as any),
-        fetchAllRows<Categoria>((f, t) => supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).range(f, t) as any),
+        fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("id, nome, sku, categoria_id, estoque_total, estoque_reservado").eq("ativo", true).order("nome").order("id", { ascending: true }).range(f, t) as any),
+        fetchAllRows<Categoria>((f, t) => supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("id", { ascending: true }).range(f, t) as any),
       ]);
       setProdutos(prod);
       setCategorias(cat);

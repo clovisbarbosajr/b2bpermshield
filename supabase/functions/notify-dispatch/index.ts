@@ -23,6 +23,14 @@ Deno.serve(async (req) => {
 
   // Quem chama? Cron-secret (força, = admin) OU usuário logado.
   let isAdmin = viaCron;
+  // `isStaff` e SEPARADO de `isAdmin` de proposito. As telas que disparam evento
+  // (/admin/orders/:id e /admin/customers/:id) sao `requiredRole="staff"`, ou
+  // seja, manager e warehouse tambem entram e tambem salvam status/aprovam
+  // cliente. Se o portao de EVENTO exigisse admin, o Save de um manager tomaria
+  // 403 — e o front chama com `.catch(() => {})`, entao ninguem veria o erro:
+  // o cliente simplesmente deixaria de ser avisado. O gate de TESTE (destino
+  // arbitrario) continua exigindo admin.
+  let isStaff = viaCron;
   let callerUserId: string | null = null;
   if (!viaCron) {
     const authHeader = req.headers.get("Authorization") ?? "";
@@ -30,9 +38,11 @@ Deno.serve(async (req) => {
     const { data: { user } } = await userClient.auth.getUser();
     if (!user) return json({ error: "Authentication required" }, 401);
     callerUserId = user.id;
-    const { data: adminRow } = await db.from("user_roles")
-      .select("role").eq("user_id", user.id).eq("role", "admin").maybeSingle();
-    isAdmin = !!adminRow;
+    const { data: papeis } = await db.from("user_roles")
+      .select("role").eq("user_id", user.id);
+    const meus = new Set((papeis ?? []).map((r: any) => r.role));
+    isAdmin = meus.has("admin");
+    isStaff = isAdmin || meus.has("manager") || meus.has("warehouse");
   }
 
   try {
@@ -71,7 +81,7 @@ Deno.serve(async (req) => {
     // (as outras chamadas — account_approved, order_status, testes — vêm de telas
     // de admin).
     const EVENTOS_DO_CLIENTE = new Set(["new_order"]);
-    if (!isAdmin && !viaCron) {
+    if (!isStaff && !viaCron) {
       if (!EVENTOS_DO_CLIENTE.has(String(event))) {
         return json({ error: "Not authorized for this event" }, 403);
       }
@@ -105,7 +115,7 @@ Deno.serve(async (req) => {
     // do body e usa o cliente do próprio usuário logado (evita SMS/email pra
     // número/endereço arbitrário = fraude de toll). Admin/cron mantêm o controle.
     let safeCustomer = customer;
-    if (!isAdmin && !viaCron) {
+    if (!isStaff && !viaCron) {
       safeCustomer = undefined;
       if (callerUserId) {
         const { data: ownCli } = await db.from("clientes")

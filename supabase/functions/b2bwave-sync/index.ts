@@ -240,7 +240,19 @@ async function upsertOrder(
       const del = await db.from("pedido_itens").delete().eq("pedido_id", ex.id);
       if (del.error) return "error";
       const insItens = await db.from("pedido_itens").insert(itemRows.map((r) => ({ ...r, pedido_id: ex.id })));
-      if (insItens.error) return "error";
+      if (insItens.error) {
+        // Aqui os itens JA foram apagados e o update do pedido JA commitou. Sem
+        // rollback, o unico jeito de nao deixar o pedido vazio pra sempre e
+        // garantir que o proximo ciclo tente de novo.
+        //
+        // `changed` compara status/total/subtotal/quantidade_total. Zerando o
+        // `quantidade_total` no banco, a proxima execucao ve diferenca contra o
+        // valor real vindo do B2BWave e refaz o delete+insert — em vez de
+        // devolver "skipped" para sempre. Se ate isso falhar, nao ha o que
+        // fazer daqui; fica o "error" no contador do sync_log.
+        await db.from("pedidos").update({ quantidade_total: 0 }).eq("id", ex.id);
+        return "error";
+      }
     }
     return "updated";
   }
