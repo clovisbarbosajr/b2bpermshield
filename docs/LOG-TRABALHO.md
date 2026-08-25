@@ -917,3 +917,67 @@ na tabela — mas agora so o admin le.
   `produto_visivel_para` nao ganharam a checagem, entao ver como um cliente
   pendente mostra catalogo cheio enquanto o cliente real ve zero. Nao e furo de
   seguranca, e furo de diagnostico.
+
+### 25/08 (noite, cont. 12) - LEVA A / A3 + A10
+
+**CONTEXTO NOVO DO DONO:** a sincronizacao com o B2BWave e TEMPORARIA. Quando os
+bugs estiverem corrigidos ele desliga o B2BWave e o PermShield vira o SISTEMA
+PRINCIPAL. Consequencia pratica: toda isencao por `b2bwave_order_id` e DIVIDA a
+remover, o banco tem que garantir integridade sozinho, e perda de dado e o pior
+risco do projeto. Salvo em memoria.
+
+**A3 - sequestro de ficha migrada (o pior da Leva A)**
+
+- **CONFIRMADO** - `ensure_my_cliente_record` roda em TODO login e vincula a
+  ficha casando por E-MAIL, sem exigir prova nenhuma de posse do e-mail. E o
+  ramo `NOT EXISTS (auth.users)` torna 100% das fichas migradas reivindicaveis,
+  porque o sync grava `user_id: crypto.randomUUID()` (`b2bwave-sync:1266`) — UUID
+  que nunca existiu. Elas chegam `ativo`, entao quem toma a ficha ja fecha pedido.
+- **FEITO** - `20260825300000`: exige `auth.users.email_confirmed_at IS NOT NULL`
+  para VINCULAR ficha existente. Le de `auth.users` e nao do JWT (o claim vem do
+  provedor e pode estar velho numa sessao antiga). Quem nao provou o e-mail ganha
+  ficha PROPRIA `pendente`, nao a de outra pessoa.
+- **DECLARADO NO ARQUIVO, sem enfeite** - isto so vale se "Confirm email"
+  estiver LIGADO no painel. Com ele desligado o Supabase confirma tudo no ato e
+  a checagem passa. LIGAR O TOGGLE E O CONSERTO; a migration e a rede.
+
+- **SEGUNDO CAMINHO (pre-registro), que o toggle NAO fecha** - o atacante se
+  cadastra ANTES com o e-mail da vitima: cria auth user NAO confirmado com a
+  senha DELE. Quando a vitima usa o link de acesso, o Supabase confirma AQUELA
+  linha, e o atacante entra com a senha que escolheu. O ramo de
+  auto-provisionamento do `send-email` nao protegia: ele so roda quando
+  `generateLink` FALHA, e com a conta sequestrada ela existe.
+- **FEITO** - `send-email`: antes de gerar link (magic link E reset de senha), se
+  ja existe conta com aquele e-mail e ela NAO esta confirmada, a senha e trocada
+  por uma aleatoria. A senha do atacante morre. Falha nessa troca NAO impede o
+  envio — impedir daria ao atacante uma forma de negar acesso a vitima.
+
+**A10 - enumeracao de e-mail**
+
+- **CONFIRMADO** - o limite por destinatario era avaliado DEPOIS das saidas
+  genericas, entao so rodava para e-mail de cliente ATIVO: "aguarde alguns
+  minutos" virava oraculo. E e-mail inexistente nunca entrava no log, entao o
+  contador nunca subia e o oraculo nao se desgastava.
+- **FEITO** - limite cobrado ANTES do lookup, nos dois fluxos, respondendo
+  exatamente igual ao caso "nao existe".
+- **CONFIRMADO E CORRIGIDO** - a resposta de SUCESSO tinha formato diferente da
+  generica (`{success,type,to,provider,fallback}` vs `{success:true}`). UMA
+  chamada ja separava cliente de nao-cliente. Agora os tipos de autenticacao
+  respondem identico.
+
+**ERRO MEU, pego por checagem que eu nao tinha** - ao mover `AUTENTICACAO` de
+lugar, passei a le-la num escopo mais RASO que o da declaracao. Seria
+ReferenceError na resposta da funcao em producao, e `npm test` nao veria: ele so
+olha `src/`, e o Deno nao esta instalado aqui.
+
+- **PORTAO NOVO** - `scripts/check-edge.mjs`: roda `tsc --noResolve` nos 14
+  arquivos de edge function e recusa TS2304/TS2552 (nome nao encontrado), exceto
+  os globais do Deno. Entrou no `npm test`.
+- **A PRIMEIRA VERSAO DO PORTAO PASSOU O MUTANTE** - o `tsc` nem rodava (Node 24
+  recusa spawnar `.cmd` sem shell), o `catch` engolia, a saida ficava vazia e
+  isso era lido como "nenhum erro". Portao que falha em silencio e PIOR que
+  portao nenhum: da confianca sem dar cobertura. Refeito com `spawnSync`,
+  chamando o JS do tsc pelo proprio Node, e verificando `error`/`status`/saida
+  vazia — falha de execucao agora e erro alto.
+- **PROVADO POR 2 MUTANTES** - nome inexistente acende; devolver a constante ao
+  escopo interno (o erro exato que cometi) acende. Controle passa.

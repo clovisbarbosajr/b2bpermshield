@@ -9,10 +9,11 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node scripts/check-migrations.mjs && tsc --noEmit -p tsconfig.json && vitest run",
+    "test": "node scripts/check-migrations.mjs && node scripts/check-edge.mjs && tsc --noEmit -p tsconfig.json && vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
-    "check:sql": "node scripts/check-migrations.mjs"
+    "check:sql": "node scripts/check-migrations.mjs",
+    "check:edge": "node scripts/check-edge.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

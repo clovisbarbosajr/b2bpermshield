@@ -14,6 +14,15 @@ import { Buffer } from "node:buffer";
 // endereço) — copiar de lá REGRIDE o layout.
 import { PDFDocument, StandardFonts, rgb, PDFFont } from "npm:pdf-lib@1.17.1";
 
+
+// Tipos de e-mail que servem para ENTRAR na conta. Tratados a parte em tres
+// lugares: contador proprio de teto, cooldown por destinatario, e resposta
+// generica (para nao virar oraculo de "este e-mail existe?").
+//
+// Fica no escopo do MODULO de proposito: os tres usos estao em profundidades
+// diferentes da funcao.
+const AUTENTICACAO = new Set(["password_reset", "magic_link", "request_magic_link", "set_password"]);
+
 interface PdfOrderItem { sku: string; name: string; qty: number; price: number; total: number; }
 interface PdfOrderData {
   orderNumber: string; orderDate: string; poNumber?: string; deliveryDate?: string;
@@ -1212,6 +1221,51 @@ Deno.serve(async (req) => {
       }
       // Generate the reset link using Supabase Admin API
       const resetEmailNorm = String(resetEmail).trim().toLowerCase();
+
+      // LIMITE ANTES DO LOOKUP (A10) — mesma razao do request_magic_link: o
+      // limite ficava depois das saidas genericas, entao "aguarde alguns
+      // minutos" so aparecia para e-mail que EXISTE, e virava oraculo.
+      {
+        const { count } = await adminClient
+          .from("notification_log")
+          .select("id", { count: "exact", head: true })
+          .eq("recipient", resetEmailNorm)
+          .in("event", ["password_reset", "magic_link", "request_magic_link", "set_password"])
+          .gte("created_at", new Date(Date.now() - 15 * 60 * 1000).toISOString());
+        if ((count ?? 0) >= 3) {
+          console.log(`[send-email] password_reset: limite de 15min atingido para ${resetEmailNorm}`);
+          return new Response(JSON.stringify({ success: true }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // SQUAT DE PRE-REGISTRO (A3, segundo caminho) — identico ao do
+      // request_magic_link. Conta NAO CONFIRMADA com este e-mail pode ter sido
+      // criada por outra pessoa; a senha dela morre antes de o link sair.
+      try {
+        const { data: uidExistente } = await (adminClient as any)
+          .rpc("auth_user_id_by_email", { _email: resetEmailNorm });
+        if (uidExistente) {
+          const { data: u } = await adminClient.auth.admin.getUserById(String(uidExistente));
+          if (u?.user && !u.user.email_confirmed_at) {
+            const senhaMorta = crypto.randomUUID() + crypto.randomUUID();
+            const { error: pwErr } = await adminClient.auth.admin.updateUserById(
+              String(uidExistente), { password: senhaMorta },
+            );
+            // Falha aqui NAO impede o envio: impedir daria ao atacante uma forma
+            // de negar acesso a vitima. Registra e segue.
+            if (pwErr) {
+              console.error(`[send-email] password_reset: nao consegui invalidar senha de conta nao confirmada (${resetEmailNorm}): ${pwErr.message}`);
+            } else {
+              console.log(`[send-email] password_reset: conta nao confirmada teve a senha invalidada antes do link (${resetEmailNorm})`);
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[send-email] password_reset: checagem de squat falhou para ${resetEmailNorm}: ${String(e)}`);
+      }
+
       let { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
         type: "recovery",
         email: resetEmailNorm,
@@ -1268,6 +1322,29 @@ Deno.serve(async (req) => {
       });
       if (!emailReq || !emailReq.includes("@")) return generic();
 
+      // ENUMERACAO DE E-MAIL (A10)
+      //
+      // O limite por e-mail existia, mas era avaliado LA EMBAIXO, depois das
+      // saidas genericas. Entao ele so chegava a rodar para e-mail de cliente
+      // ATIVO — e a resposta "muitos pedidos, aguarde" virava um oraculo:
+      // quatro chamadas e voce sabia quem e cliente. E-mail inexistente nunca
+      // entrava no log, o contador nunca subia, e o oraculo nao se desgastava.
+      //
+      // Agora o limite e cobrado ANTES de olhar o cadastro, e o excesso responde
+      // exatamente igual ao caso "nao existe". Nao ha o que comparar.
+      {
+        const { count } = await adminClient
+          .from("notification_log")
+          .select("id", { count: "exact", head: true })
+          .eq("recipient", emailReq)
+          .in("event", ["password_reset", "magic_link", "request_magic_link", "set_password"])
+          .gte("created_at", new Date(Date.now() - 15 * 60 * 1000).toISOString());
+        if ((count ?? 0) >= 3) {
+          console.log(`[send-email] request_magic_link: limite de 15min atingido para ${emailReq}`);
+          return generic();
+        }
+      }
+
       const { data: cli } = await adminClient.from("clientes")
         .select("id, nome, status, is_active, user_id")
         .ilike("email", likeEscape(emailReq)).limit(1).maybeSingle();
@@ -1283,6 +1360,50 @@ Deno.serve(async (req) => {
       if (body.redirectTo && allowedOrigins.length > 0) {
         try { if (allowedOrigins.includes(new URL(body.redirectTo).origin)) safeRedirect = body.redirectTo; } catch { /* dropa */ }
       }
+
+      // ------------------------------------------------------------------
+      // SQUAT DE PRE-REGISTRO (A3, segundo caminho)
+      //
+      // O atacante se cadastra ANTES com o e-mail da vitima. Isso cria um auth
+      // user NAO CONFIRMADO com a senha DELE — ele ainda nao consegue entrar.
+      // Quando a vitima pede este link e clica, o Supabase CONFIRMA aquela
+      // linha. A partir dai o atacante entra com a senha que escolheu.
+      //
+      // Repare que o ramo de auto-provisionamento logo abaixo nao protege: ele
+      // so roda quando `generateLink` FALHA, e com a conta sequestrada ela
+      // existe, entao o link e gerado normalmente.
+      //
+      // Conserto: se ja existe conta com este e-mail e ela NAO esta confirmada,
+      // troca a senha por uma aleatoria antes de mandar o link. A senha do
+      // atacante morre; quem for dono do e-mail entra pelo link e define a sua.
+      //
+      // Custo aceito: um cliente que se cadastrou com senha, ainda nao
+      // confirmou, e pede este link PERDE a senha que tinha escolhido. Ele entra
+      // pelo link e define outra. Preferivel a entregar a conta dele.
+      try {
+        const { data: uidExistente } = await (adminClient as any)
+          .rpc("auth_user_id_by_email", { _email: emailReq });
+        if (uidExistente) {
+          const { data: u } = await adminClient.auth.admin.getUserById(String(uidExistente));
+          if (u?.user && !u.user.email_confirmed_at) {
+            const senhaMorta = crypto.randomUUID() + crypto.randomUUID();
+            const { error: pwErr } = await adminClient.auth.admin.updateUserById(
+              String(uidExistente), { password: senhaMorta },
+            );
+            // Falhar aqui NAO pode virar "nao manda o link": isso daria ao
+            // atacante uma forma de negar acesso a vitima. Registra e segue —
+            // o pior caso volta a ser o de hoje, nao fica pior.
+            if (pwErr) {
+              console.error(`[send-email] request_magic_link: nao consegui invalidar senha de conta nao confirmada (${emailReq}): ${pwErr.message}`);
+            } else {
+              console.log(`[send-email] request_magic_link: conta nao confirmada teve a senha invalidada antes do link (${emailReq})`);
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[send-email] request_magic_link: checagem de squat falhou para ${emailReq}: ${String(e)}`);
+      }
+      // ------------------------------------------------------------------
 
       let linkRes = await adminClient.auth.admin.generateLink({
         type: "magiclink", email: emailReq, options: { redirectTo: safeRedirect },
@@ -1438,7 +1559,6 @@ Deno.serve(async (req) => {
       // as notificacoes queimarem o orcamento da hora, o cliente ainda consegue
       // entrar no portal. Trancar o cliente para fora seria trocar um problema
       // por outro pior.
-      const AUTENTICACAO = new Set(["password_reset", "magic_link", "request_magic_link", "set_password"]);
       const canalTeto = AUTENTICACAO.has(type) ? "auth" : "email";
 
       // COOLDOWN POR DESTINATARIO para autenticacao.
@@ -1572,6 +1692,21 @@ Deno.serve(async (req) => {
       });
     }
     console.log(`[send-email] Enviado "${type}" para ${toDisplay} via ${result.provider}${result.fallback ? " (fallback)" : ""}`);
+    // ENUMERACAO PELO FORMATO DA RESPOSTA (A10)
+    //
+    // As saidas de "nao existe" devolvem `{success:true}` seco. Esta devolvia
+    // `{success, type, to, provider, fallback}`. Formatos DIFERENTES — nao
+    // precisava nem das 4 tentativas do limite: UMA chamada ja separava cliente
+    // de nao-cliente.
+    //
+    // Para os tipos de autenticacao a resposta passa a ser identica a generica.
+    // Os demais tipos (pedido, estoque, teste) continuam detalhados: quem os
+    // chama e a propria aplicacao, e o detalhe serve para diagnostico.
+    if (AUTENTICACAO.has(type)) {
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     return new Response(JSON.stringify({ success: true, type, to, provider: result.provider, fallback: result.fallback }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
