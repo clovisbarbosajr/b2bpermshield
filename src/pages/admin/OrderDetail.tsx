@@ -425,7 +425,7 @@ const OrderDetail = () => {
       // ainda assim disparava e-mail ao cliente, e-mail ao admin e SMS de
       // "pedido novo". Mesma classe do incidente de 25/ago — notificar sobre uma
       // coisa que nao aconteceu.
-      const amigavel = itErr.message?.includes("ITEM_NEEDS_VARIANT")
+      const amigavel = /ITEM_NEEDS_VARIANT|ITEM_VARIANT_MISMATCH/i.test(itErr.message ?? "")
         ? "One of the products has options (size/color) and no option was picked."
         : itErr.message;
       toast.error("Order created but items failed: " + amigavel);

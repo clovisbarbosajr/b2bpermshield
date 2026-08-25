@@ -109,8 +109,15 @@ COMMIT;
 -- sync nao resolver `variante_id`, isentar e a unica opcao segura — sem isso o
 -- primeiro tick esvaziaria pedidos em laco.
 --
--- Ou seja: fecha o caminho do CLIENTE e do ADMIN, que e por onde o pedido errado
--- entrava de verdade. O caminho do sync continua aberto e esta na fila.
+-- Fecha o caminho ACIDENTAL: carrinho velho do localStorage, re-order de pedido
+-- importado, "add product" do admin, import por CSV, e a falha da validacao do
+-- checkout. E por onde o pedido errado entrava de verdade.
+--
+-- NAO fecha o caminho DELIBERADO enquanto `b2bwave_order_id` for gravavel pelo
+-- cliente: mandando essa coluna no insert, o pedido fica isento deste gatilho e
+-- de todos os recalculos de preco. A trava esta em
+-- 20260825230000_trava_b2bwave_order_id.sql e precisa rodar JUNTO com esta.
+-- (Eu tinha escrito aqui que "fecha o caminho do CLIENTE". Era falso.)
 --
 -- ---------------------------------------------------------------------------
 -- ROLLBACK

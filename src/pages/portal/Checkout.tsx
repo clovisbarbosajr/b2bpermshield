@@ -641,7 +641,7 @@ const Checkout = () => {
       // Distingue os dois motivos que hoje compartilham o mesmo ERRCODE
       // (`check_violation`): falta de estoque e item sem variante. Sem isto o
       // cliente via a mensagem CRUA do banco na tela.
-      const precisaVariante = /ITEM_NEEDS_VARIANT/i.test(itensError.message);
+      const precisaVariante = /ITEM_NEEDS_VARIANT|ITEM_VARIANT_MISMATCH/i.test(itensError.message);
       const isStock = !precisaVariante
         && /insufficient_stock|check_violation|insufficient stock/i.test(itensError.message);
       toast.error(precisaVariante
