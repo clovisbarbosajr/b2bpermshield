@@ -1165,6 +1165,62 @@ Deno.serve(async (req) => {
     }
 
     // ========== SYNC ALL ORDERS (no date filter - full history) ==========
+    // Backfill do HISTORICO INTEIRO, com cursor proprio e orcamento de tempo.
+    //
+    // O `sync_orders_all` processa 50 pedidos por chamada e devolve nextPage/
+    // nextOffset para quem chamou continuar o laco — util para um script, inutil
+    // para rodar na mao: com 1.147 pedidos daria ~23 chamadas. E o `cron_orders`
+    // pula tudo que e anterior a 2025 (`skipPre2025 = true`), entao nao serve
+    // para recuperar historico.
+    //
+    // Este varre pagina a pagina, SEM pular por data, ate acabar ou o orcamento
+    // de tempo estourar. Guarda a posicao em `sync_state` (chave propria, para
+    // nao mexer no cursor do cron), entao basta chamar de novo ate `done: true`.
+    if (action === "sync_orders_backfill") {
+      const CHAVE = "orders_backfill_cursor";
+      const ORCAMENTO_MS = body.budget_ms || 100_000;   // folga sob o limite da Edge Function
+      const inicio = Date.now();
+
+      const { data: est } = await adminClient.from("sync_state").select("value").eq("key", CHAVE).maybeSingle();
+      let page = Number((est?.value as any)?.page) || 1;
+
+      let created = 0, updated = 0, skipped = 0, errors = 0, paginas = 0;
+      let done = false;
+
+      while (Date.now() - inicio < ORCAMENTO_MS) {
+        let data: any;
+        try {
+          data = await fetchPage("orders.json", username, apiKey, page);
+        } catch (_e) {
+          errors++;
+          break;   // retoma do mesmo cursor na proxima chamada
+        }
+        if (!Array.isArray(data) || data.length === 0) { done = true; break; }
+
+        // `skipPre2025 = false`: e backfill, o historico antigo E o alvo.
+        // `notify = false`: reprocessar 1.147 pedidos nao pode disparar notificacao.
+        const r = await processOrderSlice(adminClient, data, false, false);
+        created += r.created; updated += r.updated; skipped += r.skipped; errors += r.errors;
+        paginas++;
+
+        const ultima = data.length < 500;
+        page++;
+        await adminClient.from("sync_state").upsert({ key: CHAVE, value: { page } }, { onConflict: "key" });
+        if (ultima) { done = true; break; }
+      }
+
+      if (done) {
+        // Zera o cursor para que uma proxima chamada recomece do inicio.
+        await adminClient.from("sync_state").upsert({ key: CHAVE, value: { page: 1 } }, { onConflict: "key" });
+      }
+      await logRun(adminClient, "sync_orders_backfill", { created, updated, skipped, errors });
+      return new Response(JSON.stringify({
+        success: true, done, paginas, proxima_pagina: done ? 1 : page,
+        created, updated, skipped, errors,
+        segundos: Math.round((Date.now() - inicio) / 1000),
+      }), { headers: jsonHeaders });
+    }
+
     if (action === "sync_orders_all") {
       const pageNum = body.page || 1;
       const offset = body.offset || 0;
