@@ -388,8 +388,17 @@ Profile · UsersManagement · ExtraFields · SetupApp · WarehouseSettings · B2
 | 80 | — | `EDITADO` | **40/49 corrigido** — `resolveDiscount` filtrava as datas **em JS depois** do `.limit(50)`: 50 faixas expiradas do mesmo produto escondiam a válida e o cliente perdia o desconto. Agora filtra no banco (`.or("data_inicio.is.null,data_inicio.lte.…")`), igual ao servidor. Tirei os milissegundos do ISO porque o `.` é separador na sintaxe `col.op.valor` do PostgREST |
 | 81 | — | `FEITO` | **48 revisto (não é bug do código, é do schema)** — mantive a perna `tabela_preco_id.is.null` no OR de propósito, com comentário: `produto_descontos.tabela_preco_id` é NOT NULL, então desconto "global" é inexpressável hoje; se a coluna virar nullable, o código já funciona. **Cliente sem tabela de preço continua sem nenhum desconto por quantidade** — decisão de schema, precisa o dono dizer se quer desconto global de verdade (aí é `ALTER COLUMN ... DROP NOT NULL`) |
 
+## 2026-08-25 - Integracao ETA com o CONTAINER ZAP
 
-
-
-
-
+- **FEITO** - commit `d84d7ce`. Rodada 3 do cacador/cetico fechada sem itens abertos.
+- **FEITO** - `docs/integracao-container-zap/01-RODAR-NO-CONTAINER-ZAP.sql`: RPC `eta_por_containers`
+  no projeto do tracker. Recebe a lista de containers, normaliza e devolve a melhor data.
+- **FEITO** - `supabase/functions/sync-container-eta/index.ts`: leitura paginada, pula entregues,
+  nao sobrescreve ETA manual quando a origem e a planilha.
+- **FEITO** - `supabase/migrations/20260825120000_sync_eta_container.sql`: colunas + log + cron 06:20 UTC,
+  em blocos separados (falha do cron nao derruba as colunas).
+- **FEITO** - `supabase/config.toml`: `verify_jwt = false` pra funcao (senao o cron toma 401 no gateway).
+- **FEITO** - `ProducaoStatus.tsx`: painel do ultimo sync + selo de origem no ETA, com fallback
+  na leitura E na escrita (publicar a UI antes do SQL nao quebra a tela nem perde o save).
+- **AGUARDANDO** - dono rodar: SQL nos dois projetos -> secrets -> deploy da edge -> publish.
+- **PENDENTE** - P-A: Container # e Tracking # ainda nao se espelham (`docs/integracao-container-zap/PENDENCIAS.md`).
