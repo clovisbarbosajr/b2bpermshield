@@ -32,5 +32,12 @@ prática, o cruzamento com o tracker precisa olhar `numero_container` **e**
 `tracking` — senão a linha que só tem tracking preenchido nunca casa.
 
 ## Ordem combinada
-1. Integração de ETA (em andamento)
-2. P-A — espelhar container ↔ tracking
+1. ~~Integração de ETA~~ — **CONCLUÍDA e validada em produção em 25/ago/2026**
+   (16 lidos, 13 casados, 13 atualizados, 0 erros). Ver `README.md`.
+2. **P-A — espelhar container ↔ tracking** ← próximo
+
+## Observação da execução real (25/ago)
+Nos 13 itens que casaram, o container e o tracking estavam com o **mesmo valor**,
+então o P-A não atrapalhou o cruzamento. Mas isso é coincidência dos registros
+atuais, não garantia: uma linha preenchida só num dos campos continua casando
+(a função consulta os dois), o problema do P-A é de digitação na tela.
