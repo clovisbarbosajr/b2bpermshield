@@ -16,3 +16,10 @@ verify_jwt = false
 # gateway off; a função valida o auth user pelo email e só cria status 'pendente'.
 [functions.register-customer]
 verify_jwt = false
+
+# Chamada pelo cron diario (net.http_post manda apikey + x-cron-secret, SEM
+# Authorization). Com o default verify_jwt=true a requisicao morria no gateway
+# ANTES de entrar na funcao: o job nao rodava e nem log ficava, porque o log e
+# gravado dentro dela. A propria funcao autoriza (cron-secret ou admin/manager).
+[functions.sync-container-eta]
+verify_jwt = false

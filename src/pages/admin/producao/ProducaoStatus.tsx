@@ -18,6 +18,8 @@ type Row = {
   id: string; produto_id: string; quantidade: number; est_ready: string | null; est_entrega: string | null; numero_ordem: string | null;
   numero_container: string | null; status: string; tracking: string | null; notes: string | null;
   quantidade_recebida: number | null; recebido_em: string | null; created_at: string;
+  // Preenchidos pela sincronizacao diaria de ETA (edge `sync-container-eta`).
+  eta_atualizado_em: string | null; eta_fonte: string | null;
   produtos: { nome: string; sku: string } | null;
 };
 type Produto = { id: string; nome: string; sku: string; categoria_id: string | null };
@@ -56,13 +58,35 @@ const ProducaoStatus = () => {
   const [notesRow, setNotesRow] = useState<Row | null>(null);
   const [notesText, setNotesText] = useState("");
 
+  // Ultima execucao da sincronizacao de ETA (cron diario). Sem isto o pedido
+  // "1x por dia, sem falha" so seria verificavel rodando SQL na mao.
+  const [ultimoSync, setUltimoSync] = useState<any>(null);
+
   const load = async () => {
+    // As colunas `eta_atualizado_em`/`eta_fonte` vem da migration da integracao de
+    // ETA. Se a UI subir ANTES do SQL, o PostgREST responde 400 "column does not
+    // exist", `data` vem null e a tela de Producao ficaria VAZIA — sem erro, sem
+    // aviso. Entao pede as colunas novas e, se o banco nao as tiver ainda, refaz
+    // a consulta sem elas. A tela funciona nos dois estados; some so o selo.
+    const pedidosQuery = async () => {
+      const comNovas = await supabase.from("producao_pedidos")
+        .select("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, eta_atualizado_em, eta_fonte, produtos(nome, sku)").order("created_at", { ascending: false });
+      if (!comNovas.error) return comNovas;
+      return await supabase.from("producao_pedidos")
+        .select("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)").order("created_at", { ascending: false });
+    };
+
     const [pr, prod, cat] = await Promise.all([
-      supabase.from("producao_pedidos").select("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)").order("created_at", { ascending: false }),
+      pedidosQuery(),
       supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("nome"),
       supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("nome"),
     ]);
     setRows((pr.data as any[]) ?? []);
+    const { data: sync } = await (supabase as any)
+      .from("producao_eta_sync_log")
+      .select("iniciado_em, ok, mensagem, itens_lidos, itens_casados, itens_atualizados, itens_com_erro")
+      .order("iniciado_em", { ascending: false }).limit(1).maybeSingle();
+    setUltimoSync(sync ?? null);
     setProdutos((prod.data as Produto[]) ?? []);
     setCategorias((cat.data as Categoria[]) ?? []);
     setLoading(false);
@@ -202,6 +226,20 @@ const ProducaoStatus = () => {
       est_ready: editForm.est_ready || null, est_entrega: editForm.est_entrega || null,
       numero_ordem: editForm.numero_ordem || null, numero_container: editForm.numero_container || null,
     };
+    // ETA alterado A MAO deixa de ser "do tracker": limpa a marca de origem.
+    // Sem isto o selo continuava — inclusive o VERDE "arrived", afirmando que o
+    // container chegou, numa data que o admin acabou de digitar.
+    // `"eta_fonte" in editRow`: se a UI subir ANTES do SQL, o fallback da leitura
+    // traz a linha SEM essas chaves — e mandar `eta_fonte: null` num banco que
+    // ainda nao tem a coluna faz o PostgREST recusar o UPDATE INTEIRO (PGRST204),
+    // perdendo qtd, status, order # e container junto. Blindei a leitura no
+    // `pedidosQuery` e tinha reaberto o mesmo risco aqui, na escrita — logo na
+    // acao mais comum da tela, que e justamente mexer no ETA.
+    if ((editForm.est_entrega || null) !== (editRow.est_entrega || null)
+        && "eta_fonte" in (editRow as any)) {
+      patch.eta_fonte = null;
+      patch.eta_atualizado_em = null;
+    }
     // Container # É o rastreio na prática (frete marítimo): preencher o container aqui
     // também preenche o Tracking da lista — sem redigitar. Só NÃO sobrescreve um
     // tracking digitado manualmente diferente do container antigo.
@@ -276,6 +314,41 @@ const ProducaoStatus = () => {
           value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
 
+      {/* Painel da sincronizacao automatica de ETA. E a PROVA de que o cron
+          diario rodou: sem isto, "1x por dia sem falha" so seria verificavel
+          rodando SQL na mao. Some quando a integracao ainda nao rodou nenhuma vez. */}
+      {ultimoSync && (
+        <Card className="mb-4 p-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+            <span className="flex items-center gap-2 font-medium">
+              {/* Ambar quando o lote rodou ate o fim MAS teve item com erro:
+                  verde com "40 failed" ao lado seria mentira visual. */}
+              <span className={`inline-block h-2 w-2 rounded-full ${
+                !ultimoSync.ok ? "bg-destructive"
+                : ultimoSync.itens_com_erro > 0 ? "bg-amber-500"
+                : "bg-green-500"
+              }`} />
+              ETA sync
+            </span>
+            <span className="text-muted-foreground">
+              Last run: <strong className="text-foreground">{fmtDT(ultimoSync.iniciado_em)}</strong>
+            </span>
+            <span className="text-muted-foreground">
+              Matched <strong className="text-foreground">{ultimoSync.itens_casados}</strong> of {ultimoSync.itens_lidos} ·
+              updated <strong className="text-foreground">{ultimoSync.itens_atualizados}</strong>
+            </span>
+            {ultimoSync.itens_com_erro > 0 && (
+              <span className="text-destructive">{ultimoSync.itens_com_erro} failed</span>
+            )}
+            {ultimoSync.mensagem && (
+              <span className="text-xs text-muted-foreground" title={ultimoSync.mensagem}>
+                {String(ultimoSync.mensagem).slice(0, 80)}
+              </span>
+            )}
+          </div>
+        </Card>
+      )}
+
       <Card className="p-0 overflow-hidden">
         <Table>
           <TableHeader>
@@ -302,7 +375,31 @@ const ProducaoStatus = () => {
                   <TableCell className="font-medium">{r.produtos?.nome ?? "—"}{r.produtos?.sku && <span className="text-xs text-muted-foreground"> ({r.produtos.sku})</span>}</TableCell>
                   <TableCell>{r.quantidade}</TableCell>
                   <TableCell>{r.est_ready ?? "—"}</TableCell>
-                  <TableCell>{r.est_entrega ?? "—"}</TableCell>
+                  {/* Selo quando o ETA veio do tracker (Container ZAP). Mostra a
+                      diferenca entre "chegou" (arrival) e "vai chegar" — sem isto
+                      o admin nao sabe se a data e estimativa ou fato consumado. */}
+                  <TableCell>
+                    <div className="flex items-center gap-1.5">
+                      <span>{r.est_entrega ?? "—"}</span>
+                      {r.eta_atualizado_em && (
+                        <span
+                          title={`From container tracking (${r.eta_fonte ?? "tracker"}) — ${fmtDT(r.eta_atualizado_em)}`}
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            r.eta_fonte === "arrival"
+                              ? "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400"
+                              : r.eta_fonte === "sheet"
+                                ? "bg-muted text-muted-foreground"
+                                : "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400"
+                          }`}
+                        >
+                          {/* `sheet` = planilha do tracker (dado estatico, so preenche
+                              vazio). Misturar com o rastreio ao vivo apagaria justamente
+                              a distincao que faz a planilha nao sobrescrever ETA manual. */}
+                          {r.eta_fonte === "arrival" ? "arrived" : r.eta_fonte === "sheet" ? "sheet" : "auto"}
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
                   {/* Container saiu desta coluna (duplicava o Tracking, que agora sincroniza
                       com o Container #). O dado continua no banco, no diálogo de edição e
                       na tabela de Received. */}
