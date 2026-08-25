@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { toast } from "sonner";
 import { canonicalStatus, statusLabel } from "@/lib/orderStatuses";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,27 +20,48 @@ const AdminRelatorios = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // PAGINADO (fetchAllRows): estes 3 selects eram crus e o PostgREST corta em
+    // 1000 linhas SEM erro. Em cima do recorte truncado esta tela calcula Total
+    // Revenue, Total Orders, Avg Order Value, Monthly Sales, Top Products e Low
+    // Stock — numeros plausiveis e errados, que e o pior tipo.
+    //
+    // Pior ainda no "Top Products": o Set de pedidos CANCELADOS e montado a
+    // partir de `pedidos`, que vinha so com os 1000 mais recentes. Item cujo
+    // pedido nao entrou nessa fatia nao era reconhecido como cancelado e
+    // entrava no ranking de receita — exatamente a contradicao que o comentario
+    // abaixo diz ter sido consertada.
+    //
+    // `.order("id")`: paginacao por OFFSET precisa de ordem estavel.
     const fetch = async () => {
-      const [pRes, prRes, iRes] = await Promise.all([
-        supabase.from("pedidos").select("*, clientes(nome, empresa)").order("created_at", { ascending: false }),
-        supabase.from("produtos").select("id, nome, sku, preco, estoque_total, estoque_reservado, quantidade_minima"),
+      const [ped, prod, it] = await Promise.all([
+        fetchAllRows((f, t) => supabase.from("pedidos").select("*, clientes(nome, empresa)").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("produtos").select("id, nome, sku, preco, estoque_total, estoque_reservado, quantidade_minima").order("id", { ascending: true }).range(f, t)),
         // `pedido_id` é necessário pra excluir itens de pedido CANCELADO do
         // "Top Products" (a receita total já os exclui — os dois números do
         // mesmo painel se contradiziam).
-        supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, quantidade, subtotal"),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, quantidade, subtotal").order("id", { ascending: true }).range(f, t)),
       ]);
-      setPedidos(pRes.data ?? []);
-      setProdutos(prRes.data ?? []);
-      setItens(iRes.data ?? []);
+      setPedidos(ped);
+      setProdutos(prod);
+      setItens(it);
       setLoading(false);
     };
-    fetch();
+    // `fetchAllRows` LANCA em erro (o `.data ?? []` anterior engolia). Sem o
+    // catch o setLoading(false) nunca rodava: spinner eterno.
+    fetch().catch((e) => {
+      console.error(e);
+      toast.error("Could not load the dashboard. Try again.");
+      setLoading(false);
+    });
   }, []);
 
   // Sales by month — chave ORDENÁVEL (YYYY-MM) + ordenação cronológica.
   // Antes a chave era o rótulo ("Jul 2026") e o slice(-12) cortava pela ordem de
-  // INSERÇÃO; como `pedidos` vem em created_at DESC, isso pegava os 12 meses MAIS
-  // ANTIGOS e ainda plotava o eixo invertido (novo → velho).
+  // INSERÇÃO, o que pegava os 12 meses MAIS ANTIGOS e ainda plotava o eixo
+  // invertido (novo → velho). Hoje o sort é pela chave YYYY-MM, então nenhuma
+  // conta desta tela depende da ordem em que as linhas chegam — foi por isso que
+  // deu pra trocar o `created_at DESC` do select por `id` (ordem estável, que a
+  // paginação exige).
   const salesByMonth = pedidos.reduce((acc: Record<string, { label: string; total: number }>, p) => {
     if (canonicalStatus(p.status) === "cancelled") return acc;
     const d = new Date(p.created_at);

@@ -23,17 +23,18 @@ const SalesPerCategory = () => {
       setLoading(true);
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
       const [ord, its, prod, cat] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedidos").select("id, created_at, status").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, subtotal").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("produtos").select("id, categoria_id").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("categorias").select("id, nome").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, created_at, status").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, subtotal").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("produtos").select("id, categoria_id").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("categorias").select("id, nome").order("id", { ascending: true }).range(f, t)),
       ]);
       setOrders(ord);
       setItems(its);
       setProducts(prod);
       setCategories(cat);
       setLoading(false);
-    };    fetch().catch((e) => {
+    };
+    fetch().catch((e) => {
       // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
       // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
       console.error(e);

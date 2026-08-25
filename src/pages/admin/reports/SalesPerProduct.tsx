@@ -24,13 +24,14 @@ const SalesPerProduct = () => {
       // Paginado: sem isto o PostgREST corta em 1000 linhas sem erro e o
       // relatório mostra um total plausível e errado.
       const [ord, its] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedidos").select("id, created_at, status").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, subtotal").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, created_at, status").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, subtotal").order("id", { ascending: true }).range(f, t)),
       ]);
       setOrders(ord);
       setItems(its);
       setLoading(false);
-    };    fetch().catch((e) => {
+    };
+    fetch().catch((e) => {
       // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
       // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
       console.error(e);

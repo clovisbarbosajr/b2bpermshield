@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
-import { canonicalStatus } from "@/lib/orderStatuses";
+import { canonicalStatus, statusBadge } from "@/lib/orderStatuses";
 
 const STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 
@@ -25,13 +25,14 @@ const OrderSummaryByStatus = () => {
       setLoading(true);
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
       const [ord, cli] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedidos").select("id, numero, cliente_id, status, total, created_at, updated_at").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("clientes").select("id, nome").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, numero, cliente_id, status, total, created_at, updated_at").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("clientes").select("id, nome").order("id", { ascending: true }).range(f, t)),
       ]);
       setOrders(ord);
       setCustomers(cli);
       setLoading(false);
-    };    fetch().catch((e) => {
+    };
+    fetch().catch((e) => {
       // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
       // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
       console.error(e);
@@ -48,7 +49,10 @@ const OrderSummaryByStatus = () => {
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {
-      if (dateFrom && new Date(o.created_at) < new Date(dateFrom)) return false;
+      // Date-only e parseado como UTC; date-time sem offset, como LOCAL. Sem o
+      // "T00:00:00" as duas pontas do filtro ficavam em fusos diferentes e o
+      // "From" trazia horas do dia ANTERIOR.
+      if (dateFrom && new Date(o.created_at) < new Date(dateFrom + "T00:00:00")) return false;
       if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
       return true;
     });
@@ -65,11 +69,6 @@ const OrderSummaryByStatus = () => {
       };
     });
   }, [filtered]);
-
-  const statusColor = (s: string) => {
-    const map: Record<string, string> = { recebido: "bg-blue-500/20 text-blue-400", em_processamento: "bg-yellow-500/20 text-yellow-400", enviado: "bg-purple-500/20 text-purple-400", concluido: "bg-green-500/20 text-green-400", cancelado: "bg-red-500/20 text-red-400" };
-    return map[s] || "";
-  };
 
   const handleExport = () => {
     exportToCSV(statusSummary, "order_summary_by_status", [
@@ -98,7 +97,7 @@ const OrderSummaryByStatus = () => {
           <div className="mb-6 grid grid-cols-2 md:grid-cols-5 gap-3">
             {statusSummary.map((s) => (
               <div key={s.status} className="rounded-md border p-4">
-                <Badge className={`mb-2 ${statusColor(s.status)}`}>{s.status.replace("_", " ")}</Badge>
+                <Badge className={`mb-2 ${statusBadge(s.status)}`}>{s.status.replace(/_/g, " ")}</Badge>
                 <p className="text-2xl font-bold">{formatNumber(s.count)}</p>
                 <p className="text-sm text-muted-foreground">{formatCurrency(s.total)}</p>
                 <p className="text-xs text-muted-foreground">Avg: {formatCurrency(s.avg)}</p>
@@ -123,7 +122,7 @@ const OrderSummaryByStatus = () => {
                   const pct = totalAll > 0 ? (s.total / totalAll) * 100 : 0;
                   return (
                     <TableRow key={s.status}>
-                      <TableCell><Badge className={statusColor(s.status)}>{s.status.replace("_", " ")}</Badge></TableCell>
+                      <TableCell><Badge className={statusBadge(s.status)}>{s.status.replace(/_/g, " ")}</Badge></TableCell>
                       <TableCell className="text-right">{formatNumber(s.count)}</TableCell>
                       <TableCell className="text-right">{formatCurrency(s.total)}</TableCell>
                       <TableCell className="text-right">{formatCurrency(s.avg)}</TableCell>

@@ -10,6 +10,14 @@
  *   const itens = await fetchAllRows((from, to) =>
  *     supabase.from("pedido_itens").select("pedido_id, quantidade").range(from, to));
  */
+// IMPORTANTE para quem chamar: passe SEMPRE um `.order()` por coluna unica
+// (normalmente `id`). Isto aqui pagina com `.range()`, que vira LIMIT/OFFSET, e
+// no Postgres LIMIT/OFFSET sem ORDER BY nao tem ordem definida. Cada pagina e um
+// request separado; se uma linha for atualizada entre a pagina 1 e a 2 — e
+// `pedidos`/`produtos` mudam o tempo todo — ela pode ser lida duas vezes ou
+// nenhuma. O sintoma e cruel: o MESMO relatorio, aberto duas vezes seguidas,
+// mostra receita diferente, e nenhum dos dois numeros esta certo.
+
 export async function fetchAllRows<T = any>(
   buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
   { chunk = 1000, maxRows = 200_000 }: { chunk?: number; maxRows?: number } = {},

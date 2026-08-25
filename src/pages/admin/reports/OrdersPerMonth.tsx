@@ -17,7 +17,7 @@ const OrdersPerMonth = () => {
   useEffect(() => {
     // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro, e os meses
     // mais antigos simplesmente desapareciam do gráfico.
-    fetchAllRows((f, t) => supabase.from("pedidos").select("id, total, created_at, status").range(f, t))
+    fetchAllRows((f, t) => supabase.from("pedidos").select("id, total, created_at, status").order("id", { ascending: true }).range(f, t))
       .then((data) => { setOrders(data); setLoading(false); })
       .catch((e) => {
         // Antes só desligava o spinner em silêncio: o gráfico ficava vazio e

@@ -26,13 +26,14 @@ const CustomersPerformance = () => {
       setLoading(true);
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
       const [ord, cli] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedidos").select("id, cliente_id, total, created_at, status").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("clientes").select("id, nome, empresa, email").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, cliente_id, total, created_at, status").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("clientes").select("id, nome, empresa, email").order("id", { ascending: true }).range(f, t)),
       ]);
       setOrders(ord);
       setCustomers(cli);
       setLoading(false);
-    };    fetch().catch((e) => {
+    };
+    fetch().catch((e) => {
       // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
       // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
       console.error(e);
@@ -44,7 +45,10 @@ const CustomersPerformance = () => {
   const reportData = useMemo(() => {
     const filteredOrders = orders.filter((o) => {
       if (canonicalStatus(o.status) === "cancelled") return false; // cancelado não conta receita
-      if (dateFrom && new Date(o.created_at) < new Date(dateFrom)) return false;
+      // Date-only e parseado como UTC; date-time sem offset, como LOCAL. Sem o
+      // "T00:00:00" as duas pontas do filtro ficavam em fusos diferentes e o
+      // "From" trazia horas do dia ANTERIOR.
+      if (dateFrom && new Date(o.created_at) < new Date(dateFrom + "T00:00:00")) return false;
       if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
       return true;
     });

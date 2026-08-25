@@ -24,7 +24,7 @@ const ProductSales = () => {
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro, e a
       // receita por produto saía plausível e errada.
       const [its, ord] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal").order("id", { ascending: true }).range(f, t)),
         fetchAllRows<{ id: string; status: string }>((f, t) => supabase.from("pedidos").select("id, status").range(f, t) as any),
       ]);
       setItems(its);
@@ -41,16 +41,20 @@ const ProductSales = () => {
   }, []);
 
   const reportData = useMemo(() => {
-    const map: Record<string, { sku: string; nome: string; qty: number; revenue: number; orders: number }> = {};
+    // "# Orders" conta PEDIDOS DISTINTOS, nao linhas de pedido_itens.
+    // `pedido_itens` tem `variante_id`: o mesmo produto em 2 variantes do mesmo
+    // pedido gera 2 linhas. Somando +1 por linha, produto com variante ficava
+    // sistematicamente inflado no ranking (Qty e Revenue estavam certos).
+    const map: Record<string, { sku: string; nome: string; qty: number; revenue: number; pedidos: Set<string> }> = {};
     items.forEach((i) => {
       if (cancelled.has(i.pedido_id)) return; // item de pedido cancelado não conta
-      if (!map[i.produto_id]) map[i.produto_id] = { sku: i.sku, nome: i.nome_produto, qty: 0, revenue: 0, orders: 0 };
+      if (!map[i.produto_id]) map[i.produto_id] = { sku: i.sku, nome: i.nome_produto, qty: 0, revenue: 0, pedidos: new Set() };
       map[i.produto_id].qty += i.quantidade;
       map[i.produto_id].revenue += i.subtotal;
-      map[i.produto_id].orders += 1;
+      map[i.produto_id].pedidos.add(i.pedido_id);
     });
     return Object.entries(map)
-      .map(([id, d]) => ({ id, ...d }))
+      .map(([id, { pedidos, ...d }]) => ({ id, ...d, orders: pedidos.size }))
       .filter((d) => !nameFilter || d.nome.toLowerCase().includes(nameFilter.toLowerCase()) || (d.sku ?? "").toLowerCase().includes(nameFilter.toLowerCase()))
       .sort((a, b) => b.revenue - a.revenue);
   }, [items, cancelled, nameFilter]);

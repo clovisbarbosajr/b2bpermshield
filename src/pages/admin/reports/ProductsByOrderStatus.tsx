@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Download } from "lucide-react";
 import { exportToCSV, formatCurrency, formatNumber } from "@/lib/export-csv";
-import { canonicalStatus } from "@/lib/orderStatuses";
+import { canonicalStatus, statusBadge } from "@/lib/orderStatuses";
 
 const STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
 const PAGE_SIZE = 25;
@@ -26,13 +26,14 @@ const ProductsByOrderStatus = () => {
       setLoading(true);
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
       const [ord, its] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedidos").select("id, status").range(f, t)),
-        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, status").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal").order("id", { ascending: true }).range(f, t)),
       ]);
       setOrders(ord);
       setItems(its);
       setLoading(false);
-    };    fetch().catch((e) => {
+    };
+    fetch().catch((e) => {
       // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
       // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
       console.error(e);
@@ -72,11 +73,6 @@ const ProductsByOrderStatus = () => {
     ]);
   };
 
-  const statusColor = (s: string) => {
-    const map: Record<string, string> = { recebido: "bg-blue-500/20 text-blue-400", em_processamento: "bg-yellow-500/20 text-yellow-400", enviado: "bg-purple-500/20 text-purple-400", concluido: "bg-green-500/20 text-green-400", cancelado: "bg-red-500/20 text-red-400" };
-    return map[s] || "";
-  };
-
   return (
     <AdminLayout>
       <div className="mb-4 flex items-center justify-between">
@@ -89,7 +85,7 @@ const ProductsByOrderStatus = () => {
           <SelectTrigger className="w-[200px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
-            {STATUSES.map((s) => <SelectItem key={s} value={s}>{s.replace("_", " ")}</SelectItem>)}
+            {STATUSES.map((s) => <SelectItem key={s} value={s}>{s.replace(/_/g, " ")}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
@@ -114,7 +110,7 @@ const ProductsByOrderStatus = () => {
                 <TableRow key={i}>
                   <TableCell className="font-mono text-xs">{r.sku}</TableCell>
                   <TableCell className="text-primary">{r.product}</TableCell>
-                  <TableCell><Badge className={statusColor(r.status)}>{r.status.replace("_", " ")}</Badge></TableCell>
+                  <TableCell><Badge className={statusBadge(r.status)}>{r.status.replace(/_/g, " ")}</Badge></TableCell>
                   <TableCell className="text-right">{formatNumber(r.qty)}</TableCell>
                   <TableCell className="text-right">{formatCurrency(r.revenue)}</TableCell>
                 </TableRow>

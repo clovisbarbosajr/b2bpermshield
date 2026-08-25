@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -77,18 +79,27 @@ const ActivityLogs = () => {
   const [users, setUsers] = useState<{ email: string; name: string | null }[]>([]);
 
   useEffect(() => {
+    // Paginado: `.limit(2000)` NAO funcionava — o PostgREST corta em 1000
+    // (db-max-rows) sem erro. O dropdown so enxergava os 1000 logs mais
+    // recentes, entao quem parou de mexer no sistema sumia do filtro e as acoes
+    // dele ficavam inauditaveis. Piorava sozinho conforme a tabela crescia.
+    // `.order("id")` junto do created_at: a paginacao por OFFSET precisa de
+    // ordem estavel, senao pula ou repete linha entre as paginas.
     const fetchUsers = async () => {
-      const { data } = await (supabase as any)
+      const linhas = await fetchAllRows((f, t) => (supabase as any)
         .from("activity_logs")
         .select("user_email, user_name")
         .not("user_email", "is", null)
         .order("created_at", { ascending: false })
-        .limit(2000);
+        .order("id", { ascending: true })
+        .range(f, t));
       const seen = new Map<string, string | null>();
-      (data ?? []).forEach((r: any) => { if (r.user_email && !seen.has(r.user_email)) seen.set(r.user_email, r.user_name); });
+      linhas.forEach((r: any) => { if (r.user_email && !seen.has(r.user_email)) seen.set(r.user_email, r.user_name); });
       setUsers([...seen.entries()].map(([email, name]) => ({ email, name })).sort((a, b) => a.email.localeCompare(b.email)));
     };
-    fetchUsers();
+    // Sem o catch, uma falha aqui deixava o dropdown vazio em silencio — parecia
+    // "nenhum usuario registrou acao".
+    fetchUsers().catch((e) => { console.error(e); toast.error("Could not load the user filter."); });
   }, []);
 
   const fetchLogs = async (p = 1) => {
@@ -105,14 +116,28 @@ const ActivityLogs = () => {
     if (filterAction) q = q.eq("action", filterAction);
     if (filterEntity) q = q.eq("entity_type", filterEntity);
     if (filterUser) q = q.eq("user_email", filterUser);
-    if (filterFrom) q = q.gte("created_at", `${filterFrom}T00:00:00`);
-    if (filterTo) q = q.lte("created_at", `${filterTo}T23:59:59`);
+    // `created_at` e timestamptz e a tela EXIBE em hora local, mas um literal sem
+    // offset e resolvido pelo fuso da SESSAO (UTC no Supabase). O filtro e a
+    // coluna ficavam em fusos diferentes: com o admin em UTC-5, "To = hoje"
+    // escondia tudo que aconteceu depois das 19h — numa trilha de auditoria,
+    // parece que a acao nunca foi feita. `toISOString()` do proprio limite do dia
+    // LOCAL resolve: o navegador converte para o instante UTC correspondente.
+    const inicioLocal = (d: string) => new Date(`${d}T00:00:00`).toISOString();
+    const fimLocal = (d: string) => new Date(`${d}T23:59:59.999`).toISOString();
+    if (filterFrom) q = q.gte("created_at", inicioLocal(filterFrom));
+    if (filterTo) q = q.lte("created_at", fimLocal(filterTo));
 
     const { data, count, error } = await q;
-    if (!error) {
-      setLogs(data ?? []);
-      setTotal(count ?? 0);
+    if (error) {
+      // Antes o `if (!error)` sem `else` deixava a tela com o resultado ANTIGO e
+      // a contagem antiga — dado velho passando por atual numa auditoria.
+      console.error(error);
+      toast.error("Could not load the activity log. Try again.");
+      setLoading(false);
+      return;
     }
+    setLogs(data ?? []);
+    setTotal(count ?? 0);
     setLoading(false);
   };
 
@@ -134,7 +159,10 @@ const ActivityLogs = () => {
     const toDate = new Date();
     const fromDate = new Date();
     fromDate.setDate(toDate.getDate() - days);
-    const fmt = (d: Date) => d.toISOString().split("T")[0];
+    // `toISOString()` converte para UTC ANTES de cortar: as 20h em UTC-5 a data
+    // ISO ja e amanha, e a janela inteira deslizava um dia.
+    const fmt = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     setFilterFrom(fmt(fromDate));
     setFilterTo(fmt(toDate));
   };
@@ -232,7 +260,7 @@ const ActivityLogs = () => {
             <Button size="sm" variant="outline" onClick={() => {
               const now = new Date();
               setFilterFrom(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`);
-              setFilterTo(now.toISOString().split("T")[0]);
+              setFilterTo(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`);
             }}>This month</Button>
           </div>
         </div>

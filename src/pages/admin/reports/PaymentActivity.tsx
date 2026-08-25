@@ -26,13 +26,14 @@ const PaymentActivity = () => {
       setLoading(true);
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
       const [ord, cli] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedidos").select("id, numero, cliente_id, status, total, created_at").order("created_at", { ascending: false }).range(f, t)),
-        fetchAllRows((f, t) => supabase.from("clientes").select("id, nome, empresa").range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, numero, cliente_id, status, total, created_at, is_paid").order("created_at", { ascending: false }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("clientes").select("id, nome, empresa").order("id", { ascending: true }).range(f, t)),
       ]);
       setOrders(ord);
       setCustomers(cli);
       setLoading(false);
-    };    fetch().catch((e) => {
+    };
+    fetch().catch((e) => {
       // fetchAllRows LANCA em erro (antes o `.data ?? []` engolia). Sem este catch
       // o setLoading(false) nunca rodava: spinner eterno + unhandled rejection.
       console.error(e);
@@ -49,7 +50,10 @@ const PaymentActivity = () => {
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {
-      if (dateFrom && new Date(o.created_at) < new Date(dateFrom)) return false;
+      // `new Date("2026-08-01")` (so data) e parseado como UTC; com hora e
+      // parseado como LOCAL. Sem o "T00:00:00" as duas pontas do filtro usavam
+      // fusos diferentes e o "From" puxava horas do dia ANTERIOR.
+      if (dateFrom && new Date(o.created_at) < new Date(dateFrom + "T00:00:00")) return false;
       if (dateTo && new Date(o.created_at) > new Date(dateTo + "T23:59:59")) return false;
       return true;
     });
@@ -58,23 +62,37 @@ const PaymentActivity = () => {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  // PAGAMENTO vem de `is_paid`, NAO do status do pedido.
+  //
+  // Antes este relatorio chamava de "Paid" tudo que estava com status
+  // `complete` — ou seja, contava como recebido um pedido ENTREGUE e nao pago.
+  // `is_paid` e o campo real: o admin marca em Order Detail, da pra filtrar por
+  // ele na tela de Pedidos, e o checkout o define. Entregar e receber sao coisas
+  // diferentes, e este e o relatorio de dinheiro.
+  //
+  // `cancelled` continua vindo do status: pedido cancelado sai da conta
+  // independente de ter sido pago (se foi pago e cancelado, e estorno, nao
+  // receita — e nao ha campo de estorno aqui).
+  const pago = (o: any) => o.is_paid === true;
+  const cancelado = (o: any) => canonicalStatus(o.status) === "cancelled";
+
   const totals = useMemo(() => {
-    const paid = filtered.filter((o) => canonicalStatus(o.status) === "complete").reduce((a, o) => a + o.total, 0);
-    const pending = filtered.filter((o) => { const s = canonicalStatus(o.status); return s !== "complete" && s !== "cancelled"; }).reduce((a, o) => a + o.total, 0);
-    const cancelled = filtered.filter((o) => canonicalStatus(o.status) === "cancelled").reduce((a, o) => a + o.total, 0);
+    const paid = filtered.filter((o) => !cancelado(o) && pago(o)).reduce((a, o) => a + o.total, 0);
+    const pending = filtered.filter((o) => !cancelado(o) && !pago(o)).reduce((a, o) => a + o.total, 0);
+    const cancelled = filtered.filter(cancelado).reduce((a, o) => a + o.total, 0);
     return { paid, pending, cancelled, total: paid + pending };
   }, [filtered]);
 
-  const paymentStatus = (status: string) => {
-    if (canonicalStatus(status) === "complete") return { label: "Paid", className: "bg-green-500/20 text-green-400" };
-    if (canonicalStatus(status) === "cancelled") return { label: "Cancelled", className: "bg-red-500/20 text-red-400" };
+  const paymentStatus = (o: any) => {
+    if (cancelado(o)) return { label: "Cancelled", className: "bg-red-500/20 text-red-400" };
+    if (pago(o)) return { label: "Paid", className: "bg-green-500/20 text-green-400" };
     return { label: "Pending", className: "bg-yellow-500/20 text-yellow-400" };
   };
 
   const handleExport = () => {
     exportToCSV(filtered.map((o) => {
       const c = custMap[o.cliente_id] || { nome: "—", empresa: "—" };
-      const ps = paymentStatus(o.status);
+      const ps = paymentStatus(o);
       return { numero: o.numero, customer: c.nome, company: c.empresa, payment_status: ps.label, total: o.total, date: new Date(o.created_at).toLocaleDateString() };
     }), "payment_activity", [
       { key: "numero", label: "Order #" },
@@ -123,7 +141,7 @@ const PaymentActivity = () => {
                 <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No orders.</TableCell></TableRow>
               ) : paginated.map((o) => {
                 const c = custMap[o.cliente_id] || { nome: "—", empresa: "—" };
-                const ps = paymentStatus(o.status);
+                const ps = paymentStatus(o);
                 return (
                   <TableRow key={o.id}>
                     <TableCell className="text-primary font-mono">#{o.numero}</TableCell>
