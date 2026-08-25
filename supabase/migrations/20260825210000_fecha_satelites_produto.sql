@@ -44,9 +44,26 @@
 --   ORDER BY tablename, policyname;
 -- ---------------------------------------------------------------------------
 
+-- TUDO NUMA TRANSACAO. Sem isto, um erro no meio deixa parte das tabelas com o
+-- DROP aplicado e sem policy nova — que e pior que o vazamento: em
+-- `produto_descontos` significa preco da tela diferente do preco cobrado.
+BEGIN;
+
 -- ---------- produto_descontos (regua de desconto por tabela de preco) --------
 -- Escopo pela TABELA DE PRECO do cliente, igual a `tabela_preco_itens`.
--- `is_company_contact` cobre o sub-login (contato da empresa).
+-- `is_subcustomer_of` cobre o sub-login (`parent_customer_id`).
+--
+-- NAO usar `is_company_contact`: eu tinha copiado o padrao de
+-- 20260619170000_pricelist_isolation, que e de 19/jun e foi SUBSTITUIDA em
+-- 22/jun — `20260622000000_consolidate_subusers` DROPOU aquela funcao (junto com
+-- a tabela `company_contacts`, do modelo antigo) e reescreveu as 4 policies de
+-- price list usando `is_subcustomer_of`. Copiei a versao morta.
+--
+-- Se tivesse rodado assim: erro na 1a policy, mas o DROP da linha acima JA teria
+-- passado — e `produto_descontos` ficaria SEM policy de leitura. O cliente veria
+-- o preco de tabela na tela (RLS filtra, nao da erro) enquanto
+-- `_resolve_desconto` (SECURITY DEFINER, ignora RLS) gravaria o preco COM
+-- desconto no pedido. Tela e fatura discordando, em silencio.
 DROP POLICY IF EXISTS "Authenticated can read produto_descontos" ON public.produto_descontos;
 DROP POLICY IF EXISTS "Auth can read produto_descontos" ON public.produto_descontos;
 CREATE POLICY "Read produto_descontos scoped" ON public.produto_descontos
@@ -58,7 +75,7 @@ CREATE POLICY "Read produto_descontos scoped" ON public.produto_descontos
     OR EXISTS (
       SELECT 1 FROM public.clientes c
       WHERE c.tabela_preco_id = produto_descontos.tabela_preco_id
-        AND (c.user_id = auth.uid() OR public.is_company_contact(c.id))
+        AND (c.user_id = auth.uid() OR public.is_subcustomer_of(c.id))
     )
   );
 
@@ -129,6 +146,8 @@ CREATE POLICY "Read produtos_relacionados scoped" ON public.produtos_relacionado
 -- `tax_classes`, `tax_rates`, `tax_rules`, `tax_customer_groups`: regras de
 -- imposto, que sao publicas por natureza (a aliquota do estado nao e segredo) e
 -- necessarias para o portal exibir o imposto. Anotado como aceito, nao esquecido.
+
+COMMIT;
 
 -- ---------------------------------------------------------------------------
 -- ROLLBACK — se alguma tela do portal parar de mostrar variante, imagem ou

@@ -69,12 +69,24 @@ const Catalogo = () => {
     const fetchData = async () => {
       // Privacidade (categoria/produto privado) é imposta no RLS: estas queries já
       // retornam SÓ o que o cliente pode ver. Aqui resta apenas o filtro de STATUS.
-      const [prodRes, catRes, statusRes, variantRes] = await Promise.all([
+      const [prodRes, catRes, statusRes] = await Promise.all([
         supabase.from("produtos").select("*").eq("ativo", true).order("nome"),
         supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("ordem").order("nome"),
         supabase.from("product_statuses").select("nome, permite_comprar, permite_visualizar, cor"),
-        supabase.from("produto_variantes").select("produto_id").eq("ativo", true),
       ]);
+
+      // Variantes DEPOIS dos produtos, e filtradas por eles.
+      //
+      // Antes era `select("produto_id").eq("ativo", true)` sem filtro nenhum —
+      // varredura da tabela inteira. Com a RLS escopada por
+      // `cliente_pode_ver_produto` (que roda um CTE recursivo de categoria por
+      // linha), isso vira essa funcao pesada executada uma vez POR VARIANTE do
+      // catalogo todo. Filtrando pelos produtos que a RLS de `produtos` ja
+      // liberou, vira acerto de indice.
+      const idsVisiveis = (prodRes.data ?? []).map((p: any) => p.id);
+      const variantRes = idsVisiveis.length
+        ? await supabase.from("produto_variantes").select("produto_id").eq("ativo", true).in("produto_id", idsVisiveis)
+        : { data: [], error: null } as any;
       // Produtos que têm variante: o "Add" do grid leva pra página do produto (escolher a opção).
       setVariantProductIds(new Set((variantRes.data ?? []).map((r: any) => r.produto_id)));
 
