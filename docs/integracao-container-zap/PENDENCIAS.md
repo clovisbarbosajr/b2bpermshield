@@ -34,7 +34,31 @@ prática, o cruzamento com o tracker precisa olhar `numero_container` **e**
 ## Ordem combinada
 1. ~~Integração de ETA~~ — **CONCLUÍDA e validada em produção em 25/ago/2026**
    (16 lidos, 13 casados, 13 atualizados, 0 erros). Ver `README.md`.
-2. **P-A — espelhar container ↔ tracking** ← próximo
+2. ~~P-A — espelhar container ↔ tracking~~ — **CONCLUÍDO 25/ago.**
+   Regra em `src/lib/espelhoContainer.ts`, travada por 19 testes.
+
+## P-A — como ficou
+
+Assimétrico de propósito:
+
+- **Editor (Container → Tracking):** preenche o tracking vazio, e arrasta o
+  tracking que era só cópia do container antigo (corrigir um dígito leva os dois).
+  Nunca por cima de um tracking digitado diferente.
+- **Lista (Tracking → Container):** só preenche container **vazio**. Nunca
+  sobrescreve. A lista ativa não exibe a coluna Container — escrever ali por cima
+  seria cego, e `numero_container` é a chave do sync de ETA.
+
+A primeira versão era simétrica e destruía o container real: assim que os dois
+campos ficavam iguais, a regra "o outro só estava acompanhando" virava
+indecidível, e salvar um número de courier no Tracking apagava o container.
+Três rodadas de caçador/cético até fechar. Os casos estão em
+`src/lib/espelhoContainer.test.ts` como testes de REGRESSAO — se algum voltar a
+espelhar, o container do cliente some em produção.
+
+**Consequência aceita:** container apagado de propósito volta se alguém salvar o
+tracking ou clicar "On the way". Não dá para separar isso do backfill das linhas
+antigas — os dois são o mesmo estado no banco. Sem perda de dado (o campo estava
+vazio) e o audit log registra.
 
 ## Observação da execução real (25/ago)
 Nos 13 itens que casaram, o container e o tracking estavam com o **mesmo valor**,

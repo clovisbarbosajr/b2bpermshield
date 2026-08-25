@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@/components/ui/textarea";
 import { Check, Truck, PackageCheck, Pencil, Trash2, ChevronDown, ChevronRight, StickyNote, Copy, Search, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
+import { espelharTracking, espelharContainer } from "@/lib/espelhoContainer";
 
 type Row = {
   id: string; produto_id: string; quantidade: number; est_ready: string | null; est_entrega: string | null; numero_ordem: string | null;
@@ -160,12 +161,15 @@ const ProducaoStatus = () => {
   const saveTracking = async (r: Row) => {
     const tracking = (trackingEdit[r.id] ?? r.tracking ?? "").trim();
     const patch: any = { tracking: tracking || null };
+    // Tracking -> Container: este era o sentido que NAO existia.
+    const espelhoContainer = espelharContainer(tracking, r.numero_container);
+    if (espelhoContainer) patch.numero_container = espelhoContainer;
     if (tracking && r.status === "solicitado") patch.status = "a_caminho";
     setBusy(r.id);
     const { error } = await supabase.from("producao_pedidos").update(patch).eq("id", r.id);
     setBusy(null);
     if (error) { toast.error(error.message); return; }
-    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { field: "tracking", tracking: tracking || null, ...(patch.status ? { status: patch.status } : {}) });
+    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { field: "tracking", tracking: tracking || null, ...(patch.numero_container ? { container: patch.numero_container } : {}), ...(patch.status ? { status: patch.status } : {}) });
     clearTrackingEdit(r.id);
     toast.success("Tracking saved"); load();
   };
@@ -173,11 +177,21 @@ const ProducaoStatus = () => {
   // "On the way" também SALVA o tracking pendente (antes sumia ao avançar o status).
   const goOnTheWay = async (r: Row) => {
     const tracking = (trackingEdit[r.id] ?? r.tracking ?? "").trim();
+    // Mesmo espelhamento do saveTracking: avancar para "On the way" com um
+    // tracking pendente no campo tambem preenche o Container.
+    const espelhoContainer = espelharContainer(tracking, r.numero_container);
     setBusy(r.id);
-    const { error } = await supabase.from("producao_pedidos").update({ status: "a_caminho", tracking: tracking || null }).eq("id", r.id);
+    const { error } = await supabase.from("producao_pedidos").update({
+      status: "a_caminho",
+      tracking: tracking || null,
+      ...(espelhoContainer ? { numero_container: espelhoContainer } : {}),
+    }).eq("id", r.id);
     setBusy(null);
     if (error) { toast.error(error.message); return; }
-    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { status: "a_caminho", tracking: tracking || null });
+    // Registra tambem o container: "On the way" pode preenche-lo pelo espelho, e
+    // ele e a chave do sync de ETA — escrever nele sem deixar rastro no audit log
+    // deixaria uma mudanca invisivel num campo que a lista nem exibe.
+    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { status: "a_caminho", tracking: tracking || null, ...(espelhoContainer ? { container: espelhoContainer } : {}) });
     clearTrackingEdit(r.id); load();
   };
 
@@ -224,7 +238,7 @@ const ProducaoStatus = () => {
     const patch: any = {
       produto_id: editForm.produto_id, quantidade: parseInt(editForm.quantidade), status: editForm.status,
       est_ready: editForm.est_ready || null, est_entrega: editForm.est_entrega || null,
-      numero_ordem: editForm.numero_ordem || null, numero_container: editForm.numero_container || null,
+      numero_ordem: editForm.numero_ordem.trim() || null, numero_container: editForm.numero_container.trim() || null,
     };
     // ETA alterado A MAO deixa de ser "do tracker": limpa a marca de origem.
     // Sem isto o selo continuava — inclusive o VERDE "arrived", afirmando que o
@@ -240,23 +254,24 @@ const ProducaoStatus = () => {
       patch.eta_fonte = null;
       patch.eta_atualizado_em = null;
     }
-    // Container # É o rastreio na prática (frete marítimo): preencher o container aqui
-    // também preenche o Tracking da lista — sem redigitar. Só NÃO sobrescreve um
-    // tracking digitado manualmente diferente do container antigo.
-    const newContainer = (editForm.numero_container || "").trim();
-    const curTracking = (editRow.tracking ?? "").trim();
-    const oldContainer = (editRow.numero_container ?? "").trim();
-    if (newContainer && (!curTracking || curTracking === oldContainer)) {
-      patch.tracking = newContainer;
-    }
+    // Container -> Tracking.
+    const espelhoTracking = espelharTracking(editForm.numero_container, editRow.tracking, editRow.numero_container);
+    if (espelhoTracking) patch.tracking = espelhoTracking;
     const { error } = await supabase.from("producao_pedidos").update(patch).eq("id", editRow.id);
     if (error) { toast.error(error.message); return; }
     log("updated", "production", editRow.id, `${editRow.produtos?.nome ?? "Item"}`, {
       qty_before: editRow.quantidade, qty_after: parseInt(editForm.quantidade),
       status: editForm.status, est_ready: editForm.est_ready || null, eta: editForm.est_entrega || null,
-      order_no: editForm.numero_ordem || null, container: editForm.numero_container || null,
+      // Mesmo `.trim()` do patch: sem isso o banco grava "ABC" e o audit log
+      // grava "  ABC  " — ou "   " onde o banco gravou null.
+      order_no: editForm.numero_ordem.trim() || null, container: editForm.numero_container.trim() || null,
       ...(patch.tracking ? { tracking: patch.tracking } : {}),
     });
+    // O espelho pode ter gravado `tracking`, mas o input daquela linha na lista
+    // guarda rascunho em `trackingEdit` e continuaria mostrando o texto ANTIGO —
+    // ou seja, a queixa original ("digito e o outro nao preenche") voltaria na
+    // tela, e um Save ali por cima desfaria o espelho.
+    if (espelhoTracking) clearTrackingEdit(editRow.id);
     toast.success("Updated"); setEditRow(null); load();
   };
 

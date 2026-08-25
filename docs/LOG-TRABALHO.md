@@ -416,3 +416,17 @@ Profile · UsersManagement · ExtraFields · SetupApp · WarehouseSettings · B2
 - **NOTA** - o log foi o que permitiu achar as duas falhas em minutos: sem ele, o sintoma seria
   "o ETA nao atualiza" sem nenhuma pista.
 - **PENDENTE** - P-A: Container # e Tracking # ainda nao se espelham na tela.
+
+### 25/08 - P-A: espelhar Container # e Tracking #
+
+- **FEITO** - regra extraida para `src/lib/espelhoContainer.ts` + 19 testes.
+  Editor espelha Container->Tracking; lista espelha Tracking->Container so quando
+  o container esta VAZIO.
+- **BLOQUEIO RESOLVIDO** - 1a versao (simetrica) DESTRUIA o container real:
+  depois do 1o espelho os campos ficam iguais e a regra `outro === antigo` nao
+  distingue mais "acompanhando" de "digitado de proposito". Salvar um numero de
+  courier no Tracking apagava o container — num campo que a lista nem exibe, e
+  que e a chave do sync de ETA.
+- **FEITO** - 3 rodadas cacador/cetico. Fechado sem itens abertos.
+- **AGUARDANDO** - dono publicar. NAO precisa de SQL nem de secret.
+
