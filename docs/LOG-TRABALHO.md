@@ -402,3 +402,17 @@ Profile · UsersManagement · ExtraFields · SetupApp · WarehouseSettings · B2
   na leitura E na escrita (publicar a UI antes do SQL nao quebra a tela nem perde o save).
 - **AGUARDANDO** - dono rodar: SQL nos dois projetos -> secrets -> deploy da edge -> publish.
 - **PENDENTE** - P-A: Container # e Tracking # ainda nao se espelham (`docs/integracao-container-zap/PENDENCIAS.md`).
+
+### 25/08 15:35 UTC - FUNCIONANDO EM PRODUCAO
+
+- **FEITO** - dono rodou SQL 1 (tracker), SQL 2 e SQL 3 (PermShield), criou os 2 secrets do tracker
+  e pediu o deploy da edge pelo chat do Lovable.
+- **FEITO** - teste ponta a ponta: `16 lidos / 13 casados / 13 atualizados / 0 erros / ok = true`.
+- **BLOQUEIO RESOLVIDO** - 1a tentativa deu 404: o Lovable nao tinha deployado a edge function
+  mesmo com o commit no GitHub. Resolvido pedindo o deploy no chat do Lovable.
+- **BLOQUEIO RESOLVIDO** - 2a tentativa deu `Invalid URL` — o secret TRACKER_SUPABASE_URL foi
+  salvo COM aspas (`"https://..."`), copiado direto do .env. Corrigido no painel + commit `c63ce1e`
+  faz a funcao tolerar aspas nos dois secrets do tracker.
+- **NOTA** - o log foi o que permitiu achar as duas falhas em minutos: sem ele, o sintoma seria
+  "o ETA nao atualiza" sem nenhuma pista.
+- **PENDENTE** - P-A: Container # e Tracking # ainda nao se espelham na tela.
