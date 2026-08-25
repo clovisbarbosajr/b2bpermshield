@@ -315,11 +315,24 @@ async function upsertOrder(
   // `podeNotificar`: so com data REAL da origem. Sem data, o pedido entra no
   // sistema (nao perder o pedido e mais importante), mas fica calado.
   const podeNotificar = submittedAt !== null;
-  // 7 dias espelha o DEFAULT de `order_notify_max_age_days` (a janela do
-  // gatilho), NAO a do aviso de pedido novo — aquela e de 2 dias, mais estreita.
-  // Serve para nao reabilitar pedido velho ao gravar a data da origem.
+  // TETO DE IMPORTACAO — fixo no codigo, DE PROPOSITO.
+  //
+  // Pedido importado do B2BWave so nasce (ou volta a ser) notificavel se a data
+  // da origem estiver dentro desta janela. E independente de
+  // `order_notify_max_age_days`, que fica no banco e vale para os TRES portoes.
+  //
+  // Por que nao ler a config aqui: se lesse, aumentar o numero no banco
+  // reabilitaria a frota importada inteira de uma vez — as duas defesas viravam
+  // uma, que e a forma exata do incidente de 25/ago. Fixo no codigo significa
+  // que ampliar o alcance para pedido IMPORTADO exige deploy e revisao.
+  //
+  // Consequencia a saber: com `order_notify_max_age_days = 30`, um pedido
+  // importado de 10 dias fica mudo mesmo dentro da janela configurada. Falha
+  // fechada (silencio, nao spam), mas silenciosa — por isso este comentario e a
+  // nota na tela de Notificacoes.
+  const TETO_IMPORTADO_DIAS = 7;
   const recenteDeVerdade = submittedAt !== null
-    && (Date.now() - new Date(submittedAt).getTime()) < 7 * 24 * 60 * 60 * 1000;
+    && (Date.now() - new Date(submittedAt).getTime()) < TETO_IMPORTADO_DIAS * 24 * 60 * 60 * 1000;
   const deliveryDate = o.request_delivery_at ? new Date(o.request_delivery_at).toISOString() : null;
 
   const { rows: itemRows, qty: itemsQty, sum: itemsSum } = buildOrderItems(o.order_products || [], productSkuToId, productNameToId);
@@ -433,7 +446,7 @@ async function upsertOrder(
   }).select("id").single();
   if (ins.error || !ins.data) return "error";
   const orderId = ins.data.id;
-    existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: quantidade, data_origem: submittedAt });
+  existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: quantidade, data_origem: submittedAt });
   if (itemRows.length > 0) {
     // Mesmo buraco do caminho de UPDATE, e pelo mesmo motivo: sem checar o erro,
     // um pedido NOVO ficava com zero itens e retornava "created" — e como o
@@ -1488,11 +1501,19 @@ Deno.serve(async (req) => {
       // disparou 1281 SMS. O aviso de PEDIDO NOVO (`new_order`) continua saindo,
       // porque so acontece em pedido criado agora e e a notificacao legitima —
       // e o teto de canal limita o estrago se algo der errado.
-      await suprimirNotificacao(adminClient, true, 20);
+      // DENTRO do try: `suprimirNotificacao(true)` LANCA de proposito quando a
+      // RPC nao existe — que e exatamente o cenario "SQL nao aplicado" que o
+      // catch abaixo diz cobrir. Fora do try, esse caso continuava sumindo do
+      // `sync_log`. Desligar que falha nao lanca, entao o `finally` e seguro
+      // mesmo se nunca chegou a ligar.
+      //
+      // Contadores declarados FORA do try: no catch eles precisam existir, senao
+      // o log de erro grava 0/0/0 mesmo com 5 paginas ja processadas.
+      let created = 0, updated = 0, skipped = 0, errors = 0, reachedEnd = false;
       try {
+      await suprimirNotificacao(adminClient, true, 20);
       const PAGES_PER_TICK = body.pages || 6;
       let page = await getOrdersCursor(adminClient);
-      let created = 0, updated = 0, skipped = 0, errors = 0, reachedEnd = false;
 
       for (let i = 0; i < PAGES_PER_TICK; i++) {
         let data: any;
@@ -1538,7 +1559,7 @@ Deno.serve(async (req) => {
         // laco e nunca roda. Se o erro for permanente (ex.: SQL nao aplicado), o
         // cron falha em toda tick, o cursor nao avanca, nada sincroniza — e a
         // tela de Sync do admin mostra "nada aconteceu" em vez do erro.
-        await logRun(adminClient, "orders", { errors: 1, samples: [String((e as any)?.message ?? e).slice(0, 300)] });
+        await logRun(adminClient, "orders", { created, updated, skipped, errors: errors + 1, samples: [String((e as any)?.message ?? e).slice(0, 300)] });
         throw e;
       } finally {
         await suprimirNotificacao(adminClient, false);

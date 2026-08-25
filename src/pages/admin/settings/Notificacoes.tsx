@@ -720,6 +720,16 @@ export default function Notificacoes() {
               <strong> real production email</strong> (template, logo — and the PDF for orders), using the
               most recent order's data. Requires the Email channel ON.
             </p>
+            {/* Torna visivel um limite que so existia no codigo. Sem esta nota, o
+                dono aumentaria o limite de dias no banco e nao entenderia por que
+                pedido importado continua mudo. */}
+            <p className="text-xs text-muted-foreground mt-2 border-t pt-2">
+              <strong>Order age limit.</strong> Notifications are never sent for orders older than the
+              configured limit (default 7 days) — this is what prevents a re-sync from messaging
+              customers about old orders. Orders <em>imported from B2BWave</em> have a separate, fixed
+              7-day limit that lives in the code: raising the limit here widens it for native orders
+              only. Changing it for imported orders requires a deploy, on purpose.
+            </p>
           </Card>
           {events.map((ev) => (
             <Card key={ev.id} className="p-4 flex items-center justify-between gap-3">
