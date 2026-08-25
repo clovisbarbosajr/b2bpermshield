@@ -330,6 +330,10 @@ async function upsertOrder(
   // importado de 10 dias fica mudo mesmo dentro da janela configurada. Falha
   // fechada (silencio, nao spam), mas silenciosa — por isso este comentario e a
   // nota na tela de Notificacoes.
+  //
+  // NAO CONFUNDIR com a janela do aviso de PEDIDO NOVO, que e de 2 dias e fica
+  // mais abaixo neste mesmo arquivo (no `fireNewOrderNotification`). Sao duas
+  // janelas diferentes, para coisas diferentes.
   const TETO_IMPORTADO_DIAS = 7;
   const recenteDeVerdade = submittedAt !== null
     && (Date.now() - new Date(submittedAt).getTime()) < TETO_IMPORTADO_DIAS * 24 * 60 * 60 * 1000;

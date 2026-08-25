@@ -720,15 +720,17 @@ export default function Notificacoes() {
               <strong> real production email</strong> (template, logo — and the PDF for orders), using the
               most recent order's data. Requires the Email channel ON.
             </p>
-            {/* Torna visivel um limite que so existia no codigo. Sem esta nota, o
-                dono aumentaria o limite de dias no banco e nao entenderia por que
-                pedido importado continua mudo. */}
+            {/* Este limite nao tem campo em tela nenhuma — a versao anterior desta
+                nota mandava "raising the limit here", numa aba que nao tem o
+                numero. Diz onde ele realmente esta. */}
             <p className="text-xs text-muted-foreground mt-2 border-t pt-2">
-              <strong>Order age limit.</strong> Notifications are never sent for orders older than the
-              configured limit (default 7 days) — this is what prevents a re-sync from messaging
-              customers about old orders. Orders <em>imported from B2BWave</em> have a separate, fixed
-              7-day limit that lives in the code: raising the limit here widens it for native orders
-              only. Changing it for imported orders requires a deploy, on purpose.
+              <strong>Order age limit.</strong> Notifications are never sent for orders older than
+              the limit (default 7 days) — this is what stops a re-sync from messaging customers
+              about old orders. There is no field for it here: the value lives in
+              <code className="mx-1">sync_state.order_notify_max_age_days</code> and is changed by
+              SQL only. Orders <em>imported from B2BWave</em> have a separate 7-day limit fixed in
+              the code, so raising the SQL value widens it for native orders only — widening it for
+              imported orders takes a deploy, on purpose.
             </p>
           </Card>
           {events.map((ev) => (
