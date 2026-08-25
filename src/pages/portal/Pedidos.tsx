@@ -119,31 +119,54 @@ const Pedidos = () => {
     // re-order remontava o item só com `produto_id` e o cliente repetia o pedido
     // recebendo o produto errado (o tamanho/cor só existia no texto do nome).
     const variantIds = itens.map((i: any) => i.variante_id).filter(Boolean) as string[];
-    const [{ data: prods }, { data: vars }] = await Promise.all([
-      supabase.from("produtos")
-        .select("id, preco, estoque_total, estoque_reservado, quantidade_minima, unidade_venda, imagem_url")
-        .in("id", productIds),
-      variantIds.length
-        ? supabase.from("produto_variantes").select("id, produto_id, codigo, quantidade, imagem_url, valores_opcao, ativo").in("id", variantIds)
-        : Promise.resolve({ data: [] as any[] }),
-    ]);
+
+    // TUDO em lotes de 100 e com o erro CHECADO.
+    //
+    // Antes: `.in("id", productIds)` sem lote (mesmo problema de URL que motivou
+    // o lote no catalogo), `{ data: prods }` sem `error` (falha ali esvaziava o
+    // mapa, todo item caia no `continue`, e a funcao retornava sem toast), e a
+    // checagem de variante cortada em 100 — ou seja, protegia so os 100
+    // primeiros produtos e deixava o resto exatamente como estava. Buraco que eu
+    // mesmo abri na rodada anterior.
+    const emLotes = async <T,>(ids: string[], f: (lote: string[]) => any): Promise<T[] | null> => {
+      const out: T[] = [];
+      for (let i = 0; i < ids.length; i += 100) {
+        const { data, error } = await f(ids.slice(i, i + 100));
+        if (error) { console.error(error); return null; }
+        out.push(...((data ?? []) as T[]));
+      }
+      return out;
+    };
+
+    const prods = await emLotes<any>(productIds as string[], (lote) => supabase.from("produtos")
+      .select("id, preco, estoque_total, estoque_reservado, quantidade_minima, unidade_venda, imagem_url")
+      .in("id", lote));
+    const vars = variantIds.length
+      ? await emLotes<any>(variantIds, (lote) => supabase.from("produto_variantes")
+          .select("id, produto_id, codigo, quantidade, imagem_url, valores_opcao, ativo").in("id", lote))
+      : [];
+    if (prods === null || vars === null) {
+      toast.error("Could not load the products. Please try again.");
+      setReordering(null);
+      return;
+    }
     const prodMap = new Map((prods ?? []).map((p: any) => [p.id, p]));
     const varMap = new Map((vars ?? []).map((v: any) => [v.id, v]));
 
     // Quais destes produtos TEM variante hoje. Pedido importado do B2BWave nao
     // guarda `variante_id`, entao sem esta consulta o "buy again" mandaria o
     // produto-pai (sem tamanho/cor, com o preco do pai) sem nenhum aviso.
-    const produtosComVariante = new Set<string>();
     const idsProd = [...prodMap.keys()] as string[];
-    if (idsProd.length) {
-      const { data: vAll, error: vErr } = await supabase
-        .from("produto_variantes").select("produto_id")
-        .eq("ativo", true).in("produto_id", idsProd.slice(0, 100));
-      // Falha aqui NAO pode virar "nenhum tem variante" — seria o pedido errado
-      // outra vez. Aborta o re-order e avisa.
-      if (vErr) { console.error(vErr); toast.error("Could not check product options. Please try again."); return; }
-      (vAll ?? []).forEach((r: any) => produtosComVariante.add(r.produto_id));
+    const todasVariantes = await emLotes<any>(idsProd, (lote) => supabase
+      .from("produto_variantes").select("produto_id").eq("ativo", true).in("produto_id", lote));
+    // Falha aqui NAO pode virar "nenhum tem variante" — seria o pedido errado
+    // outra vez. Aborta o re-order e avisa (e libera o botao).
+    if (todasVariantes === null) {
+      toast.error("Could not check product options. Please try again.");
+      setReordering(null);
+      return;
     }
+    const produtosComVariante = new Set<string>(todasVariantes.map((r: any) => r.produto_id));
     let added = 0;
     const perdidos: string[] = [];
     // `as any`: `variante_id` foi adicionada em 20260802130000 e os types gerados

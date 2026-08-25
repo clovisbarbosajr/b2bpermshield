@@ -64,8 +64,30 @@ const Carrinho = () => {
     toast.info(`${item.nome} saved for later`);
   };
 
-  const moveToCart = (item: any) => {
-    addItem(item);
+  // REVALIDA antes de devolver ao carrinho. O "saved for later" e persistente:
+  // o objeto vem cru do localStorage, com o preco e o estoque do dia em que foi
+  // salvo, e ignorava todas as guardas de variante. Item salvo antes do produto
+  // ganhar variante voltava sem variante e com o preco do pai.
+  const moveToCart = async (item: any) => {
+    const { data: prod, error: prodErr } = await supabase
+      .from("produtos").select("id, preco, ativo, estoque_total, estoque_reservado")
+      .eq("id", item.produto_id).maybeSingle();
+    if (prodErr) { console.error(prodErr); toast.error("Could not check this product. Please try again."); return; }
+    if (!prod || prod.ativo === false) { toast.error(`${item.nome} is no longer available.`); return; }
+
+    if (!item.variante_id) {
+      const { data: temVar, error: varErr } = await supabase
+        .from("produto_variantes").select("id")
+        .eq("produto_id", item.produto_id).eq("ativo", true).limit(1);
+      if (varErr) { console.error(varErr); toast.error("Could not check product options. Please try again."); return; }
+      if ((temVar ?? []).length > 0) {
+        toast.error("This product now has options — please pick one on the product page.");
+        return;
+      }
+    }
+
+    // Preco releito do banco: o salvo pode ter meses.
+    addItem({ ...item, preco: prod.preco ?? item.preco });
     persistSaved(savedItems.filter((s) => cartKey(s) !== cartKey(item)));
     toast.success(`${item.nome} moved to cart`);
   };

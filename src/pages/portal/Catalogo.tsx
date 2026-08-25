@@ -29,6 +29,10 @@ const Catalogo = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [variantProductIds, setVariantProductIds] = useState<Set<string>>(new Set());
   const [categorias, setCategorias] = useState<Categoria[]>([]);
+  // Estado de erro INLINE, com retry. Um toast some em segundos e a tela ficava
+  // em "No products found." — que afirma uma coisa FALSA sobre o negocio.
+  const [erroCarga, setErroCarga] = useState<string | null>(null);
+  const [tentativa, setTentativa] = useState(0);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   // Abre em LISTA por padrão (pedido do dono).
@@ -90,7 +94,7 @@ const Catalogo = () => {
       // vazio em silencio, e o cliente concluia que a loja nao tem produto.
       if (prodRes.error) {
         console.error(prodRes.error);
-        toast.error("Could not load the catalog. Please reload the page.");
+        setErroCarga("Could not load the catalog.");
         setLoading(false);
         return;
       }
@@ -114,7 +118,7 @@ const Catalogo = () => {
       // sem tamanho/cor e com preco do produto-pai. Melhor a tela avisar.
       if (erroVariantes) {
         console.error(erroVariantes);
-        toast.error("Could not load product options. Please reload the page.");
+        setErroCarga("Could not load product options.");
         setLoading(false);
         return;
       }
@@ -170,7 +174,7 @@ const Catalogo = () => {
       setLoading(false);
     };
     fetchData();
-  }, [clienteId]);
+  }, [clienteId, tentativa]);
 
   // Estoque AO VIVO: quando um produto muda (item comprado reserva/baixa), atualiza
   // o disponível na tela sem refresh. Realtime respeita a RLS (só produtos visíveis).
@@ -485,7 +489,22 @@ const Catalogo = () => {
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
         </div>
       ) : sorted.length === 0 ? (
-        <div className="py-20 text-center text-muted-foreground">No products found.</div>
+        erroCarga ? (
+          // NUNCA dizer "No products found" quando a carga falhou: isso afirma
+          // algo falso sobre o negocio e o cliente vai embora achando que a loja
+          // esta vazia.
+          <div className="py-20 text-center">
+            <p className="text-destructive font-medium">{erroCarga}</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              This is a loading problem, not an empty catalog.
+            </p>
+            <Button variant="outline" className="mt-4" onClick={() => { setErroCarga(null); setLoading(true); setTentativa((t) => t + 1); }}>
+              Try again
+            </Button>
+          </div>
+        ) : (
+          <div className="py-20 text-center text-muted-foreground">No products found.</div>
+        )
       ) : viewMode === "grid" ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {sorted.map((p) => (

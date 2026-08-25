@@ -96,6 +96,22 @@ const PedidoDetalhe = () => {
       toast.error("That option is no longer available.");
       return;
     }
+    // Pedido IMPORTADO do B2BWave nao guarda `variante_id`. Se o produto tem
+    // variante hoje, repetir a linha "sem variante" manda o produto-pai, com o
+    // preco do pai. Este e o caminho mais natural para repetir um pedido
+    // importado — e era o unico sem a guarda. 1 produto por clique, entao uma
+    // consulta simples resolve.
+    if (!item.variante_id) {
+      const { data: temVar, error: varErr } = await supabase
+        .from("produto_variantes").select("id")
+        .eq("produto_id", item.produto_id).eq("ativo", true).limit(1);
+      // Falha NAO pode virar "nao tem variante": seria o pedido errado.
+      if (varErr) { console.error(varErr); toast.error("Could not check product options. Please try again."); return; }
+      if ((temVar ?? []).length > 0) {
+        toast.error("This product now has options — please pick one on the product page.");
+        return;
+      }
+    }
     const dispProduto = (prod.estoque_total ?? 0) - (prod.estoque_reservado ?? 0);
     const disponivel = v ? Math.min(dispProduto, v.quantidade ?? 0) : dispProduto;
     addItem({

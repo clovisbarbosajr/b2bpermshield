@@ -39,8 +39,12 @@ const ProdutoDetalhe = () => {
   const [statusInfo, setStatusInfo] = useState<{ permite_comprar: boolean; nome: string } | null>(null);
   const [accessDenied, setAccessDenied] = useState(false); // restrito por privacy group / não-visível
   const [variantes, setVariantes] = useState<any[]>([]);
-  // Distingue "produto nao tem variante" de "nao consegui carregar as variantes".
+  // TRI-ESTADO. `variantesErro` cobria erro, nao "ainda nao sei": entre montar a
+  // tela e a query voltar, `hasVariants` era false e o botao adicionava sem
+  // variante. Sao dois efeitos independentes e o `loading` so acompanha o do
+  // produto.
   const [variantesErro, setVariantesErro] = useState(false);
+  const [variantesCarregadas, setVariantesCarregadas] = useState(false);
   const [selectedVarianteId, setSelectedVarianteId] = useState<string>("");
 
   // Fetch clienteId
@@ -93,6 +97,14 @@ const ProdutoDetalhe = () => {
   // Carrega as variantes ativas do produto (Size/Color etc.).
   useEffect(() => {
     if (!id) return;
+    // RESET ao trocar de produto: a rota e a mesma, entao navegar de A para B
+    // NAO remonta o componente. Sem isto o botao ficava vivo com as variantes de
+    // A e o `produto` ja trocado para B — dava para mandar a variante de A no
+    // produto B.
+    setVariantes([]);
+    setSelectedVarianteId("");
+    setVariantesErro(false);
+    setVariantesCarregadas(false);
     supabase
       .from("produto_variantes")
       .select("id, codigo, quantidade, valores_opcao, imagem_url, ativo")
@@ -108,10 +120,12 @@ const ProdutoDetalhe = () => {
           console.error(error);
           toast.error("Could not load product options. Please reload the page.");
           setVariantesErro(true);
+          setVariantesCarregadas(true);
           return;
         }
         setVariantesErro(false);
         setVariantes(data ?? []);
+        setVariantesCarregadas(true);
       });
   }, [id]);
 
@@ -180,6 +194,7 @@ const ProdutoDetalhe = () => {
     // Nao sei se este produto tem variante: nao adiciona. Adicionar "sem
     // variante" quando a lista falhou em carregar produz o pedido errado
     // exatamente como se o produto nao tivesse opcao nenhuma.
+    if (!variantesCarregadas) { toast.error("Still loading product options — one moment."); return; }
     if (variantesErro) { toast.error("Product options could not be loaded. Please reload the page."); return; }
     if (hasVariants && !selectedVariante) { toast.error("Please select an option first."); return; }
     // Preço $0 (não configurado / "contact us") PODE ser adicionado — vira pedido/pedido

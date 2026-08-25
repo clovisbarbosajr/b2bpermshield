@@ -1412,9 +1412,14 @@ Deno.serve(async (req) => {
       const valorDiferente: any[] = [];
       const pagamentoDiferente: any[] = [];
       const reparoPendente: any[] = [];
+      const reparoReabre: any[] = [];
+      const vaiEscreverEx: any[] = [];
+      // Mesma janela do `recenteDeVerdade` do upsertOrder.
+      const TETO_DIAS_IMPORTADO_MS = 7 * 24 * 60 * 60 * 1000;
       // Contadores: 20 exemplos nao distinguem 3 de 1147, que e o numero que
       // decide se da para religar.
       let nFaltando = 0, nSobrando = 0, nStatus = 0, nValor = 0, nPagamento = 0, nReparo = 0;
+      let nReabre = 0, nVaiEscrever = 0;
 
       // Mesma extracao de data do upsertOrder, para saber se o pedido vai cair
       // no `precisaReparar`.
@@ -1474,10 +1479,43 @@ Deno.serve(async (req) => {
         // enquanto o proximo ciclo reescreve e reabre a marca que disparou os
         // 1508 SMS. Eu tinha selecionado as colunas e nao olhado.
         const temDataOrigem = local.data_origem !== null && local.data_origem !== undefined;
-        const vaiSerReparado = submittedDe(o) !== null && !temDataOrigem;
+        const dataOrigem = submittedDe(o);
+        const vaiSerReparado = dataOrigem !== null && !temDataOrigem;
         if (vaiSerReparado) { nReparo++; }
+
+        // SO o reparo que REABRE `notificavel` trava o `identico`.
+        //
+        // Pedido pre-2025 nunca sera reparado pelo sync de rotina (`skipPre2025`
+        // retorna antes), entao ele ficaria em `reparo_pendente` PARA SEMPRE — e
+        // um portao que nunca fica verde e um portao que todo mundo aprende a
+        // ignorar. Alem disso pre-2025 nunca e `recenteDeVerdade`, entao nao liga
+        // `notificavel`: e ruido em cima do unico numero que importa.
+        const reabre = vaiSerReparado
+          && (Date.now() - new Date(dataOrigem as string).getTime()) < TETO_DIAS_IMPORTADO_MS;
+        if (reabre) {
+          nReabre++;
+          if (reparoReabre.length < 20) {
+            reparoReabre.push({ pedido: n, data_origem: dataOrigem, notificavel_hoje: local.notificavel });
+          }
+        }
         if (vaiSerReparado && reparoPendente.length < 20) {
-          reparoPendente.push({ pedido: n, motivo: "sem data_origem — o proximo ciclo do sync vai reescrever", notificavel_hoje: local.notificavel });
+          reparoPendente.push({ pedido: n, data: dataOrigem, notificavel_hoje: local.notificavel });
+        }
+
+        // ESPELHA o `changed` do upsertOrder, com igualdade CRUA (sem arredondar).
+        // O `cent()` abaixo e para dinheiro de verdade; este e para responder "o
+        // proximo tick escreve?". Com ruido de float, o sync reescreve e — em
+        // pedido de menos de 7 dias — RELIGA `notificavel`, apagando o
+        // kill-switch do admin. Arredondar aqui esconderia exatamente isso.
+        const vaiEscrever = statusOrigem !== local.status
+          || Number(local.total) !== totalOrigem
+          || Number(local.subtotal) !== subtotalOrigem
+          || (local.quantidade_total ?? 0) !== qtdOrigem;
+        if (vaiEscrever) {
+          nVaiEscrever++;
+          if (vaiEscreverEx.length < 20) {
+            vaiEscreverEx.push({ pedido: n, total: { la: totalOrigem, aqui: Number(local.total) }, subtotal: { la: subtotalOrigem, aqui: Number(local.subtotal) } });
+          }
         }
 
         const pagoOrigem = pickPago(o);
@@ -1502,8 +1540,12 @@ Deno.serve(async (req) => {
         // `identico` EXIGE leitura completa: com `truncado`, "sobrando_aqui" e
         // formado por pedidos legitimos que a origem so nao terminou de listar.
         // Chamar isso de identico (ou de lixo) seria conclusao errada.
+        // `identico` NAO exige `nReparo === 0` — pedido pre-2025 nunca sera
+        // reparado e travaria o portao para sempre. Exige `nReabre` (reparo que
+        // religa `notificavel`) e `nVaiEscrever` (o proximo tick escreve).
         identico: !truncado && nFaltando === 0 && nSobrando === 0
-          && nStatus === 0 && nValor === 0 && nPagamento === 0 && nReparo === 0,
+          && nStatus === 0 && nValor === 0 && nPagamento === 0
+          && nReabre === 0 && nVaiEscrever === 0,
         // Os TOTAIS sao o que decide se da para religar. As listas abaixo sao so
         // 20 exemplos cada.
         totais: {
@@ -1513,6 +1555,8 @@ Deno.serve(async (req) => {
           valor_diferente: nValor,
           pagamento_diferente: nPagamento,
           reparo_pendente: nReparo,
+          reparo_reabre_notificavel: nReabre,
+          proximo_tick_escreve: nVaiEscrever,
         },
         aviso: truncado
           ? "LEITURA INCOMPLETA — a lista da origem nao terminou. `sobrando_aqui` aqui NAO significa lixo: sao pedidos que a origem ainda nao listou. Rode de novo com budget_ms maior."
@@ -1524,6 +1568,8 @@ Deno.serve(async (req) => {
           valor_diferente: valorDiferente,
           pagamento_diferente: pagamentoDiferente,
           reparo_pendente: reparoPendente,
+          reparo_reabre_notificavel: reparoReabre,
+          proximo_tick_escreve: vaiEscreverEx,
         },
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });
