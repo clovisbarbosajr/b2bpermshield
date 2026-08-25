@@ -113,12 +113,38 @@ BEGIN
   --
   -- Cancelar pedido pago e operacao de ATENDIMENTO, com estorno. Nao e desfazer
   -- de checkout.
+  --
+  -- HONESTIDADE: isto MITIGA, nao FECHA. No caminho de erro de rede o front
+  -- nunca chega a gravar `is_paid`/`payment_intent_id` — quem carimba e o
+  -- webhook do Stripe. Entao este guard so dispara se o webhook chegar antes da
+  -- chamada da RPC: e corrida, nao trava. Fechar de verdade exige o
+  -- `create_payment_intent` gravar `payment_intent_id` no pedido JA ao criar a
+  -- intent, para o banco ter sinal de "houve tentativa de cobranca". Anotado na
+  -- fila. Hoje o Stripe esta desligado, entao o caminho nem roda.
   IF EXISTS (
     SELECT 1 FROM public.pedidos
     WHERE id = _pedido_id
       AND (is_paid IS TRUE OR payment_intent_id IS NOT NULL)
   ) THEN
     RAISE EXCEPTION 'ROLLBACK_PAID';
+  END IF;
+
+  -- 2c) STATUS JA AVANCADO nunca se desfaz por aqui.
+  --
+  -- O UPDATE la embaixo forca 'cancelled' sem olhar o status atual. Se o pedido
+  -- tiver menos de 30 min e o admin ja o tiver movido para 'complete',
+  -- `fn_adjust_stock_on_order_status` cai no ramo "saiu de concluido" e DEVOLVE
+  -- `estoque_total` — desfaz a baixa de mercadoria que pode ja ter saido do
+  -- deposito. Janela estreita (30 min E o admin agindo dentro dela), mas real.
+  --
+  -- Desfazer de checkout so alcanca pedido que ainda esta no estado inicial.
+  IF EXISTS (
+    SELECT 1 FROM public.pedidos
+    WHERE id = _pedido_id
+      AND (status <> 'submitted'::public.pedido_status
+           OR tracking_number IS NOT NULL)
+  ) THEN
+    RAISE EXCEPTION 'ROLLBACK_ADVANCED';
   END IF;
 
   -- 3) Pedido VAZIO nunca existiu de verdade: apaga. Deixa-lo como 'cancelled'

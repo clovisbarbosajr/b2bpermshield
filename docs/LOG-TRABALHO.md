@@ -699,3 +699,59 @@ eu ter lido em vez de perguntar.
 - **FEITO** - "Payment Fee Percentage/Amount" removidos de `PaymentOptions`,
   mesmo tratamento.
 - As COLUNAS continuam no banco e continuam sincronizadas: nenhum dado se perde.
+
+### 25/08 (noite, cont. 7) - ERRO GRAVE MEU: quebrei as 2 travas e mandei rodar
+
+- **O QUE ACONTECEU** - a substituicao de texto que reescreveu o comentario do
+  bloco de isencao apagou junto as 3 linhas de
+  `CREATE OR REPLACE FUNCTION ... AS $$ BEGIN` das DUAS travas (230000 e 240000).
+  O corpo ficou solto no script: `IF ... THEN` fora de bloco e ERRO DE SINTAXE.
+  As funcoes nao seriam criadas, os `CREATE TRIGGER` falhariam com "function does
+  not exist", e os dois achados mais graves do dia continuariam abertos — com o
+  log dizendo que estavam fechados.
+- **E EU JA TINHA MANDADO O DONO RODAR.** Avisei para parar assim que o cetico
+  da rodada 3 pegou. Cabecalhos repostos e conferidos.
+- **PORTAO CRIADO** - `scripts/check-migrations.mjs`, ligado no `npm test` e em
+  `npm run check:sql`. Varre as 162 migrations caractere a caractere (entendendo
+  comentario de linha, comentario de bloco aninhado, string com '' escapado,
+  identificador citado e dollar-quote com tag) e RECUSA:
+    - `RETURN`, `RAISE`, `IF...THEN`, `ELSIF`, `END IF` ou atribuicao a `NEW.`
+      fora de bloco PL/pgSQL;
+    - dollar-quote aberto e nunca fechado;
+    - `BEGIN;` sem `COMMIT;`.
+- **PORTAO PROVADO POR MUTANTE** - apagar o cabecalho da funcao acende
+  "bloco $$ aberto e nunca fechado"; comentar o `COMMIT;` acende "transacao sem
+  fechar"; o arquivo intacto passa (CONTROLE). A primeira versao do portao dava
+  ALARME FALSO numa migration boa (um `$$` dentro de comentario `--`) — refiz o
+  scanner, porque portao que da alarme falso vira portao ignorado.
+- **O QUE O PORTAO NAO PEGA, e esta escrito nele** - o outro erro do dia
+  (comentario ocupando o lugar da instrucao) nao e detectavel estaticamente:
+  exigiria saber o que a funcao DEVERIA fazer. Contra ele o que funciona e
+  listar as atribuicoes REAIS da funcao e conferir uma a uma contra o cabecalho.
+
+### 25/08 (noite, cont. 8) - Resto da rodada 3 do cetico
+
+- **CORRIGIDO, ERA FURO REAL (Checkout)** - eu tinha posto o teste de
+  `gratis_acima_de` FORA do `if (conds.length > 0)`, valendo nos dois casos. O
+  banco so aplica o limiar quando a opcao NAO tem condicao nenhuma
+  (`IF COALESCE(_ncond,0) = 0`); com condicoes e nenhuma casando, ele cai no
+  preco fixo sem olhar o limiar. Divergia na opcao com condicoes + limiar +
+  cliente em zona sem regra: front zerava, banco cobrava, e a guarda de preco
+  desfazia PEDIDO LEGITIMO — o oposto do que ela existe para fazer.
+- **CORRIGIDO (Checkout)** - faltavam 2 das 6 leituras de imposto instrumentadas
+  (`tax_classes` e `tax_customer_groups` por `is_default`). Se falhassem,
+  `taxRate` ficava 0, `taxLookupOk` ficava TRUE e a guarda barrava todo pedido.
+  Inclui o caso de `maybeSingle()` errar por voltar MAIS DE UMA linha (duas
+  classes marcadas como padrao) — o banco usa LIMIT 1 e acha uma.
+- **CORRIGIDO (250000)** - novo guard `ROLLBACK_ADVANCED`. O UPDATE forcava
+  'cancelled' sem olhar o status atual: pedido de <30min que o admin ja tivesse
+  movido para 'complete' teria `estoque_total` DEVOLVIDO pelo gatilho de status —
+  desfazendo a baixa de mercadoria que pode ja ter saido.
+- **DECLARADO NO ARQUIVO** - o `ROLLBACK_PAID` MITIGA, nao FECHA: no erro de rede
+  o front nunca grava `payment_intent_id` (quem carimba e o webhook), entao o
+  guard so dispara se o webhook chegar antes. Fechar exige o
+  `create_payment_intent` carimbar a intent no pedido ao cria-la. Na fila.
+- **NAO ALCANCADO, registrado** - o "View As": a impersonacao e so
+  `sessionStorage`, a sessao continua sendo a do staff, entao um pedido feito
+  pelo admin em nome do cliente cai em ROLLBACK_DENIED e volta a virar orfao.
+  Nao e regressao; e caso que a correcao nao cobre.

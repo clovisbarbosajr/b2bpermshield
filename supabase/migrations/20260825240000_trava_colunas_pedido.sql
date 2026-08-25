@@ -73,6 +73,9 @@ BEGIN
   END IF;
 END $gate$;
 
+CREATE OR REPLACE FUNCTION public.fn_lock_pedido_cols()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
   -- ISENTOS: `service_role` (o sync) e a conexao DIRETA ao banco — SQL editor do
   -- Lovable, psql — que nao passa por PostgREST e por isso nao tem claim de role
   -- (`auth.role()` NULL).

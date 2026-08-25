@@ -206,7 +206,12 @@ const Checkout = () => {
         const customerGroupId = (cliente as any).tax_customer_group_id;
 
         // Get default tax class (Taxable)
-        const { data: defaultClass } = await supabase.from("tax_classes").select("id").eq("is_default", true).maybeSingle();
+        const { data: defaultClass, error: clsErr } = await supabase.from("tax_classes").select("id").eq("is_default", true).maybeSingle();
+        // `maybeSingle()` tambem ERRA quando volta mais de uma linha. Duas
+        // `tax_classes` marcadas como padrao => erro aqui, `taxRate` fica 0, e o
+        // banco (que usa LIMIT 1) cobra o imposto de verdade. Sem marcar a
+        // falha, a guarda de preco barraria TODO pedido.
+        if (clsErr) setTaxLookupOk(false);
         const taxClassId = defaultClass?.id;
 
         if (customerGroupId && taxClassId) {
@@ -229,7 +234,8 @@ const Checkout = () => {
           }
         } else if (taxClassId) {
           // Customer has no group assigned - find default group rule
-          const { data: defaultGroup } = await supabase.from("tax_customer_groups").select("id").eq("is_default", true).maybeSingle();
+            const { data: defaultGroup, error: grpErr } = await supabase.from("tax_customer_groups").select("id").eq("is_default", true).maybeSingle();
+          if (grpErr) setTaxLookupOk(false);
           if (defaultGroup) {
             const { data: rule, error: ruleErr } = await supabase.from("tax_rules")
               .select("tax_rate_id")
@@ -478,11 +484,19 @@ const Checkout = () => {
       }
     }
 
-    // Sem condicao que case: preco fixo da opcao — MAS o banco zera acima do
-    // limiar de frete gratis, e o front nunca lia esse campo. A tela cobrava um
-    // frete que o pedido nao tinha.
-    const gratis = (opt as any).gratis_acima_de;
-    if (gratis != null && base >= Number(gratis)) return 0;
+    // `gratis_acima_de` SO vale quando a opcao NAO tem condicao nenhuma — e
+    // exatamente o que o banco faz (`IF COALESCE(_ncond,0) = 0`). Quando a opcao
+    // TEM condicoes e nenhuma casa, o banco cai no preco fixo SEM olhar o
+    // limiar.
+    //
+    // Eu tinha posto este teste fora do `if (conds.length > 0)`, valendo nos
+    // dois casos. Divergia do banco justamente na opcao com condicoes + limiar +
+    // cliente numa zona sem regra: o front zerava, o banco cobrava, e a guarda
+    // de preco desfazia PEDIDO LEGITIMO — o oposto do que ela existe para fazer.
+    if (conds.length === 0) {
+      const gratis = (opt as any).gratis_acima_de;
+      if (gratis != null && base >= Number(gratis)) return 0;
+    }
     return Number(opt.preco) || 0;
   }, [shippingId, shippingOptions, selectedEndereco, customerCountry]);
 

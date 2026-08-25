@@ -46,6 +46,9 @@
 
 BEGIN;
 
+CREATE OR REPLACE FUNCTION public.fn_pedido_b2bwave_id_so_servidor()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
   -- ISENTOS: `service_role` (o sync) e a conexao DIRETA ao banco — SQL editor do
   -- Lovable, psql — que nao passa por PostgREST e por isso nao tem claim de role
   -- (`auth.role()` NULL).
