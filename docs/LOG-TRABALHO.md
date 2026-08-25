@@ -981,3 +981,39 @@ olha `src/`, e o Deno nao esta instalado aqui.
   vazia — falha de execucao agora e erro alto.
 - **PROVADO POR 2 MUTANTES** - nome inexistente acende; devolver a constante ao
   escopo interno (o erro exato que cometi) acende. Controle passa.
+
+### 25/08 (noite, cont. 13) - LEVA A / A9 e A8
+
+**A9 - /reset-password aceitava QUALQUER sessao**
+
+- **CONFIRMADO** - `if (session) setReady(true)`: qualquer sessao liberava a troca
+  de senha, nao so a de recuperacao. Isso promove sessao TEMPORARIA em senha
+  PERMANENTE — o link de acesso por e-mail entrega sessao completa a quem tiver
+  acesso a caixa (e-mail encaminhado, caixa compartilhada de compras@, maquina de
+  balcao com sessao aberta), e bastava abrir /reset-password e fixar a senha. E
+  era o caminho de escalada de qualquer XSS no dominio.
+- **FEITO** - so libera com sinal explicito de recuperacao. O sinal e capturado no
+  CARREGAMENTO DO MODULO, nao dentro do efeito: o supabase-js limpa o hash assim
+  que o cliente e criado, e a checagem so no efeito trancaria o cliente legitimo
+  quando o hash ja tivesse sumido.
+- **NAO FECHA SOZINHO** - a raiz e o "Secure password change" DESLIGADO no painel
+  do Auth: `EditPassword.tsx` faz o mesmo `updateUser({password})` sem pedir a
+  senha atual, para staff logado. O toggle fecha os dois.
+
+**A8 - PDF de pedido alheio**
+
+- **CONFIRMADO** - os gates anti-relay validam o DESTINATARIO, nunca o CONTEUDO.
+  `buildOrderPdf` hidrata do banco com service role usando o `order.id` que veio
+  no CORPO da requisicao, sem conferir de quem e o pedido. Quem conseguisse um
+  UUID de pedido recebia no proprio e-mail o PDF com nome, telefone, endereco,
+  itens e precos de outro cliente.
+- **FEITO** - checagem de posse antes de montar o anexo: so sai se o destinatario
+  for o cliente do pedido, alguem da MESMA conta (sub-usuario ou o dono), ou um
+  endereco de staff configurado pelo dono. `to` pode ser LISTA — todos precisam
+  ter direito, porque o e-mail e o mesmo para todos. Falha de leitura tambem nao
+  anexa: na duvida sobre posse, nao manda o documento. O e-mail continua saindo,
+  so sem o anexo.
+- **ERRO MEU, PEGO PELO PORTAO NOVO** - passei `customerEmail` num ramo onde essa
+  variavel nao existe (e escrevi um comentario afirmando que `to` so era definido
+  depois — era falso, `to` ja estava definido 20 linhas acima). O
+  `scripts/check-edge.mjs` acusou TS2304 na hora. Sem ele, isso ia para producao.

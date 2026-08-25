@@ -7,6 +7,26 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 
+
+// Sinal de recuperacao capturado no CARREGAMENTO DO MODULO, nao dentro do
+// efeito.
+//
+// O supabase-js consome os tokens do fragmento da URL e LIMPA o hash assim que o
+// cliente e criado — o que pode acontecer antes de o componente montar. Se a
+// checagem so existisse dentro do `useEffect`, o link legitimo as vezes chegaria
+// com o hash ja vazio e o cliente de verdade ficaria trancado do lado de fora.
+//
+// Ler aqui em cima acontece na importacao do modulo, junto com o resto do
+// bundle, e o valor fica guardado.
+const VEIO_DE_RECUPERACAO = (() => {
+  if (typeof window === "undefined") return false;
+  const hash = window.location.hash || "";
+  const query = window.location.search || "";
+  return /(^|[#&?])type=recovery(&|$)/.test(hash)
+      || /(^|[#&?])type=recovery(&|$)/.test(query)
+      || hash.includes("recovery_token");
+})();
+
 const ResetPassword = () => {
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
@@ -24,22 +44,28 @@ const ResetPassword = () => {
       }
     });
 
-    // Also check if there's already a session with recovery type in the hash
-    const hash = window.location.hash;
-    if (hash.includes("type=recovery")) {
+    // Sinal capturado no topo do modulo (ver comentario la em cima): aqui o hash
+    // ja pode ter sido limpo pelo supabase-js.
+    if (VEIO_DE_RECUPERACAO) {
       setReady(true);
       setChecking(false);
     }
 
-    // Check if we already have a valid session (user may have been redirected with tokens already processed)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        // If there's a session and hash had recovery tokens (already processed by supabase-js),
-        // we should allow password reset
-        setReady(true);
-      }
-      setChecking(false);
-    });
+    // ANTES ESTAVA ERRADO AQUI: `if (session) setReady(true)` — QUALQUER sessao
+    // liberava o formulario de troca de senha, nao so a de recuperacao.
+    //
+    // Isso promove uma sessao TEMPORARIA em senha PERMANENTE. O link de acesso
+    // por e-mail (publico) entrega uma sessao completa a quem tiver acesso a
+    // caixa: e-mail encaminhado, caixa compartilhada de compras@, computador de
+    // balcao com sessao aberta. Bastava abrir /reset-password e fixar a senha.
+    // E era o caminho de escalada de qualquer XSS no dominio.
+    //
+    // Agora so libera com sinal explicito de recuperacao: o evento
+    // PASSWORD_RECOVERY, ou o `type=recovery` capturado no topo do modulo.
+    if (VEIO_DE_RECUPERACAO) {
+      setReady(true);
+    }
+    setChecking(false);
 
     // Timeout: if nothing detected after 3 seconds, show invalid link
     const timeout = setTimeout(() => {

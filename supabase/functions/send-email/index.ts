@@ -907,8 +907,89 @@ Deno.serve(async (req) => {
 
     // Gera o PDF do pedido (anexado no email do CLIENTE e no do ADMIN).
     // Import dinâmico + try/catch: falha de PDF nunca derruba o email.
-    const buildOrderPdf = async (order: any, customer: any, items: any[]) => {
+    // `destinoPdf`: para QUEM este PDF vai. O anexo so e montado se esse
+    // destinatario tiver direito de ver ESTE pedido.
+    const buildOrderPdf = async (order: any, customer: any, items: any[], destinoPdf?: string | string[]) => {
       try {
+        // ------------------------------------------------------------------
+        // POSSE DO PEDIDO (A8)
+        //
+        // Os gates anti-relay validam o DESTINATARIO, nunca o CONTEUDO. Este
+        // builder hidrata do banco com service role usando o `order.id` que veio
+        // no CORPO da requisicao — sem conferir de quem e o pedido. Quem
+        // conseguisse um UUID de pedido recebia, no proprio e-mail, o PDF com
+        // nome, telefone, endereco, itens e precos de outro cliente.
+        //
+        // Regra: o anexo so sai se o destinatario for (a) o cliente do pedido,
+        // (b) um contato/sub-usuario da mesma conta, ou (c) um endereco de STAFF
+        // configurado. Qualquer outro caso -> sem anexo. O e-mail ainda vai; so
+        // nao leva o documento com os dados de terceiro.
+        //
+        // Falha de leitura tambem NAO anexa: na duvida sobre a posse, o lado
+        // seguro e nao mandar o documento.
+        if (order?.id) {
+          // `to` pode ser lista (copia para varios enderecos de staff). TODOS
+          // precisam ter direito: basta um estranho na lista para o documento
+          // vazar, e o e-mail e o mesmo para todos.
+          const destinos = (Array.isArray(destinoPdf) ? destinoPdf : [destinoPdf])
+            .flatMap((v) => String(v ?? "").split(/[;,]/))
+            .map((v) => v.trim().toLowerCase())
+            .filter(Boolean);
+          if (destinos.length === 0) {
+            console.error(`[send-email] buildOrderPdf: sem destinatario para conferir posse do pedido ${order.id} — anexo NAO gerado`);
+            return undefined;
+          }
+
+          const { data: donoRow, error: donoErr } = await adminClient
+            .from("pedidos")
+            .select("id, cliente_id, clientes:cliente_id ( email, parent_customer_id )")
+            .eq("id", order.id)
+            .maybeSingle();
+
+          if (donoErr || !donoRow) {
+            console.error(`[send-email] buildOrderPdf: nao consegui confirmar posse do pedido ${order.id} — anexo NAO gerado`, donoErr);
+            return undefined;
+          }
+
+          const dono: any = (donoRow as any).clientes ?? {};
+          const emailDono = String(dono.email ?? "").trim().toLowerCase();
+
+          // (c) STAFF: enderecos que o proprio dono configurou para receber copia.
+          const enderecosStaff = [config?.email_new_orders, config?.email_contato, config?.bcc_outgoing_emails]
+            .filter(Boolean)
+            .flatMap((v: any) => String(v).split(/[;,]/))
+            .map((v: string) => v.trim().toLowerCase())
+            .filter(Boolean);
+
+          const faltaConferir = destinos.filter(
+            (d) => d !== emailDono && !enderecosStaff.includes(d),
+          );
+
+          // (b) mesma CONTA: sub-usuario do dono, ou o dono de quem fez o pedido.
+          if (faltaConferir.length > 0 && donoRow.cliente_id) {
+            const raiz = dono.parent_customer_id ?? donoRow.cliente_id;
+            const { data: familia, error: famErr } = await adminClient
+              .from("clientes")
+              .select("email")
+              .or(`id.eq.${raiz},parent_customer_id.eq.${raiz}`);
+            if (famErr) {
+              console.error(`[send-email] buildOrderPdf: falha ao conferir a conta do pedido ${order.id} — anexo NAO gerado`, famErr);
+              return undefined;
+            }
+            const emailsDaConta = new Set(
+              (familia ?? []).map((c: any) => String(c.email ?? "").trim().toLowerCase()).filter(Boolean),
+            );
+            const estranhos = faltaConferir.filter((d) => !emailsDaConta.has(d));
+            if (estranhos.length > 0) {
+              console.error(`[send-email] buildOrderPdf: ${estranhos.join(", ")} sem direito ao pedido ${order.id} — anexo NAO gerado`);
+              return undefined;
+            }
+          } else if (faltaConferir.length > 0) {
+            console.error(`[send-email] buildOrderPdf: ${faltaConferir.join(", ")} sem direito ao pedido ${order.id} — anexo NAO gerado`);
+            return undefined;
+          }
+        }
+        // ------------------------------------------------------------------
 
         // HIDRATA do banco — o `order`/`customer` que chega do checkout costuma vir
         // PARCIAL (sem endereço do cliente, às vezes sem PO/comments). Buscar a linha
@@ -1055,7 +1136,7 @@ Deno.serve(async (req) => {
         `New Order #${order.numero || order.id} from ${customer.empresa || customer.nome}`,
         adminFallbackHtml));
       // Admin também recebe o PDF do pedido anexado.
-      orderPdfAttachment = await buildOrderPdf(order, customer, items || []);
+      orderPdfAttachment = await buildOrderPdf(order, customer, items || [], to);
     } else if (type === "new_order_customer") {
       // New order — confirm to customer (+ BCC to configured addresses)
       if (config?.email_on_new_order === false && !force) {
@@ -1115,7 +1196,7 @@ Deno.serve(async (req) => {
       }
 
       // PDF de verdade anexado — mesmos dados do email acima.
-      orderPdfAttachment = await buildOrderPdf(order, customer, orderItems);
+      orderPdfAttachment = await buildOrderPdf(order, customer, orderItems, to);
     } else if (type === "order_status_change") {
       // Order status updated — notify customer
       if (config?.email_on_order_status === false && !force) {
@@ -1146,7 +1227,7 @@ Deno.serve(async (req) => {
       // Anexa o PDF ATUALIZADO — ao editar/mudar status a ordem vai com o PDF novo.
       // buildOrderPdf hidrata pedido+itens do banco pelo order.id, então reflete
       // as últimas mudanças (itens, PO, tracking, totais) mesmo sem passar items.
-      orderPdfAttachment = await buildOrderPdf(order, customer, []);
+      orderPdfAttachment = await buildOrderPdf(order, customer, [], to);
     } else if (type === "rejection") {
       // Customer rejected — notify customer
       if (config?.email_on_rejection === false && !force) {
