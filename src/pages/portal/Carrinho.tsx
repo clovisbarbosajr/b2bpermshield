@@ -50,9 +50,15 @@ const Carrinho = () => {
     localStorage.removeItem("cart_saved_for_later"); // remove dados vazados da chave antiga
   }, [effectiveSavedKey]);
 
-  const persistSaved = (updated: any[]) => {
-    setSavedItems(updated);
-    localStorage.setItem(effectiveSavedKey, JSON.stringify(updated));
+  // Aceita lista OU funcao. A forma funcional le o estado ATUAL: sem ela, dois
+  // cliques rapidos em itens diferentes liam a mesma lista e o segundo regravava
+  // o primeiro de volta.
+  const persistSaved = (updated: any[] | ((atual: any[]) => any[])) => {
+    setSavedItems((atual: any[]) => {
+      const novo = typeof updated === "function" ? (updated as (a: any[]) => any[])(atual) : updated;
+      localStorage.setItem(effectiveSavedKey, JSON.stringify(novo));
+      return novo;
+    });
   };
 
   // Identidade do item salvo = produto + variante (cartKey). Filtrar só por
@@ -107,7 +113,11 @@ const Carrinho = () => {
     // Preco releito do banco: o salvo pode ter meses. E o preco BASE — o
     // definitivo e recalculado no submit (`getProductPrice`), como no re-order.
     addItem({ ...item, preco: prod.preco ?? item.preco });
-    persistSaved(savedItems.filter((s) => cartKey(s) !== cartKey(item)));
+    // Filtra a partir do estado ATUAL, nao do capturado na closure. Clicando em
+    // dois itens rapido, os dois liam a mesma lista e o segundo regravava o
+    // primeiro DE VOLTA — item no carrinho e em "saved for later" ao mesmo
+    // tempo, e o proximo clique somava a quantidade.
+    persistSaved((atual) => atual.filter((s: any) => cartKey(s) !== cartKey(item)));
     toast.success(`${item.nome} moved to cart`);
     } finally {
       movendoRef.current.delete(cartKey(item));
@@ -145,7 +155,9 @@ const Carrinho = () => {
           ? supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", ids)
           : Promise.resolve({ data: [] as any[] }),
       ]);
-      if (cancelled || !prods || !statuses) return;
+      // Cobre `vars` tambem: sem isso, falha na consulta de variantes deixava a
+      // checagem rodar com lista vazia — ou seja, sem a regra de variante.
+      if (cancelled || !prods || !statuses || !vars) return;
       // Regra única, compartilhada com o Checkout e coberta por teste (src/lib/stock.test.ts).
       const { blocked, insufficient } = checkCartStock(items, prods, statuses, vars ?? []);
       setUnavailableItems(blocked);

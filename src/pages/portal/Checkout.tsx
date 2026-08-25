@@ -467,7 +467,9 @@ const Checkout = () => {
           ? supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", ids)
           : Promise.resolve({ data: [] as any[] }),
       ]);
-      if (cancelled || !prods || !statuses) return;
+      // Cobre `vars` tambem: sem isso, falha na consulta de variantes deixava a
+      // checagem rodar com lista vazia — ou seja, sem a regra de variante.
+      if (cancelled || !prods || !statuses || !vars) return;
       // Regra única (src/lib/stock.ts), a mesma do Carrinho e do submit: teto da
       // variante + soma por produto. Coberta por teste em src/lib/stock.test.ts.
       const { blocked, insufficient } = checkCartStock(items, prods, statuses, vars ?? []);
@@ -518,27 +520,38 @@ const Checkout = () => {
     setLoading(true);
 
     // Validate stock & status before submitting
-    const productIds = items.map(i => i.produto_id);
-    const variantIds = items.map((i: any) => i.variante_id).filter(Boolean) as string[];
-    const { data: freshProducts } = await supabase
-      .from("produtos")
-      .select("id, estoque_total, estoque_reservado, status_produto")
-      .in("id", productIds);
-
-    const { data: allStatuses } = await supabase
-      .from("product_statuses")
-      .select("nome, permite_comprar");
-
-    // Estoque por variante relido agora — o teto da variante entra na validação final.
-    // POR PRODUTO, nao por id de variante: e aqui que se pega a linha SEM
-    // variante num produto que ganhou opcao depois de entrar no carrinho. Este e
-    // o portao de SAIDA, o ultimo antes de virar pedido.
+    //
+    // FALHA FECHADO. Antes o erro destas queries era descartado e o
+    // `if (freshProducts && allStatuses)` pulava a checagem INTEIRA — uma queda
+    // de rede aqui gravava o pedido sem validar nada, inclusive sem variante.
+    // E nao ha rede no banco: `pedido_itens.variante_id` e anulavel, sem
+    // constraint. Este e o ultimo portao antes de virar pedido.
     const idsProdSubmit = [...new Set(items.map((i: any) => i.produto_id))];
-    const { data: freshVariants } = idsProdSubmit.length
-      ? await supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", idsProdSubmit)
-      : { data: [] as any[] };
+    const [prodRes, statusRes, varRes] = await Promise.all([
+      supabase.from("produtos")
+        .select("id, estoque_total, estoque_reservado, status_produto")
+        .in("id", idsProdSubmit),
+      supabase.from("product_statuses").select("nome, permite_comprar"),
+      idsProdSubmit.length
+        ? supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", idsProdSubmit)
+        : Promise.resolve({ data: [] as any[], error: null } as any),
+    ]);
+    if (prodRes.error || statusRes.error || varRes.error) {
+      console.error(prodRes.error ?? statusRes.error ?? varRes.error);
+      toast.error("Could not verify stock right now. Please try again.");
+      setLoading(false);
+      return;
+    }
+    const freshProducts = prodRes.data;
+    const allStatuses = statusRes.data;
+    const freshVariants = varRes.data;
+    if (!freshProducts || !allStatuses) {
+      toast.error("Could not verify stock right now. Please try again.");
+      setLoading(false);
+      return;
+    }
 
-    if (freshProducts && allStatuses) {
+    {
       // Mesma regra da checagem proativa (src/lib/stock.ts): teto da variante +
       // soma por produto. Antes o submit olhava só o total do produto, então
       // dava pra fechar 10 de um tamanho que só tinha 2.

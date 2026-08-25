@@ -277,6 +277,19 @@ const OrderDetail = () => {
 
   const handleAddProduct = async (product: any) => {
     if (!order) return;
+    // Produto com opcao (tamanho/cor) nao pode entrar como produto-PAI: o
+    // pedido sairia com o item errado e o preco do pai. Mesma regra do portal,
+    // que aqui faltava — e agora tambem existe como gatilho no banco
+    // (trg_item_exige_variante), entao sem esta checagem o insert falharia com
+    // erro cru do Postgres na cara do admin.
+    const { data: temVar, error: varErr } = await supabase
+      .from("produto_variantes").select("id")
+      .eq("produto_id", product.id).eq("ativo", true).limit(1);
+    if (varErr) { console.error(varErr); toast.error("Could not check product options. Please try again."); return; }
+    if ((temVar ?? []).length > 0) {
+      toast.error(`"${product.nome}" has options (size/color). Adding it from here would order the base product — use the customer portal or add the specific variant.`);
+      return;
+    }
     const qty = 1;
     const { error } = await supabase.from("pedido_itens").insert({
       pedido_id: order.id,

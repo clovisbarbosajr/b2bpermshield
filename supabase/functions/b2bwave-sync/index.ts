@@ -1564,16 +1564,22 @@ Deno.serve(async (req) => {
         // `identico` EXIGE leitura completa: com `truncado`, "sobrando_aqui" e
         // formado por pedidos legitimos que a origem so nao terminou de listar.
         // Chamar isso de identico (ou de lixo) seria conclusao errada.
-        // `identico` NAO exige `nReparo === 0` — pedido pre-2025 nunca sera
-        // reparado e travaria o portao para sempre. Exige `nReabre` (reparo que
-        // religa `notificavel`) e `nVaiEscrever` (o proximo tick escreve).
         // Nao exige `nVaiEscrever === 0` nem `nReparo === 0`: os dois ficam
         // eternamente diferentes de zero por ruido de float e por pedido
-        // pre-2025. Exige o que muda comportamento: escrita em pedido RECENTE
-        // (que religa `notificavel`) e divergencia real de dado.
+        // pre-2025. Exige o que muda comportamento:
+        //
+        //   nEscreveRecente — o tick escreve num pedido recente e, ao escrever,
+        //                     grava `notificavel: true`;
+        //   nReabre         — o REPARO (pedido recente sem `data_origem` local)
+        //                     tambem grava `notificavel: true`, e nesse caso
+        //                     status/total/subtotal/qtd podem estar TODOS
+        //                     batendo, entao `nEscreveRecente` seria 0 e o
+        //                     portao ficaria verde. Este e o estado do sistema
+        //                     AGORA, antes do primeiro tick — exatamente quando
+        //                     este relatorio e consultado para decidir religar.
         identico: !truncado && nFaltando === 0 && nSobrando === 0
           && nStatus === 0 && nValor === 0 && nPagamento === 0
-          && nEscreveRecente === 0,
+          && nEscreveRecente === 0 && nReabre === 0,
         // Os TOTAIS sao o que decide se da para religar. As listas abaixo sao so
         // 20 exemplos cada.
         totais: {

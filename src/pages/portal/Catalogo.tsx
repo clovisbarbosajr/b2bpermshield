@@ -132,6 +132,11 @@ const Catalogo = () => {
         setLoading(false);
         return;
       }
+      // Sucesso: limpa o erro. Sem isto, uma falha na primeira passada (com
+      // `clienteId` ainda nulo) deixava o banner setado, e o cliente que
+      // legitimamente nao tem produto visivel via "Could not load the catalog"
+      // em vez de "no products".
+      setErroCarga(null);
       // Produtos que têm variante: o "Add" do grid leva pra página do produto (escolher a opção).
       setVariantProductIds(comVariante);
 

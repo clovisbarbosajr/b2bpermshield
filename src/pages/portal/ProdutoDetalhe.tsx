@@ -75,6 +75,7 @@ const ProdutoDetalhe = () => {
     setCategoria(null);
     setStatusInfo(null);
     setAccessDenied(false);
+    setCalculatedPrice(null);
     setLoading(true);
     const fetchData = async () => {
       const [prodRes, catsRes, statusesRes] = await Promise.all([
