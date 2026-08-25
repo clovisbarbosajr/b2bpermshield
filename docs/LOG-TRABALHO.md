@@ -430,3 +430,27 @@ Profile · UsersManagement · ExtraFields · SetupApp · WarehouseSettings · B2
 - **FEITO** - 3 rodadas cacador/cetico. Fechado sem itens abertos.
 - **AGUARDANDO** - dono publicar. NAO precisa de SQL nem de secret.
 
+### 25/08 17:00 UTC - INCIDENTE: 1281 SMS disparados (CAUSA MINHA)
+
+- **BLOQUEIO** - corrigi a paginacao da API de pedidos do B2BWave (que so trazia
+  9 pedidos porque `?page=N` e ignorado; o certo e `paginated=1&per_page=500`).
+  O sync passou a reconciliar 1.147 pedidos de uma vez, e o gatilho
+  `trg_order_status_notify` mandou 1 SMS POR PEDIDO. 1281 aceitos pela Twilio,
+  227 falhados — e cada falha gerou um e-mail de alerta ao admin, sem teto.
+  Custo real para o dono.
+- **FEITO** - estancado: fila do pg_net esvaziada, canais/eventos desligados,
+  gatilho desabilitado, todos os crons removidos.
+- **FEITO** - `docs/INCIDENTE-2026-08-25-sms.md` com a analise completa.
+- **FEITO** - `20260825180000_teto_notificacao.sql`: supressao em massa + teto
+  sincrono (20/h order_status, 10/h low_stock) + teto no alerta ao admin (5/h).
+  O gatilho fica DESLIGADO; religar e passo manual verificado.
+- **FEITO** - cabecalho obrigatorio em `b2bwave-sync/index.ts` e em
+  `_shared/dispatch.ts`: operacao que toca mais de um pedido TEM que suprimir
+  notificacao antes.
+- **NOTA** - a 1a versao das travas foi REPROVADA na revisao e nao chegou a ser
+  executada: a supressao era codigo morto, o teto lia o log (1-3s de atraso) e
+  deixaria passar ~100 SMS, e o ENABLE TRIGGER podia abortar a migration.
+- **AGUARDANDO** - dono: teto de gasto na Twilio (Billing > Usage triggers).
+  E a unica protecao que nao depende deste codigo estar certo.
+- **AGUARDANDO** - revisao da 2a versao antes de qualquer SQL ser rodado.
+

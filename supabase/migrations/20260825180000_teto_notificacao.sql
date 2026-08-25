@@ -26,13 +26,24 @@ INSERT INTO public.sync_state (key, value) VALUES
   -- Supressao explicita para operacao em massa. `ate` e validade: se a operacao
   -- morrer no meio sem desligar, expira sozinha.
   ('suppress_order_notify', jsonb_build_object('on', false, 'ate', NULL)),
-  -- Teto por hora. 100 pedidos DISTINTOS: o pico legitimo observado e ~10/h,
-  -- entao ha uma ordem de grandeza de folga antes de calar cliente de verdade.
-  ('order_notify_max_per_hour', jsonb_build_object('n', 100)),
-  ('low_stock_max_per_hour',    jsonb_build_object('n', 50)),
+  -- Teto por hora, calibrado no volume REAL (medido no notification_log dos 7
+  -- dias antes do incidente): o pico legitimo de order_status foi 10 linhas numa
+  -- hora, o normal fica entre 2 e 4. O teto e o DOBRO do pico: 20.
+  -- Estoque baixo tinha ~1/hora; teto 10.
+  --
+  -- Deliberadamente APERTADO. Estourar o teto e um alarme, nao um acidente:
+  -- significa que alguma coisa esta disparando em lote, e nesse caso e melhor
+  -- calar e investigar do que gastar. Para ajustar depois, sem deploy:
+  --   UPDATE public.sync_state SET value = jsonb_build_object('n', 30)
+  --   WHERE key = 'order_notify_max_per_hour';
+  ('order_notify_max_per_hour', jsonb_build_object('n', 20)),
+  ('low_stock_max_per_hour',    jsonb_build_object('n', 10)),
   -- Contadores sincronos: {"hora": "2026-08-25T17:00:00Z", "n": 0}
   ('order_notify_counter', jsonb_build_object('hora', NULL, 'n', 0)),
-  ('low_stock_counter',    jsonb_build_object('hora', NULL, 'n', 0))
+  ('low_stock_counter',    jsonb_build_object('hora', NULL, 'n', 0)),
+  -- Alerta de falha ao admin: sai 1 por falha, e falha vem em lote (227 no
+  -- incidente). Teto de 5/h no proprio dispatch.
+  ('admin_alert_counter',  jsonb_build_object('hora', NULL, 'n', 0))
 ON CONFLICT (key) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
@@ -60,6 +71,8 @@ RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.bump_notify_counter(text) FROM PUBLIC;
+-- O `_shared/dispatch` chama esta RPC para limitar o alerta de falha ao admin.
+GRANT EXECUTE ON FUNCTION public.bump_notify_counter(text) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.set_suppress_order_notify(_on boolean, _minutos integer DEFAULT 30)
 RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
@@ -102,12 +115,12 @@ BEGIN
   END IF;
 
   -- TRAVA 2 — teto horario, contador SINCRONO (vale desde o 1o pedido do lote).
-  SELECT COALESCE((value->>'n')::integer, 100) INTO _teto
+  SELECT COALESCE((value->>'n')::integer, 20) INTO _teto
   FROM public.sync_state WHERE key = 'order_notify_max_per_hour';
 
   _n := public.bump_notify_counter('order_notify_counter');
 
-  IF _n > COALESCE(_teto, 100) THEN
+  IF _n > COALESCE(_teto, 20) THEN
     -- Uma linha por hora, nao uma por pedido barrado. Em bloco proprio: se este
     -- insert falhar, NAO pode derrubar o UPDATE do pedido.
     BEGIN

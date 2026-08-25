@@ -1,3 +1,27 @@
+// ============================================================================
+// REGRA NUMERO UM DESTE ARQUIVO
+//
+// TODA operacao que toca MAIS DE UM PEDIDO precisa DESLIGAR a notificacao antes
+// de comecar:
+//
+//     await suprimirNotificacao(adminClient, true, 30);
+//     try { ...o lote... } finally { await suprimirNotificacao(adminClient, false); }
+//
+// POR QUE: existe um gatilho no banco (`trg_order_status_notify`) que manda
+// SMS/e-mail A CADA mudanca de status de pedido — e ele NAO distingue "o admin
+// mudou" de "o sync reconciliou". Reconciliar N pedidos = N mensagens.
+//
+// O QUE ACONTECEU EM 25/ago/2026: a paginacao da API de pedidos estava quebrada
+// (`orders.json?page=N` ignora o `page`; o certo e `paginated=1&per_page=500`),
+// entao o sync so via 9 pedidos. Ao corrigir isso, ele passou a reconciliar
+// 1.147 de uma vez e saiu 1 SMS POR PEDIDO: 1281 mensagens aceitas pela Twilio
+// em uma hora, 227 falhas, e cada falha gerou ainda um e-mail de alerta ao
+// admin. Custo real para o dono, e o servidor de e-mail engasgou.
+//
+// Existe teto no banco como segunda linha de defesa, mas ele e um ALARME, nao
+// uma licenca: se voce depender do teto, alguem ja recebeu mensagem errada.
+// ============================================================================
+
 // Deployed b2bwave-sync (SYNC_VERSION:related-v4) — redeploy from main @ 7e3e753
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 

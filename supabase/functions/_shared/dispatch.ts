@@ -1,3 +1,12 @@
+// ============================================================================
+// ATENCAO: tudo aqui gasta dinheiro do dono (Twilio por SMS, Resend por e-mail).
+//
+// Antes de mexer, leia o cabecalho de `b2bwave-sync/index.ts`: em 25/ago/2026
+// uma reconciliacao em massa disparou 1281 SMS e centenas de e-mails de alerta
+// numa hora. Regra que saiu dali: NENHUM caminho que possa rodar em lote pode
+// enviar sem teto.
+// ============================================================================
+
 // Núcleo de envio (inline). Lê config do admin, renderiza template, envia por
 // cada canal habilitado e registra em notification_log.
 import { render, sendEmail, sendSms, sendWhatsapp } from "./senders.ts";
@@ -35,6 +44,19 @@ async function logRow(db: Db, event: string, channel: string, recipient: string,
 // Vai pelo send-email (Resend primário + Office365 fallback) p/ chegar mesmo se o
 // SMS/Twilio estiver fora. Nunca derruba o fluxo (o chamador faz try/catch).
 async function alertAdmin(db: Db, event: string, vars: Record<string, unknown>, failures: string[]) {
+  // TETO. Este alerta sai UMA VEZ POR FALHA, e falha vem em lote: no incidente de
+  // 25/ago foram 227 SMS falhados, ou seja, ate 227 e-mails para o MESMO endereco
+  // em poucos minutos. Alerta que chega 227 vezes nao e alerta — e o que congela
+  // a fila do servidor de e-mail e faz o admin ignorar o aviso de verdade.
+  //
+  // 5 por hora e suficiente: o objetivo e avisar QUE esta falhando, nao listar
+  // cada ocorrencia. O detalhe completo esta no Notifications Log.
+  try {
+    const { data: n } = await db.rpc("bump_notify_counter", { _chave: "admin_alert_counter" });
+    if (typeof n === "number" && n > 5) return;
+  } catch {
+    // RPC ausente (SQL nao rodado): segue sem teto, como era antes.
+  }
   const { data: cfg } = await db.from("configuracoes").select("email_new_orders, email_contato").limit(1).maybeSingle();
   const adminEmail = cfg?.email_new_orders || cfg?.email_contato || "";
   if (!adminEmail) return;
