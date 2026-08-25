@@ -253,7 +253,7 @@ const OrderDetail = () => {
         }).catch(() => {});
       }
       supabase.functions.invoke("notify-dispatch", { body: { event: "order_status", vars: {
-        order_id: (order as any).numero ?? order.id, status: (order as any).status ?? "",
+        order_id: order.id, order_numero: (order as any).numero, status: (order as any).status ?? "",
         total: (order as any).total ?? "",
         customer_name: cliente?.nome ?? "", customer_company: cliente?.empresa ?? "",
         customer_email: cliente?.email ?? "", customer_phone: (cliente as any)?.telefone ?? "",
@@ -406,7 +406,7 @@ const OrderDetail = () => {
       supabase.functions.invoke("send-email", { body: { type: "new_order_customer", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
       supabase.functions.invoke("send-email", { body: { type: "new_order_admin", order: pedido, customer: emailCustomer, items: emailItems } }).catch(() => {});
       supabase.functions.invoke("notify-dispatch", { body: { event: "new_order", vars: {
-        order_id: (pedido as any).numero ?? pedido.id, total: subtotal, date: new Date().toLocaleString("pt-BR"),
+        order_id: pedido.id, order_numero: (pedido as any).numero, total: subtotal, date: new Date().toLocaleString("pt-BR"),
         items: items.map((i) => `• ${i.quantidade}x ${i.nome_produto} — ${i.preco_unitario}`).join("\n"),
         customer_name: cli.nome ?? "", customer_company: cli.empresa ?? "", customer_email: cli.email ?? "", customer_phone: (cli as any).telefone ?? "",
       }, customer: { email: cli.email, phone: (cli as any).telefone, whatsapp: (cli as any).telefone } } }).catch(() => {});

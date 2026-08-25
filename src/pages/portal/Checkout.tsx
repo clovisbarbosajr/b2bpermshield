@@ -702,7 +702,7 @@ const Checkout = () => {
           { fn: "send-email", body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } },
           { fn: "send-email", body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } },
           { fn: "notify-dispatch", body: { event: "new_order", vars: {
-            order_id: (pedido as any).numero ?? pedido.id, total: finalTotal,
+            order_id: pedido.id, order_numero: (pedido as any).numero, total: finalTotal,
             date: new Date().toLocaleString("pt-BR"),
             items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
             customer_name: customerName, customer_company: customerCompany, customer_email: customerEmail, customer_phone: customerPhone,
@@ -729,7 +729,7 @@ const Checkout = () => {
       { fn: "send-email", body: { type: "new_order_customer", order: emailOrder, customer: emailCustomer, items: emailItems } },
       { fn: "send-email", body: { type: "new_order_admin", order: emailOrder, customer: emailCustomer, items: emailItems } },
       { fn: "notify-dispatch", body: { event: "new_order", vars: {
-        order_id: (pedido as any).numero ?? pedido.id, total: finalTotal,
+        order_id: pedido.id, order_numero: (pedido as any).numero, total: finalTotal,
         date: new Date().toLocaleString("pt-BR"),
         items: recalculated.map(i => `• ${i.quantidade}x ${i.nome} — ${i.preco}`).join("\n"),
         customer_name: customerName, customer_company: customerCompany, customer_email: customerEmail, customer_phone: customerPhone,

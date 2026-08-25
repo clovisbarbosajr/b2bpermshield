@@ -49,38 +49,60 @@ async function podeEnviar(db: Db, canal: string): Promise<{ ok: boolean; motivo?
   }
 }
 
-// IDADE DO PEDIDO — checagem CENTRAL, no unico ponto por onde TODOS os eventos
-// de pedido passam.
+// BARREIRA DE IDADE — checagem CENTRAL, no unico ponto por onde TODOS os
+// eventos de pedido passam (`dispatchEvent`).
 //
-// Estava so no gatilho de status, e isso deixava `new_order` completamente
-// aberto: ele nao passa por gatilho nenhum, e tem `notify_customer = true`. Um
-// pedido antigo inserido pelo sync mandava "novo pedido" para o CELULAR DO
-// CLIENTE, sobre uma compra de meses atras. Foi o furo que a revisao achou
-// depois do incidente de 25/ago.
+// Estava so no gatilho de status, e isso deixava `new_order` aberto: ele nao
+// passa por gatilho nenhum e tem `notify_customer = true`. Pedido antigo
+// inserido pelo sync mandava "novo pedido" para o CELULAR DO CLIENTE.
 //
-// Aqui e o lugar certo: `dispatchEvent` e obrigatorio para order_status,
-// new_order e qualquer evento futuro que cite um pedido.
+// NAO cobre `send-email` chamado direto (OrderDetail, Checkout) — aquele tem a
+// sua propria checagem. Nao presuma cobertura universal a partir daqui.
 //
-// Falha FECHADO: pedido citado que nao existe, ou consulta que falha, NAO
-// notifica. Evento sem `order_id` (low_stock, account_approved) passa.
-async function pedidoRecenteDemaisParaCalar(db: Db, vars: Record<string, unknown>): Promise<string | null> {
+// TUDO falha FECHADO: sem `order_id`, pedido inexistente, numero ambiguo,
+// consulta com erro, ou pedido marcado `notificavel = false` => NAO notifica.
+const EVENTOS_DE_PEDIDO = new Set(["new_order", "order_status"]);
+
+async function bloqueioPorIdade(db: Db, event: string, vars: Record<string, unknown>): Promise<string | null> {
   const ref = String((vars as any)?.order_id ?? "").trim();
-  if (!ref) return null;                       // evento nao e sobre pedido
+
+  // Evento de pedido SEM `order_id` e recusado. Antes passava reto: a trava
+  // dependia do chamador cooperar, o que nao e trava.
+  if (!ref) {
+    return EVENTOS_DE_PEDIDO.has(event) ? `evento ${event} sem order_id — recusado` : null;
+  }
 
   const { data: cfg } = await db.from("sync_state")
     .select("value").eq("key", "order_notify_max_age_days").maybeSingle();
-  const maxDias = Number((cfg?.value as any)?.n) || 7;
+  const bruto = (cfg?.value as any)?.n;
+  // `??` e nao `||`: com `||`, configurar 0 ("nada retroativo, ponto") virava 7.
+  const maxDias = typeof bruto === "number" ? bruto : 7;
 
-  const numero = /^\d+$/.test(ref) ? Number(ref) : null;
-  const q = db.from("pedidos").select("created_at").limit(1);
-  const { data: ped, error } = numero !== null
-    ? await q.eq("numero", numero).maybeSingle()
-    : await q.eq("id", ref).maybeSingle();
+  const ehNumero = /^[0-9]+$/.test(ref);
+  // `pedidos.numero` NAO e unico — app e B2BWave escrevem no mesmo espaco de
+  // inteiros. Sem contar as linhas, um `.limit(1)` sem ordem devolvia um pedido
+  // ARBITRARIO: podia ler o recente e liberar o antigo. Por isso pede a
+  // contagem e recusa quando ha mais de um.
+  const q = db.from("pedidos").select("created_at, data_origem, notificavel", { count: "exact" });
+  const { data, error, count } = ehNumero
+    ? await q.eq("numero", Number(ref))
+    : await q.eq("id", ref);
 
-  if (error) return `nao foi possivel checar a idade do pedido ${ref}: ${error.message}`;
-  if (!ped?.created_at) return `pedido ${ref} nao encontrado — notificacao recusada`;
+  if (error) return `nao foi possivel checar o pedido ${ref}: ${error.message}`;
+  if (!data || data.length === 0) return `pedido ${ref} nao encontrado — recusado`;
+  if ((count ?? data.length) > 1) {
+    return `numero ${ref} corresponde a ${count} pedidos — ambiguo, recusado`;
+  }
 
-  const idadeDias = (Date.now() - new Date(ped.created_at as string).getTime()) / 86_400_000;
+  const ped: any = data[0];
+  if (ped.notificavel === false) return `pedido ${ref} marcado como nao-notificavel`;
+
+  // Data da ORIGEM quando existe; `created_at` so vale como data de compra para
+  // pedido nativo do app.
+  const quando = ped.data_origem ?? ped.created_at;
+  if (!quando) return `pedido ${ref} sem data — recusado`;
+
+  const idadeDias = (Date.now() - new Date(quando).getTime()) / 86_400_000;
   if (idadeDias > maxDias) {
     return `pedido ${ref} tem ${Math.floor(idadeDias)} dias (limite ${maxDias}) — nada retroativo`;
   }
@@ -156,7 +178,7 @@ export async function dispatchEvent(db: Db, event: string, vars: Record<string, 
   // Barreira de idade ANTES de qualquer coisa: vale para todo evento que cite
   // um pedido, por qualquer caminho (gatilho, sync, tela do admin, chamada
   // direta). E a unica trava que sozinha impede o incidente de se repetir.
-  const retroativo = await pedidoRecenteDemaisParaCalar(db, vars);
+  const retroativo = await bloqueioPorIdade(db, event, vars);
   if (retroativo) {
     await logRow(db, event, "-", "-", { ok: false, error: "BLOQUEADO — " + retroativo }, vars);
     return { ok: true, sent: 0, results: [], problems: [retroativo] };

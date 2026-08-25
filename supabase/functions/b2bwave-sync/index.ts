@@ -335,6 +335,9 @@ async function upsertOrder(
     const pago = pickPago(o);
     const upd = await db.from("pedidos").update({
       status, subtotal, total, quantidade_total: quantidade,
+      // Reafirma a marca a cada ciclo: se o B2BWave passar a informar a data,
+      // o pedido volta a ser notificavel; se nunca informar, continua calado.
+      ...(submittedAt ? { data_origem: submittedAt, notificavel: true } : { notificavel: false }),
       // So entra no patch quando o B2BWave realmente informou — ver pickPago.
       ...(pago === undefined ? {} : { is_paid: pago }),
       observacoes: o.comments_customer || o.customer_comments || null,
@@ -382,10 +385,16 @@ async function upsertOrder(
     delivery_date: deliveryDate,
     quantidade_total: quantidade,
     shipping_option_id: null, payment_option_id: null,
-    // Sem data da origem, deixa o banco usar o DEFAULT. Nao inventa data de
-    // compra: data de compra errada contamina relatorio, garantia e a trava de
-    // idade.
+    // OMITIR `created_at` NAO resolvia: a coluna tem DEFAULT now(), entao o
+    // pedido de 2025 continuava nascendo com a data de hoje e a trava de idade
+    // o considerava recente. Por isso a marca e EXPLICITA:
+    //   data_origem = a data real da origem (NULL se o B2BWave nao informou)
+    //   notificavel = false quando nao ha data confiavel
+    // Assim nao dependemos de deduzir idade de um campo que nos mesmos
+    // preenchemos errado.
     ...(submittedAt ? { created_at: submittedAt } : {}),
+    data_origem: submittedAt,
+    notificavel: podeNotificar,
   }).select("id").single();
   if (ins.error || !ins.data) return "error";
   const orderId = ins.data.id;
@@ -424,7 +433,13 @@ async function fireNewOrderNotification(db: any, numero: number, total: number, 
     body: JSON.stringify({
       event: "new_order",
       vars: {
-        order_id: numero, total, date: new Date().toISOString(),
+        // `order_id` = UUID, nao o `numero`. `pedidos.numero` NAO e unico (app e
+        // B2BWave escrevem no mesmo espaco de inteiros), e a barreira de idade
+        // busca por este campo: com o numero, ela podia ler o pedido ERRADO e
+        // liberar justamente o que devia calar.
+        order_id: orderId ?? numero,
+        order_numero: numero,
+        total, date: new Date().toISOString(),
         customer_name: cli?.nome ?? "", customer_company: cli?.empresa ?? "",
         customer_email: cli?.email ?? "", customer_phone: cli?.telefone ?? "",
       },

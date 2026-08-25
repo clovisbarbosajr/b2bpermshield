@@ -1,0 +1,175 @@
+-- ============================================================================
+-- MARCA EXPLICITA DE "PODE NOTIFICAR" NO PEDIDO
+--
+-- A tentativa anterior (nao gravar `created_at` quando o B2BWave nao manda data)
+-- NAO resolveu nada: a coluna tem `DEFAULT now()`, entao o pedido de 2025
+-- continuava nascendo com a data de hoje e a trava de idade o considerava
+-- recente. Mesmo furo, so que escondido atras de um comentario dizendo o
+-- contrario.
+--
+-- A correcao nao pode depender de adivinhar a idade a partir de um campo que o
+-- proprio sync preenche errado. Passa a existir uma marca explicita:
+--
+--   notificavel = false  ->  este pedido NUNCA gera notificacao, ponto.
+--
+-- Quem marca: o sync, quando importa um pedido sem data de origem confiavel.
+-- Nao ha como um pedido assim voltar a ser notificavel por acidente — so por
+-- UPDATE deliberado.
+-- ============================================================================
+
+ALTER TABLE public.pedidos
+  ADD COLUMN IF NOT EXISTS notificavel boolean NOT NULL DEFAULT true,
+  -- Data REAL da origem (B2BWave). NULL = a origem nao informou.
+  -- `created_at` continua sendo a data da linha no nosso banco.
+  ADD COLUMN IF NOT EXISTS data_origem timestamptz;
+
+COMMENT ON COLUMN public.pedidos.notificavel IS
+  'false = pedido nunca gera notificacao (importado sem data de origem confiavel). Ver incidente 25/ago/2026.';
+COMMENT ON COLUMN public.pedidos.data_origem IS
+  'Data em que o pedido foi feito na ORIGEM (B2BWave). NULL quando a origem nao informou — nesse caso created_at e a data da importacao, NAO a da compra.';
+
+-- ---------------------------------------------------------------------------
+-- BACKFILL DEFENSIVO
+--
+-- Os pedidos ja importados com data falsa nao dao para distinguir agora. O que
+-- da para fazer e nao deixar os antigos notificarem: qualquer pedido do B2BWave
+-- com mais de 7 dias fica marcado como nao-notificavel de forma PERMANENTE.
+-- Sem isto, cada linha dessas e um SMS retroativo esperando o status mudar.
+-- ---------------------------------------------------------------------------
+UPDATE public.pedidos
+SET notificavel = false
+WHERE b2bwave_order_id IS NOT NULL
+  AND created_at < now() - interval '7 days';
+
+-- ---------------------------------------------------------------------------
+-- O gatilho de status passa a olhar a marca ANTES da idade.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.fn_order_status_notify()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  _cli record;
+  _suprimido boolean;
+  _teto integer;
+  _n integer;
+  _max_dias integer;
+  _via_api text;
+  _idade timestamptz;
+BEGIN
+  IF NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NEW;
+  END IF;
+
+  -- TRAVA A1 — marca explicita. Nao depende de data nenhuma.
+  IF NEW.notificavel IS NOT TRUE THEN
+    RETURN NEW;
+  END IF;
+
+  -- TRAVA A2 — idade. Usa a data da ORIGEM quando existe; so cai no `created_at`
+  -- para pedido nativo do app, onde ele E a data da compra.
+  SELECT COALESCE((value->>'n')::integer, 7) INTO _max_dias
+  FROM public.sync_state WHERE key = 'order_notify_max_age_days';
+
+  _idade := COALESCE(NEW.data_origem, NEW.created_at);
+  IF _idade IS NULL OR _idade < now() - make_interval(days => COALESCE(_max_dias, 7)) THEN
+    RETURN NEW;
+  END IF;
+
+  -- TRAVA B — mudanca feita por SQL direto nao fala com cliente.
+  -- ATENCAO: isto NAO cobre o sync, que fala pelo PostgREST e portanto tem
+  -- `request.method` preenchido. Quem cobre o sync sao as travas A1 e A2.
+  _via_api := current_setting('request.method', true);
+  IF _via_api IS NULL OR _via_api = '' THEN
+    BEGIN
+      INSERT INTO public.notification_log (event, channel, recipient, status, error, payload)
+      VALUES ('order_status_sql', '-', '-', 'failed',
+              'mudanca feita por SQL direto — notificacao suprimida por regra',
+              jsonb_build_object('pedido', NEW.numero, 'de', OLD.status, 'para', NEW.status));
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'log de supressao por SQL falhou (ignorado): %', SQLERRM;
+    END;
+    RETURN NEW;
+  END IF;
+
+  SELECT COALESCE((value->>'on')::boolean, false)
+         AND COALESCE((value->>'ate')::timestamptz, '-infinity'::timestamptz) > now()
+    INTO _suprimido
+  FROM public.sync_state WHERE key = 'suppress_order_notify';
+
+  IF COALESCE(_suprimido, false) THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT COALESCE((value->>'n')::integer, 20) INTO _teto
+  FROM public.sync_state WHERE key = 'order_notify_max_per_hour';
+
+  _n := public.bump_notify_counter('order_notify_counter');
+
+  IF _n IS NULL OR _n > COALESCE(_teto, 20) THEN
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM public.notification_log
+        WHERE event = 'order_status_teto' AND created_at > now() - interval '1 hour'
+      ) THEN
+        INSERT INTO public.notification_log (event, channel, recipient, status, error, payload)
+        VALUES ('order_status_teto', '-', '-', 'failed',
+                format('teto de %s/hora atingido — notificacoes de status suspensas ate virar a hora', _teto),
+                jsonb_build_object('pedido', NEW.numero, 'status', NEW.status, 'contador', _n));
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE NOTICE 'marcador de teto falhou (ignorado): %', SQLERRM;
+    END;
+    RETURN NEW;
+  END IF;
+
+  SELECT nome, empresa, email, telefone INTO _cli FROM public.clientes WHERE id = NEW.cliente_id;
+  BEGIN
+    PERFORM net.http_post(
+      url := 'https://bnicfvxvyblzzatvursw.supabase.co/functions/v1/notify-dispatch',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'apikey', (select decrypted_secret from vault.decrypted_secrets where name='PROJECT_ANON_KEY'),
+        'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name='CRON_SECRET')
+      ),
+      body := jsonb_build_object(
+        'event', 'order_status',
+        -- `order_id` passa a ser o UUID, nao o `numero`: `pedidos.numero` NAO e
+        -- unico (app e B2BWave escrevem no mesmo espaco de inteiros), entao
+        -- buscar por numero podia ler o pedido ERRADO e liberar o que devia
+        -- calar.
+        'vars', jsonb_build_object(
+          'order_id', NEW.id,
+          'order_numero', COALESCE(NEW.numero, 0),
+          'status', NEW.status,
+          'total', COALESCE(NEW.total, 0),
+          'customer_name', COALESCE(_cli.nome, ''),
+          'customer_company', COALESCE(_cli.empresa, ''),
+          'customer_email', COALESCE(_cli.email, ''),
+          'customer_phone', COALESCE(_cli.telefone, '')
+        ),
+        'customer', jsonb_build_object(
+          'email', _cli.email, 'phone', _cli.telefone, 'whatsapp', _cli.telefone
+        )
+      )
+    );
+  EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'order_status notify falhou (nao derruba o update): %', SQLERRM;
+  END;
+
+  RETURN NEW;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- MODELOS DE MENSAGEM: `{order_id}` -> `{order_numero}`
+--
+-- `order_id` passou a carregar o UUID (porque `pedidos.numero` NAO e unico e a
+-- barreira de idade busca por ele). Os textos usam `{order_id}` no corpo, entao
+-- sem esta troca o cliente receberia "Pedido #a3f2e1b0-4c9d-..." no lugar de
+-- "#2726". O numero continua disponivel em `{order_numero}`.
+-- ---------------------------------------------------------------------------
+UPDATE public.notification_events SET
+  template_email    = replace(COALESCE(template_email,    ''), '{order_id}', '{order_numero}'),
+  template_sms      = replace(COALESCE(template_sms,      ''), '{order_id}', '{order_numero}'),
+  template_whatsapp = replace(COALESCE(template_whatsapp, ''), '{order_id}', '{order_numero}')
+WHERE COALESCE(template_email, '')    LIKE '%{order_id}%'
+   OR COALESCE(template_sms, '')      LIKE '%{order_id}%'
+   OR COALESCE(template_whatsapp, '') LIKE '%{order_id}%';
