@@ -89,7 +89,9 @@ BEGIN
         INSERT INTO public.notification_log (event, channel, recipient, status, error, payload)
         VALUES ('order_status_calado', '-', '-', 'failed',
                 'pedido marcado como nao-notificavel (importado sem data de origem) — ver coluna pedidos.notificavel',
-                jsonb_build_object('pedido', NEW.numero, 'status', NEW.status));
+                -- `id`, nao `numero`: numero NAO e unico, e um rastro forense que
+                -- nao identifica a linha nao serve para nada.
+                jsonb_build_object('pedido_id', NEW.id, 'numero', NEW.numero, 'status', NEW.status));
       END IF;
     EXCEPTION WHEN OTHERS THEN
       RAISE NOTICE 'log de A1 falhou (ignorado): %', SQLERRM;
@@ -112,7 +114,7 @@ BEGIN
         INSERT INTO public.notification_log (event, channel, recipient, status, error, payload)
         VALUES ('order_status_retroativo', '-', '-', 'failed',
                 format('pedido com mais de %s dias — nada retroativo', _max_dias),
-                jsonb_build_object('pedido', NEW.numero, 'data', _idade, 'status', NEW.status));
+                jsonb_build_object('pedido_id', NEW.id, 'numero', NEW.numero, 'data', _idade, 'status', NEW.status));
       END IF;
     EXCEPTION WHEN OTHERS THEN
       RAISE NOTICE 'log de A2 falhou (ignorado): %', SQLERRM;

@@ -315,6 +315,10 @@ async function upsertOrder(
   // `podeNotificar`: so com data REAL da origem. Sem data, o pedido entra no
   // sistema (nao perder o pedido e mais importante), mas fica calado.
   const podeNotificar = submittedAt !== null;
+  // Mesma janela usada para decidir se avisa de pedido novo. Reaproveitada aqui
+  // para nao reabilitar pedido velho ao gravar a data da origem.
+  const recenteDeVerdade = submittedAt !== null
+    && (Date.now() - new Date(submittedAt).getTime()) < 7 * 24 * 60 * 60 * 1000;
   const deliveryDate = o.request_delivery_at ? new Date(o.request_delivery_at).toISOString() : null;
 
   const { rows: itemRows, qty: itemsQty, sum: itemsSum } = buildOrderItems(o.order_products || [], productSkuToId, productNameToId);
@@ -343,9 +347,20 @@ async function upsertOrder(
     const pago = pickPago(o);
     const upd = await db.from("pedidos").update({
       status, subtotal, total, quantidade_total: quantidade,
-      // Reafirma a marca a cada ciclo: se o B2BWave passar a informar a data,
-      // o pedido volta a ser notificavel; se nunca informar, continua calado.
-      ...(submittedAt ? { data_origem: submittedAt, notificavel: true } : { notificavel: false }),
+      // `data_origem` SEMPRE que a origem informar — e o dado verdadeiro.
+      //
+      // `notificavel`, porem, so sobe de false para true quando o pedido e
+      // GENUINAMENTE recente. Duas razoes:
+      //   - subir incondicionalmente reduzia duas defesas a uma: os 1150 pedidos
+      //     passariam a depender so de `order_notify_max_age_days`, uma linha
+      //     editavel em `sync_state`. Alguem poe 3650 ali e a frota inteira
+      //     volta a falar — a mesma forma do incidente;
+      //   - e apagava o kill-switch manual: admin calava um pedido, o proximo
+      //     tick do sync ressuscitava. O COMMENT da coluna promete o contrario.
+      // Descer para false continua incondicional: sem data, nao fala.
+      ...(submittedAt
+        ? { data_origem: submittedAt, ...(recenteDeVerdade ? { notificavel: true } : {}) }
+        : { notificavel: false }),
       // So entra no patch quando o B2BWave realmente informou — ver pickPago.
       ...(pago === undefined ? {} : { is_paid: pago }),
       observacoes: o.comments_customer || o.customer_comments || null,
@@ -354,7 +369,12 @@ async function upsertOrder(
       delivery_date: deliveryDate,
     }).eq("id", ex.id);
     if (upd.error) return "error";
-    if (itemRows.length > 0) {
+    // `changed &&`: o reparo (gravar `data_origem`) NAO precisa reescrever itens.
+    // Sem esta condicao, os ~1150 pedidos importados fariam DELETE+INSERT de
+    // itens de uma vez — 3 chamadas HTTP cada, num tick sem orcamento de tempo —
+    // e cada pedido ficaria momentaneamente SEM ITENS, multiplicando por 1150 a
+    // exposicao ao buraco que o comentario abaixo descreve. De graca.
+    if (changed && itemRows.length > 0) {
       // delete + insert sao DUAS chamadas HTTP, ou seja, duas transacoes: nao ha
       // rollback. Se o insert falhar e o erro for descartado, o pedido fica com
       // ZERO itens e a funcao ainda retorna "updated".
@@ -419,7 +439,7 @@ async function upsertOrder(
     const insItens = await db.from("pedido_itens").insert(itemRows.map((r) => ({ ...r, pedido_id: orderId })));
     if (insItens.error) {
       await db.from("pedidos").update({ quantidade_total: 0 }).eq("id", orderId);
-      existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: 0 });
+      existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: 0, data_origem: submittedAt });
       return "error";
     }
   }
@@ -489,7 +509,13 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
   // Casa por b2bwave_order_id (NÃO por numero — que colide com o serial dos pedidos
   // do app). Pedido nativo do app (b2bwave_order_id NULL) nunca entra aqui.
   const b2bIds = slice.map((it: any) => parseInt((it.order || it).id) || 0).filter((n: number) => n > 0);
-  const { data: existingOrders } = await db.from("pedidos").select("id, b2bwave_order_id, status, total, subtotal, quantidade_total, data_origem").in("b2bwave_order_id", b2bIds);
+  // Checa o erro: descartado, uma falha transitoria deste select deixava
+  // `existing` VAZIO e mandava o slice inteiro para o ramo de INSERT — 500
+  // tentativas de criar pedido que ja existe.
+  const { data: existingOrders, error: exErr } = await db.from("pedidos")
+    .select("id, b2bwave_order_id, status, total, subtotal, quantidade_total, data_origem")
+    .in("b2bwave_order_id", b2bIds);
+  if (exErr) throw new Error("falha ao ler pedidos existentes: " + exErr.message);
   const existing = new Map<number, ExistingOrder>();
   for (const e of existingOrders || []) {
     existing.set(e.b2bwave_order_id, { id: e.id, status: e.status, total: Number(e.total), subtotal: Number(e.subtotal), quantidade_total: e.quantidade_total ?? 0, data_origem: (e as any).data_origem ?? null });

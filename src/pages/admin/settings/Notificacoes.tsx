@@ -388,9 +388,19 @@ export default function Notificacoes() {
       // todos pode ser importado do B2BWave e estar marcado como
       // nao-notificavel — aí o teste era bloqueado e o admin ficava sem
       // conseguir testar o template, sem entender por quê.
-      const { data: pedido } = await sb.from('pedidos').select('*, pedido_itens(*)')
+      // Le o `error`: descartado, uma coluna que ainda nao existe (SQL nao
+      // rodado) virava "No orders found" e mandava o admin criar pedido — o
+      // mesmo diagnostico falso que este arquivo acabou de corrigir no toast.
+      //
+      // Ordena por `data_origem` com fallback: em pedido importado o
+      // `created_at` e a data da IMPORTACAO, nao a da compra, entao ordenar por
+      // ele traria um pedido velho que a barreira de idade barraria depois.
+      const { data: pedido, error: pedErr } = await sb.from('pedidos').select('*, pedido_itens(*)')
         .eq('notificavel', true)
-        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+        .order('data_origem', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(1).maybeSingle();
+      if (pedErr) { toast.error(`Could not load a sample order: ${pedErr.message}`); return; }
       if (!pedido) { toast.error('No notifiable orders found — place an order first.'); return; }
       const { data: cliente } = await sb.from('clientes').select('*').eq('id', pedido.cliente_id).maybeSingle();
       const customer = { ...(cliente ?? {}), email: to };
