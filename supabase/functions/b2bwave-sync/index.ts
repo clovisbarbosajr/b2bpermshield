@@ -332,8 +332,13 @@ async function upsertOrder(
   // nota na tela de Notificacoes.
   //
   // NAO CONFUNDIR com a janela do aviso de PEDIDO NOVO, que e de 2 dias e fica
-  // mais abaixo neste mesmo arquivo (no `fireNewOrderNotification`). Sao duas
-  // janelas diferentes, para coisas diferentes.
+  // mais abaixo neste mesmo arquivo, na CHAMADA de `fireNewOrderNotification`
+  // (nao dentro dela). Sao duas janelas diferentes, para coisas diferentes.
+  //
+  // E saiba do limite desta aqui: `notificavel` e PEGAJOSO — uma vez `true`,
+  // nunca volta a `false` por idade. Este teto protege o MOMENTO da importacao,
+  // nao a vida inteira do pedido. Depois disso quem segura e o limite de idade
+  // nos tres portoes.
   const TETO_IMPORTADO_DIAS = 7;
   const recenteDeVerdade = submittedAt !== null
     && (Date.now() - new Date(submittedAt).getTime()) < TETO_IMPORTADO_DIAS * 24 * 60 * 60 * 1000;

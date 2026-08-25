@@ -729,8 +729,10 @@ export default function Notificacoes() {
               about old orders. There is no field for it here: the value lives in
               <code className="mx-1">sync_state.order_notify_max_age_days</code> and is changed by
               SQL only. Orders <em>imported from B2BWave</em> have a separate 7-day limit fixed in
-              the code, so raising the SQL value widens it for native orders only — widening it for
-              imported orders takes a deploy, on purpose.
+              the code, which decides whether an imported order is <em>born</em> notifiable —
+              widening that takes a deploy, on purpose. Note the limits are not fully independent:
+              once an order is marked notifiable it stays marked, so raising the SQL value also
+              widens the window for imported orders that were already marked.
             </p>
           </Card>
           {events.map((ev) => (
