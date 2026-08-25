@@ -87,6 +87,11 @@ const Checkout = () => {
   // era com o literal "United States" e toda regra de Canada/UK era descartada.
   const [customerCountry, setCustomerCountry] = useState("");
   const [subCannotOrder, setSubCannotOrder] = useState(false);
+  // `disable_ordering` e `minimum_order_value` existiam so como campo de tela:
+  // editaveis, sincronizados do B2BWave, protegidos contra edicao pelo cliente —
+  // e lidos por ninguem. O dono bloqueava um inadimplente e ele seguia comprando.
+  const [orderingDisabled, setOrderingDisabled] = useState(false);
+  const [minimoPedido, setMinimoPedido] = useState<number | null>(null);
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [stripePublishableKey, setStripePublishableKey] = useState("");
   const [payByCard, setPayByCard] = useState(false);
@@ -107,7 +112,7 @@ const Checkout = () => {
 
       // Traz JÁ os campos de endereço + grupo de imposto na MESMA query — evita
       // 2 buscas redundantes depois (endereço da empresa e tax_customer_group_id).
-      const cols = "id, nome, empresa, email, telefone, pais, parent_customer_id, can_confirm_order, endereco, cidade, estado, cep, tax_customer_group_id";
+      const cols = "id, nome, empresa, email, telefone, pais, parent_customer_id, can_confirm_order, endereco, cidade, estado, cep, tax_customer_group_id, disable_ordering, minimum_order_value";
       const clienteQuery = impersonatedCustomer?.id
         ? supabase.from("clientes").select(cols).eq("id", impersonatedCustomer.id).maybeSingle()
         : supabase.from("clientes").select(cols).eq("user_id", user!.id).maybeSingle();
@@ -123,6 +128,16 @@ const Checkout = () => {
         setCustomerCountry(((cliente as any).pais || "").trim());
         // Sub-customer sem permissão de confirmar não finaliza (espelha a trava do banco).
         setSubCannotOrder(!!(cliente as any).parent_customer_id && (cliente as any).can_confirm_order === false);
+        // Le a PROPRIA ficha, nao a do pai, para casar exatamente com o que o
+        // gatilho `fn_block_order_inactive_customer` confere no banco
+        // (ele olha `pedidos.cliente_id`). Front e banco discordando seria pior
+        // que qualquer um dos dois sozinho.
+        setOrderingDisabled((cliente as any).disable_ordering === true);
+        setMinimoPedido(
+          (cliente as any).minimum_order_value != null
+            ? Number((cliente as any).minimum_order_value)
+            : null
+        );
         // Endereço puxa da conta da EMPRESA: sub-usuário usa os endereços do pai.
         const addressClienteId = (cliente as any).parent_customer_id ?? cliente.id;
         setAddressOwnerId(addressClienteId);
@@ -506,6 +521,10 @@ const Checkout = () => {
       toast.error("Your account is not allowed to place orders. Please ask your account owner to confirm orders.");
       return;
     }
+    if (orderingDisabled) {
+      toast.error("Ordering is currently disabled for this account. Please contact us.");
+      return;
+    }
     if (items.length === 0) {
       toast.error("Cart is empty");
       return;
@@ -589,6 +608,27 @@ const Checkout = () => {
     const recalcTax = (recalcSubtotal - recalcDiscount) * taxRate / 100;
     const recalcGrossTotal = recalcSubtotal - recalcDiscount + recalcTax + shippingCost;
 
+    // Pedido minimo por cliente. Confere contra o subtotal RECALCULADO (preco
+    // atual do banco), nao contra o que a tela somou — carrinho velho pode ter
+    // preco desatualizado e passar por pouco.
+    //
+    // ATENCAO, limitacao conhecida e deliberada: esta guarda e SO do navegador.
+    // Nao da para impo-la no banco do jeito que o checkout envia hoje — o pedido
+    // e criado numa chamada e os itens em outra, entao no INSERT do pedido o
+    // subtotal ainda e o do navegador e nao ha item nenhum para somar. Quem
+    // montar a requisicao a mao fecha pedido abaixo do minimo. E abuso de baixa
+    // gravidade (ele paga o que pediu; nada e subtraido), diferente das travas
+    // de preco. Fechar de verdade exige mudar o formato do envio do pedido —
+    // anotado na fila como item proprio.
+    if (minimoPedido != null && minimoPedido > 0 && recalcSubtotal < minimoPedido) {
+      toast.error(
+        `Minimum order value for your account is $${minimoPedido.toFixed(2)}. ` +
+        `Your order subtotal is $${recalcSubtotal.toFixed(2)}.`
+      );
+      setLoading(false);
+      return;
+    }
+
     const addr = await resolveEnderecoEntregaId();
     if (!addr.ok) { setLoading(false); return; }
 
@@ -628,7 +668,14 @@ const Checkout = () => {
     } as any).select().single();
 
     if (error || !pedido) {
-      toast.error("Error: " + (error?.message ?? ""));
+      // Tokens que o banco levanta com texto reconhecivel. Sem isto o cliente
+      // via a mensagem crua do Postgres na tela.
+      const msg = error?.message ?? "";
+      toast.error(
+        /ORDERING_DISABLED/i.test(msg)
+          ? "Ordering is currently disabled for this account. Please contact us."
+          : "Error: " + msg
+      );
       setLoading(false);
       return;
     }

@@ -579,3 +579,63 @@ colunas. O Checkout manda um conjunto educado; um POST cru manda o que quiser.
   cupom recusado viraria cobranca silenciosa a mais.
 - 68 testes verdes, build limpo, typecheck 0.
 - **AGUARDANDO** - cetico (migrations 230000/240000) e cacador (Leva A) rodando.
+
+### 25/08 (noite, cont. 3) - Cetico REPROVOU a 240000. Erro meu, bloqueante.
+
+- **ERRO MEU, PEGO PELO CETICO** - eu escrevia `NEW.status := 'recebido'`.
+  `recebido` e valor LEGADO: `20260622170000:15-18` trocou o DEFAULT para
+  `submitted` e migrou as linhas antigas. Ele so sobrevive no mapa LEGACY de
+  `src/lib/orderStatuses.ts:22`.
+  O estrago seria SILENCIOSO: `portal/Pedidos.tsx:91` e `:238` filtram com
+  `.eq("status", ...)` nos canonicos, entao o CLIENTE filtrando "Submitted" nao
+  veria nenhum pedido dele; `functions/api/index.ts:127` filtra a coluna crua,
+  entao a integracao externa perderia os pedidos do portal. O admin escaparia por
+  sorte (normaliza com `canonicalStatus` antes de exibir) — o dado ficaria errado
+  e a TELA ESCONDERIA. Corrigido para `submitted`.
+- **SEGUNDO ERRO MEU, pego por mim** - ao aplicar a correcao acima o comentario
+  entrou e a LINHA DE CODIGO sumiu na substituicao. Peguei conferindo a lista de
+  atribuicoes reais da funcao em vez de reler o texto. Restaurada.
+- **CORRIGIDO** - consulta de diagnostico usava `status <> 'recebido'` como sinal
+  de abuso: marcaria 100% dos pedidos legitimos. Agora `<> 'submitted'`.
+- **CORRIGIDO** - troquei `auth.role() IS NULL OR = 'service_role'` por
+  `auth.uid() IS NULL` nas duas travas. Mesmo efeito nos caminhos reais (service
+  key nao carrega `sub`), e e a forma que a outra trava do repo ja usa
+  (`fn_lock_privileged_cliente_cols`): escopa a restricao a quem FOI
+  identificado, em vez de isentar por ausencia de claim. Nao depende mais de
+  afirmacao minha sobre o que o PostgREST garante.
+- **CORRIGIDO** - 4 afirmacoes falsas nos cabecalhos: "SQL do admin nao define
+  este campo" (contradizia o proprio escape 5 linhas acima); "tem que ser o
+  PRIMEIRO da lista" (e o segundo); "a policy de INSERT e apenas o pedido e meu"
+  (ha uma segunda porta, `Contacts insert company pedidos`); credito errado da
+  `fn_pedido_recompute_subtotal`. O portao passou a checar as DUAS colunas.
+- **NOVO NA FILA (achado do cetico)** - `pedido_itens` tem a mesma classe de furo
+  em `quantidade_enviada`, `backorder`, `status_linha`, `nome_produto`, `sku`:
+  sem gatilho nenhum. Cliente insere item ja marcado como ENVIADO.
+- **NOVO NA FILA, GRAVE (achado do cetico)** - `activity_logs` aceita INSERT de
+  QUALQUER autenticado com `WITH CHECK (auth.uid() IS NOT NULL)` — nem posse
+  valida. `user_id`, `user_email`, `user_name`, `action`, `details` todos
+  forjaveis, sem gatilho. Leitura e admin-only: e forja plantada exatamente onde
+  o admin vai olhar.
+
+### 25/08 (noite, cont. 4) - Leva B: controles mortos do dono
+
+- **CONFIRMADO POR MIM** - `disable_ordering`, `minimum_order_value`,
+  `clientes.discount` e a taxa de pagamento (`taxa_percentual`/`taxa_valor`) sao
+  editaveis, sincronizados, protegidos contra edicao do cliente — e lidos por
+  NINGUEM. Nenhum gatilho, nenhum ponto do checkout.
+- **FEITO** - `20260825270000_disable_ordering.sql`: entra no gatilho que ja
+  existe (`fn_block_order_inactive_customer`), com as mesmas isencoes. Mensagem
+  SEPARADA (`ORDERING_DISABLED`) — "aguarde aprovacao" mandaria o cliente esperar
+  algo que nunca vem, porque a conta esta ativa e o que foi suspenso e a compra.
+- **FEITO** - Checkout le `disable_ordering` e `minimum_order_value` da propria
+  ficha (mesma linha que o gatilho confere, para front e banco nao discordarem),
+  barra no submit e traduz `ORDERING_DISABLED`.
+- **LIMITACAO DECLARADA** - o minimo de pedido e SO do navegador. Nao da para
+  impor no banco com o formato de envio atual: o pedido e criado numa chamada e
+  os itens em outra, entao no INSERT o subtotal ainda e o do navegador e nao ha
+  item para somar. Abuso de baixa gravidade (o cliente paga o que pediu). Fechar
+  de verdade exige mudar o formato do envio — item proprio na fila.
+- **NAO FIZ, PRECISA DE DECISAO DO DONO** - `clientes.discount` e a taxa de
+  pagamento MUDAM O VALOR COBRADO. Nao da para adivinhar se o desconto do cliente
+  compoe com a tabela de preco ou a substitui, nem se a taxa incide antes ou
+  depois do imposto. Perguntar antes de implementar.

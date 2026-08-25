@@ -8,7 +8,7 @@
 -- valores calculados na origem:
 --
 --   fn_pedido_item_preco_autoritativo  (20260622220000)  -> reescreve preco_unitario
---   fn_pedido_recompute_subtotal       (20260730120000)  -> recalcula subtotal
+--   fn_pedido_recompute_subtotal       (20260622220000)  -> recalcula subtotal
 --   fn_pedido_total_appside                              -> desconto/imposto/frete/total
 --   fn_reserve_stock_on_order_item     (20260623000000)  -> reserva de estoque
 --   fn_item_exige_variante             (20260825220000)  -> exige variante
@@ -49,27 +49,27 @@ BEGIN;
 CREATE OR REPLACE FUNCTION public.fn_pedido_b2bwave_id_so_servidor()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  -- `service_role` = edge function (o sync). `auth.role()` devolve o papel do
-  -- JWT; para chamada com service key vem 'service_role'.
+  -- Chamador NAO identificado = `service_role` (a service key nao carrega `sub`,
+  -- entao `auth.uid()` e NULL) ou conexao DIRETA ao banco (SQL editor do
+  -- Lovable, psql), que nem passa por PostgREST.
   --
-  -- `IS NULL` = conexao DIRETA (SQL editor do Lovable, psql), que nao passa por
-  -- PostgREST e por isso nao tem claim de role. Toda chamada pela API tem role
-  -- (`anon`, `authenticated` ou `service_role`), entao NULL nao e alcancavel
-  -- pela web — e quem ja esta com conexao direta ao banco nao precisa desta
-  -- trava para nada.
+  -- Testar `auth.uid()` e nao `auth.role()` de proposito: e a forma que a outra
+  -- trava do repo usa (`fn_lock_privileged_cliente_cols`,
+  -- 20260801130000:167-170) — escopa a restricao a quem FOI identificado, em vez
+  -- de isentar por ausencia de um claim. Nao depende de nenhuma afirmacao minha
+  -- sobre o que o PostgREST garante no JWT.
   --
-  -- Sem este escape a trava vira uma armadilha: o ramo de UPDATE abaixo
-  -- RESTAURA o valor antigo, entao `UPDATE pedidos SET b2bwave_order_id = NULL`
-  -- rodado no SQL editor seria silenciosamente revertido — e o SQL editor e o
-  -- unico caminho que o dono usa. A propria consulta de diagnostico no topo
-  -- deste arquivo manda procurar pedidos forjados; sem o escape, nao haveria
-  -- como limpa-los depois.
-  IF auth.role() IS NULL OR auth.role() = 'service_role' THEN
+  -- Sem este escape a trava vira armadilha: o ramo de UPDATE abaixo RESTAURA o
+  -- valor antigo, entao `UPDATE pedidos SET b2bwave_order_id = NULL` rodado no
+  -- SQL editor seria silenciosamente revertido — e o SQL editor e o unico
+  -- caminho que o dono usa. A consulta de diagnostico no topo deste arquivo
+  -- manda procurar pedidos forjados; sem o escape, nao haveria como limpa-los.
+  IF auth.uid() IS NULL THEN
     RETURN NEW;
   END IF;
 
-  -- Qualquer outro chamador (cliente, staff pela tela, SQL do admin) NAO define
-  -- este campo. Zera em silencio em vez de recusar: recusar quebraria o insert
+  -- Qualquer outro chamador IDENTIFICADO (cliente, staff pela tela) NAO define
+  -- este campo. O SQL do admin nao cai aqui — ele e o caso isento acima. Zera em silencio em vez de recusar: recusar quebraria o insert
   -- legitimo de quem mandar a coluna sem querer, e o efeito desejado — nao ser
   -- isento dos recalculos — se obtem zerando.
   IF TG_OP = 'INSERT' THEN

@@ -34,8 +34,8 @@
 -- a tela de admin cria pedido com `status: "submitted"` de proposito
 -- (`src/pages/admin/OrderDetail.tsx:406`), e travar isso quebraria o pedido
 -- manual. O Checkout do cliente NAO manda `status` nem `is_paid`
--- (`src/pages/portal/Checkout.tsx:595-610`), entao o caminho legitimo do portal
--- nao muda em nada.
+-- (`src/pages/portal/Checkout.tsx`, bloco do insert do pedido), entao o portal
+-- so muda no que este arquivo forca de proposito.
 --
 -- ROLLBACK e VERIFICACAO no fim.
 -- ============================================================================
@@ -51,7 +51,7 @@
 --   FROM public.pedidos
 --   WHERE b2bwave_order_id IS NULL
 --     AND (is_paid IS TRUE OR payment_intent_id IS NOT NULL
---          OR status <> 'recebido')
+--          OR status <> 'submitted')
 --   ORDER BY created_at DESC;
 -- ---------------------------------------------------------------------------
 
@@ -66,17 +66,28 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'pedidos'
-      AND column_name = 'notificavel'
+      AND column_name IN ('notificavel', 'data_origem')
+    HAVING count(*) = 2
   ) THEN
-    RAISE EXCEPTION 'Rode 20260825200000_pedido_notificavel.sql ANTES desta migration (falta pedidos.notificavel).';
+    RAISE EXCEPTION 'Rode 20260825200000_pedido_notificavel.sql ANTES desta migration (faltam pedidos.notificavel/data_origem).';
   END IF;
 END $gate$;
 
 CREATE OR REPLACE FUNCTION public.fn_lock_pedido_cols()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-  -- Mesmo criterio da 20260825230000: `IS NULL` e conexao direta ao banco.
-  IF auth.role() IS NULL OR auth.role() = 'service_role' THEN
+  -- Chamador NAO identificado = `service_role` (a service key nao carrega `sub`,
+  -- entao `auth.uid()` e NULL) ou conexao DIRETA ao banco (SQL editor do
+  -- Lovable, psql), que nem passa por PostgREST.
+  --
+  -- Testar `auth.uid()` e nao `auth.role()` de proposito: e a forma que a outra
+  -- trava do repo usa (`fn_lock_privileged_cliente_cols`,
+  -- 20260801130000:167-170) — escopa a restricao a quem FOI identificado, em vez
+  -- de isentar por ausencia de um claim. Nao depende de nenhuma afirmacao minha
+  -- sobre o que o PostgREST garante no JWT.
+  --
+  -- Mesmo criterio da 20260825230000.
+  IF auth.uid() IS NULL THEN
     RETURN NEW;
   END IF;
 
@@ -89,7 +100,20 @@ BEGIN
   NEW.payment_intent_id := NULL;
 
   -- Maquina de estado. Todo pedido do portal comeca no inicio.
-  NEW.status := 'recebido'::public.pedido_status;
+  --
+  -- 'submitted', NAO 'recebido'. Eu tinha escrito 'recebido' — que e valor
+  -- LEGADO, migrado para fora em 20260622170000:15-18 (`SET DEFAULT 'submitted'`
+  -- + `UPDATE ... WHERE status='recebido'`). Ele so sobrevive no mapa LEGACY de
+  -- `src/lib/orderStatuses.ts:22`, para exibir pedido antigo.
+  --
+  -- O estrago seria silencioso: `src/pages/portal/Pedidos.tsx:91` e `:238`
+  -- filtram com `.eq("status", ...)` nos valores canonicos, entao o CLIENTE
+  -- filtrando "Submitted" nao veria nenhum pedido novo dele. E
+  -- `supabase/functions/api/index.ts:127-129` filtra a coluna crua, entao a
+  -- integracao externa tambem perderia os pedidos do portal. O admin escaparia
+  -- por sorte, porque normaliza com `canonicalStatus` antes de exibir — ou seja,
+  -- o dado ficaria errado e a tela esconderia.
+  NEW.status := 'submitted'::public.pedido_status;
 
   -- Marcas do incidente dos SMS (20260825200000). Deixar o cliente escrever
   -- `data_origem` seria devolver a ele o controle do "nada retroativo".
@@ -159,7 +183,7 @@ COMMIT;
 --   -- (ordem alfabetica da listagem; a EXECUCAO segue a mesma ordem)
 --
 -- 2) O portal continua criando pedido: feche um pedido de teste pelo site e
---    confira que ele nasce `status = 'recebido'`, `is_paid = false`.
+--    confira que ele nasce `status = 'submitted'`, `is_paid = false`.
 --
 -- 3) O admin continua criando pedido manual com `status = 'submitted'`.
 -- ---------------------------------------------------------------------------
