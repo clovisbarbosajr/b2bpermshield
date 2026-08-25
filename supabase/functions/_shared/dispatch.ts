@@ -61,7 +61,18 @@ export async function dispatchEvent(db: Db, event: string, vars: Record<string, 
   // funcao devolve ok:true/sent:0. Ou seja, ninguem receberia nada e ninguem
   // seria avisado, com o canal visivelmente ligado na tela.
   const { data: channels, error: chErr } = await db.from("notification_channels").select("*");
-  if (chErr) throw new Error("falha ao ler notification_channels: " + chErr.message);
+  if (chErr) {
+    // Deixa rastro ANTES de lancar. Este era o unico caminho de nao-envio sem
+    // registro no Notifications Log — e o throw vira 500, que TODOS os chamadores
+    // do front engolem com `.catch(() => {})`. Sem esta linha, a falha total de
+    // notificacao ficava invisivel na tela E no log.
+    // Em try/catch proprio: se o banco esta fora, gravar o log tambem falha, e
+    // nesse caso o que importa e o throw abaixo, nao o log.
+    try {
+      await logRow(db, event, "-", "-", { ok: false, error: "falha ao ler notification_channels: " + chErr.message }, vars);
+    } catch { /* banco fora: segue pro throw */ }
+    throw new Error("falha ao ler notification_channels: " + chErr.message);
+  }
   const ch = Object.fromEntries((channels ?? []).map((c: any) => [c.id, c]));
 
   const { data: evt } = await db.from("notification_events").select("*").eq("id", event).maybeSingle();

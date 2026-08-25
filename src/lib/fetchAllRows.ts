@@ -6,9 +6,13 @@
  * relatórios isso é pior que um erro — o total sai plausível e errado (some a
  * venda mais antiga, ou a mais nova, dependendo do `order`).
  *
+ * SEMPRE passe um `.order()` por coluna UNICA (normalmente `id`) — ver o aviso
+ * abaixo. O exemplo aqui ensinava o padrao errado.
+ *
  * Uso:
  *   const itens = await fetchAllRows((from, to) =>
- *     supabase.from("pedido_itens").select("pedido_id, quantidade").range(from, to));
+ *     supabase.from("pedido_itens").select("pedido_id, quantidade")
+ *       .order("id", { ascending: true }).range(from, to));
  */
 // IMPORTANTE para quem chamar: passe SEMPRE um `.order()` por coluna unica
 // (normalmente `id`). Isto aqui pagina com `.range()`, que vira LIMIT/OFFSET, e

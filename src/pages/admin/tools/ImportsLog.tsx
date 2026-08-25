@@ -24,7 +24,9 @@ const ImportsLog = () => {
       const { data, error, count } = await supabase
         .from("import_logs")
         .select("*", { count: "exact" })
+        // Desempate unico: OFFSET sem ordem estavel repete/pula linha.
         .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
         .range(from, to);
 
       if (!error) {

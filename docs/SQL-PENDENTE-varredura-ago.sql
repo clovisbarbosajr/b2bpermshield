@@ -28,6 +28,12 @@ AS $$
   SELECT DISTINCT ON (l.user_email) l.user_email, l.user_name
   FROM public.activity_logs l
   WHERE l.user_email IS NOT NULL AND l.user_email <> ''
+    -- SECURITY DEFINER ignora o RLS da tabela (que e admin-only), entao a
+    -- checagem de papel precisa estar AQUI DENTRO. Sem esta linha, qualquer
+    -- cliente logado — e o cadastro e aberto — chamaria a RPC direto e receberia
+    -- o e-mail e o nome de todo o staff. "A tela e protegida" nao basta: a RPC
+    -- nao e a tela.
+    AND public.has_role(auth.uid(), 'admin'::app_role)
   ORDER BY l.user_email, l.created_at DESC;   -- o nome mais recente de cada email
 $$;
 

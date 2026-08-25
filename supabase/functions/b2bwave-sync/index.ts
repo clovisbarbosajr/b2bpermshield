@@ -271,7 +271,20 @@ async function upsertOrder(
   const orderId = ins.data.id;
   existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: quantidade });
   if (itemRows.length > 0) {
-    await db.from("pedido_itens").insert(itemRows.map((r) => ({ ...r, pedido_id: orderId })));
+    // Mesmo buraco do caminho de UPDATE, e pelo mesmo motivo: sem checar o erro,
+    // um pedido NOVO ficava com zero itens e retornava "created" — e como o
+    // comparador `changed` so olha status/total/subtotal/quantidade_total, todo
+    // ciclo seguinte devolvia "skipped". Ficava vazio para sempre, sem nem
+    // aparecer no contador de erros.
+    //
+    // Zerar `quantidade_total` faz o proximo ciclo ver diferenca e refazer.
+    // Seguro: os triggers de recalculo pulam pedido com b2bwave_order_id.
+    const insItens = await db.from("pedido_itens").insert(itemRows.map((r) => ({ ...r, pedido_id: orderId })));
+    if (insItens.error) {
+      await db.from("pedidos").update({ quantidade_total: 0 }).eq("id", orderId);
+      existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: 0 });
+      return "error";
+    }
   }
   // Notifica só pedidos NOVOS e RECENTES (evita spam de milhares na recuperação).
   if (opts.notify && CRON_SECRET) {

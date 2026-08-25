@@ -76,11 +76,18 @@ const Pedidos = () => {
       setLoading(true);
       let q = supabase.from("pedidos").select("*", { count: "exact" })
         .eq("cliente_id", clienteId)
+        // Desempate unico: OFFSET sem ordem estavel repete/pula linha entre
+        // paginas — o cliente veria o mesmo pedido duas vezes, ou nenhuma.
         .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
         .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
-      if (applied.fromDate) q = q.gte("created_at", applied.fromDate);
-      if (applied.toDate) q = q.lte("created_at", applied.toDate + "T23:59:59");
+      // `created_at` e timestamptz e a tela exibe em hora LOCAL; literal sem
+      // offset e resolvido no fuso da sessao (UTC). Converter o limite do dia
+      // local para ISO alinha filtro e exibicao — senao o cliente filtra "ate
+      // hoje" e nao ve o pedido que acabou de fazer.
+      if (applied.fromDate) q = q.gte("created_at", new Date(`${applied.fromDate}T00:00:00`).toISOString());
+      if (applied.toDate) q = q.lte("created_at", new Date(`${applied.toDate}T23:59:59.999`).toISOString());
       if (applied.status && applied.status !== "_all") q = q.eq("status", applied.status as any);
       if (applied.reference) q = q.ilike("po_number", `%${applied.reference}%`);
 

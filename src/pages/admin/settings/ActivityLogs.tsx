@@ -130,7 +130,11 @@ const ActivityLogs = () => {
     let q = (supabase as any)
       .from("activity_logs")
       .select("*", { count: "exact" })
+      // `.order("id")` como desempate: created_at NAO e unico e a paginacao por
+      // OFFSET sem ordem estavel pode repetir ou pular linha entre as paginas —
+      // numa trilha de auditoria isso e inaceitavel.
       .order("created_at", { ascending: false })
+      .order("id", { ascending: true })
       .range(from, to);
 
     if (filterAction) q = q.eq("action", filterAction);
