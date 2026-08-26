@@ -1191,3 +1191,19 @@ quem manda no estoque durante a transicao); estoque de VARIANTE que nunca da
 baixa; `pedido_itens` aceitando produto desativado/privado; `ImportCustomers`
 duplicando cadastro; `ImportProductVariants` duplicando ao rodar duas vezes; e o
 parser de CSV ingenuo (`split(",")`) em 8 importadores.
+
+### 25/08 (noite, cont. 20) - PORTAO DE TIPOS NAO CHECAVA NADA
+
+- **ERRO MEU, e passou commitado** - um `error TS2345` do ImportOrders foi para o
+  repositorio. O `npm test` tinha dito OK.
+- **CAUSA** - eu tinha posto `tsc --noEmit -p tsconfig.json` no portao, mas esse
+  arquivo tem `"files": []` e SO referencias: ele nao checa nada e sai 0 sempre.
+  Quem checa de verdade e o `tsconfig.app.json`, que o `npm run build` usa.
+  Ou seja: por duas horas o portao de tipos deu confianca sem dar cobertura —
+  exatamente o defeito que o portao de edge function ja tinha tido duas vezes.
+- **CORRIGIDO** - `npm test` passou a usar `tsc -p tsconfig.app.json --noEmit`.
+- **PROVADO POR MUTANTE** - `const erroDeTipo: number = "texto"` em `src/lib/`
+  agora derruba o `npm test` (rc=2). Antes passava.
+- **PADRAO QUE SE REPETE, anotado** - as tres vezes que um portao meu falhou, o
+  sintoma foi o mesmo: ele SAIA ZERO sem ter olhado. Portao novo so vale depois
+  de um mutante provar que ele reprova.

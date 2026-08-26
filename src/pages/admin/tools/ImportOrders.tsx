@@ -93,7 +93,7 @@ const ImportOrders = () => {
       const quantityRaw = String(r["quantity"] ?? "").trim();
       const quantity = Number(quantityRaw);
       if (!Number.isInteger(quantity) || quantity < 1) {
-        res.push({ row: i + 2, status: "error", message: `Invalid quantity "${quantityRaw}" — must be a whole number of 1 or more` });
+        groupRowErrors.push({ row: i + 2, key, status: "error", message: `Invalid quantity "${quantityRaw}" — must be a whole number of 1 or more` });
         continue;
       }
       const price = parseFloat(r["price"]);
