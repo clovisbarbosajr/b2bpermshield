@@ -52,6 +52,43 @@ jogaria fora a autenticação inteira.
 
 Não fiz nada disso: o dono pediu para subir sem alterar. Está subido, intacto.
 
+### P3. Domínio próprio — `b2b.permshield.com`
+
+Pedido do dono (26/ago): sair de `b2bpermshield.lovable.app` /
+`b2bpermshield.vercel.app` para **`b2b.permshield.com`**, com os caminhos de
+admin e de cliente junto.
+
+**Decisão que falta:** subdomínio ou caminho?
+
+- `b2b.permshield.com/admin-login` e `/customers-login` — é o que o código já
+  faz hoje, e não muda uma linha. Recomendado.
+- `admin.b2b.permshield.com` — vira outro domínio, e aí cada um precisa de
+  entrada de DNS, certificado e, principalmente, **entra separado na lista de
+  redirecionamento do Auth**. Mais trabalho e mais lugar para errar.
+
+**O que quebra calado se for esquecido — esta é a parte que importa:**
+
+1. **Supabase Auth → Site URL e Redirect URLs.** O link de recuperação de senha
+   e o de acesso único são gerados com essa URL **embutida**. Trocar o domínio
+   sem atualizar essa lista faz todo e-mail de recuperação apontar para o
+   endereço antigo. O cliente clica e não entra — e não há nada na tela que
+   explique. É a falha mais provável desta mudança.
+2. **SPF, DKIM e DMARC.** Hoje estão registrados como "fora do alcance" na
+   seção 5 justamente porque o domínio não é do dono. Com `permshield.com` isso
+   deixa de valer: passam a ser **dele**, e sem eles o e-mail do sistema cai em
+   spam. Configurar junto, não depois de os clientes reclamarem.
+3. **CSP em `vercel.json`.** Conferir se alguma diretiva referencia o host
+   antigo.
+
+**O que NÃO muda:** a URL do Supabase (`bnicfvxvyblzzatvursw.supabase.co`), que
+aparece nos gatilhos do banco. É o endereço do banco, não do site.
+
+**Ordem sugerida:** DNS → certificado → Auth (Site URL + Redirect URLs) → SPF/
+DKIM/DMARC → publicar → testar recuperação de senha de ponta a ponta, com
+e-mail real, antes de anunciar o endereço novo.
+
+---
+
 ### P2. Cloudflare Turnstile nas telas de login e cadastro
 
 Ideia do dono (26/ago): pôr o desafio do Cloudflare para bloquear robô sozinho e
