@@ -57,7 +57,7 @@ import AdminProductExport from "./pages/admin/ProductExport";
 import AdminBanners from "./pages/admin/Banners";
 
 // Tools sub-pages
-import PdfCatalog from "./pages/admin/tools/PdfCatalog";
+// import PdfCatalog from "./pages/admin/tools/PdfCatalog";  // rota comentada abaixo
 import ImportCustomerPrices from "./pages/admin/tools/ImportCustomerPrices";
 import ImportCustomers from "./pages/admin/tools/ImportCustomers";
 import ImportAddresses from "./pages/admin/tools/ImportAddresses";
@@ -91,13 +91,13 @@ import SetupApp from "./pages/admin/settings/SetupApp";
 import PaymentOptions from "./pages/admin/settings/PaymentOptions";
 import ShippingOptions from "./pages/admin/settings/ShippingOptions";
 import EditPassword from "./pages/admin/settings/EditPassword";
-import QuickLinks from "./pages/admin/settings/QuickLinks";
+// import QuickLinks from "./pages/admin/settings/QuickLinks";  // rota comentada abaixo
 import ProductStatuses from "./pages/admin/settings/ProductStatuses";
 import ProductStatusRules from "./pages/admin/settings/ProductStatusRules";
 import PrivacyGroups from "./pages/admin/settings/PrivacyGroups";
 import Coupons from "./pages/admin/settings/Coupons";
 import SalesTax from "./pages/admin/settings/SalesTax";
-import MeasurementUnit from "./pages/admin/settings/MeasurementUnit";
+// import MeasurementUnit from "./pages/admin/settings/MeasurementUnit";  // rota comentada abaixo
 import CompanyActivities from "./pages/admin/settings/CompanyActivities";
 import UsersManagement from "./pages/admin/settings/UsersManagement";
 import ActivityLogs from "./pages/admin/settings/ActivityLogs";
@@ -105,11 +105,10 @@ import WarehouseSettings from "./pages/admin/settings/WarehouseSettings";
 import EmailSettings from "./pages/admin/settings/EmailSettings";
 import Notificacoes from "./pages/admin/settings/Notificacoes";
 import NotificacoesLog from "./pages/admin/settings/NotificacoesLog";
-import ExtraFields from "./pages/admin/settings/ExtraFields";
-import ApiKeys from "./pages/admin/settings/ApiKeys";
+// import ExtraFields from "./pages/admin/settings/ExtraFields";  // rota comentada abaixo
+// import ApiKeys from "./pages/admin/settings/ApiKeys";  // rota comentada abaixo
 import B2BWaveSync from "./pages/admin/settings/B2BWaveSync";
-import OauthApplications from "./pages/admin/settings/OauthApplications";
-
+// import OauthApplications from "./pages/admin/settings/OauthApplications";  // rota comentada abaixo
 const queryClient = new QueryClient();
 
 // Admin-only routes
@@ -190,7 +189,10 @@ const App = () => (
               <Route path="/admin/producao/dashboard" element={<AW><ProducaoDashboard /></AW>} />
 
               {/* Tools */}
-              <Route path="/admin/tools/pdf-catalog" element={<A><PdfCatalog /></A>} />
+              {/* Rota removida junto com o item de menu (ver AdminLayout).
+                * A tela sempre da erro: manda `type: "catalog"` e a funcao
+                * `generate-pdf` so aceita `pedido_id`.
+                * <Route path="/admin/tools/pdf-catalog" element={<A><PdfCatalog /></A>} /> */}
               <Route path="/admin/tools/import-customer-prices" element={<A><ImportCustomerPrices /></A>} />
               <Route path="/admin/tools/import-customers" element={<A><ImportCustomers /></A>} />
               <Route path="/admin/tools/import-addresses" element={<A><ImportAddresses /></A>} />
@@ -222,19 +224,48 @@ const App = () => (
               <Route path="/admin/settings/setup-app" element={<A><SetupApp /></A>} />
               <Route path="/admin/settings/payment-options" element={<A><PaymentOptions /></A>} />
               <Route path="/admin/settings/shipping-options" element={<A><ShippingOptions /></A>} />
-              <Route path="/admin/settings/quick-links" element={<A><QuickLinks /></A>} />
+              {/* TELA REMOVIDA em 25/ago/2026 — nao fazia nada.
+                * Os links nao aparecem em menu nem tela nenhuma. A descricao promete 'acesso rapido para clientes', e nenhuma pagina do portal consulta a tabela.
+                * PARA VOLTAR: o layout do portal (ou o painel do cliente) teria que ler `quick_links` e renderizar, com um mapeamento do campo `icone`.
+                *
+                * Ja estava fora do menu; isto fecha o link direto.
+                * <Route path="/admin/settings/quick-links" element={<A><QuickLinks /></A>} />
+                */}
               <Route path="/admin/settings/product-statuses" element={<A><ProductStatuses /></A>} />
               <Route path="/admin/settings/product-status-rules" element={<A><ProductStatusRules /></A>} />
               <Route path="/admin/settings/privacy-groups" element={<A><PrivacyGroups /></A>} />
               <Route path="/admin/settings/coupons" element={<A><Coupons /></A>} />
               <Route path="/admin/settings/sales-tax" element={<A><SalesTax /></A>} />
-              <Route path="/admin/settings/measurement-unit" element={<A><MeasurementUnit /></A>} />
+              {/* TELA REMOVIDA em 25/ago/2026 — nao fazia nada.
+                * As unidades cadastradas aqui nao sao usadas. `produtos.unidade_venda` e digitacao LIVRE (um campo de texto no ProductEdit) ou vem do sync do B2BWave — sem nenhuma ligacao com esta tabela. Cuidado com a armadilha: existe `produtos.unidade_medida_id`, mas ela aponta para `product_options`, NAO para `measurement_units`, e tambem nao e lida por ninguem.
+                * PARA VOLTAR: trocar o campo de texto de `unidade_venda` no ProductEdit por uma lista alimentada por `measurement_units`.
+                *
+                * Ja estava fora do menu; isto fecha o link direto.
+                * <Route path="/admin/settings/measurement-unit" element={<A><MeasurementUnit /></A>} />
+                */}
               <Route path="/admin/settings/company-activities" element={<A><CompanyActivities /></A>} />
-              <Route path="/admin/settings/extra-fields" element={<A><ExtraFields /></A>} />
-              <Route path="/admin/settings/api-keys" element={<A><ApiKeys /></A>} />
+              {/* TELA REMOVIDA em 25/ago/2026 — nao fazia nada.
+                * Os campos definidos aqui nao aparecem em formulario nenhum — nem checkout, nem cadastro, nem produto. E NAO EXISTE tabela de valores: mesmo que a tela renderizasse os campos, nao haveria onde gravar a resposta.
+                * PARA VOLTAR: criar `extra_field_values (extra_field_id, entidade, entidade_id, valor)` e um componente que consulte `extra_fields` por `view_location` em cada formulario.
+                *
+                * Ja estava fora do menu; isto fecha o link direto.
+                * <Route path="/admin/settings/extra-fields" element={<A><ExtraFields /></A>} />
+                */}
+              {/* TELA REMOVIDA em 25/ago/2026 — nao fazia nada.
+                * As chaves geradas aqui nao autenticam nada. A API real compara o header `x-api-token` com `configuracoes.api_token` (`functions/api/index.ts`); uma chave `bj_...` desta tela devolve 403. Os `scopes` e `allowed_ips` tambem nao sao lidos — o token unico da acesso total.
+                * PARA VOLTAR: a edge `api` teria que procurar o token recebido em `api_keys` (checando `ativo`, `allowed_ips` e `scopes`) em vez de comparar com `configuracoes.api_token`.
+                *
+                * Ja estava fora do menu; isto fecha o link direto.
+                * <Route path="/admin/settings/api-keys" element={<A><ApiKeys /></A>} />
+                */}
               <Route path="/admin/settings/b2bwave-sync" element={<A><B2BWaveSync /></A>} />
-              <Route path="/admin/settings/oauth-applications" element={<A><OauthApplications /></A>} />
-
+              {/* TELA REMOVIDA em 25/ago/2026 — nao fazia nada.
+                * Nao existe endpoint OAuth neste sistema. Nenhuma das edge functions fala `/authorize` ou `/token`, e o `client_id`/`client_secret` gerados aqui nao sao validados por nada. O `redirect_uri` padrao aponta para um app mobile que nao existe.
+                * PARA VOLTAR: precisaria de uma edge function OAuth2 completa (authorize + token + tabela de codigos), validando contra `oauth_applications`. Hoje nao ha nem o esqueleto.
+                *
+                * Ja estava fora do menu; isto fecha o link direto.
+                * <Route path="/admin/settings/oauth-applications" element={<A><OauthApplications /></A>} />
+                */}
               {/* Settings — staff COM checagem de permissão por papel */}
               <Route path="/admin/settings/edit-password" element={<S><EditPassword /></S>} />
               {/* ADMIN-ONLY desde 25/ago/2026. As duas telas fazem `select("*")`

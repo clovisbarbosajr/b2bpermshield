@@ -91,7 +91,22 @@ const adminNavEntries: NavEntry[] = [
   {
     label: "Tools", icon: Wrench,
     children: [
-      { to: "/admin/tools/pdf-catalog", icon: FileDown, label: "PDF Catalog" },
+      // REMOVIDO DO MENU em 25/ago/2026: a tela SEMPRE da erro.
+      //
+      // Ela chama `generate-pdf` com `{ type: "catalog", categories, price_list_id,
+      // statuses, ... }`, e a funcao so aceita `pedido_id` — responde
+      // `400 pedido_id is required` e a tela mostra "Error: ...". Nunca gerou
+      // catalogo nenhum.
+      //
+      // Sao DUAS falhas encadeadas: mesmo que a funcao aceitasse, a tela espera
+      // `data.html` e a funcao devolve `{ pdf_base64, filename }` — o
+      // `window.open` seria pulado em silencio e ainda assim apareceria
+      // "Catalog generated!".
+      //
+      // PARA VOLTAR: descomente ISTO **e** crie o ramo `type === "catalog"` em
+      // `supabase/functions/generate-pdf/index.ts`, que hoje so sabe montar PDF
+      // de um pedido. Sem as duas pontas, volta a ser um botao que so erra.
+      // { to: "/admin/tools/pdf-catalog", icon: FileDown, label: "PDF Catalog" },
       { to: "/admin/tools/import-product-discounts", icon: Percent, label: "Import Product Discounts" },
       { to: "/admin/tools/import-related-products", icon: Package, label: "Import Related Products" },
       // OCULTOS (rotas/telas intactas — ver MENU_OCULTO.md):

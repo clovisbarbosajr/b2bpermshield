@@ -1558,3 +1558,39 @@ banco (7 telas gravam certo). Corrigido — 3 linhas.
   a mesma tabela com os nomes CERTOS. As duas ja estao fora do menu.
 - `PdfCatalog` e a UNICA das telas mortas ainda VISIVEL no menu, e ela sempre da
   erro: manda `type: "catalog"` e a funcao so aceita `pedido_id`. Prioridade.
+
+### 25/08 (noite, cont. 32) - LEVA E fechada: 6 telas que nao faziam nada
+
+Cada uma confirmada pelo cacador ANTES de mexer, com o motivo e o caminho de
+volta escritos no proprio lugar de onde saiu.
+
+- **`PdfCatalog`** — a UNICA que ainda estava VISIVEL no menu, e ela SEMPRE dava
+  erro. Manda `{ type: "catalog", categories, price_list_id, ... }` e a funcao
+  `generate-pdf` so aceita `pedido_id`: responde `400` e a tela mostra "Error".
+  Sao duas falhas encadeadas — mesmo que a funcao aceitasse, a tela espera
+  `data.html` e a funcao devolve `{ pdf_base64, filename }`, entao o download
+  seria pulado em silencio e ainda assim apareceria "Catalog generated!".
+  Removida do MENU e da ROTA.
+- **`ApiKeys`** — as chaves geradas ali nao autenticam nada: a API real compara
+  `x-api-token` com `configuracoes.api_token`. Uma chave `bj_...` devolve 403.
+  `scopes` e `allowed_ips` tambem nao sao lidos — o token unico da acesso total.
+- **`OauthApplications`** — nao existe endpoint OAuth no sistema. Nenhuma edge
+  function fala `/authorize` ou `/token`.
+- **`ExtraFields`** — os campos nao aparecem em formulario nenhum, e NAO EXISTE
+  tabela de valores: mesmo renderizando, nao haveria onde gravar a resposta.
+- **`QuickLinks`** — os links nao aparecem em lugar nenhum do portal.
+- **`MeasurementUnit`** — `produtos.unidade_venda` e digitacao LIVRE ou vem do
+  sync; nao tem ligacao com essa tabela. Armadilha registrada: existe
+  `produtos.unidade_medida_id`, mas aponta para `product_options`, NAO para
+  `measurement_units` — nem o FK que PARECIA ligar as duas coisas liga.
+
+As cinco ultimas ja estavam fora do menu; o que fechei foi o LINK DIRETO.
+
+**EVIDENCIA INDEPENDENTE de que sao mortas:** as policies anonimas de
+`measurement_units`, `extra_fields` e `quick_links` foram derrubadas em
+`20260802140000` e nada quebrou. Se houvesse consumidor, teria quebrado em agosto.
+
+**NAO REMOVIDO, apesar de parecer morto:** `configuracoes.moeda` e
+`fuso_horario`. Dentro do app ninguem le (moeda e "USD" fixo, datas usam o fuso
+do navegador), MAS a edge `api` os devolve em `GET /config`. Remover as colunas
+derrubaria esse endpoint para qualquer integrador externo.
