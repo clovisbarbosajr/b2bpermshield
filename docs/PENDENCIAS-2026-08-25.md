@@ -31,14 +31,20 @@ Cada arquivo tem, dentro dele: consulta de **backup** para rodar antes, o
 
 ### 1.3 Pedir deploy das edge functions no chat do Lovable
 
-`send-email` · `stripe-checkout` · `register-customer` · `company-member`
+`send-email` · `stripe-checkout` · `register-customer` · `company-member` · `b2bwave-sync`
+
+`b2bwave-sync` foi acrescentada depois: o `diff_orders` (a comparação de 1.4)
+mudou cinco vezes nesta varredura. Rodar a comparação contra a versão antiga
+publicada daria "idêntico" com o critério errado.
 
 Push no GitHub **não** publica edge function. Sem este passo, as correções de
 e-mail, pagamento, cadastro e equipe não entram.
 
 ### 1.4 Avisar, para eu rodar a comparação com o B2BWave
 
-Comparo pedido a pedido, só leitura, sem enviar nada. **A sincronização só volta
+Comparo pedido a pedido, só leitura, sem enviar nada — conferido: o
+`diff_orders` não tem `insert`/`update`/`upsert`/`delete`, e pagina os dois
+lados (foi a falta de paginação que causou o incidente dos 1.508 SMS). **A sincronização só volta
 depois disso, e a notificação só quando o dono mandar.**
 
 ---
@@ -116,6 +122,7 @@ site com eles num navegador: a primeira versão quebrava as fontes.
 | Enumeração por **tempo** de resposta no login por e-mail | E-mail inexistente responde em duas consultas; cliente ativo passa por RPC, geração de link e envio síncrono. Fechar exige responder antes de enviar (fila) |
 | Cupom aplicado por UPDATE de staff não revalida | Só o INSERT valida. Risco interno (exige papel de staff) |
 | Isenções por `b2bwave_order_id` em ~6 gatilhos | Concessão temporária à fonte externa. **Remover no desligamento do B2BWave** |
+| Gatilhos que o sync aciona | Conferidos um a um em `scripts/checar-sync-preflight.py`; os 8 sem isenção automática têm veredito gravado lá. Rodar de novo antes de religar |
 | Reserva presa se o pedido for apagado sem apagar itens antes | Herdado do comportamento do produto-pai; sem caminho de tela |
 
 ---
