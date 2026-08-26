@@ -197,13 +197,39 @@ const ShippingOptions = () => {
             </div>
           </div>
 
-          <div>
-            <Label>Rule Type</Label>
-            <Select value={form.tipo_regra} onValueChange={v => setForm({ ...form, tipo_regra: v })}>
-              <SelectTrigger className="max-w-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>{RULE_TYPES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
+          {/* CAMPO REMOVIDO DA TELA em 25/ago/2026.
+            *
+            * O seletor oferecia quatro comportamentos — "Per Order flat rate",
+            * "Per Order Net Value", "Per Item flat rate", "Per Item flat value" —
+            * e o valor escolhido NAO era lido em lugar nenhum: nem no front, nem
+            * no `fn_pedido_total_appside`, que calcula o frete a partir de
+            * `preco`, `gratis_acima_de` e `condicoes`.
+            *
+            * Ou seja: configurar "Per Item flat rate $10" cobrava $10 num pedido
+            * de 20 itens. O dono achava que tinha um controle que nao existia.
+            *
+            * O que o sistema FAZ hoje e sempre "por pedido, pela faixa de valor"
+            * — que e justamente uma das quatro opcoes. A coluna `tipo_regra`
+            * continua no banco e continua vindo do sync; so parou de ser
+            * oferecida como se mudasse alguma coisa.
+            *
+            * PARA VOLTAR: descomente ISTO **e** implemente o calculo por item em
+            * `fn_pedido_total_appside` (multiplicar pela quantidade total do
+            * pedido) e no `calcShippingCost` do Checkout. Sem as duas pontas,
+            * volta a ser fantasma.
+            *
+            * <div>
+            *   <Label>Rule Type</Label>
+            *   <Select value={form.tipo_regra} onValueChange={v => setForm({ ...form, tipo_regra: v })}>
+            *     <SelectTrigger className="max-w-xs"><SelectValue /></SelectTrigger>
+            *     <SelectContent>{RULE_TYPES.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+            *   </Select>
+            * </div>
+            */}
+          <p className="text-xs text-muted-foreground">
+            Shipping is charged <strong>per order</strong>, using the price and the
+            conditions below (free above a threshold, or by state/value range).
+          </p>
 
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -335,7 +361,8 @@ const ShippingOptions = () => {
               <TableHead>Name</TableHead>
               <TableHead>Vat Class</TableHead>
               <TableHead>Default</TableHead>
-              <TableHead>Rule Type</TableHead>
+              {/* Cabecalho removido junto com a coluna. Ver o comentario no
+                * formulario: o valor nao afetava o calculo. */}
               <TableHead>Private</TableHead>
               <TableHead />
             </TableRow>
@@ -362,7 +389,8 @@ const ShippingOptions = () => {
                     {r.padrao ? "Default ✓" : "Set default"}
                   </Button>
                 </TableCell>
-                <TableCell>{r.tipo_regra ?? "Per Order Net Value"}</TableCell>
+                {/* Coluna removida junto com o seletor — mostrava um valor que
+                  * nao afeta o calculo. Ver o comentario no formulario. */}
                 <TableCell>
                   {r.privado
                     ? <Check className="h-4 w-4 text-green-500" />

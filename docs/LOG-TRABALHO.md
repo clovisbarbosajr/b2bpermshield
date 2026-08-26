@@ -1414,3 +1414,31 @@ Veredito: SEGURO COM RESSALVA nas duas. As ressalvas eram reais.
   e a assimetria do `GREATEST(0,...)` entre concluir e des-concluir.
 - **OPERACIONAL** - rodar a 320000 FORA DE PICO: o `ALTER TABLE` + backfill segura
   `ACCESS EXCLUSIVE` em `produto_variantes`, e a vitrine espera.
+
+### 25/08 (noite, cont. 27) - LEVA G: rotulo que escondia produto da loja
+
+- **CONFIRMADO E CORRIGIDO — o pior rotulo do sistema.** Em ProductStatuses, o
+  campo `permite_visualizar` estava rotulado **"View order"** — que se le como
+  "ver o pedido". O que ele faz de verdade: desmarcado, ESCONDE do catalogo todo
+  produto com aquele status (`Catalogo.tsx:170` filtra por ele). O dono desmarcava
+  achando que mexia na visualizacao do PEDIDO e sumia com produto da loja, sem
+  nenhum aviso. Agora: "Shows in store", com texto embaixo dizendo exatamente o
+  que acontece ao desmarcar. O mesmo no cabecalho da tabela.
+- **FEITO** - "Can order" virou "Can be ordered", e "Active" ganhou explicacao —
+  os tres checkboxes dessa tela pareciam a mesma coisa.
+
+- **LEVA E aplicada ao "Rule Type" do frete (B7)** - o seletor oferecia QUATRO
+  comportamentos ("Per Order flat rate", "Per Order Net Value", "Per Item flat
+  rate", "Per Item flat value") e o valor NAO era lido em lugar nenhum: nem no
+  front, nem no `fn_pedido_total_appside`, que calcula frete a partir de `preco`,
+  `gratis_acima_de` e `condicoes`. Configurar "Per Item $10" cobrava $10 num
+  pedido de 20 itens.
+  Removido da tela e do cabecalho da lista, comentado no lugar, com o passo para
+  voltar (descomentar E implementar nas DUAS pontas: gatilho do banco e
+  `calcShippingCost`). A coluna continua no banco e continua vindo do sync.
+  No lugar do seletor, uma frase dizendo o que o sistema realmente faz: cobra por
+  PEDIDO, pela faixa de valor.
+
+- **LIMITACAO DECLARADA** - nao consigo conferir estas duas telas no navegador:
+  sao de admin e exigem login, e criar/usar login esta fora do que eu faco.
+  Conferi por typecheck e build. A checagem visual fica com o dono.

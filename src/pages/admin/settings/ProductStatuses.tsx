@@ -59,8 +59,13 @@ const ProductStatuses = () => {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>View order</TableHead>
-                <TableHead>Can order?</TableHead>
+                {/* "View order" lia-se como "ver o pedido". O campo e
+                  * `permite_visualizar`, e desmarcar ESCONDE o produto do
+                  * catalogo (`Catalogo.tsx` filtra por ele). O dono desmarcava
+                  * achando que mexia na visualizacao do PEDIDO e sumia com
+                  * produto da loja. */}
+                <TableHead>Shows in store</TableHead>
+                <TableHead>Can be ordered</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -98,9 +103,18 @@ const ProductStatuses = () => {
               <div><Label>Color</Label><div className="flex gap-2"><Input type="color" value={form.cor} onChange={e => setForm({ ...form, cor: e.target.value })} className="w-16 h-10 p-1" /><Input value={form.cor} onChange={e => setForm({ ...form, cor: e.target.value })} /></div></div>
               <div><Label>Order</Label><Input type="number" value={form.ordem} onChange={e => setForm({ ...form, ordem: parseInt(e.target.value) || 0 })} /></div>
             </div>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.permite_visualizar} onChange={e => setForm({ ...form, permite_visualizar: e.target.checked })} /> View order</label>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.permite_comprar} onChange={e => setForm({ ...form, permite_comprar: e.target.checked })} /> Can order</label>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ativo} onChange={e => setForm({ ...form, ativo: e.target.checked })} /> Active</label>
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.permite_visualizar} onChange={e => setForm({ ...form, permite_visualizar: e.target.checked })} /> Shows in store</label>
+              <p className="text-xs text-muted-foreground pl-6">Unchecking this <strong>hides every product with this status from the catalog</strong>. Customers will not see them at all.</p>
+            </div>
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.permite_comprar} onChange={e => setForm({ ...form, permite_comprar: e.target.checked })} /> Can be ordered</label>
+              <p className="text-xs text-muted-foreground pl-6">Unchecked means the product is still visible, but cannot be added to an order.</p>
+            </div>
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ativo} onChange={e => setForm({ ...form, ativo: e.target.checked })} /> Active</label>
+              <p className="text-xs text-muted-foreground pl-6">Inactive statuses stay in the list but are no longer offered when editing a product.</p>
+            </div>
             <Button onClick={handleSave} disabled={saving} className="w-full">{saving ? "Saving..." : "Save"}</Button>
           </div>
         </DialogContent>
