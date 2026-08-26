@@ -1937,6 +1937,15 @@ Deno.serve(async (req) => {
           cliente_faltando: cliFaltando, cliente_sobrando: cliSobrando,
           cliente_status: cliStatus, cliente_bloqueio: cliBloqueio,
         },
+        // O QUE ESTE RELATORIO NAO OLHA. Vai no corpo da resposta de proposito:
+        // "diff_catalog: IDENTICO" lido sozinho vira "tudo esta sincronizado", que
+        // e a mesma armadilha de tratar leitura truncada como igualdade. O sync
+        // escreve 13 tabelas; entre esta e a `diff_orders`, quatro ficam de fora.
+        nao_comparado: {
+          tabelas: ["tabela_preco_itens", "categorias", "brands", "representantes",
+                    "privacy_groups", "company_activities", "pedido_itens"],
+          nota: "a mais cara delas e `tabela_preco_itens` (a regua de preco por cliente): divergencia ali sai dinheiro em todo pedido futuro",
+        },
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });
     }
