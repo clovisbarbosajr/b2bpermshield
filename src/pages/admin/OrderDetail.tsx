@@ -456,8 +456,20 @@ const OrderDetail = () => {
   const handleDeleteOrder = async () => {
     if (!order) return;
     if (!confirm("Are you sure you want to delete this order? This cannot be undone.")) return;
-    await supabase.from("pedido_itens").delete().eq("pedido_id", order.id);
-    await supabase.from("pedidos").delete().eq("id", order.id);
+    // DOIS deletes em sequencia. Se o segundo falhar, os ITENS ja foram e sobra
+    // um pedido com total e nenhuma linha — e a tela dizia "Order deleted".
+    // Falhar no primeiro tambem: antes seguia direto e apagava o pedido pai,
+    // deixando os itens orfaos.
+    const { error: itErr } = await supabase.from("pedido_itens").delete().eq("pedido_id", order.id);
+    if (itErr) {
+      toast.error("Could not delete the order items — nothing was removed: " + itErr.message);
+      return;
+    }
+    const { error: pedErr } = await supabase.from("pedidos").delete().eq("id", order.id);
+    if (pedErr) {
+      toast.error("The items were removed but the order itself could not be deleted: " + pedErr.message);
+      return;
+    }
     toast.success("Order deleted");
     log("deleted", "order", order.id, `Order #${order.numero || order.id}`);
     navigate("/admin/orders");

@@ -227,8 +227,16 @@ const AdminCategorias = () => {
 
   const sortAlphabetically = async () => {
     const sorted = [...categorias].sort((a, b) => a.nome.localeCompare(b.nome));
+    // Sao N escritas em sequencia. Se a de indice K falhar, as anteriores JA
+    // passaram: a ordenacao fica pela METADE, e antes a tela dizia "ordenado".
+    // Parar no primeiro erro e dizer ate onde foi e melhor que fingir sucesso.
     for (let i = 0; i < sorted.length; i++) {
-      await supabase.from("categorias").update({ ordem: i } as any).eq("id", sorted[i].id);
+      const { error } = await supabase.from("categorias").update({ ordem: i } as any).eq("id", sorted[i].id);
+      if (error) {
+        toast.error(`Sorting stopped at "${sorted[i].nome}" — the first ${i} were reordered: ${error.message}`);
+        fetchData();
+        return;
+      }
     }
     toast.success("Categories sorted alphabetically");
     fetchData();

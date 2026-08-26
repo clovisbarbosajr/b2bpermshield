@@ -102,8 +102,20 @@ const ShippingOptions = () => {
   };
 
   const setDefault = async (r: any) => {
-    await supabase.from("shipping_options").update({ padrao: false } as any).neq("id", r.id);
-    await supabase.from("shipping_options").update({ padrao: true } as any).eq("id", r.id);
+    // Duas escritas: tira o padrao de TODOS e poe no escolhido. Se a segunda
+    // falhar, o sistema fica SEM padrao nenhum — e a tela dizia que estava
+    // definido.
+    const { error: limpaErr } = await supabase.from("shipping_options").update({ padrao: false } as any).neq("id", r.id);
+    if (limpaErr) {
+      toast.error("Could not change the default — nothing was changed: " + limpaErr.message);
+      return;
+    }
+    const { error: poeErr } = await supabase.from("shipping_options").update({ padrao: true } as any).eq("id", r.id);
+    if (poeErr) {
+      toast.error(`No shipping option is set as default now — please pick one again: ${poeErr.message}`);
+      fetchData();
+      return;
+    }
     fetchData();
     toast.success(`"${r.nome}" set as default`);
   };

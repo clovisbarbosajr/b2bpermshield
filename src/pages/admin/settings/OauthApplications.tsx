@@ -125,19 +125,21 @@ const OauthApplications = () => {
 
   const handleDuplicate = async (r: any) => {
     const { id, created_at, updated_at, client_id, client_secret, ...rest } = r;
-    await (supabase.from("oauth_applications") as any).insert({
+    const { error } = await (supabase.from("oauth_applications") as any).insert({
       ...rest,
       nome: `${r.nome} (copy)`,
       client_id:     genClientId(),
       client_secret: genClientSecret(),
     });
+    if (error) { toast.error("Could not duplicate: " + error.message); return; }
     toast.success("Duplicated");
     fetchData();
   };
 
   const handleDelete = async (r: any) => {
     if (!confirm(`Delete "${r.nome}"?`)) return;
-    await (supabase.from("oauth_applications") as any).delete().eq("id", r.id);
+    const { error } = await (supabase.from("oauth_applications") as any).delete().eq("id", r.id);
+    if (error) { toast.error("Could not delete: " + error.message); return; }
     toast.success("Deleted");
     fetchData();
   };

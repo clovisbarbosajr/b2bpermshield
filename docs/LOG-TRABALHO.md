@@ -1325,3 +1325,46 @@ para TRUE — e o freio de mao.
   A leitura dos produtos-pai tambem truncava em 1000: do produto 1001 em diante
   a variante era descartada com "Parent product not found" — mensagem mentirosa,
   porque o produto existe. E o estoque agora e validado (era `parseInt` cru).
+
+### 25/08 (noite, cont. 25) - LEVA C fechada (C7) + LEVA D fechada
+
+**C7 - item de pedido aceitava produto desativado, privado ou nao-vendavel**
+
+- **CONFIRMADO** - a policy de INSERT em `pedido_itens` valida so a posse do
+  pedido; `produto_id` nao e olhado em lugar nenhum, e nenhum dos gatilhos que ja
+  rodam confere se o produto pode ser comprado. Tres buracos: produto desativado
+  (e `cliente_pode_ver_produto` tambem nao olha `ativo`), produto privado de
+  outro grupo, e status marcado como nao-vendavel — coluna que existe desde
+  marco/2026 e NUNCA apareceu em SQL nenhum, so no navegador.
+- **FEITO** - `20260825330000`. Isenta o sync (insert em lote: uma linha recusada
+  derrubaria todos os itens) e o staff (pedido manual precisa incluir item fora
+  do catalogo).
+- **DOIS ERROS MEUS, pegos por mim antes de entregar:**
+  1. `RAISE EXCEPTION 'msg %' NEW.x` sem a virgula — erro de sintaxe.
+  2. MAIS GRAVE: eu ia comparar `produtos.status_produto` cru com
+     `product_statuses.nome`. Um esta em PORTUGUES e o outro em INGLES; o front
+     traduz antes de comparar (`NAME_MAP` em `stock.ts`). Sem replicar a
+     traducao NADA casaria e, como a regra e conservadora ("nao achou, nao
+     bloqueia"), a trava nunca dispararia. Seria decoracao. A tabela de traducao
+     agora existe nos dois lados, com aviso cruzado em cada um.
+
+**LEVA D - 15 escritas que diziam "salvo" sem ter salvado**
+
+Varri o `src/` inteiro com script (escrita sem desestruturar `error`, seguida de
+`toast.success` sem `toast.error` no caminho). Achou 15; a anotacao previa 12.
+Todas corrigidas, e a varredura final volta ZERO.
+
+Os que mais doiam:
+- `UsersManagement` "Remove access": a tela dizia "acesso removido" e a pessoa
+  CONTINUAVA com o papel — o oposto do que o admin pediu.
+- `UsersManagement` criar usuario e `CustomerEdit` aprovar cliente / criar
+  funcionario: o LOGIN era criado mas o PAPEL nao. A pessoa recebe o e-mail,
+  define a senha, e nao consegue entrar em lugar nenhum.
+- `OrderDetail` apagar pedido: dois deletes em sequencia. Se o segundo falhasse,
+  os ITENS ja tinham ido e sobrava um pedido com total e nenhuma linha.
+- `ShippingOptions` "set as default": duas escritas. Se a segunda falhasse, o
+  sistema ficava SEM padrao nenhum, e a tela dizia que estava definido.
+- `portal/Conta`: o cliente atualizava nome e telefone, a tela confirmava, e nada
+  era salvo — inclusive o telefone que vai no pedido dele.
+- `Categorias` ordenar: N escritas em laco. Falha no meio deixava a ordenacao
+  pela METADE. Agora para no primeiro erro e diz ate onde foi.

@@ -136,7 +136,13 @@ const AdminOptions = () => {
   const removeValue = async (idx: number) => {
     const v = values[idx];
     if (v.id && !v.id.startsWith("temp-")) {
-      await supabase.from("option_values").delete().eq("id", v.id);
+      const { error } = await supabase.from("option_values").delete().eq("id", v.id);
+      if (error) {
+        // Sem isto, a linha sumia da TELA e continuava no banco: o usuario
+        // fechava a pagina achando que tinha removido, e o valor reaparecia.
+        toast.error("Could not remove: " + error.message);
+        return;
+      }
     }
     setValues(values.filter((_, i) => i !== idx));
     toast.success("Value removed");

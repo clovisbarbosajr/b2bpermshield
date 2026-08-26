@@ -112,7 +112,14 @@ const UsersManagement = () => {
 
   const handleDelete = async (u: StaffUser) => {
     if (!confirm(`Remove access for ${u.nome || u.email}?\nThis removes their role — their login account is kept.`)) return;
-    await supabase.from("user_roles").delete().eq("user_id", u.user_id);
+    const { error } = await supabase.from("user_roles").delete().eq("user_id", u.user_id);
+    if (error) {
+      // Sem isto, a tela dizia "acesso removido" e a pessoa CONTINUAVA com o
+      // papel — que e o oposto do que o admin acabou de pedir.
+      toast.error("Access was NOT removed: " + error.message);
+      fetchData();
+      return;
+    }
     toast.success("Access removed");
     fetchData();
   };
@@ -233,10 +240,18 @@ const UsersManagement = () => {
       ? DEFAULT_PERMISSIONS[createForm.role as "manager" | "warehouse"]
       : {};
 
-    await (supabase.from("user_roles") as any).upsert(
+    const { error: papelErr } = await (supabase.from("user_roles") as any).upsert(
       { user_id: userId, role: createForm.role, permissions: defaultPerms },
       { onConflict: "user_id" }
     );
+    if (papelErr) {
+      // O LOGIN ja foi criado; o que falhou foi o papel. Dizer as duas coisas,
+      // senao o admin tenta criar de novo e bate em "e-mail ja existe".
+      toast.error(`The login was created but the role was not assigned — the user cannot access anything yet: ${papelErr.message}`);
+      setCreating(false);
+      fetchData();
+      return;
+    }
 
     toast.success(`${createForm.role.charAt(0).toUpperCase() + createForm.role.slice(1)} user created`);
     setCreating(false);

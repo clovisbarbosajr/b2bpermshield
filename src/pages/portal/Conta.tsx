@@ -66,13 +66,26 @@ const Conta = () => {
     if (impersonatedCustomer?.user_id || user?.id) {
       const profileUserId = impersonatedCustomer?.user_id ?? user?.id;
       if (profileUserId) {
-        await supabase.from("profiles").update({ nome: profile.nome, telefone: profile.telefone }).eq("user_id", profileUserId);
+        const { error: perfErr } = await supabase.from("profiles")
+          .update({ nome: profile.nome, telefone: profile.telefone }).eq("user_id", profileUserId);
+        if (perfErr) {
+          setSaving(false);
+          toast.error("Could not save your profile: " + perfErr.message);
+          return;
+        }
       }
     }
 
-    await supabase.from("clientes").update({ nome: profile.nome, telefone: profile.telefone }).eq("id", cliente.id);
-
+    // Esta e a que importa: e a ficha que o pedido usa. Antes as DUAS escritas
+    // tinham o erro descartado, e o cliente saia achando que tinha atualizado o
+    // telefone de contato do pedido dele.
+    const { error: cliErr } = await supabase.from("clientes")
+      .update({ nome: profile.nome, telefone: profile.telefone }).eq("id", cliente.id);
     setSaving(false);
+    if (cliErr) {
+      toast.error("Could not save your details: " + cliErr.message);
+      return;
+    }
     toast.success("Profile updated");
     fetchData();
   };
@@ -91,7 +104,13 @@ const Conta = () => {
   };
 
   const handleDeleteEndereco = async (id: string) => {
-    await supabase.from("enderecos").delete().eq("id", id);
+    const { error } = await supabase.from("enderecos").delete().eq("id", id);
+    if (error) {
+      // O endereco continuava na lista depois do F5 e o cliente nao entendia
+      // por que. Pior: podia acabar usando o endereco antigo num pedido.
+      toast.error("Could not remove the address: " + error.message);
+      return;
+    }
     toast.success("Address removed");
     fetchData();
   };

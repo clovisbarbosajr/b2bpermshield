@@ -962,7 +962,17 @@ const CustomerEdit = () => {
                     }).select("id, nome, email, can_confirm_order, can_view_full_history, status").single();
                     if (ctErr) { toast.error(ctErr.message); setSavingContact(false); return; }
                     // Papel 'cliente' apenas (nunca admin/manager/warehouse → sem escalonamento)
-                    await supabase.from("user_roles").upsert({ user_id: fnData.user_id, role: "cliente" }, { onConflict: "user_id" });
+                    //
+                    // O erro era descartado. Sem o papel, o funcionário RECEBE o
+                    // e-mail para definir a senha, define, e não consegue entrar
+                    // em lugar nenhum — e a tela dizia que estava tudo certo.
+                    const { error: papelErr } = await supabase.from("user_roles")
+                      .upsert({ user_id: fnData.user_id, role: "cliente" }, { onConflict: "user_id" });
+                    if (papelErr) {
+                      toast.error(`The employee record was created but the access role was not — they will not be able to log in: ${papelErr.message}`);
+                      setSavingContact(false);
+                      return;
+                    }
                     // Envia DE VERDADE o link de definição de senha (Resend + Office365 fallback).
                     const { error: mailErr } = await supabase.functions.invoke("send-email", {
                       body: { type: "password_reset", email: contactForm.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
@@ -1014,10 +1024,18 @@ const CustomerEdit = () => {
                   if (apErr) { toast.error("Could not approve: " + apErr.message); return; }
                   // Ensure user can log in to portal — add cliente role if not already set
                   if (cliente.user_id) {
-                    await (supabase.from("user_roles") as any).upsert(
+                    // Mesmo caso: a ficha vira "ativo", mas sem o papel o cliente
+                    // continua sem conseguir entrar. E a tela comemorava
+                    // "Customer approved!" de qualquer jeito.
+                    const { error: papelErr } = await (supabase.from("user_roles") as any).upsert(
                       { user_id: cliente.user_id, role: "cliente" },
                       { onConflict: "user_id" }
                     );
+                    if (papelErr) {
+                      toast.error(`Approved, but the access role failed — the customer still cannot log in: ${papelErr.message}`);
+                      setCliente({ ...cliente, status: "ativo", is_active: true });
+                      return;
+                    }
                   }
                   setCliente({ ...cliente, status: "ativo", is_active: true });
                   toast.success("Customer approved!");
