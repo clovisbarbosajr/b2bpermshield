@@ -152,7 +152,7 @@ const Carrinho = () => {
         // variante e exatamente perder o caso que interessa — produto que ganhou
         // opcao DEPOIS que o cliente o colocou no carrinho.
         ids.length
-          ? supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", ids)
+          ? supabase.from("produto_variantes").select("id, produto_id, quantidade, estoque_reservado").eq("ativo", true).in("produto_id", ids)
           : Promise.resolve({ data: [] as any[] }),
       ]);
       // Cobre `vars` tambem: sem isso, falha na consulta de variantes deixava a

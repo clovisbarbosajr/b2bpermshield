@@ -49,6 +49,8 @@ export type StockVariant = {
   id: string;
   produto_id: string;
   quantidade: number | null;
+  /** Reservado por pedido em aberto. Ver o comentário no cálculo do teto. */
+  estoque_reservado?: number | null;
 };
 
 export type StockStatus = { nome: string; permite_comprar?: boolean | null };
@@ -125,7 +127,16 @@ export function checkCartStock(
       const v = varById.get(item.variante_id);
       // Variante que sumiu (desativada/apagada) é bloqueio, não "estoque 0 do produto".
       if (!v) { blocked.set(key, item); continue; }
-      teto = Math.min(dispProduto, v.quantidade ?? 0);
+      // DESCONTA O RESERVADO DA VARIANTE, igual ao que já se faz com o produto-pai
+      // duas linhas acima.
+      //
+      // A partir de 20260825320000 quem decide no banco é
+      // `quantidade - estoque_reservado`. Se a tela olhasse só `quantidade`, um
+      // tamanho com pedido aberto apareceria como disponível, o cliente fecharia,
+      // e o banco recusaria com "um item acabou de esgotar" — sem o carrinho
+      // dizer quanto reduzir, e sem ele entender por quê.
+      const dispVariante = (v.quantidade ?? 0) - (v.estoque_reservado ?? 0);
+      teto = Math.min(dispProduto, dispVariante);
     } else if (variantesPorProduto.get(item.produto_id)) {
       // Linha SEM variante num produto que TEM variante hoje: bloqueia.
       //

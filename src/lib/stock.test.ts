@@ -187,3 +187,47 @@ describe("linha sem variante em produto que ganhou variante", () => {
     expect(blocked.has("p1::v1")).toBe(false);
   });
 });
+
+// A partir de 20260825320000 quem decide no banco e
+// `produto_variantes.quantidade - estoque_reservado`. Se a tela olhasse so
+// `quantidade`, um tamanho com pedido aberto apareceria como disponivel, o
+// cliente fecharia, e o banco recusaria com "um item acabou de esgotar" — sem o
+// carrinho dizer quanto reduzir, e sem ele entender por que.
+describe("reservado da variante desconta do disponivel", () => {
+  const produtos = [{ id: "p1", estoque_total: 100, estoque_reservado: 0, status_produto: "available" }];
+  const statuses = [{ nome: "available", permite_comprar: true }];
+  const pede = (qtd: number, variante: any) =>
+    checkCartStock(
+      [{ produto_id: "p1", variante_id: "v1", quantidade: qtd }] as any,
+      produtos as any, statuses as any, [variante] as any,
+    );
+
+  // VIGIA
+  it("BLOQUEIA quando o reservado consome o tamanho inteiro", () => {
+    const { blocked } = pede(1, { id: "v1", produto_id: "p1", quantidade: 5, estoque_reservado: 5 });
+    expect(blocked.has("p1::v1")).toBe(true);
+  });
+
+  it("REDUZ para o que sobrou, quando ha reserva parcial", () => {
+    // 5 no tamanho, 3 reservados => sobram 2, e o cliente pediu 4.
+    const { insufficient } = pede(4, { id: "v1", produto_id: "p1", quantidade: 5, estoque_reservado: 3 });
+    expect(insufficient.get("p1::v1")).toBe(2);
+  });
+
+  // CONTROLE — sem estes, uma regra que bloqueia TODA variante passaria acima.
+  it("PERMITE quando o reservado ainda deixa saldo", () => {
+    const { blocked, insufficient } = pede(2, { id: "v1", produto_id: "p1", quantidade: 5, estoque_reservado: 3 });
+    expect(blocked.has("p1::v1")).toBe(false);
+    expect(insufficient.has("p1::v1")).toBe(false);
+  });
+
+  it("PERMITE quando nao ha reserva nenhuma", () => {
+    const { blocked } = pede(5, { id: "v1", produto_id: "p1", quantidade: 5, estoque_reservado: 0 });
+    expect(blocked.has("p1::v1")).toBe(false);
+  });
+
+  it("trata reservado ausente como zero — ficha antiga nao pode bloquear venda", () => {
+    const { blocked } = pede(5, { id: "v1", produto_id: "p1", quantidade: 5 });
+    expect(blocked.has("p1::v1")).toBe(false);
+  });
+});

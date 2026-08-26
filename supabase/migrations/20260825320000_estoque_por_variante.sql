@@ -45,7 +45,8 @@
 --    aqui). Se voltar linha, o numero de `quantidade` esta otimista demais:
 --
 --   SELECT v.id, p.nome AS produto, v.nome AS variante, v.quantidade,
---          COALESCE(SUM(pi.quantidade), 0) AS ja_vendido_em_pedido_aberto
+--          COALESCE(SUM(pi.quantidade) FILTER (WHERE ped.id IS NOT NULL), 0)
+--            AS ja_vendido_em_pedido_aberto
 --   FROM public.produto_variantes v
 --   JOIN public.produtos p ON p.id = v.produto_id
 --   LEFT JOIN public.pedido_itens pi ON pi.variante_id = v.id
@@ -53,8 +54,14 @@
 --        AND ped.b2bwave_order_id IS NULL
 --        AND ped.status::text NOT IN ('cancelado','cancelled','concluido','complete')
 --   GROUP BY v.id, p.nome, v.nome, v.quantidade
---   HAVING COALESCE(SUM(pi.quantidade), 0) > v.quantidade
+--   HAVING COALESCE(SUM(pi.quantidade) FILTER (WHERE ped.id IS NOT NULL), 0) > v.quantidade
 --   ORDER BY p.nome, v.nome;
+--
+-- O `FILTER (WHERE ped.id IS NOT NULL)` NAO e detalhe. Os filtros de `pedidos`
+-- estao no ON do LEFT JOIN, entao item de pedido cancelado, concluido ou do
+-- B2BWave NAO e eliminado — ele sobrevive com `ped.*` NULL. Sem o FILTER, o SUM
+-- contava TUDO que ja foi vendido daquela variante e a consulta cuspia linhas
+-- falsas de "vendida alem do que tem". (Eu tinha escrito sem.)
 --
 -- 2) Quantas variantes existem, para dimensionar:
 --
@@ -306,24 +313,47 @@ COMMIT;
 -- NAO gera linha em `estoque_log` por variante: os relatorios somam essa tabela,
 -- e uma linha por variante MAIS a do pai contaria o mesmo movimento duas vezes.
 -- O log continua por produto, como sempre foi.
+--
+-- FALTA UMA VIA DE ENTRADA PARA A VARIANTE — e isto precisa entrar na fila
+-- JUNTO, nao depois. Nada no sistema DEVOLVE estoque para uma variante: o
+-- check-in de producao credita so `produtos.estoque_total` (20260619210000), a
+-- API publica so mexe no pai, e o ajuste manual do admin so escreve no pai.
+-- A partir daqui cada pedido concluido decrementa `produto_variantes.quantidade`
+-- de forma permanente, e as UNICAS reposicoes sao o feed do B2BWave (que vai ser
+-- desligado) e a digitacao manual no ProductEdit.
+--
+-- No dia em que o B2BWave morrer, o estoque de variante vira CATRACA DE MAO
+-- UNICA ate zero: a vitrine mostra "esgotado" por tamanho enquanto a producao
+-- credita so o produto-pai.
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------
 -- ROLLBACK
 --
--- Reinstala as tres funcoes SEM o espelho na variante, rodando de novo, nesta
--- ordem, os arquivos:
+-- NAO E TRIVIAL, e eu tinha escrito duas coisas erradas aqui. Leia antes.
 --
---   20260623000000_stock_and_coupon_hardening.sql       (reserva e release)
---   20260803120000_desfazer_conclusao_devolve_estoque.sql (status)
+-- 1) NAO rode `20260623000000_stock_and_coupon_hardening.sql` de novo.
+--    Aquele arquivo tambem reinstala `fn_pedido_total_appside` numa versao
+--    ANTERIOR ao conserto de 20260801130000 — a que revalida a elegibilidade do
+--    cupom em TODO update e zera o desconto, SUBINDO o total de um pedido que o
+--    cliente ja fechou. Ele traz junto o `_resolve_desconto` antigo e um UPDATE
+--    de reparo no estoque reservado do produto-pai.
 --
--- ATENCAO: aqueles arquivos fazem MAIS do que essas funcoes (o primeiro tem um
--- UPDATE de reparo no fim). Se so quiser desligar o espelho, e mais seguro
--- deixar as funcoes como estao e zerar a coluna:
+-- 2) NAO adianta "zerar a coluna". Depois desta migration a coluna E LIDA, no
+--    proprio WHERE que recusa a venda. Zerar so apaga o razao: a trava continua
+--    de pe e o decremento de `quantidade` no fechamento tambem.
 --
---   UPDATE public.produto_variantes SET estoque_reservado = 0;
+-- O rollback de verdade e reinstalar as TRES funcoes sem os blocos de variante.
+-- Os corpos originais estao em:
+--   `fn_reserve_stock_on_order_item`  e `fn_release_stock_on_item_delete`
+--       -> 20260623000000_stock_and_coupon_hardening.sql (SO essas duas funcoes,
+--          copiadas a mao; nao rode o arquivo inteiro)
+--   `fn_adjust_stock_on_order_status`
+--       -> 20260803120000_desfazer_conclusao_devolve_estoque.sql (idem)
 --
--- A coluna pode ficar; sem ela ser lida, nao atrapalha.
+-- Depois, opcionalmente:
+--   ALTER TABLE public.produto_variantes DROP COLUMN estoque_reservado;
+--
 -- Reverter reabre a venda do mesmo tamanho para dois clientes.
 -- ---------------------------------------------------------------------------
 

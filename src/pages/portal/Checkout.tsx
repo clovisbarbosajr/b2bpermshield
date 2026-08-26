@@ -519,7 +519,7 @@ const Checkout = () => {
         // variante e exatamente perder o caso que interessa — produto que ganhou
         // opcao DEPOIS que o cliente o colocou no carrinho.
         ids.length
-          ? supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", ids)
+          ? supabase.from("produto_variantes").select("id, produto_id, quantidade, estoque_reservado").eq("ativo", true).in("produto_id", ids)
           : Promise.resolve({ data: [] as any[] }),
       ]);
       // Cobre `vars` tambem: sem isso, falha na consulta de variantes deixava a
@@ -592,7 +592,7 @@ const Checkout = () => {
         .in("id", idsProdSubmit),
       supabase.from("product_statuses").select("nome, permite_comprar"),
       idsProdSubmit.length
-        ? supabase.from("produto_variantes").select("id, produto_id, quantidade").eq("ativo", true).in("produto_id", idsProdSubmit)
+        ? supabase.from("produto_variantes").select("id, produto_id, quantidade, estoque_reservado").eq("ativo", true).in("produto_id", idsProdSubmit)
         : Promise.resolve({ data: [] as any[], error: null } as any),
     ]);
     if (prodRes.error || statusRes.error || varRes.error) {
@@ -751,13 +751,18 @@ const Checkout = () => {
       // (`check_violation`): falta de estoque e item sem variante. Sem isto o
       // cliente via a mensagem CRUA do banco na tela.
       const precisaVariante = /ITEM_NEEDS_VARIANT|ITEM_VARIANT_MISMATCH/i.test(itensError.message);
-      const isStock = !precisaVariante
+      // Tokens de 20260825330000. Sem isto o cliente via o texto CRU do Postgres
+      // na tela: "ITEM_PRODUTO_INATIVO: product 6f2a-... is not available".
+      const produtoIndisponivel = /ITEM_PRODUTO_INATIVO|ITEM_PRODUTO_NAO_VENDAVEL/i.test(itensError.message);
+      const isStock = !precisaVariante && !produtoIndisponivel
         && /insufficient_stock|check_violation|insufficient stock/i.test(itensError.message);
       toast.error(precisaVariante
         ? "One of the items needs an option (size/color) chosen. Please open the product and pick one."
-        : isStock
-          ? "Sorry — an item just went out of stock. Please review your cart and try again."
-          : "Error saving order items: " + itensError.message);
+        : produtoIndisponivel
+          ? "One of the items is no longer available for ordering. Please remove it from your cart and try again."
+          : isStock
+            ? "Sorry — an item just went out of stock. Please review your cart and try again."
+            : "Error saving order items: " + itensError.message);
       setLoading(false);
       return;
     }

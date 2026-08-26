@@ -1368,3 +1368,49 @@ Os que mais doiam:
   era salvo — inclusive o telefone que vai no pedido dele.
 - `Categorias` ordenar: N escritas em laco. Falha no meio deixava a ordenacao
   pela METADE. Agora para no primeiro erro e diz ate onde foi.
+
+### 25/08 (noite, cont. 26) - Cetico nas duas migrations de estoque/produto
+
+Veredito: SEGURO COM RESSALVA nas duas. As ressalvas eram reais.
+
+- **FURO REAL, e era meu (320000)** - o banco passaria a decidir por
+  `quantidade - estoque_reservado`, mas a TELA so lia `quantidade`
+  (`Checkout.tsx`, `Carrinho.tsx`, `StockVariant`, `stock.ts`). Resultado: tamanho
+  com pedido aberto aparecia DISPONIVEL, o cliente fechava, e o banco recusava
+  com "um item acabou de esgotar" — sem o carrinho dizer quanto reduzir e sem ele
+  entender por que. Para o produto-PAI a tela ja descontava certo; para a
+  variante, nao. Corrigido nos 3 selects e no calculo do teto.
+- **5 TESTES NOVOS + 2 MUTANTES** - ignorar o reservado da variante acende 2
+  testes; tratar reservado ausente como bloqueio acende 5 (incluindo os de
+  CONTROLE). 26 testes no arquivo.
+- **FURO REAL (330000)** - o cliente veria o texto CRU do Postgres:
+  "ITEM_PRODUTO_INATIVO: product 6f2a-... is not available". Os tokens novos nao
+  estavam na traducao do Checkout — o mesmo erro que a 220000 ja tinha resolvido,
+  e que eu esqueci de repetir. Corrigido.
+- **CORRIGIDO - a consulta de diagnostico da 320000 media ERRADO.** Os filtros de
+  `pedidos` estavam no ON do LEFT JOIN, entao item de pedido cancelado, concluido
+  ou do B2BWave NAO era eliminado: sobrevivia com `ped.*` NULL e continuava no
+  SUM. A consulta cuspiria linhas falsas de "vendida alem do que tem". Agora usa
+  `FILTER (WHERE ped.id IS NOT NULL)`.
+- **CORRIGIDO - a secao de ROLLBACK da 320000 estava FACTUALMENTE ERRADA em dois
+  pontos**, e era o rollback:
+    1. eu mandava rodar `20260623000000` de novo — aquele arquivo tambem
+       reinstala `fn_pedido_total_appside` numa versao ANTERIOR ao conserto de
+       20260801130000, a que revalida o cupom em todo update e SOBE o total de um
+       pedido que o cliente ja fechou;
+    2. eu dizia que "zerar a coluna" desligaria o espelho — nao desliga: depois
+       da migration a coluna E LIDA no WHERE que recusa a venda.
+- **NOVO NA FILA, apontado pelo cetico e agora escrito no proprio arquivo** -
+  NADA no sistema devolve estoque para uma VARIANTE. O check-in de producao
+  credita so o produto-pai, a API publica so mexe no pai, e o ajuste manual
+  tambem. A partir da 320000 cada pedido concluido decrementa a variante de forma
+  permanente, e as unicas reposicoes sao o feed do B2BWave (que vai ser
+  desligado) e a digitacao manual. **No dia em que o B2BWave morrer, o estoque de
+  variante vira catraca de mao unica ate zero.** Precisa entrar JUNTO, nao depois.
+- **RESSALVAS ACEITAS, registradas e nao consertadas** (herdadas do
+  comportamento do produto-pai, agora com efeito visivel): reserva presa se o
+  pedido for apagado sem apagar itens antes; UPDATE de `quantidade`/`variante_id`
+  de item sem gatilho que ajuste a reserva; item inserido em pedido ja cancelado;
+  e a assimetria do `GREATEST(0,...)` entre concluir e des-concluir.
+- **OPERACIONAL** - rodar a 320000 FORA DE PICO: o `ALTER TABLE` + backfill segura
+  `ACCESS EXCLUSIVE` em `produto_variantes`, e a vitrine espera.
