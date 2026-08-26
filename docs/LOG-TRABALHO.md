@@ -2293,3 +2293,47 @@ dado tem** — so que desta vez para o lado do alarme, nao do silencio.
 
 Anotei as duas conferencias na tabela de dividas, com o motivo, para o proximo
 leitor nao refazer a investigacao.
+
+---
+
+## cont. 50 — Pagina de execucao, e a pergunta que a motivou
+
+O dono perguntou, antes de comecar: *"pq vou digitar todos eles novamente?"*
+
+Resposta factual: nao vai — os 12 de manha eram outros arquivos, e estes 8 nunca
+rodaram. Mas responder "confia em mim" seria a pior resposta possivel num dia em
+que eu errei cinco vezes por olhar escopo menor do que o dado tem.
+
+Entao a resposta virou **codigo**: bloco 0 da pagina e uma consulta que devolve
+APLICADO ou FALTA para cada um dos 8, lida do banco. Ele nao precisa da minha
+memoria.
+
+Fica FORA da contagem de progresso — e conferencia, nao trabalho; senao o
+contador diria 1/10 antes de ele ter rodado nada.
+
+### Duas conferencias que a pergunta exigia
+
+**Rodar bloco repetido causa dano?** Nao. Fora dos corpos de funcao, os 8 so tem
+`ADD COLUMN IF NOT EXISTS`, `DROP`/`CREATE` e dois `UPDATE` que **atribuem**
+valor absoluto (`SET x = COALESCE((SELECT sum...),0)`), nao incrementam. Os 5
+`INSERT` que o meu grep achou no bloco 1 estao todos DENTRO de funcao — olhei um
+por um em vez de aceitar a contagem.
+
+**O bloco 0 reconhece o bloco 5?** Esse bloco nao cria objeto novo: acrescenta
+condicao a politicas que ja existem, entao so da para reconhece-lo pelo TEXTO.
+Usei `pg_policies.qual LIKE '%cliente_conta_liberada%'` — e fui conferir se a
+condicao entra em `USING` ou em `WITH CHECK`, porque `qual` so guarda a primeira.
+As cinco sao `FOR SELECT ... USING (...)`. Confere.
+
+Se eu nao tivesse olhado, o bloco 0 diria FALTA para um bloco ja aplicado — um
+verificador mentindo dentro da ferramenta feita para ele nao precisar acreditar
+em mim.
+
+### A pagina
+
+Gerada por `scripts/gerar-pagina-sql.py`, mesma disciplina do runbook: le o SQL
+das migrations e confere byte a byte o que escreveu. Verificada no navegador
+antes de publicar — as duas fontes carregam de verdade, contador e marcacao
+funcionam, nao rola de lado, contraste passa nos dois temas, console limpo.
+
+**Nao editar o HTML a mao.** Editar o gerador e rodar de novo.
