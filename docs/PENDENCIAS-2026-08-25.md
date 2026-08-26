@@ -1,4 +1,27 @@
-# Estado do projeto — 25/ago/2026 (fim do dia)
+# Estado do projeto — 26/ago/2026
+
+> **LEVA DE 26/ago — notificação e preço.** As 8 migrations de 25/ago já rodaram
+> (confirmado: o Lovable regenerou os tipos com `cupom_consumido`,
+> `estoque_reservado` e `conta_liberada_de`). Entrou uma leva nova de **8
+> migrations** (`20260826010000` a `20260826080000`) fechando o vazamento do
+> reimport e seis furos de dinheiro. Cinco rodadas de cético derrubaram **19
+> coisas minhas** antes de a última voltar limpa.
+>
+> **ORDEM OBRIGATÓRIA, na mesma sessão:** 1) os 8 SQL · 2) push + deploy das edge
+> functions `b2bwave-sync` **e** `notify-dispatch` (as duas juntas — uma sozinha
+> reabre o furo) · 3) publish. Entre o bloco 6 e o publish o cupom fica sem
+> funcionar no portal.
+>
+> **Não tocar no botão "Resume sending"** (tela de Notifications) antes do deploy
+> das edge functions: ele abre a torneira geral, e com o sync antigo ainda no ar
+> isso reabre o cenário de 25/ago.
+>
+> Página com os SQL: `PermShield-SQL.html`, na Área de Trabalho.
+> Painel de travas: `docs/CONSULTA-ESTADO-NOTIFICACAO.sql`
+
+---
+
+# Estado anterior — 25/ago/2026 (fim do dia)
 
 Este é o arquivo de estado. O histórico detalhado, com o raciocínio de cada
 conserto e cada erro cometido no caminho, está em `LOG-TRABALHO.md`.
