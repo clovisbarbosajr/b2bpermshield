@@ -85,6 +85,18 @@ const AdminTabelasPreco = () => {
       .select("produto_id, preco").eq("tabela_preco_id", t.id);
     if (readErr) { toast.error("List created, but failed to read prices: " + readErr.message); fetchData(); return; }
     if (items && items.length > 0) {
+      // SEM `origem` DE PROPOSITO — a linha nasce no default `desconhecido`.
+      //
+      // Duplicar copia TODAS as linhas de uma vez; ninguem "mexeu" em nenhuma.
+      // Carimbar `local` seria marcar como humano o que e copia mecanica de preco
+      // do B2BWave, e criaria uma regua inteira imune a limpeza automatica.
+      // Carimbar `b2bwave` seria pior: a copia vai para uma regua "<nome> (copy)",
+      // que a origem NAO conhece — o sync casa regua por nome, e esse nome nunca
+      // casa. Seria afirmar que a origem escreveu uma linha que ela nunca viu.
+      //
+      // CUSTO ACEITO: essas linhas ficam em `desconhecido` PARA SEMPRE e
+      // reaparecem em toda consulta de candidatos. E residuo visivel, e preferi
+      // isso a imunidade invisivel.
       const rows = items.map((i) => ({ tabela_preco_id: nova.id, produto_id: i.produto_id, preco: i.preco }));
       const { error: insErr } = await supabase.from("tabela_preco_itens").insert(rows);
       if (insErr) { toast.error("List created, but prices failed to copy: " + insErr.message); fetchData(); return; }
@@ -126,16 +138,26 @@ const AdminTabelasPreco = () => {
   const saveAllPrices = async () => {
     if (!selectedTabela || dirtyIds.length === 0) return;
     setSavingPrices(true);
-    const upserts: { tabela_preco_id: string; produto_id: string; preco: number }[] = [];
+    // `origem: 'local'` — preco que uma PESSOA digitou.
+    //
+    // So as linhas de `dirtyIds` entram aqui, e e por isso que o carimbo e
+    // honesto: marca o que foi realmente mexido, nao tudo que a tela gravou.
+    //
+    // Sem isto, uma linha editada a mao continuaria marcada `b2bwave` e seria
+    // apagada sozinha no ciclo seguinte, quando a exclusao automatica for
+    // armada — exatamente a perda de trabalho humano que a coluna `origem`
+    // (20260826100000) existe para impedir.
+    const upserts: { tabela_preco_id: string; produto_id: string; preco: number; origem: string }[] = [];
     const removes: string[] = [];
     for (const id of dirtyIds) {
       const v = parseFloat(editingPrices[id] ?? "");
       if (isNaN(v) || v <= 0) removes.push(id);
-      else upserts.push({ tabela_preco_id: selectedTabela.id, produto_id: id, preco: v });
+      else upserts.push({ tabela_preco_id: selectedTabela.id, produto_id: id, preco: v, origem: "local" });
     }
     let error = null as { message: string } | null;
     if (upserts.length) {
-      const r = await supabase.from("tabela_preco_itens").upsert(upserts, { onConflict: "tabela_preco_id,produto_id" });
+      const r = await supabase.from("tabela_preco_itens")
+        .upsert(upserts, { onConflict: "tabela_preco_id,produto_id" });
       error = r.error;
     }
     if (!error && removes.length) {

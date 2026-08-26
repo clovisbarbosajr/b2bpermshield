@@ -88,6 +88,11 @@ const ProductEdit = () => {
   const [accGrant, setAccGrant] = useState<string[]>([]);
   const [accExclude, setAccExclude] = useState<string[]>([]);
   const [priceLists, setPriceLists] = useState<{ tabela_preco_id: string; preco: number }[]>([]);
+  // Snapshot do que veio do BANCO. Sem ele nao da para saber quais precos a
+  // pessoa realmente editou — e sem isso nao ha carimbo de procedencia correto:
+  // marcar `local` em tudo que a tela grava mataria a auto-cura da coluna
+  // `origem`, porque esta tela reescreve TODAS as linhas do produto a cada save.
+  const [origPriceLists, setOrigPriceLists] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetchLookups();
@@ -180,7 +185,13 @@ const ProductEdit = () => {
     setAccGroups(groupIds);
     setAccGrant(((cliAcc.data ?? []) as any[]).filter((r) => r.tipo === "grant").map((r) => r.cliente_id));
     setAccExclude(((cliAcc.data ?? []) as any[]).filter((r) => r.tipo === "exclude").map((r) => r.cliente_id));
-    setPriceLists((pl.data ?? []).map((p: any) => ({ tabela_preco_id: p.tabela_preco_id, preco: Number(p.preco) })));
+    // O erro E lido: com o codigo novo, snapshot vazio nao apaga nada (o
+    // `removidos` fica vazio), mas a tela mostraria "nenhum preco" para um produto
+    // que TEM preco — e o admin poderia digitar por cima achando que estava vazio.
+    if (pl.error) toast.error("Could not load this product's price lists: " + pl.error.message);
+    const precosDoBanco = (pl.data ?? []).map((p: any) => ({ tabela_preco_id: p.tabela_preco_id, preco: Number(p.preco) }));
+    setPriceLists(precosDoBanco);
+    setOrigPriceLists(Object.fromEntries(precosDoBanco.map((p) => [p.tabela_preco_id, p.preco])));
 
     setLoading(false);
   };
@@ -278,6 +289,23 @@ const ProductEdit = () => {
     }
 
     setSaving(false);
+    // O SNAPSHOT TEM QUE ACOMPANHAR O QUE FOI GRAVADO.
+    //
+    // Sem esta linha, `origPriceLists` congela no que veio do banco no carregamento
+    // e a pagina fica aberta com um retrato velho. A sequencia que perde dinheiro,
+    // sem erro nenhum na tela: o admin apaga a linha da tabela X e salva (DELETE
+    // ok, mas o snapshot AINDA tem X); percebe o engano, re-adiciona X com o mesmo
+    // preco e salva de novo — agora `removidos` esta vazio E `sujos` tambem, porque
+    // o preco bate com o snapshot velho. Nada e gravado, a tela diz "Product saved"
+    // e mostra X, e o banco nao tem X. O cliente daquela tabela passa a pagar o
+    // preco base.
+    //
+    // O `TabelasPreco` ja fazia isso (`setOrigPrices({ ...editingPrices })`); foi
+    // aqui que eu esqueci.
+    setOrigPriceLists(Object.fromEntries(
+      priceLists.filter((p) => p.tabela_preco_id).map((p) => [p.tabela_preco_id, p.preco]),
+    ));
+
     toast.success(isNew ? "Product created" : "Product saved");
     log(isNew ? "created" : "updated", "product", productId!, form.nome as string);
     if (goBack) { navigate("/admin/products"); return; }
@@ -307,6 +335,14 @@ const ProductEdit = () => {
       faltando.push('Discounts: pick a price list on every row');
     if (customerPrices.some((cp: any) => !String(cp.cliente_id ?? "").trim()))
       faltando.push('Customer prices: pick a customer on every row');
+    // Repetida quebra de dois jeitos: `21000 cardinality_violation` no upsert
+    // (DEPOIS de o DELETE ja ter sido commitado), ou — pior, silencioso — trocar a
+    // linha A para a tabela B que ja esta na tela com o mesmo preco: nenhuma das
+    // duas fica "suja", nada e gravado, e o preco de A e apagado sem erro nenhum.
+    {
+      const ids = priceLists.map((pl: any) => String(pl.tabela_preco_id ?? "").trim()).filter(Boolean);
+      if (new Set(ids).size !== ids.length) faltando.push("Price lists: the same price list is used twice");
+    }
     if (priceLists.some((pl: any) => !String(pl.tabela_preco_id ?? "").trim()))
       faltando.push('Price lists: pick a price list on every row');
     if (statusRules.some((sr: any) => !String(sr.status_nome ?? "").trim()))
@@ -370,12 +406,40 @@ const ProductEdit = () => {
       orFail(await supabase.from("produto_opcoes").insert(assignedOptions.map(o => ({ produto_id: pid, option_id: o.option_id }))), "assigned options");
     }
 
-    // Price lists
-    await delOrFail("tabela_preco_itens", "price lists");
-    if (priceLists.length > 0) {
-      orFail(await supabase.from("tabela_preco_itens").insert(priceLists.map(pl => ({
-        produto_id: pid, tabela_preco_id: pl.tabela_preco_id, preco: pl.preco
-      }))), "price lists");
+    // Price lists — UPSERT do que mudou + DELETE do que saiu da tela.
+    //
+    // Era `delete` de tudo seguido de `insert` de tudo. Funcionava, mas destruia
+    // a linha a cada save: a procedencia (`origem`, 20260826100000) voltava para
+    // `desconhecido` e o `created_at` era resetado — entao nenhum dos dois servia
+    // para julgar nada. Um save de produto lavava o carimbo do produto inteiro.
+    //
+    // SAO DUAS METADES, e a segunda nao pode faltar: hoje quem faz a LIXEIRA
+    // funcionar e justamente o delete geral. Trocando so por upsert, apertar a
+    // lixeira e salvar deixaria o preco vivo no banco com a tela mostrando que
+    // sumiu — numa tabela de dinheiro, isso e pior que o problema original.
+    {
+      const idsNaTela = priceLists.map((pl) => pl.tabela_preco_id).filter(Boolean);
+      const removidos = Object.keys(origPriceLists).filter((id) => !idsNaTela.includes(id));
+      if (removidos.length > 0) {
+        const { error } = await supabase.from("tabela_preco_itens")
+          .delete().eq("produto_id", pid).in("tabela_preco_id", removidos);
+        if (error) throw new Error(`Failed to remove price lists: ${error.message}`);
+      }
+
+      // So o que MUDOU. Linha intocada nao e reescrita, entao mantem a origem que
+      // ja tinha — e a auto-cura do sync continua valendo para ela.
+      const sujos = priceLists.filter((pl) => pl.tabela_preco_id
+        && origPriceLists[pl.tabela_preco_id] !== pl.preco);
+      if (sujos.length > 0) {
+        orFail(await supabase.from("tabela_preco_itens").upsert(
+          sujos.map((pl) => ({
+            produto_id: pid, tabela_preco_id: pl.tabela_preco_id, preco: pl.preco,
+            // Preco que uma PESSOA digitou nesta tela.
+            origem: "local",
+          })),
+          { onConflict: "tabela_preco_id,produto_id" },
+        ), "price lists");
+      }
     }
 
     // Status rules

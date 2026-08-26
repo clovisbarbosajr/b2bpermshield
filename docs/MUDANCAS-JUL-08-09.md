@@ -117,16 +117,19 @@ produtos **apagava os 96 links importados manualmente**. Correção: o sync **n�
 `produtos_relacionados` (related é 100% via tela Import). Marcador
 `SYNC_VERSION:related-v4` confirma a versão sem-wipe.
 
-> **NOTA (26/ago) — o marcador foi RENOMEADO para `SYNC_VERSION:stock-lock-v1`.**
-> Ele é prova de DEPLOY, não de funcionalidade, então muda a cada versão que
-> altera comportamento. Qualquer valor a partir de `stock-lock-v1` já inclui a
-> versão sem-wipe descrita acima. Se o log disser `stock-lock-v1`, esta
-> conferência está satisfeita: NÃO reimporte os relacionados e NÃO peça redeploy
-> por causa dela. O "redeploy v4" citado abaixo está superado — o que vale hoje é
-> o deploy da leva de 26/ago (ver `docs/LOG-TRABALHO.md`, seção "FALTA").
+> **NOTA (26/ago) — o marcador MUDA A CADA LEVA e não serve para esta conferência.**
+> Ele é prova de DEPLOY, não de funcionalidade. Já foi `related-v4`, depois
+> `stock-lock-v1`, depois `preco-rpc-v1` — e os nomes NÃO são ordenáveis, então
+> não dá para olhar um valor e saber se é mais novo que outro.
+>
+> A versão sem-wipe descrita acima está no ar desde `related-v4`, ou seja, desde
+> muito antes de qualquer marcador atual. **Esta conferência está satisfeita e
+> não precisa ser refeita:** NÃO reimporte os relacionados e NÃO peça redeploy
+> por causa dela. Para saber se um deploy SEU subiu, use o valor da sua própria
+> leva — ver `docs/LOG-TRABALHO.md`, passo 3 da seção "FALTA".
 
-**Reimportar os relacionados SÓ DEPOIS de o marcador aparecer no log** — hoje isso
-significa `stock-lock-v1`, não `v4`.
+**Os relacionados NÃO precisam ser reimportados.** A versão sem-wipe está no ar desde
+`related-v4`; qualquer marcador atual já a inclui.
 
 ## BACKLOG / PRÓXIMOS UPDATES (não urgente)
 - **Opt-out de notificação por cliente** (pedido do dono, 2026-07-09): cada cliente poder
@@ -195,8 +198,9 @@ Templates — nada regrava templates automaticamente; NÃO rodar aquele SQL de n
 
    ⚠️ **ATUALIZADO em 26/ago:** este item mandava conferir `SYNC_VERSION:related-v3`, e esse
    valor NÃO vai mais aparecer — o marcador foi renomeado. Confirmar por: rodar
-   Products → Sync Now e checar que `sync_log.samples` contém **`SYNC_VERSION:stock-lock-v1`**
-   (ou valor mais novo). Ver `docs/LOG-TRABALHO.md`, passo 3 da seção "FALTA", que traz a
-   consulta pronta e a conferência do `created_at`.
+   Products → Sync Now e checar que `sync_log.samples` contém o marcador **da leva que
+   você acabou de deployar** — os nomes não são ordenáveis, então não adianta procurar um
+   valor fixo. Ver `docs/LOG-TRABALHO.md`, passo 3 da seção "FALTA", que traz a consulta
+   pronta e a conferência do `created_at`.
 2. **Pré-desligamento do B2BWave** (semana que vem): sync diferencial final + limpar dados de teste.
    Fazer com cuidado, junto.

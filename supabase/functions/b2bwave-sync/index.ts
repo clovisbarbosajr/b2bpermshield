@@ -34,7 +34,7 @@
 // uma licenca: se voce depender do teto, alguem ja recebeu mensagem errada.
 // ============================================================================
 
-// Deployed b2bwave-sync (SYNC_VERSION:stock-lock-v1) — redeploy from main
+// Deployed b2bwave-sync (SYNC_VERSION:preco-rpc-v1) — redeploy from main
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -1266,10 +1266,56 @@ Deno.serve(async (req) => {
           tpItens.push({ produto_id: localProdId, tabela_preco_id: localTabelaId, preco });
         }
       }
+      // PRECO PELA RPC, nao por `.upsert()`.
+      //
+      // Duas coisas tem que acontecer no MESMO statement: carimbar `b2bwave` no
+      // que a origem escreve, e NAO pisar no `local` que uma pessoa marcou. O
+      // `.upsert()` do PostgREST nao expressa `DO UPDATE ... WHERE origem <>
+      // 'local'` — mandar `origem: 'b2bwave'` no payload regravaria por cima do
+      // carimbo humano a cada ciclo, e o carimbo duraria no maximo uma hora.
+      // `sync_upsert_precos` (20260826110000) faz os dois com um CASE.
+      //
+      // O preco da origem continua vencendo sempre, inclusive na linha `local` —
+      // `local` protege a PROCEDENCIA, nao o numero.
+      let precoErros = 0;
+      // Vai para `sync_log.samples` com prefixo `BLOQUEIO_`, que e o unico texto
+      // que o painel do sync mostra sem depender de `errors_count`.
+      let bloqueioPreco = "";
+      // LINHAS, nao lotes. O ultimo lote e parcial (1015 itens = 10 de 100 + 1 de
+      // 15), entao multiplicar lotes por 100 superestimava. `chunk.length` e exato.
+      let precoLinhasPerdidas = 0;
       for (let i = 0; i < tpItens.length; i += 100) {
         const chunk = tpItens.slice(i, i + 100);
-        const { error } = await adminClient.from("tabela_preco_itens").upsert(chunk, { onConflict: "tabela_preco_id,produto_id" });
-        if (!error) priceRows += chunk.length;
+        // O ERRO E LIDO. A versao anterior fazia `if (!error) priceRows += ...`
+        // sem `else`: um lote que falhasse nao entrava na conta E nao aparecia em
+        // lugar nenhum, e o sync terminava relatando sucesso com zero preco
+        // gravado. Se a migration nao tiver rodado, o PostgREST devolve PGRST202
+        // aqui, e agora isso aparece.
+        const { data, error } = await adminClient.rpc("sync_upsert_precos", { _itens: chunk });
+        if (error) {
+          precoErros++;
+          precoLinhasPerdidas += chunk.length;
+          // `BLOQUEIO_` porque o painel do sync renderiza essa faixa
+          // INCONDICIONALMENTE, enquanto `errorSamples` so aparece quando ha erro
+          // — e mesmo ai ele mostra so `samples[0]`, que e sempre o marcador de
+          // versao. Sem isto, na rodada do cron o operador via "11 erros" com a
+          // string da versao embaixo, e o motivo real ("funcao nao existe") ficava
+          // em outra tela.
+          if (!bloqueioPreco) bloqueioPreco = `BLOQUEIO_PRECO: ${error.message}`;
+          if (errorSamples.length < 5) errorSamples.push(`precos: ${error.message}`);
+        } else {
+          priceRows += Number(data) || 0;
+        }
+      }
+      if (precoErros > 0) {
+        // Soma LINHAS, nao lotes: `errors` no resto deste handler conta linhas, e
+        // "11 errors" para 11 lotes significaria ate 1015 precos nao gravados.
+        errors += precoLinhasPerdidas;
+        await adminClient.from("notification_log").insert({
+          event: "preco_upsert_falhou", channel: "-", recipient: "-", status: "failed",
+          error: `${precoLinhasPerdidas} preco(s) NAO gravaram, em ${precoErros} lote(s) — a migration 20260826110000 rodou?`,
+          payload: { lotes_com_erro: precoErros, linhas_perdidas: precoLinhasPerdidas, total_itens: tpItens.length },
+        }).then(() => {}, () => {});
       }
 
       // PRODUTO QUE SUMIU DE LA: quem trata e o bloco "Stale products" mais
@@ -1323,11 +1369,20 @@ Deno.serve(async (req) => {
       // Entao ele so CONTA e grava um exemplo no log — o dono ve o numero e
       // decide, que e a mesma disciplina que usei no resto desta leva.
       //
-      // O conserto de verdade e uma coluna `origem` em `tabela_preco_itens`
-      // ('b2bwave' | 'local'), e so 'b2bwave' ser apagavel. Esta na fila.
+      // A coluna `origem` JA EXISTE (20260826100000) e e lida logo abaixo, com
+      // tres valores: 'b2bwave' (o sync escreveu), 'local' (uma pessoa digitou) e
+      // 'desconhecido' (backfill — ninguem sabe). Armar a exclusao automatica
+      // continua sendo passo separado, e depende da triagem manual dos
+      // `desconhecido`. Ate la, este bloco so CONTA.
       let precosObsoletos = 0;
+      let precosSemTriagem = 0;
       if (pricesByProduct.size > 0 && tpItens.length > 0) {
         // Pares que a origem afirma existir, no formato "produtoLocal|tabelaLocal".
+        // Pares que a origem afirma existir NESTA rodada. Nada a ver com a coluna
+        // `origem` — quem filtra por procedencia e o `naoLocal`, mais abaixo.
+        // (Uma versao anterior deste comentario dizia "so conta par que o SYNC
+        // escreveu", que era falso: o filtro de la inclui `desconhecido`, e o
+        // bloco DOIS BALDES explica por que TEM que incluir.)
         const paresDaOrigem = new Set(tpItens.map((r: any) => `${r.produto_id}|${r.tabela_preco_id}`));
         // So os produtos que vieram no feed E casaram com uma linha local.
         const produtosNoFeed = [...pricesByProduct.keys()]
@@ -1338,7 +1393,7 @@ Deno.serve(async (req) => {
           const lote = produtosNoFeed.slice(i, i + 100);
           const { data: atuais, error: errLer } = await adminClient
             .from("tabela_preco_itens")
-            .select("produto_id, tabela_preco_id")
+            .select("produto_id, tabela_preco_id, origem")
             .in("produto_id", lote);
           // Erro de LEITURA nao pode virar exclusao: sem saber o que existe, o
           // seguro e nao apagar nada deste lote.
@@ -1348,11 +1403,29 @@ Deno.serve(async (req) => {
           // isto, tabela que a origem nao tocou apareceria inteira como
           // "obsoleta" — foi a quebra (b) do cetico.
           const tabelasDaOrigem = new Set(tpItens.map((r: any) => r.tabela_preco_id));
-          const sobrando = atuais.filter(
-            (r: any) => tabelasDaOrigem.has(r.tabela_preco_id)
+          // DOIS BALDES, e a diferenca importa.
+          //
+          // Sai da conta so o `local` — linha que uma pessoa marcou como dela,
+          // legitima, mantida de proposito. Sem tirar `local`, o numero nunca
+          // cairia nem com a triagem 100% feita, e ele e a unica metrica de "o
+          // problema acabou".
+          //
+          // MAS `desconhecido` TEM QUE CONTINUAR CONTADO. Eu tinha escrito
+          // `origem === 'b2bwave'` aqui, e isso zerava a metrica pelo motivo
+          // errado: as 29 linhas obsoletas de hoje sao, por definicao, pares que a
+          // origem NAO precifica — entao o sync nunca as escreve, nunca as carimba
+          // `b2bwave`, e ficariam em `desconhecido` para sempre. O relatorio diria
+          // "0 stale prices" com 4 a 6 mil ainda vendendo. Ir de 29 visivel para 0
+          // mentiroso e pior que nao ter filtro nenhum.
+          const naoLocal = atuais.filter(
+            (r: any) => r.origem !== "local"
+              && tabelasDaOrigem.has(r.tabela_preco_id)
               && !paresDaOrigem.has(`${r.produto_id}|${r.tabela_preco_id}`)
           );
-          precosObsoletos += sobrando.length;
+          precosObsoletos += naoLocal.length;
+          // Quantos ainda esperam triagem — o balde que so esvazia com decisao
+          // humana, e que separa "ainda nao olhei" de "obsoleto de verdade".
+          precosSemTriagem += naoLocal.filter((r: any) => r.origem === "desconhecido").length;
         }
       }
 
@@ -1361,8 +1434,11 @@ Deno.serve(async (req) => {
       if (precosObsoletos > 0) {
         await adminClient.from("notification_log").insert({
           event: "preco_obsoleto_detectado", channel: "-", recipient: "-", status: "failed",
-          error: `${precosObsoletos} precos existem aqui e a origem nao tem mais. NAO foram apagados.`,
-          payload: { quantidade: precosObsoletos, origem: "b2bwave" },
+          error: `${precosObsoletos} precos existem aqui e a origem nao tem mais (${precosSemTriagem} ainda sem triagem). NAO foram apagados.`,
+          // `fonte`, e nao `origem`: `origem` agora e uma COLUNA com valores
+          // proprios, e escrever `origem: "b2bwave"` aqui afirmaria que estas
+          // linhas sao do sync — quando por definicao sao o contrario.
+          payload: { quantidade: precosObsoletos, sem_triagem: precosSemTriagem, fonte: "b2bwave-sync" },
         }).then(() => {}, () => {});
       }
 
@@ -1648,7 +1724,7 @@ Deno.serve(async (req) => {
       // primeira que levanta `suppress_stock_notify` — se o log de um sync de
       // produtos ainda disser `related-v4`, a edge function NAO foi deployada,
       // e o `sync_products` esta rodando sem a trava de estoque.
-      const diagSamples: string[] = ["SYNC_VERSION:stock-lock-v1"];
+      const diagSamples: string[] = ["SYNC_VERSION:preco-rpc-v1"];
       // O BLOQUEIO PRECISA APARECER NA TELA DO SYNC, e nao so no log de
       // notificacoes. A tela B2B Wave Sync le `sync_log`; `notification_log` mora
       // em outra tela. Sem esta linha, "bloqueei 40 desativacoes" e "nao havia
@@ -1658,6 +1734,7 @@ Deno.serve(async (req) => {
       // `diagSamples` inteiro na mensagem, entao somar os dois imprimia o
       // bloqueio duas vezes no card.
       if (bloqueio) diagSamples.push(bloqueio);
+      if (bloqueioPreco) diagSamples.push(bloqueioPreco);
       if (relatedRows === 0 && allProducts.length) {
         const s = allProducts[0] as Record<string, any>;
         const arrays = Object.keys(s).filter((k) => Array.isArray(s[k]));
@@ -1669,7 +1746,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         success: true,
         samples: errorSamples,
-        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${precosObsoletos} stale prices detected, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${desativados} deactivated (gone from origin — NOT deleted)${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
+        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${precosObsoletos} stale prices detected (${precosSemTriagem} untriaged), ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${desativados} deactivated (gone from origin — NOT deleted)${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
       }), { headers: jsonHeaders });
       } finally {
         // `finally`, nao depois do `return`: o handler tem saida por `return` e
@@ -2585,10 +2662,18 @@ Deno.serve(async (req) => {
       }
 
       const reguaAqui = new Map<string, number>();     // "produto|tabela" -> preco
+      // Pares que uma PESSOA marcou como dela. Ficam fora da conta de obsoletos:
+      // sao legitimos e mantidos de proposito, entao contar como "a origem
+      // removeu" travaria o numero para sempre — a mesma correcao que o contador
+      // do `sync_products` recebeu. Consertar um e deixar o gemeo produz duas
+      // telas com o mesmo nome dando numeros diferentes.
+      const reguaLocal = new Set<string>();
       const okRegua = await secao("ler regua de preco daqui", async () => {
         for (const r of await lerTudo(
-          "tabela_preco_itens", "produto_id, tabela_preco_id, preco", adminClient)) {
-          reguaAqui.set((r as any).produto_id + "|" + (r as any).tabela_preco_id, num((r as any).preco));
+          "tabela_preco_itens", "produto_id, tabela_preco_id, preco, origem", adminClient)) {
+          const chave = (r as any).produto_id + "|" + (r as any).tabela_preco_id;
+          reguaAqui.set(chave, num((r as any).preco));
+          if ((r as any).origem === "local") reguaLocal.add(chave);
         }
       });
 
@@ -2644,6 +2729,8 @@ Deno.serve(async (req) => {
           const b2b = b2bPorLocalProd.get(idProd);
           if (b2b == null || !prodOrigem.has(b2b)) continue;
           if (paresDaOrigem.has(chave)) continue;
+          // `local` = preco combinado aqui. Nao e sobra da origem.
+          if (reguaLocal.has(chave)) continue;
           nReguaObsoleta++;
           if (reguaObsoleta.length < LIMITE_EX) {
             reguaObsoleta.push({ produto_b2bwave: b2b, preco_aqui: reguaAqui.get(chave) });

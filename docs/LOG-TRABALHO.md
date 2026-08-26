@@ -2488,8 +2488,14 @@ SELECT created_at, samples FROM public.sync_log
  WHERE action = 'products' ORDER BY created_at DESC LIMIT 1;
 ```
 
-Tem que aparecer **`SYNC_VERSION:stock-lock-v1`**. Se aparecer `related-v4`, a
-edge function NAO foi deployada — pare e peca o deploy.
+⚠️ **O MARCADOR MUDA A CADA LEVA que altera comportamento** — e essa e a razao de
+ele existir. Confira sempre contra o valor da leva que voce ACABOU de deployar,
+nunca contra um valor fixo escrito aqui. Hoje (26/ago, leva da procedencia de
+preco) o valor e **`SYNC_VERSION:preco-rpc-v1`**; antes dele foi
+`stock-lock-v1`, e antes `related-v4`.
+
+Se aparecer um valor ANTERIOR ao da sua leva, a edge function nao foi deployada —
+pare e peca o deploy. Se aparecer o valor da sua leva, subiu.
 
 CONFIRA O `created_at` PRIMEIRO: tem que ser do sync que voce acabou de rodar. Se
 for antigo, o sync falhou ANTES de gravar o log (erro da API do B2BWave,
@@ -2946,3 +2952,64 @@ PENDENCIAS REGISTRADAS (nao entraram, de proposito):
 - a linha vermelha de erro do painel mostra `samples[0]`, que num run de produtos
   e sempre o marcador de versao — erro real nunca aparece ali.
 - catalogo com <10 ativos: a mensagem tranquiliza igual para 1 e para 5 sumidos.
+
+### 26/ago (noite) — PONTO DE PARADA. Retomar exatamente daqui.
+
+O dono parou por credito. Estado exato:
+
+**NO AR, funcionando:** notificacoes ligadas (torneira aberta, sistema em
+repouso), 5 crons rodando, alerta de estoque baixo ligado por SMS, travas de
+catalogo e de estoque ativas. A migration `20260826100000` (coluna `origem`)
+esta APLICADA — 1015 linhas, todas `desconhecido`. Backup `backup_tpi_20260826`
+existe com 1015 linhas, com RLS e REVOKE, e AINDA NAO FOI APAGADO.
+
+**PRONTO, ESPERANDO O DONO RODAR:**
+  `supabase/migrations/20260826110000_preco_carimbo_e_guarda.sql`
+  Cria a RPC `sync_upsert_precos`, que carimba `b2bwave` e preserva `local` no
+  mesmo statement. Aprovada pelo cetico ("pode rodar o SQL"). Rodar sozinha e
+  seguro: o codigo velho nao a chama.
+
+**PRONTO, ESPERANDO PUBLISH+DEPLOY** (nao commitado ainda quando isto foi
+escrito — ver commit seguinte):
+  - `b2bwave-sync`: preco pela RPC com leitura de erro; `SYNC_VERSION` virou
+    `preco-rpc-v1`; contador de obsoletos em DOIS baldes (`precosObsoletos` /
+    `precosSemTriagem`); erro de preco vira faixa `BLOQUEIO_PRECO` na tela;
+    metrica gemea do `diff_catalog` tambem passa a ignorar `local`.
+  - `ProductEdit.tsx`: upsert do que mudou + DELETE do que saiu (era delete+insert
+    de tudo); snapshot `origPriceLists` atualizado apos salvar; validacao de
+    tabela de preco repetida; leitura de erro no load dos precos.
+  - `TabelasPreco.tsx`: carimba `local` so nas linhas sujas; `handleDuplicate`
+    deliberadamente sem carimbo.
+  - `types.ts`: `origem` adicionado a mao (o Lovable regera igual).
+
+**O QUE O CETICO EXIGIU E EU FIZ na rodada 2:** os dois baldes (o filtro
+`origem === 'b2bwave'` que eu tinha escrito zerava a metrica dos 29 pelo motivo
+errado — eles NUNCA sao carimbados `b2bwave`, por definicao); o snapshot do
+`ProductEdit` (apagar linha, salvar, re-adicionar, salvar = nada gravado com a
+tela dizendo "salvo"); o marcador de versao nos DOIS documentos que mandavam
+procurar o valor antigo; e quatro comentarios que afirmavam o contrario do
+codigo.
+
+**PENDENCIAS REGISTRADAS, com decisao do dono pendente:**
+  1. `ImportProductDiscounts.tsx:89` grava a coluna `desconto`, que NAO EXISTE em
+     `tabela_preco_itens` (o desconto mora em `produto_descontos`). Toda linha
+     erra. Precisa decidir: gravar na tabela certa, ou criar a coluna. E o `as any`
+     dali e o mesmo truque que escondeu esse bug por meses.
+  2. `ProductEdit.tsx` — SETE leituras do load (`produto_imagens`,
+     `produto_arquivos`, `produto_descontos`, `produto_precos_cliente`,
+     `produtos_relacionados`, `produto_opcoes`, `produto_status_regras`) NAO leem
+     o erro, e o save faz `delete tudo + insert o que esta na tela`. Se o load
+     falhar, o save APAGA os dados e diz "Product saved". Preco ja esta imune
+     (snapshot vazio nao apaga nada); os sete nao. E a pendencia mais perigosa da
+     lista.
+  3. Textos de notificacao: `low_stock` esta em ingles, mas `new_order`,
+     `order_status`, `new_customer` e `account_approved` estao em PORTUGUES — e a
+     operacao e em ingles.
+  4. Tres residuos da leva do catalogo (relDiag acoplado a `relatedRows`, a linha
+     vermelha do painel mostrando `samples[0]`, mensagem de catalogo pequeno).
+  5. Fila nao comecada: Turnstile (P2), dominio `b2b.permshield.com` (P3),
+     pedidos 2605/2550 com itens aqui e nenhum na origem.
+
+**PROXIMO PASSO EXATO ao retomar:** rodar `20260826110000` no SQL, depois publish
++ pedir deploy da edge function, depois conferir `SYNC_VERSION:preco-rpc-v1` no
+`sync_log`, e so entao a triagem dos `desconhecido`.

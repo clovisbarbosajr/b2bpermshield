@@ -2667,6 +2667,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          origem: string
           preco: number
           produto_id: string
           tabela_preco_id: string
@@ -2674,6 +2675,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          origem?: string
           preco?: number
           produto_id: string
           tabela_preco_id: string
@@ -2681,6 +2683,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          origem?: string
           preco?: number
           produto_id?: string
           tabela_preco_id?: string
