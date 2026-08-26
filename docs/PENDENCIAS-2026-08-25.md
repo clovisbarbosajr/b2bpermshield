@@ -29,6 +29,49 @@
 
 ---
 
+## PENDÊNCIAS ABERTAS — 26/ago
+
+### P1. As páginas novas ainda NÃO substituíram nada
+
+`public/paginas/` (portal, login de admin, login de cliente, recuperação de
+senha) está no GitHub, mas **não é a tela do sistema**. Dois motivos:
+
+1. **As rotas já existem em React** — `App.tsx:143-151` serve `/`,
+   `/admin-login`, `/customers-login` e `/reset-password` pelos componentes
+   `LoginLanding`, `AdminLogin`, `CustomerLogin` e `ResetPassword`. Quem
+   responde nesses caminhos é o app; os arquivos estáticos ficam em
+   `/paginas/...` e ninguém chega neles pelo fluxo normal.
+2. **Os formulários não autenticam** — `action="#"` e o `app.js` intercepta o
+   envio, mostrando "Interface ready — connect this form to your authentication
+   endpoint". Nenhuma chamada ao Supabase.
+
+**Conserto certo:** levar o DESENHO (HTML/CSS) para dentro dos componentes React
+que já existem, porque a lógica de login, sessão e recuperação já está feita e
+testada neles. O caminho inverso — apontar as rotas para os arquivos estáticos —
+jogaria fora a autenticação inteira.
+
+Não fiz nada disso: o dono pediu para subir sem alterar. Está subido, intacto.
+
+### P2. Cloudflare Turnstile nas telas de login e cadastro
+
+Ideia do dono (26/ago): pôr o desafio do Cloudflare para bloquear robô sozinho e
+sinalizar ao visitante que o site é protegido.
+
+**Por que faz sentido aqui, e não é só enfeite:** o cadastro deste sistema é
+ABERTO, e isso já apareceu como agravante em vários achados desta semana —
+qualquer pessoa cria conta e passa a ter acesso autenticado. O Turnstile corta a
+criação em massa na porta.
+
+**Onde entra:** `/cadastro`, `/login`, `/admin-login` e a recuperação de senha.
+Precisa dos dois lados — o widget na tela E a validação do token no servidor
+(edge function), senão é decoração: sem a checagem do lado do servidor, um robô
+simplesmente não carrega o widget e manda o POST direto.
+
+**Depende de P1** se as telas forem trocadas: fazer nos componentes atuais e
+depois refazer no desenho novo é trabalho dobrado.
+
+---
+
 # Estado anterior — 25/ago/2026 (fim do dia)
 
 Este é o arquivo de estado. O histórico detalhado, com o raciocínio de cada
