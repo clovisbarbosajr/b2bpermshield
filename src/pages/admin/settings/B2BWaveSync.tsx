@@ -260,6 +260,12 @@ const B2BWaveSync = () => {
       if (r2?.abortado) {
         toast.error("Não apaguei nada", { description: r2.motivo });
         setOrderProgress("⚠ " + r2.motivo);
+      } else if (r2?.interrompido) {
+        // O servidor avisa quando parou pelo tempo. A tela NAO lia esse campo, e
+        // trabalho parcial saia como toast VERDE — o admin lia "40 apagados"
+        // achando que era tudo, exatamente o que o campo existe para impedir.
+        toast.warning(`${r2?.apagados ?? 0} apagados — NÃO terminou`, { description: r2.aviso });
+        setOrderProgress(`⚠ ${r2.apagados} de ${r2.alvo ?? "?"} apagados. Parei pelo tempo — clique de novo para terminar.`);
       } else {
         toast.success(`${r2?.apagados ?? 0} pedido(s) apagados`);
         setOrderProgress(`✅ ${r2?.apagados ?? 0} apagados${(r2?.falhas?.length ?? 0) > 0 ? `, ${r2.falhas.length} falharam` : ""}`);

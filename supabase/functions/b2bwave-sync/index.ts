@@ -412,7 +412,15 @@ async function upsertOrder(
     // O epsilon so empurra o valor de volta para o lado decimal certo. Conferido
     // que nao estraga caso legitimo: 10.005 continua subindo, 10.0049999
     // continua descendo.
-    const cent = (x: number) => Math.round((Number(x) || 0) * 100 + 1e-6);
+    // `Math.sign` + `Math.abs`: em valor NEGATIVO o epsilon empurraria em
+    // direcao a zero, que e o lado errado — o Postgres arredonda meio para LONGE
+    // de zero. Hoje negativo nao chega aqui (`pickNum` so devolve > 0), mas a
+    // coluna nao tem CHECK: no dia em que alguem lancar nota de credito, a
+    // protecao seria um filtro distante, nao esta conta.
+    const cent = (x: number) => {
+      const v = Number(x) || 0;
+      return Math.sign(v) * Math.round(Math.abs(v) * 100 + 1e-6);
+    };
     const changed = ex.status !== status
       || cent(ex.total) !== cent(total)
       || cent(ex.subtotal) !== cent(subtotal)
@@ -1774,7 +1782,12 @@ Deno.serve(async (req) => {
         // dinheiro identico, em massa, justo na populacao que o fallback
         // alcanca. (O `changed` do upsertOrder tem o mesmo defeito e por isso
         // reescreve esses pedidos a cada tick — anotado na fila.)
-        const cent = (v: number) => Math.round(v * 100) / 100;
+        // MESMO epsilon do `cent()` do upsertOrder. Este e o comparador que
+        // alimenta `nValor`, e `nValor` entra no `identico` — enquanto ele ficou
+        // cru, os pedidos 987 e 1766 (2080.615 la, 2080.62 aqui) mantinham o
+        // relatorio vermelho para sempre. Eu tinha corrigido o OUTRO comparador
+        // deste mesmo arquivo, que nao decide nada.
+        const cent = (v: number) => Math.round(v * 100 + 1e-6) / 100;
         const difTotal = cent(Number(local.total)) !== cent(totalOrigem);
         const difSub = cent(Number(local.subtotal)) !== cent(subtotalOrigem);
         const difQtd = (local.quantidade_total ?? 0) !== qtdOrigem;
@@ -2564,7 +2577,15 @@ Deno.serve(async (req) => {
           .not("b2bwave_order_id", "is", null)
           .order("b2bwave_order_id", { ascending: true })
           .range(de, de + 999);
-        if (error) throw new Error("falha ao ler pedidos: " + error.message);
+        if (error) {
+          // Mesmo formato dos outros quatro abortos. Com `throw` isto virava 500,
+          // e a tela mostrava "non-2xx status code" — a doenca que este arquivo
+          // acabou de curar nos outros pontos, sobrevivendo aqui.
+          return new Response(JSON.stringify({
+            success: false, abortado: true,
+            motivo: "falha ao ler os pedidos locais: " + error.message + " — NAO apaguei nada",
+          }), { headers: jsonHeaders });
+        }
         const parte = data ?? [];
         for (const r of parte) aqui.push({ id: (r as any).id, numero: Number((r as any).b2bwave_order_id) });
         if (parte.length === 0) break;
@@ -2572,6 +2593,19 @@ Deno.serve(async (req) => {
       }
 
       let fantasmas = aqui.filter((r) => !naOrigem.has(r.numero));
+
+      // APAGAR EXIGE A LISTA CONFIRMADA. Sem ela, recusa.
+      //
+      // A versao anterior so FILTRAVA quando `numeros` vinha — ou seja, o
+      // default da trava era ABERTO: uma chamada `{dry_run:false}` sem lista
+      // apagava ate o teto (150) sem ninguem ter confirmado nada. Numa acao
+      // destrutiva, e o default que precisa ser fechado.
+      if (!soContar && !(Array.isArray(body.numeros) && body.numeros.length > 0)) {
+        return new Response(JSON.stringify({
+          success: false, abortado: true,
+          motivo: "apagar exige a lista `numeros` confirmada — NAO apaguei nada",
+        }), { headers: jsonHeaders });
+      }
 
       // SO APAGA O QUE FOI CONFIRMADO.
       //
@@ -2620,11 +2654,18 @@ Deno.serve(async (req) => {
       let apagados = 0;
       const falhas: any[] = [];
       let interrompido = false;
+      const numerosApagados: number[] = [];
       for (const r of fantasmas) {
-        if (Date.now() - inicio > 140_000) { interrompido = true; break; }
+        // 100s, a mesma folga que o resto deste arquivo adota sob o limite da
+        // Edge Function. Eu tinha posto 140s sem justificar por que abandonava a
+        // margem — e o laco faz DUAS idas ao banco por pedido depois de checar o
+        // relogio. Estourar aqui mata a resposta inteira, que e justamente o que
+        // o campo `interrompido` existe para evitar.
+        if (Date.now() - inicio > 100_000) { interrompido = true; break; }
         const { error } = await adminClient.from("pedidos").delete().eq("id", r.id);
         if (error) { falhas.push({ pedido: r.numero, erro: error.message }); continue; }
         apagados++;
+        numerosApagados.push(r.numero);
         await adminClient.from("notification_log").insert({
           event: "pedido_fantasma_apagado", channel: "-", recipient: "-", status: "failed",
           error: `pedido ${r.numero} existia aqui e nao existe mais no B2BWave`,
@@ -2640,7 +2681,10 @@ Deno.serve(async (req) => {
         // admin leria "apagados: 40" achando que era tudo.
         interrompido,
         ...(interrompido ? { aviso: "parei pelo tempo — rode de novo para terminar" } : {}),
-        numeros: fantasmas.map((r) => r.numero).sort((a, b) => a - b),
+        // Os que FORAM apagados, nao a lista inteira. Interrompido, a resposta
+        // anterior afirmava 120 numeros ao lado de `apagados: 40`.
+        numeros: numerosApagados.sort((a, b) => a - b),
+        alvo: fantasmas.length,
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });
     }
