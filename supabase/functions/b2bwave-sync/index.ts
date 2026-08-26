@@ -385,6 +385,12 @@ async function upsertOrder(
     // so o de fuso. Um pedido importado com data de 2020 que a origem depois
     // corrija para 2026 fica em 2020 — e mudo — para sempre. Falha fechada, mas
     // nao sao "alguns minutos": e permanente, e o conserto e a mao.
+    //
+    // Segunda fresta, tambem fechada: `data_origem` corrompida no banco faz
+    // `_dtAtual` virar NaN. A data e regravada (o ramo `!Number.isFinite`), mas
+    // `notificavel` NAO sobe, porque isso exige `_dtAtual === null`. Um pedido
+    // genuinamente recente nesse estado fica mudo. Falha fechada, coerente com
+    // a politica — e agora dita, em vez de descoberta depois.
     const _dtAtual = ex.data_origem ? new Date(ex.data_origem).getTime() : null;
     const _dtNova  = submittedAt ? new Date(submittedAt).getTime() : null;
     const podeGravarData = _dtNova !== null && Number.isFinite(_dtNova)
@@ -1511,13 +1517,12 @@ Deno.serve(async (req) => {
       const reparoPendente: any[] = [];
       const reparoReabre: any[] = [];
       const vaiEscreverEx: any[] = [];
-      const escreveRecenteEx: any[] = [];
       // Mesma janela do `recenteDeVerdade` do upsertOrder.
       const TETO_DIAS_IMPORTADO_MS = 7 * 24 * 60 * 60 * 1000;
       // Contadores: 20 exemplos nao distinguem 3 de 1147, que e o numero que
       // decide se da para religar.
       let nFaltando = 0, nSobrando = 0, nStatus = 0, nValor = 0, nPagamento = 0, nReparo = 0;
-      let nReabre = 0, nVaiEscrever = 0, nEscreveRecente = 0;
+      let nReabre = 0, nVaiEscrever = 0;
 
       // Mesma extracao de data do upsertOrder, para saber se o pedido vai cair
       // no `precisaReparar`.
@@ -1593,10 +1598,15 @@ Deno.serve(async (req) => {
         if (reabre) {
           nReabre++;
           if (reparoReabre.length < 20) {
-            // NOTA: este contador cobre so o reparo. `notificavel: true` tambem
-            // e gravado em QUALQUER update de pedido recente, mesmo com
-            // `data_origem` ja presente — esse caso cai em
-            // `proximo_tick_religa_notificavel`, que e o numero a olhar.
+            // Este contador cobre o REPARO, e o reparo e o UNICO caminho que
+            // ainda religa `notificavel` num pedido existente: desde a trava de
+            // data, um update em pedido recente que ja TEM `data_origem` nao
+            // toca mais a marca.
+            //
+            // (Esta nota ja dizia o contrario — que qualquer update de pedido
+            //  recente religava, e mandava olhar outro campo. Ficou falsa junto
+            //  com a trava e sobreviveu a uma renomeacao que trocou a palavra e
+            //  nao a frase.)
             reparoReabre.push({ pedido: n, data_origem: dataOrigem, notificavel_hoje: local.notificavel });
           }
         }
@@ -1632,17 +1642,14 @@ Deno.serve(async (req) => {
         // Portao que nunca fica verde e portao que todo mundo aprende a ignorar
         // — foi o argumento que me fez tirar `nReparo` daqui, e eu tinha
         // reconstruido o mesmo problema com outro nome.
-        const recente = dataOrigem !== null
-          && (Date.now() - new Date(dataOrigem).getTime()) < TETO_DIAS_IMPORTADO_MS;
-        // `local.data_origem` VAZIA = o proximo tick vai reparar, e o reparo e o
-        // unico caminho que ainda religa `notificavel`.
-        const vaiRepararEReligar = !local.data_origem && recente;
-        if (vaiEscrever && vaiRepararEReligar) {
-          nEscreveRecente++;
-          if (escreveRecenteEx.length < 20) {
-            escreveRecenteEx.push({ pedido: n, data_origem: dataOrigem, notificavel_hoje: local.notificavel, status: { la: statusOrigem, aqui: local.status } });
-          }
-        }
+        // (Aqui existia `nEscreveRecente`, um segundo contador de "vai religar
+        //  `notificavel`". Ele fazia sentido quando QUALQUER update em pedido
+        //  recente religava a marca. Depois que isso passou a acontecer so no
+        //  REPARO, ele virou subconjunto estrito de `nReabre` — e subcontava,
+        //  porque exigia `vaiEscrever` e o reparo dispara o UPDATE sozinho, por
+        //  `precisaReparar`, sem `changed`. Dois numeros para a mesma coisa, com
+        //  o errado se chamando "o numero a olhar". `nReabre` e o conjunto
+        //  verdadeiro e ja esta no portao `identico`.)
 
         const pagoOrigem = pickPago(o);
         if (pagoOrigem !== undefined && pagoOrigem !== local.is_paid) { nPagamento++; }
@@ -1737,18 +1744,21 @@ Deno.serve(async (req) => {
         // eternamente diferentes de zero por ruido de float e por pedido
         // pre-2025. Exige o que muda comportamento:
         //
-        //   nEscreveRecente — o tick escreve num pedido recente e, ao escrever,
-        //                     grava `notificavel: true`;
-        //   nReabre         — o REPARO (pedido recente sem `data_origem` local)
-        //                     tambem grava `notificavel: true`, e nesse caso
-        //                     status/total/subtotal/qtd podem estar TODOS
-        //                     batendo, entao `nEscreveRecente` seria 0 e o
-        //                     portao ficaria verde. Este e o estado do sistema
-        //                     AGORA, antes do primeiro tick — exatamente quando
-        //                     este relatorio e consultado para decidir religar.
+        //   nReabre — o REPARO: pedido recente cuja `data_origem` esta vazia
+        //             aqui. O proximo tick grava a data e, junto, religa
+        //             `notificavel`. E o UNICO caminho que ainda religa a marca
+        //             num pedido existente.
+        //
+        //             Repare que ele NAO depende de `changed`: status, total,
+        //             subtotal e quantidade podem estar todos batendo, e o
+        //             UPDATE acontece assim mesmo, por `precisaReparar`. Um
+        //             portao que exigisse `changed` reportaria zero justamente
+        //             nesse caso — que e o estado do sistema AGORA, antes do
+        //             primeiro tick, exatamente quando este relatorio e
+        //             consultado para decidir religar.
         identico: !truncado && nFaltando === 0 && nSobrando === 0
           && nStatus === 0 && nValor === 0 && nPagamento === 0
-          && nEscreveRecente === 0 && nReabre === 0
+          && nReabre === 0
           && itensOk && nSemNenhum === 0 && nItensSobrando === 0,
         linhas_dos_pedidos: itensOk ? {
           pedido_sem_nenhuma_linha: nSemNenhum,
@@ -1770,7 +1780,6 @@ Deno.serve(async (req) => {
           reparo_pendente: nReparo,
           reparo_reabre_notificavel: nReabre,
           proximo_tick_escreve: nVaiEscrever,
-          proximo_tick_religa_notificavel: nEscreveRecente,
         },
         aviso: truncado
           ? "LEITURA INCOMPLETA — a lista da origem nao terminou. `sobrando_aqui` aqui NAO significa lixo: sao pedidos que a origem ainda nao listou. Rode de novo com budget_ms maior."
@@ -1784,7 +1793,6 @@ Deno.serve(async (req) => {
           reparo_pendente: reparoPendente,
           reparo_reabre_notificavel: reparoReabre,
           proximo_tick_escreve: vaiEscreverEx,
-          proximo_tick_religa_notificavel: escreveRecenteEx,
         },
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });
