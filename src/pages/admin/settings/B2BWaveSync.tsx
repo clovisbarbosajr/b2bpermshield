@@ -389,6 +389,19 @@ const B2BWaveSync = () => {
                   +{r.created_count} novos · {r.updated_count} atualizados · {r.skipped_count} iguais ·{" "}
                   <span className={r.errors_count > 0 ? "text-destructive font-medium" : ""}>{r.errors_count} erros</span>
                 </div>
+                {/* BLOQUEIO NAO E ERRO, e por isso nao aparecia.
+                    Este painel so mostrava `samples` quando `errors_count > 0`, e
+                    mostrava apenas `samples[0]` — que e sempre o marcador de
+                    versao. Um feed truncado nao gera erro de upsert: `errors` fica
+                    0, e "bloqueei 40 desativacoes" ficava visualmente IGUAL a "nao
+                    havia nada a desativar". No caminho do cron, sem ninguem na
+                    frente, o espelho parava de refletir exclusoes em silencio.
+                    Agora o bloqueio tem faixa propria, independente de erro. */}
+                {Array.isArray(r.samples) && r.samples.filter((s: any) => typeof s === "string" && s.startsWith("BLOQUEIO_")).map((s: string, i: number) => (
+                  <div key={i} className="mt-1 break-words rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-400">
+                    ⚠ {s}
+                  </div>
+                ))}
                 {r.errors_count > 0 && Array.isArray(r.samples) && r.samples.length > 0 && (
                   <div className="mt-1 break-words text-destructive">{r.samples[0]}</div>
                 )}

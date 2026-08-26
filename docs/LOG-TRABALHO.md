@@ -2860,3 +2860,89 @@ dono (contagem fisica apagada com a tela dizendo que continuava la; auditoria
 marcando "failed" com pedidos no banco, numa tela sem idempotencia), 1 arquivo
 que virou binario para o git, e onze reincidencias da mesma classe: comentario
 afirmando o que o codigo nao faz.
+
+### 26/ago (tarde) — pos-religamento: catalogo, login e preco
+
+Depois de a torneira abrir, ataquei tres coisas. As duas primeiras ja passaram por
+varias rodadas de cetico; a terceira acabou de reprovar na primeira.
+
+**1. A trava de desativacao de produto — DEFEITO QUE JA ESTAVA EM PRODUCAO.**
+O `sync_products` desativa produto que sumiu da origem. A trava de sanidade
+exigia que a origem devolvesse >= 50% do catalogo — e a comparacao e `>=`, entao
+com EXATAMENTE metade ela PASSA e desativa a outra metade. E `fetchAllPages` para
+em pagina curta sem lancar erro: truncagem silenciosa e o caminho normal de falha
+dessa API. O dono desagendou `b2bwave-cron-products` como precaucao.
+Consertado: fracao maxima de 10% dos ATIVOS (nao razao contra o total, que era
+tautologia), teto de 25 por execucao, teto de 60 por 24h, rastro quando bloqueia,
+e escape em dois campos para o dia em que a origem realmente apagar muita coisa.
+No caminho, removi um bloco duplicado que EU tinha escrito de manha sem ver que o
+original ja existia — e que rodava ANTES dele, sombreando a trava do outro.
+
+**2. Login: "nao consegui verificar" != "sua conta esta pendente".**
+Qualquer falha ao ler `user_roles` virava a tela "Account Pending Approval" — uma
+afirmacao sobre o CADASTRO do usuario. O dono viu isso sobre a propria conta.
+Havia QUATRO lugares fazendo isso, e o pior era o `AdminLogin`: ele DESLOGAVA o
+admin dizendo "esta conta nao tem acesso administrativo". Consertados os quatro,
+com componente unico de tela de erro, retentativa, e botao de sair que realmente
+sai (o `signOut` do supabase-js nao limpa o token local quando a rede cai — e
+rede caindo e a causa numero um de estar naquela tela).
+
+**3. Preco com procedencia (`20260826100000`).** Coluna `origem` para distinguir
+"a origem removeu" de "o admin definiu aqui" — sem isso, apagar os 29 precos
+obsoletos e chute. Backfill em `desconhecido`, nao `b2bwave`: "nao me lembro de
+ter definido" nao e "ninguem definiu", e marcar errado faria o sistema apagar
+sozinho um preco combinado com cliente.
+O cetico derrubou um defeito de FUNDO que eu nao tinha visto: `ProductEdit.tsx`
+APAGA e REINSERE as linhas de preco ao salvar um produto. Sob o contrato da
+coluna, um save de produto lavaria a procedencia de todos os precos daquele
+produto. Virou pre-requisito escrito no cabecalho — o codigo de carimbo nao pode
+ser escrito antes de o `ProductEdit` virar upsert.
+
+**ACHADO LATERAL — a importacao de descontos por tabela de preco esta QUEBRADA.**
+`src/pages/admin/tools/ImportProductDiscounts.tsx` faz upsert de uma coluna
+`desconto` em `tabela_preco_itens`. Essa coluna NAO EXISTE — conferido nas
+migrations e em `types.ts`; o desconto mora em `produto_descontos`. O `as any` na
+chamada desliga o TypeScript. Toda linha importada com tabela de preco falha com
+PGRST204. Aparece na tela (o erro e reportado por linha), entao nao e silencioso,
+mas o recurso nao funciona. NAO consertado nesta leva — precisa decidir se grava
+em `produto_descontos` ou se a coluna deve ser criada.
+
+### 26/ago — leva do catalogo/login APROVADA (6 rodadas de cetico)
+
+O que estava em producao e era o risco real: a trava que impede desativacao em
+massa de produto passava com METADE do catalogo (`>= 0.5` contra o total), e
+`fetchAllPages` para em pagina curta sem lancar — truncagem silenciosa e o
+caminho normal de falha dessa API. O dono desagendou o cron de produtos assim que
+eu contei, e ficou desagendado ate este deploy.
+
+FICOU ASSIM: fracao maxima de 10% dos ATIVOS (a razao anterior comparava o
+tamanho da ORIGEM com o nosso — tautologia, sempre verdadeira), teto de 25 por
+execucao, teto de 60 por 24h (sem ele, 20 por hora esvaziam o catalogo em uma
+semana com cada execucao parecendo normal), rastro quando bloqueia — inclusive
+NA TELA DO SYNC, que era onde nao aparecia — e escape em dois campos, com o
+comando certo para cada motivo de bloqueio.
+
+LOGIN: quatro lugares transformavam "nao consegui ler seu papel" em "sua conta
+esta pendente". O pior deslogava o admin dizendo que a conta nao tem acesso
+administrativo. Componente unico de erro de sistema, com botao de sair que
+realmente sai (o `signOut` do supabase-js nao limpa o token quando a rede cai, e
+rede caindo e a causa numero um de estar naquela tela — conferido no
+`node_modules`, nao afirmado de memoria).
+
+MINHAS FALHAS NESTA LEVA, para nao repetir:
+- escrevi um bloco de desativacao de produto sem ver que ja existia um fazendo o
+  mesmo, e o meu rodava ANTES, sombreando a trava do outro;
+- "consertei" a razao trocando uma tautologia por outra;
+- DEI UMA CORRECAO COMO FEITA SEM ELA ESTAR NO ARQUIVO: o script abortou numa
+  assercao antes de gravar e eu nao conferi. O cetico pegou com grep. Passei a
+  conferir cada edicao no arquivo depois de aplicar;
+- afirmei DUAS coisas sobre o `@supabase/auth-js` sem abrir o `node_modules`, uma
+  em cada direcao, e as duas estavam erradas.
+
+PENDENCIAS REGISTRADAS (nao entraram, de proposito):
+- `relDiag` acopla a visibilidade do bloqueio no `message` a `relatedRows`, que
+  hoje e `const 0`. Se related products voltar, o bloqueio some do card manual (a
+  faixa na tela continua).
+- a linha vermelha de erro do painel mostra `samples[0]`, que num run de produtos
+  e sempre o marcador de versao — erro real nunca aparece ali.
+- catalogo com <10 ativos: a mensagem tranquiliza igual para 1 e para 5 sumidos.

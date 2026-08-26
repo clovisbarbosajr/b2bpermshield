@@ -32,12 +32,32 @@ const AdminLogin = () => {
       return;
     }
     if (data.user) {
-      const { data: roleData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", data.user.id)
-        .maybeSingle();
-      if (roleData?.role !== "admin" && (roleData?.role as string) !== "warehouse" && (roleData?.role as string) !== "manager") {
+      // O `error` E LIDO, e uma falha de leitura NAO derruba a sessao.
+      //
+      // Antes o erro era descartado na desestruturacao: rede caindo, RLS mudando
+      // ou um 500 do PostgREST entre o login e esta consulta faziam
+      // `roleData = null`, a condicao virava verdadeira, e o sistema DESLOGAVA o
+      // administrador dizendo que a conta dele nao tem acesso administrativo.
+      // Pior que a tela de "conta pendente" que motivou esta leva: aquela so
+      // mentia, esta mente E destroi a sessao. Uma tentativa a mais antes de
+      // desistir — a falha tipica aqui e transitoria.
+      let roleData: any = null, roleErr: any = null;
+      for (let tentativa = 0; tentativa < 2; tentativa++) {
+        const r = await supabase.from("user_roles").select("role").eq("user_id", data.user.id).maybeSingle();
+        roleData = r.data; roleErr = r.error;
+        if (!roleErr) break;
+        if (tentativa === 0) await new Promise((ok) => setTimeout(ok, 600));
+      }
+      if (roleErr) {
+        // Nao desloga: a sessao e valida, quem falhou fomos nos. Deixa entrar e
+        // deixa o `ProtectedRoute` decidir — la a falha vira tela de erro de
+        // sistema, com botao de tentar de novo, em vez de acusacao ao cadastro.
+        console.error("[admin-login] leitura de user_roles falhou", roleErr);
+        navigate("/admin");
+        return;
+      }
+      const papel = roleData?.role as string | undefined;
+      if (papel !== "admin" && papel !== "warehouse" && papel !== "manager") {
         await supabase.auth.signOut();
         toast.error("This account does not have administrator access.");
         setAviso({ tipo: "erro", texto: "This account does not have administrator access." });

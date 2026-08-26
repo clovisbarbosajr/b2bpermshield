@@ -1,5 +1,6 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate } from "react-router-dom";
+import ErroDeVerificacao from "@/components/ErroDeVerificacao";
 
 const STAFF_ROLES = ["admin", "manager", "warehouse"];
 
@@ -10,7 +11,7 @@ interface Props {
 }
 
 const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Props) => {
-  const { user, role, loading, isDemo, hasPermission, contaAprovada } = useAuth();
+  const { user, role, loading, isDemo, hasPermission, contaAprovada, falhaAoLerPapel } = useAuth();
 
   if (loading) {
     return (
@@ -22,6 +23,11 @@ const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Props) =
 
   if (!user) {
     return <Navigate to="/" replace />;
+  }
+
+  // Falha ao LER o papel nao e conta pendente — ver `ErroDeVerificacao`.
+  if (!isDemo && falhaAoLerPapel) {
+    return <ErroDeVerificacao />;
   }
 
   // Real user with no role → pending approval (customers only)

@@ -1,9 +1,10 @@
 import { Link, Navigate } from "react-router-dom";
+import ErroDeVerificacao from "@/components/ErroDeVerificacao";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePortalTheme, usePortalMotion } from "@/hooks/usePortalTheme";
 
 const LoginLanding = () => {
-  const { user, role, loading } = useAuth();
+  const { user, role, loading, falhaAoLerPapel } = useAuth();
 
   usePortalTheme(["portal-page"]);
   usePortalMotion();
@@ -20,6 +21,12 @@ const LoginLanding = () => {
     }
     if (role === "cliente") {
       return <Navigate to="/portal" replace />;
+    }
+    // Falha ao LER o papel nao e conta pendente. Esta rota NAO passa pelo
+    // `ProtectedRoute`, entao precisa da checagem propria — e e por aqui que se
+    // entra com sessao ja viva (aba salva, favorito), que foi o caso do dono.
+    if (falhaAoLerPapel) {
+      return <ErroDeVerificacao />;
     }
     // role nulo -> aguardando aprovacao
     return <Navigate to="/pending-approval" replace />;

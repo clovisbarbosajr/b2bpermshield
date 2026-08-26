@@ -33,6 +33,11 @@ interface AuthContextType {
   // é só a tela — existe para o cliente ver "aguardando aprovação" em vez de uma
   // loja vazia sem explicação.
   contaAprovada: boolean;
+  // `true` quando a leitura do papel FALHOU (nao quando o usuario nao tem papel).
+  // Existe para a tela poder dizer "nao consegui verificar" em vez de "sua conta
+  // esta pendente" — a segunda e uma afirmacao sobre o cadastro, e afirmar isso
+  // por causa de um erro de rede foi o que assustou o dono em 26/ago.
+  falhaAoLerPapel: boolean;
   signOut: () => Promise<void>;
   clearViewAs: (dest?: string) => void;
 }
@@ -46,6 +51,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   isDemo: false,
   contaAprovada: true,
+  falhaAoLerPapel: false,
   impersonatedCustomer: null,
   canPlaceOrders: true,
   isSubUser: false,
@@ -90,6 +96,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [canPlaceOrders, setCanPlaceOrders] = useState<boolean>(true);
   const [isSubUser, setIsSubUser] = useState<boolean>(false);
   const [contaAprovada, setContaAprovada] = useState<boolean>(true);
+  const [falhaAoLerPapel, setFalhaAoLerPapel] = useState<boolean>(false);
 
   // Admin always has full access; for others check the permissions map
   const hasPermission = (key: string): boolean => {
@@ -97,13 +104,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return permissions[key] === true;
   };
 
-  // Fetch role + permissions, returns the resolved role
-  const fetchRoleAndPermissions = async (userId: string): Promise<AppRole | null> => {
-    const { data } = await (supabase as any)
-      .from("user_roles")
-      .select("role, permissions")
-      .eq("user_id", userId)
-      .maybeSingle();
+  // Fetch role + permissions, returns the resolved role.
+  //
+  // O `error` e LIDO, e uma falha de leitura NAO e tratada como "sem papel".
+  //
+  // Sem isto, `{data: null, error}` — rede caindo, RLS mudando, token expirando —
+  // era indistinguivel de "este usuario nao tem papel nenhum", e o admin caia na
+  // tela "Account Pending Approval": uma afirmacao sobre o CADASTRO dele, feita
+  // por causa de um erro de rede. Aconteceu com o dono em 26/ago.
+  //
+  // CORRECAO DE UMA VERSAO ANTERIOR DESTE COMENTARIO: eu tinha escrito que a
+  // falha CRIAVA ficha de cliente para o administrador, via `ensureClienteRecord`.
+  // Nao cria. `ensure_my_cliente_record` e `SECURITY DEFINER` e recusa staff no
+  // banco desde 20260716140000 (versao viva em 20260825300000:94-100), sem
+  // depender do que o navegador leu. O retorno cedo abaixo e redundancia, nao o
+  // conserto de um vazamento — e quem ler isto nao vai perder meia hora
+  // procurando uma ficha fantasma.
+  //
+  // Uma tentativa a mais antes de desistir: a falha tipica aqui e transitoria.
+  // Se as duas falharem, devolve o sentinela `"__erro__"` — quem chama nao pode
+  // criar ficha nem afirmar que a conta esta pendente.
+  const fetchRoleAndPermissions = async (userId: string): Promise<AppRole | null | "__erro__"> => {
+    let data: any = null, error: any = null;
+    for (let tentativa = 0; tentativa < 2; tentativa++) {
+      const r = await (supabase as any)
+        .from("user_roles")
+        .select("role, permissions")
+        .eq("user_id", userId)
+        .maybeSingle();
+      data = r.data; error = r.error;
+      if (!error) break;
+      if (tentativa === 0) await new Promise((ok) => setTimeout(ok, 600));
+    }
+    if (error) {
+      console.error("[auth] leitura de user_roles falhou; NAO tratando como conta pendente", error);
+      setRole(null);
+      setPermissions({});
+      setCanPlaceOrders(true);
+      setIsSubUser(false);
+      // Redundancia defensiva, HOJE INALCANCAVEL: `contaAprovada` tem um unico
+      // consumidor (`ProtectedRoute`, no ramo `role === "cliente"`), e aqui o
+      // papel acabou de virar nulo, com `falhaAoLerPapel` decidindo antes. Fica
+      // para o dia em que aparecer um consumidor novo sem essa guarda. Se ficar,
+      // nao vaza dado: o portao real e o banco — `cliente_conta_liberada` faz o
+      // catalogo voltar vazio mesmo chamando a API direto com a chave anon.
+      setContaAprovada(true);
+      setFalhaAoLerPapel(true);
+      // Libera a memoria de "ja inicializei este usuario", para que um
+      // `TOKEN_REFRESHED` consiga reexecutar a leitura.
+      //
+      // CUSTO CONHECIDO, aceito: no carregamento inicial o `onAuthStateChange` e
+      // o `getSession()` correm em paralelo e checam este mesmo ref. Zerando ele
+      // aqui, uma falha rapida (offline) pode fazer a inicializacao rodar duas
+      // vezes — quatro requisicoes e dois `setLoading(true)`. Nao e laco, e
+      // duplicacao, e so acontece quando ja esta tudo errado. Reestruturar a
+      // inicializacao da autenticacao com a torneira de notificacao ABERTA seria
+      // trocar um custo pequeno e conhecido por um risco grande e desconhecido.
+      //
+      // Conferido no `@supabase/auth-js` 2.108.2 instalado, em
+      // `_onVisibilityChanged` -> `_recoverAndRefresh`: com sessao valida e fora
+      // da margem de expiracao, o ramo final emite `SIGNED_IN`. Ou seja, TODA
+      // volta para a aba reexecuta esta leitura enquanto o ref estiver nulo — e
+      // nao "cerca de 1x por hora", como duas versoes anteriores deste comentario
+      // afirmaram, uma em cada direcao. As duas foram escritas sem abrir o
+      // `node_modules`; esta foi conferida.
+      //
+      // Consequencia aceita: enquanto `falhaAoLerPapel` estiver ligado, cada foco
+      // de aba custa duas tentativas de leitura. E o preco de a falha transitoria
+      // nao virar permanente, e so acontece com o sistema ja em erro.
+      initializedUserRef.current = null;
+      return "__erro__";
+    }
+    setFalhaAoLerPapel(false);
     const dbRole = data?.role as AppRole | undefined;
 
     // STAFF (admin/manager/warehouse) tem prioridade.
@@ -191,6 +263,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const initUserSession = async (authUser: User) => {
     const resolvedRole = await fetchRoleAndPermissions(authUser.id);
+    // Leitura falhou: nao decide aprovacao e nao chama `ensureClienteRecord` (que
+    // ja recusaria staff no banco — ver o comentario da funcao acima). A sessao
+    // segue sem papel, e a tela avisa em vez de afirmar algo sobre o cadastro.
+    if (resolvedRole === "__erro__") return;
     if (resolvedRole === "cliente" || resolvedRole === null) {
       // Sub-usuário já tem registro próprio em `clientes` (criado pelo admin com
       // parent_customer_id) — claim_customer_record o encontra pelo user_id e não
@@ -215,6 +291,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCanPlaceOrders(true);
     setIsSubUser(false);
     setIsDemo(true);
+    setFalhaAoLerPapel(false);
     setRole("cliente");
     setPermissions({});
     setUser({
@@ -247,6 +324,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       supabase.auth.getSession().then(async ({ data: { session: real } }) => {
         let isAdmin = false;
         if (real?.user?.id) {
+          // Aqui o erro E descartado DE PROPOSITO, ao contrario das outras
+          // leituras de `user_roles` deste projeto. A diferenca e a direcao da
+          // falha: falhar aqui derruba a impersonacao e devolve o usuario para a
+          // sessao real dele — o lado SEGURO. Nas outras, falhar acusava o
+          // cadastro do usuario ou derrubava a sessao do admin, e por isso la o
+          // erro passou a ser lido. Falha-fechado nao precisa de retentativa.
           const { data } = await (supabase as any)
             .from("user_roles").select("role").eq("user_id", real.user.id).maybeSingle();
           isAdmin = data?.role === "admin";
@@ -309,6 +392,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         initializedUserRef.current = null;
         setRole(null);
         setPermissions({});
+        // Zera junto com o resto: estado de erro pendurado depois do logout
+        // sobreviveria para o proximo login nesta aba.
+        setFalhaAoLerPapel(false);
         setLoading(false);
       }
     });
@@ -376,6 +462,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canPlaceOrders,
         isSubUser,
         contaAprovada,
+        falhaAoLerPapel,
         signOut,
         clearViewAs,
       }}

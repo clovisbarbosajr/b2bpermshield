@@ -1246,7 +1246,7 @@ Deno.serve(async (req) => {
       }
 
       // Mapa produto b2b id -> local id (reaproveitado p/ preços, variantes e stale).
-      const allProds = await lerTudo("produtos", "id, sku, b2bwave_id", adminClient);
+      const allProds = await lerTudo("produtos", "id, sku, b2bwave_id, ativo", adminClient);
       const b2bIdToProdId = new Map<string, string>();
       for (const p of allProds || []) {
         if (p.b2bwave_id) b2bIdToProdId.set(String(p.b2bwave_id), p.id);
@@ -1272,45 +1272,18 @@ Deno.serve(async (req) => {
         if (!error) priceRows += chunk.length;
       }
 
-      // ----- PRODUTO QUE SUMIU DE LA E DESATIVADO AQUI -----
+      // PRODUTO QUE SUMIU DE LA: quem trata e o bloco "Stale products" mais
+      // abaixo, que ja existia. Eu escrevi um segundo aqui em 26/ago sem ver o
+      // primeiro — e ele nasceu inerte, porque o original ja tinha desativado os
+      // 9 produtos e o meu so olhava `ativo !== false`. Duas travas diferentes
+      // (0.8 aqui, 0.5 la) para a mesma decisao e pior que uma: numa leitura
+      // parcial da origem, qual delas responde vira loteria.
       //
-      // Decisao do dono (26/ago): "TUDO vem de la — estoque, produtos, pedidos.
-      // O nosso e um espelho". Entao produto apagado no B2BWave nao pode
-      // continuar vendavel aqui. A comparacao daquele dia achou 9 assim.
-      //
-      // DESATIVA, nao apaga, e a escolha e deliberada:
-      //   - `pedido_itens.produto_id` referencia `produtos` SEM cascata
-      //     (20260317043654:134), entao o banco RECUSA apagar produto que esta
-      //     em qualquer pedido. Apagar seria um erro por produto vendido.
-      //   - desativar e REVERSIVEL, e se auto-corrige: se o produto voltar ao
-      //     feed, o upsert acima grava `ativo: p.is_active !== false` e ele
-      //     volta sozinho. Numa leitura parcial da origem, o estrago dura um
-      //     ciclo — apagar duraria para sempre.
-      //
-      // TRAVA: se a origem devolveu menos de 80% do que temos aqui, a leitura
-      // provavelmente veio pela metade. Desativar em massa por leitura ruim e o
-      // tipo de coisa que so aparece quando o cliente reclama que sumiu produto.
-      let desativados = 0;
-      const idsNoFeed = new Set(
-        (allProducts || []).map((pr: any) => String((pr?.product || pr)?.id ?? "")).filter(Boolean)
-      );
-      if (idsNoFeed.size > 0 && idsNoFeed.size >= (existingProds || []).length * 0.8) {
-        const sumidos = (existingProds || []).filter(
-          (pr: any) => pr.b2bwave_id && !idsNoFeed.has(String(pr.b2bwave_id)) && pr.ativo !== false
-        );
-        for (const pr of sumidos) {
-          const { error } = await adminClient.from("produtos")
-            .update({ ativo: false }).eq("id", (pr as any).id);
-          if (!error) desativados++;
-        }
-        if (desativados > 0) {
-          await adminClient.from("notification_log").insert({
-            event: "produto_sumiu_da_origem", channel: "-", recipient: "-", status: "failed",
-            error: `${desativados} produto(s) nao vieram mais no feed do B2BWave e foram DESATIVADOS aqui`,
-            payload: { quantidade: desativados, origem: "b2bwave" },
-          }).then(() => {}, () => {});
-        }
-      }
+      // E ele NAO era inofensivo: ficava ACIMA do original neste mesmo arquivo,
+      // entao rodava primeiro, e no proximo produto que sumisse ele e que
+      // decidiria, sombreando a trava do outro. (Sem numero de linha de
+      // proposito: apontaria para a versao anterior deste mesmo arquivo.) Nao ter tido efeito no dia em que foi escrito — os 9 ja
+      // estavam desativados — escondeu isso. Removido.
 
       // ----- PRECO QUE SAIU DA REGUA LA, SAI DAQUI TAMBEM -----
       //
@@ -1471,22 +1444,198 @@ Deno.serve(async (req) => {
       // produtos_relacionados. (Ver docs/MUDANCAS-JUL-08-09.md.)
       const relatedRows = 0;
 
-      // Stale products. SEGURANÇA: nunca DELETA (irreversível); apenas DESATIVA, e só
-      // produtos que vieram do B2BWave (b2bwave_id) — produto nativo do app é preservado.
-      // Sanity: só roda se o feed veio "completo" (>=50% dos b2b locais vistos), pra um
-      // fetch truncado (página curta) não desativar a base inteira.
-      let deleted = 0;
+      // PRODUTO QUE SUMIU DA ORIGEM — DESATIVA, nunca apaga.
+      //
+      // `pedido_itens.produto_id` referencia `produtos` SEM cascata, entao o banco
+      // RECUSA apagar produto vendido. E desativar se auto-corrige: se ele voltar
+      // ao feed, o upsert acima grava `ativo` de novo. So produto com
+      // `b2bwave_id` entra — produto nativo do app e preservado.
+      //
+      // TRES TRAVAS, e a razao sozinha nao bastava:
+      //
+      // 1) FRACAO SUMIDA de no maximo 10% dos ATIVOS — `sumidos / b2bAtivos`.
+      //    (Equivale a "90% continuam presentes", mas escrito do lado que o
+      //    codigo mede, para nao parecer a razao antiga que este bloco condena
+      //    trinta linhas abaixo.)
+      //    Era 50% contra TODOS, e as duas metades disso estavam erradas: `>= 0.5`
+      //    com metade do catalogo devolvido PASSA (a comparacao e `>=`) e desativa
+      //    a outra metade — o desastre que o comentario anterior dizia evitar. E
+      //    contar os ja desativados no denominador fazia a razao cair a cada baixa
+      //    legitima: acumuladas 50% de desativacoes, a trava fechava PARA SEMPRE,
+      //    em silencio.
+      //
+      // 2) TETO ABSOLUTO. Fracao baixa nao impede estrago grande num catalogo
+      //    grande: 10% de 3.000 ainda libera 300 desativacoes de uma vez. Acima do
+      //    teto, NAO desativa nada e deixa o dono decidir — a diferenca entre
+      //    "sumiram uns produtos" e "sumiu o catalogo" e ele quem sabe.
+      //
+      // 3) RASTRO TAMBEM QUANDO BLOQUEIA. Sem isto, um feed truncado cinco vezes
+      //    seguidas produz cinco syncs que parecem perfeitos: `desativados: 0` e
+      //    "nada sumiu" sao a mesma linha na tela. Trava sem rastro e trava que
+      //    ninguem sabe se esta funcionando.
+      //
+      // `fetchAllPages` para em `data.length < 500` sem lançar: pagina curta
+      // devolvida pela origem encerra o laço e retorna array PARCIAL, com 200 e
+      // sem erro. Truncagem silenciosa nao e hipotese, e o caminho normal de
+      // falha desta API.
+      // A RAZAO MEDE A INTERSECAO, nao o tamanho da origem.
+      //
+      // A versao anterior comparava `seenB2bIds.size >= b2bAtivos.length * 0.9`:
+      // numerador = quantos produtos a ORIGEM devolveu, denominador = quantos
+      // NOS temos ativos. Os dois nao se cruzam em lugar nenhum. Como o B2BWave
+      // e o mestre e sempre tem mais produtos que nos, a condicao era VERDADEIRA
+      // em operacao normal independentemente de quantos dos nossos vieram —
+      // tautologia com cara de trava. Caso concreto: 40 produtos nossos, feed
+      // devolve 500 itens e nenhum e um dos nossos 40. `500 >= 36` passava, os
+      // 40 cabiam no teto, e o catalogo inteiro era desativado com as duas
+      // travas verdes.
+      //
+      // O que importa e a FRACAO DOS NOSSOS que sumiu: `sumidos / ativos`.
+      const FRACAO_MAXIMA_SUMIDA = 0.1;   // no maximo 10% dos ativos podem sumir de uma vez
+      const TETO_DESATIVACAO = 25;        // e nunca mais que isto, mesmo em catalogo grande
+      const TETO_DIARIO = 60;             // teto por JANELA, nao por execucao — ver abaixo
+
+      let desativados = 0;
+      let bloqueio = "";   // vai para `sync_log.samples`, que a tela do sync le
       // Casa por b2bwave_id (o sku deixou de ser chave). seenB2bIds = ids vistos no feed.
       const seenB2bIds = new Set<string>((allProducts || []).map((p: any) => String(p.id)));
       const b2bLocal = (allProds || []).filter((p: any) => p.b2bwave_id);
-      if (b2bLocal.length === 0 || seenB2bIds.size >= b2bLocal.length * 0.5) {
-        for (const p of b2bLocal) {
-          if (!seenB2bIds.has(String(p.b2bwave_id))) {
-            await adminClient.from("produtos").update({ ativo: false }).eq("id", p.id);
-            deleted++;
-          }
+      // Denominador = so os ATIVOS: contar os ja desativados fazia a razao cair a
+      // cada baixa legitima, ate a trava fechar para sempre em silencio.
+      const b2bAtivos = b2bLocal.filter((p: any) => p.ativo !== false);
+      const sumidos = b2bAtivos.filter((p: any) => !seenB2bIds.has(String(p.b2bwave_id)));
+
+      // TETO POR JANELA. O teto por execucao nao segura nada sozinho: este handler
+      // roda de hora em hora, entao um feed que perca 20 produtos DIFERENTES por
+      // hora passa 24 vezes por dia e esvazia o catalogo em uma semana, com cada
+      // execucao parecendo normal. Conta o que ja foi desativado nas ultimas 24h.
+      //
+      // Soma `quantidade_prevista`, gravada ANTES do laço — entao se o laço morrer
+      // no meio, o numero SUPERESTIMA. A direcao e conservadora de proposito
+      // (gasta o orcamento mais rapido que o estrago real), mas o campo nao e
+      // "quantos foram desativados": e "quantos foram autorizados".
+      //
+      // Nas primeiras 24h depois do deploy o historico conta ZERO — a versao
+      // anterior gravava a chave `quantidade`, nao `quantidade_prevista`.
+      // Auto-cura no primeiro ciclo; registrado para nao virar susto.
+      let desativados24h = 0;
+      const { data: recentes, error: errRecentes } = await adminClient
+        .from("notification_log")
+        .select("payload")
+        .eq("event", "produto_sumiu_da_origem")
+        .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+      let logIndisponivel = false;
+      if (errRecentes) {
+        // FALHA FECHADO: sem saber quanto ja saiu hoje, nao desativa mais nada.
+        // Perder uma desativacao e reversivel; perder o catalogo nao.
+        //
+        // A flag existe para a MENSAGEM nao mentir. A versao anterior so punha
+        // `MAX_SAFE_INTEGER` no contador, e a linha gravada saia dizendo "ja foram
+        // 9007199254740991 nas ultimas 24h" — um numero que nunca aconteceu, no
+        // lugar do fato real, que e "nao consegui ler o historico".
+        logIndisponivel = true;
+        desativados24h = Number.MAX_SAFE_INTEGER;
+      } else {
+        for (const r of recentes || []) {
+          desativados24h += Number((r as any)?.payload?.quantidade_prevista) || 0;
         }
       }
+
+      // ESCAPE, em DOIS campos, porque sao duas afirmacoes diferentes do admin.
+      //
+      // `confirmar_desativacao: <numero exato>` = "eu li a lista e sao esses
+      // mesmo". Numero, e nao `true`, pelo mesmo motivo do `limpar_fantasmas`:
+      // obriga a ter LIDO o relatorio. Isso libera os TETOS (execucao e diario).
+      //
+      // `confirmar_leitura_parcial: true` = "eu sei que parece leitura incompleta
+      // e mando desativar assim mesmo". Isso, e SO isso, libera a FRACAO.
+      //
+      // A versao anterior tinha um campo so, dentro do `&& fracaoOk` — entao ele
+      // nao liberava nada no motivo de bloqueio MAIS COMUM (fracao alta), e a
+      // mensagem gravada mandava o dono rodar exatamente aquele comando. Ele
+      // rodaria, levaria o mesmo bloqueio, e nao teria como sair. Bloqueio sem
+      // saida e ruim; bloqueio com saida anunciada que nao funciona e pior.
+      const confirmado = Number((body as any)?.confirmar_desativacao) === sumidos.length
+                         && sumidos.length > 0;
+      const confirmadoParcial = (body as any)?.confirmar_leitura_parcial === true && confirmado;
+
+      const fracaoOk = b2bAtivos.length === 0
+        || (sumidos.length / b2bAtivos.length) <= FRACAO_MAXIMA_SUMIDA;
+      const tetoOk   = sumidos.length <= TETO_DESATIVACAO;
+      const diarioOk = desativados24h + sumidos.length <= TETO_DIARIO;
+
+      if (sumidos.length > 0
+          && (fracaoOk || confirmadoParcial)
+          && (confirmado || (tetoOk && diarioOk))) {
+        // Log ANTES do laço: numa desativacao grande o tempo da edge function pode
+        // matar a funcao no meio, e ai seriam N produtos desativados com ZERO
+        // linhas de rastro — justamente o caso em que o rastro importa.
+        await adminClient.from("notification_log").insert({
+          event: "produto_sumiu_da_origem", channel: "-", recipient: "-", status: "failed",
+          error: `${sumidos.length} produto(s) nao vieram mais no feed do B2BWave — DESATIVANDO (nao apagando)${confirmado ? " [confirmado pelo admin]" : ""}`,
+          payload: {
+            quantidade_prevista: sumidos.length, origem: "b2bwave",
+            ativos_aqui: b2bAtivos.length, vistos_no_feed: seenB2bIds.size, percentual: Math.round((sumidos.length / Math.max(1, b2bAtivos.length)) * 100),
+            // Mesma guarda do ramo de bloqueio. Sem ela, este payload gravava
+            // `9007199254740991` — e o caminho e alcancavel exatamente por quem
+            // seguiu a instrucao da mensagem anterior: historico ilegivel ->
+            // bloqueia -> admin confirma -> cai AQUI com o contador estourado.
+            ja_desativados_24h: logIndisponivel ? null : desativados24h,
+            historico_indisponivel: logIndisponivel,
+            confirmado, confirmado_leitura_parcial: confirmadoParcial,
+            skus_truncados: sumidos.length > 25,
+            skus: sumidos.slice(0, 25).map((p: any) => p.sku ?? p.id),
+          },
+        }).then(() => {}, () => {});
+
+        for (const p of sumidos) {
+          const { error } = await adminClient.from("produtos").update({ ativo: false }).eq("id", p.id);
+          if (!error) desativados++;
+        }
+      } else if (sumidos.length > 0) {
+        // BLOQUEADO. Nao desativa nada e diz por que — com os numeros, e com o
+        // comando de destravar, para o dono nao ficar preso sem saida.
+        const pct = Math.round((sumidos.length / Math.max(1, b2bAtivos.length)) * 100);
+        // Com poucos ativos, UM produto ja estoura a fracao: 1 de 9 e 11%. Acusar
+        // a origem de "leitura INCOMPLETA" ai seria culpar o feed por um problema
+        // que e do denominador — e a exclusao pode ser perfeitamente legitima.
+        // O eixo e `b2bAtivos.length`, nao `sumidos.length`: abaixo de
+        // 1/FRACAO_MAXIMA_SUMIDA ativos, NENHUMA exclusao isolada passa nunca.
+        const catalogoPequeno = b2bAtivos.length < Math.ceil(1 / FRACAO_MAXIMA_SUMIDA);
+        const motivo = !fracaoOk
+          ? (catalogoPequeno
+              ? `catalogo pequeno: ${b2bAtivos.length} produtos ativos, entao ${sumidos.length} ja e ${pct}% e passa do limite de ${Math.round(FRACAO_MAXIMA_SUMIDA * 100)}% — a leitura da origem pode estar correta`
+              : `leitura da origem parece INCOMPLETA: ${sumidos.length} de ${b2bAtivos.length} produtos ativos sumiriam de uma vez (${pct}%)`)
+          : logIndisponivel
+            ? `nao consegui ler o historico de desativacoes das ultimas 24h — parei por precaucao, nao por teto`
+            : !diarioOk
+              ? `teto DIARIO: ja foram ${desativados24h} nas ultimas 24h, mais ${sumidos.length} passaria de ${TETO_DIARIO}`
+              : `${sumidos.length} de uma vez, acima do teto de ${TETO_DESATIVACAO} por execucao`;
+        // O comando oferecido tem que ser o que REALMENTE destrava este motivo.
+        const comando = !fracaoOk
+          ? `{"action":"sync_products","confirmar_desativacao":${sumidos.length},"confirmar_leitura_parcial":true}`
+          : `{"action":"sync_products","confirmar_desativacao":${sumidos.length}}`;
+        bloqueio = `BLOQUEIO_DESATIVACAO: ${sumidos.length} candidato(s) — ${motivo}`;
+        await adminClient.from("notification_log").insert({
+          event: "stale_trava_bloqueou", channel: "-", recipient: "-", status: "failed",
+          error: `${motivo} — NAO desativei nada. ${sumidos.length > 25 ? `A lista abaixo mostra 25 dos ${sumidos.length}` : "Confira a lista de SKUs abaixo"}; se estiver certa, rode ${comando}`,
+          payload: {
+            candidatos: sumidos.length, ativos_aqui: b2bAtivos.length, percentual: pct,
+            vistos_no_feed: seenB2bIds.size,
+            // `null` em vez do numero-monstro: o campo diz "nao sei", nao "9 quatrilhoes".
+            ja_desativados_24h: logIndisponivel ? null : desativados24h,
+            historico_indisponivel: logIndisponivel,
+            fracao_ok: fracaoOk, teto_ok: tetoOk, diario_ok: diarioOk,
+            // `confirmado` pode ser TRUE num bloqueio: o admin manda o numero mas
+            // nao manda `confirmar_leitura_parcial`, e a fracao continua barrando.
+            confirmado, confirmado_leitura_parcial: confirmadoParcial,
+            catalogo_pequeno: catalogoPequeno,
+            skus: sumidos.slice(0, 25).map((p: any) => p.sku ?? p.id),
+            skus_truncados: sumidos.length > 25,
+          },
+        }).then(() => {}, () => {});
+      }
+
       // DIAGNÓSTICO (persistido em sync_log.samples p/ consulta via SQL): se não veio
       // nenhum relacionado, registra os campos que a API realmente manda no produto
       // (arrays + qualquer chave "relat/bundle/together") — revela se o dado existe
@@ -1500,6 +1649,15 @@ Deno.serve(async (req) => {
       // produtos ainda disser `related-v4`, a edge function NAO foi deployada,
       // e o `sync_products` esta rodando sem a trava de estoque.
       const diagSamples: string[] = ["SYNC_VERSION:stock-lock-v1"];
+      // O BLOQUEIO PRECISA APARECER NA TELA DO SYNC, e nao so no log de
+      // notificacoes. A tela B2B Wave Sync le `sync_log`; `notification_log` mora
+      // em outra tela. Sem esta linha, "bloqueei 40 desativacoes" e "nao havia
+      // nada a desativar" continuavam sendo a MESMA mensagem para o operador —
+      // que e exatamente o que a trava #3 diz existir para impedir.
+      // `push`, e nao concatenar no `message` tambem: `relDiag` ja despeja o
+      // `diagSamples` inteiro na mensagem, entao somar os dois imprimia o
+      // bloqueio duas vezes no card.
+      if (bloqueio) diagSamples.push(bloqueio);
       if (relatedRows === 0 && allProducts.length) {
         const s = allProducts[0] as Record<string, any>;
         const arrays = Object.keys(s).filter((k) => Array.isArray(s[k]));
@@ -1511,7 +1669,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         success: true,
         samples: errorSamples,
-        message: `${synced} updated/created, ${skipped} unchanged, ${desativados} deactivated (gone from origin), ${priceRows} prices, ${precosObsoletos} stale prices detected, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${deleted} stale deleted${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
+        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${precosObsoletos} stale prices detected, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${desativados} deactivated (gone from origin — NOT deleted)${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
       }), { headers: jsonHeaders });
       } finally {
         // `finally`, nao depois do `return`: o handler tem saida por `return` e

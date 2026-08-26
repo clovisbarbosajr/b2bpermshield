@@ -1,0 +1,277 @@
+-- ---------------------------------------------------------------------------
+-- PRECO GANHA PROCEDENCIA: quem escreveu esta linha, o sync ou uma pessoa?
+--
+-- O PROBLEMA, medido na comparacao de 26/ago: existem 29 pares (produto, tabela
+-- de preco) valendo aqui que a origem nao tem mais — alguns de 4 a 6 mil. Preco
+-- retirado de uma regua no B2BWave continua valendo aqui, e o cliente compra
+-- pelo valor antigo.
+--
+-- POR QUE AINDA NAO FOI CONSERTADO: apagar automaticamente e chute enquanto nao
+-- der para saber quem criou a linha. O `sync_products` roda de hora em hora,
+-- sozinho, sem ninguem na frente (confira o estado do cron — PRE-REQUISITO 4), e o cetico
+-- derrubou as tres travas que pareciam suficientes:
+--
+--   (a) preco que o ADMIN definiu aqui e indistinguivel de "a origem removeu".
+--       `TabelasPreco.tsx`, `ProductEdit.tsx` e o importador de descontos
+--       escrevem na mesma tabela. (O importador de descontos hoje ERRA em toda
+--       linha: ele grava uma coluna `desconto` que nao existe nesta tabela. Bug
+--       separado, registrado no LOG-TRABALHO; nao muda o raciocinio.)
+--   (b) tabela de preco cujo NOME nao case (renomeada, espaco a mais, acento)
+--       sai inteira do conjunto "a origem tem" — um rename viraria milhares de
+--       exclusoes;
+--   (c) leitura parcial da origem e indistinguivel de leitura vazia.
+--
+-- Esta migration ataca so o (a), que e a raiz. As travas de (b) e (c) continuam
+-- valendo e nao saem daqui.
+--
+-- ---------------------------------------------------------------------------
+-- *** ORDEM OBRIGATORIA: ESTE SQL PRIMEIRO, DEPLOY DO CODIGO DEPOIS. ***
+--
+-- Nao ha "o contrario tambem funciona" — uma versao anterior deste cabecalho
+-- dizia isso e se contradizia na frase seguinte.
+--
+-- Invertido, o estrago e SILENCIOSO e total: o PostgREST devolve `PGRST204`
+-- ("Could not find the 'origem' column in the schema cache") em TODO upsert de
+-- preco, e o `b2bwave-sync` engole esse erro sem log — ele so incrementa o
+-- contador quando NAO ha erro. Resultado: o sync termina relatando sucesso
+-- tendo gravado ZERO preco, e ninguem fica sabendo.
+--
+-- ---------------------------------------------------------------------------
+-- PRE-REQUISITOS DO CODIGO DE CARIMBO — NAO comece por ele
+--
+-- A REGRA QUE RESOLVE O CASO DIFICIL, decidida aqui para o codigo nao ter que
+-- decidir sozinho: carimba `local` a linha que a PESSOA REALMENTE MEXEU, nao
+-- toda linha que a tela gravou.
+--
+-- Sem essa distincao o desenho nao fecha, nos dois sentidos:
+--   * carimbar `local` em tudo que a tela grava mata a autocura — o `ProductEdit`
+--     reescreve TODAS as linhas do produto mesmo nas que ninguem tocou, entao um
+--     unico save marcaria o produto inteiro como intocavel;
+--   * so "preservar `origem`" no upsert e pior ainda: um preco que o admin
+--     acabou de DIGITAR continua marcado `b2bwave` e e apagado sozinho no ciclo
+--     seguinte. Seria a perda irreversivel de trabalho humano que esta coluna
+--     existe para impedir, produzida por ela.
+-- Ou seja: sem rastrear o que mudou, nao ha carimbo correto. E pre-requisito, nao
+-- refinamento.
+--
+-- 1. `ProductEdit.tsx` PRECISA parar de apagar e reinserir. Hoje ele faz
+--    `delete().eq("produto_id", ...)` seguido de `insert(...)`: salvar um
+--    produto no admin DESTROI e recria todas as linhas de preco dele. Tem que
+--    virar upsert por `(tabela_preco_id, produto_id)`, e precisa passar a saber
+--    QUAIS campos de preco o usuario editou — carimbando `local` so nesses e
+--    deixando os demais como estao.
+--    Efeito colateral que ja existe hoje: o `created_at` daquelas linhas e
+--    resetado a cada save, entao ele NAO serve para julgar "isto e antigo".
+--
+-- 2. `TabelasPreco.tsx` -> `saveAllPrices` ja tem o rastreamento certo (so
+--    grava `dirtyIds`), mas o upsert NAO manda `origem` — e em `ON CONFLICT DO
+--    UPDATE` o PostgREST so escreve as colunas enviadas, entao a linha editada
+--    continua `b2bwave`. Precisa mandar `origem: 'local'` explicitamente.
+--
+-- 3. `TabelasPreco.tsx` -> `handleDuplicate` copia precos com `insert`. A copia
+--    deve HERDAR a origem da linha copiada: duplicar uma regua nao e ato de
+--    precificacao, e nascer em `desconhecido` criaria triagem manual a cada
+--    duplicacao.
+--
+-- 4. O cron `b2bwave-cron-products` precisa estar AGENDADO — toda a autocura
+--    descrita abaixo depende de um ciclo de sync acontecer. CONFIRA, nao suponha:
+--    o repositorio o agenda em `20260618000002` (`'10 * * * *'`), mas ele pode
+--    ter sido desagendado a mao (foi, em 26/ago, por precaucao).
+--
+--      SELECT jobname, schedule, active FROM cron.job
+--       WHERE jobname = 'b2bwave-cron-products';
+--
+-- ---------------------------------------------------------------------------
+-- POR QUE `desconhecido` NO BACKFILL, E NAO `b2bwave`
+--
+-- A tentacao era marcar tudo como `b2bwave` — o dono disse que nao definiu preco
+-- a mao. Mas "eu nao me lembro de ter feito" nao e o mesmo que "ninguem fez", e
+-- o custo do erro e assimetrico: marcar errado como `b2bwave` faz um preco
+-- definido aqui ser APAGADO sozinho no ciclo seguinte, sem ninguem ver. Perda
+-- irreversivel de trabalho humano.
+--
+-- `desconhecido` erra para "mantem a linha". O custo e o vazamento que JA existe
+-- hoje (as 29 continuam valendo) — visivel e reversivel.
+--
+-- E o dado se cura: quando o codigo existir, o sync carimbara `b2bwave` no que
+-- ele escrever e as telas carimbarao `local`. Depois de UM ciclo completo, o que
+-- sobrar em `desconhecido` sera a lista de candidatos, para o dono decidir UMA
+-- vez, com a lista na mao.
+--
+-- CONTRATO A CUMPRIR PELO CODIGO — NAO EXISTE AINDA, nada disto esta ligado:
+--   * so `b2bwave` PODERA ser apagado automaticamente;
+--   * `local` e `desconhecido` nunca serao tocados pelo sync.
+-- Enquanto o codigo nao subir, esta coluna e so uma coluna.
+--
+-- ---------------------------------------------------------------------------
+-- ESTA MIGRATION NAO ARMA NADA SOZINHA
+--
+-- Ela so cria a coluna, a trava de valor e o indice. Rodar isto sozinho e
+-- inofensivo: a coluna nasce com o default e nenhum comportamento muda.
+--
+-- ---------------------------------------------------------------------------
+-- BACKUP DE VERDADE — rode ANTES. Este arquivo sugere DELETE mais abaixo; sem
+-- copia, nao ha volta para linha de dinheiro apagada por engano.
+--
+-- AS TRES LINHAS ANDAM JUNTAS. `CREATE TABLE ... AS SELECT` NAO herda RLS, nem
+-- policy, nem grant da tabela de origem — e tabela nova em `public` e servida
+-- pelo PostgREST com os privilegios padrao do Supabase. Sem as duas linhas
+-- seguintes, o backup vira uma copia LEGIVEL POR QUALQUER UM com a chave anon de
+-- todas as reguas de preco de todos os clientes, desfazendo num segundo o que
+-- 20260619170000 e 20260825360000 existem para garantir. Uma versao anterior
+-- deste bloco tinha so o CREATE.
+--
+--   CREATE TABLE IF NOT EXISTS public.backup_tpi_20260826 AS
+--     SELECT * FROM public.tabela_preco_itens;
+--   ALTER TABLE public.backup_tpi_20260826 ENABLE ROW LEVEL SECURITY;
+--   REVOKE ALL ON public.backup_tpi_20260826 FROM anon, authenticated;
+--   SELECT count(*) FROM public.backup_tpi_20260826;
+--
+-- E APAGUE quando a triagem terminar — backup esquecido e dado de preco vivo
+-- fora do controle de acesso:
+--   DROP TABLE IF EXISTS public.backup_tpi_20260826;
+--
+-- DIAGNOSTICO — guarde o retorno:
+--
+--   SELECT count(*) AS total FROM public.tabela_preco_itens;
+--   SELECT column_name, is_nullable, column_default
+--     FROM information_schema.columns
+--    WHERE table_schema='public' AND table_name='tabela_preco_itens';
+--   -- Se `origem` JA aparecer aqui, PARE: `ADD COLUMN IF NOT EXISTS` aceitaria
+--   -- em silencio uma coluna preexistente com outro formato (nullable, sem
+--   -- default), e a trava entraria sozinha sobre um dado que nao combina.
+--
+-- ROLLBACK (derruba a constraint e o indice junto — os dois dependem so desta
+-- coluna, entao nem CASCADE e preciso):
+--
+--   ALTER TABLE public.tabela_preco_itens DROP COLUMN IF EXISTS origem;
+--
+-- ATENCAO: o rollback so e seguro ENQUANTO o codigo de carimbo nao estiver
+-- deployado. Depois, derrubar a coluna reintroduz o PGRST204 descrito acima e
+-- para o sync de precos em silencio.
+-- ---------------------------------------------------------------------------
+
+BEGIN;
+
+-- Nao fica na fila atras de uma leitura longa de catalogo segurando ACCESS
+-- EXCLUSIVE. Falhar rapido e melhor que travar a vitrine.
+-- Se estourar, o erro e `55P03 lock_not_available`, a transacao aborta inteira e
+-- nada fica pela metade — e so rodar de novo.
+SET LOCAL lock_timeout = '3s';
+
+-- Postgres 11+ nao reescreve a tabela para DEFAULT nao-volatil (o valor vai para
+-- `attmissingval`), entao isto e O(1) e seguro em horario comercial.
+ALTER TABLE public.tabela_preco_itens
+  ADD COLUMN IF NOT EXISTS origem text NOT NULL DEFAULT 'desconhecido';
+
+-- CHECK, e nao enum: enum novo exige `ALTER TYPE ... ADD VALUE`, que tem
+-- restricao para rodar dentro de transacao. Aqui o conjunto e pequeno e estavel,
+-- e valor errado tem que falhar ALTO, na hora da escrita.
+--
+-- `IS NOT NULL` explicito: CHECK so reprova em FALSE, e `NULL IN (...)` avalia
+-- para NULL. Hoje o `NOT NULL` da coluna cobre — mas se a coluna ja existisse
+-- nullable, o `IF NOT EXISTS` acima teria aceitado, e NULL viraria um quarto
+-- valor fora do contrato.
+ALTER TABLE public.tabela_preco_itens
+  DROP CONSTRAINT IF EXISTS tabela_preco_itens_origem_valida;
+ALTER TABLE public.tabela_preco_itens
+  ADD CONSTRAINT tabela_preco_itens_origem_valida
+  CHECK (origem IS NOT NULL AND origem IN ('b2bwave', 'local', 'desconhecido'));
+
+-- Indice PARCIAL, e a honestidade sobre ele: a tabela tem ~959 linhas hoje e nao
+-- precisa de indice nenhum — um seq scan aqui e sub-milissegundo. Uma versao
+-- anterior deste comentario justificava um indice cheio dizendo que "o sync
+-- varre por origem a cada ciclo"; nao varre, o sync filtra por `produto_id`.
+--
+-- Parcial porque `b2bwave` sera ~97% das linhas: num indice cheio o planner
+-- ignoraria e preferiria seq scan. Assim ele cobre exatamente a consulta que
+-- importa — achar o que NAO e do sync — e cresce junto com o problema, nao com a
+-- tabela.
+CREATE INDEX IF NOT EXISTS idx_tpi_origem_nao_sync
+  ON public.tabela_preco_itens (origem)
+  WHERE origem <> 'b2bwave';
+
+COMMIT;
+
+-- O PostgREST guarda o schema em cache. Sem este aviso, ele pode seguir devolvendo
+-- `PGRST204` para a coluna nova mesmo com o SQL ja aplicado — a MESMA falha
+-- silenciosa da ordem invertida, com a ordem certa. O Supabase costuma recarregar
+-- sozinho, mas isto custa nada e fecha a janela.
+NOTIFY pgrst, 'reload schema';
+
+-- ---------------------------------------------------------------------------
+-- VERIFICACAO
+--
+-- (1) A coluna existe, e o formato e o esperado:
+--
+--   SELECT origem, count(*) FROM public.tabela_preco_itens GROUP BY 1;
+--   -- ESPERADO: uma linha, `desconhecido`, com o total da tabela.
+--   -- (Tabela vazia devolveria ZERO linhas, nao uma — nao e falha.)
+--
+-- (2) A trava recusa valor fora do contrato. Escopada e com ROLLBACK: um
+--     `UPDATE ... WHERE true` nesta tabela reescreveria a procedencia das ~959
+--     linhas de uma vez, destruindo justamente o dado que esta migration cria.
+--
+--   BEGIN;
+--     UPDATE public.tabela_preco_itens SET origem = 'qualquer'
+--      WHERE id = (SELECT id FROM public.tabela_preco_itens LIMIT 1);
+--   ROLLBACK;
+--   -- ESPERADO: o UPDATE da ERRO de constraint (23514).
+--   -- ATENCAO: com a tabela VAZIA o subselect devolve NULL, o UPDATE afeta zero
+--   -- linhas e NAO erra — e ai "passou" nao significa "a trava nao entrou".
+--   -- Confira antes que (1) devolveu contagem maior que zero.
+--
+-- (3) A LISTA DE CANDIDATOS — *** so faz sentido DEPOIS do deploy do codigo de
+--     carimbo E de um ciclo completo de sync *** (cron agendado, PRE-REQUISITO 4).
+--
+--     Rodada HOJE, recem-aplicada a migration, a consulta abaixo devolve a
+--     TABELA INTEIRA — porque ainda nao ha codigo carimbando nada, e tudo esta em
+--     `desconhecido`. Triar centenas de linhas achando que sao 29, com um DELETE
+--     colado embaixo, e o erro que este aviso existe para impedir.
+--
+--     Confira primeiro que a divisao ja tem sentido:
+--
+--   SELECT origem, count(*) FROM public.tabela_preco_itens GROUP BY 1;
+--   -- ESPERADO: a maioria em `b2bwave`, e o resto em `desconhecido`.
+--   -- Se ainda for tudo `desconhecido`, PARE: o carimbo nao rodou.
+--
+--   -- E ai sim, a lista para decidir UMA vez. O `i.id` vem primeiro porque e
+--   -- ele que as acoes abaixo exigem:
+--   SELECT i.id, tp.nome AS tabela, p.nome AS produto, p.sku, i.preco
+--     FROM public.tabela_preco_itens i
+--     JOIN public.tabelas_preco tp ON tp.id = i.tabela_preco_id
+--     JOIN public.produtos p       ON p.id = i.produto_id
+--    WHERE i.origem = 'desconhecido'
+--    ORDER BY i.preco DESC;
+--
+--   -- NAO use `created_at` para julgar idade: `ProductEdit` reseta a cada save
+--   -- do produto (ver PRE-REQUISITOS 1).
+--
+--   Para cada linha, a pergunta e uma so: este preco foi combinado aqui, ou e
+--   sobra de um preco que o B2BWave ja tirou?
+--
+--   -- combinado aqui, nunca mais candidato:
+--   -- UPDATE public.tabela_preco_itens SET origem = 'local' WHERE id = '<id>';
+--   -- sobra (o backup do topo e a sua volta):
+--   -- DELETE FROM public.tabela_preco_itens WHERE id = '<id>';
+--
+-- ---------------------------------------------------------------------------
+-- NOTA DE PRIVACIDADE, registrada porque ninguem perguntou
+--
+-- RLS no Postgres e por LINHA, nao por coluna, e nao ha GRANT por coluna neste
+-- projeto — entao um cliente com conta liberada que leia a linha do preco dele
+-- passa a ler tambem o `origem`. Nao e credencial; e um sinal comercial fraco
+-- ("este preco foi negociado" contra "este preco e do catalogo").
+--
+-- NAO resolva com `REVOKE SELECT (origem) ... FROM authenticated`. O admin deste
+-- sistema fala com o banco COMO `authenticated` — a distincao de papel e feita
+-- por `has_role()` dentro da policy, nao por role do Postgres. E privilegio de
+-- coluna e checado ANTES da RLS. Esse REVOKE quebraria os dois `select("*")` do
+-- admin (`ProductEdit` e `TabelasPreco`): a aba de precos do produto e o popup de
+-- precos da regua parariam de abrir com "permission denied". Uma versao anterior
+-- desta nota sugeria exatamente isso.
+--
+-- Se um dia incomodar de verdade, o caminho e uma VIEW sem a coluna para o
+-- portal, ou trocar os `select("*")` do admin por lista explicita antes de
+-- qualquer REVOKE.
+-- ---------------------------------------------------------------------------
