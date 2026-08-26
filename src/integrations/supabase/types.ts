@@ -1586,12 +1586,14 @@ export type Database = {
           cliente_id: string
           coupon_id: string | null
           created_at: string
+          data_origem: string | null
           delivery_date: string | null
           delivery_mode: string | null
           desconto: number | null
           endereco_entrega_id: string | null
           id: string
           is_paid: boolean | null
+          notificavel: boolean
           numero: number
           observacoes: string | null
           payment_option_id: string | null
@@ -1612,12 +1614,14 @@ export type Database = {
           cliente_id: string
           coupon_id?: string | null
           created_at?: string
+          data_origem?: string | null
           delivery_date?: string | null
           delivery_mode?: string | null
           desconto?: number | null
           endereco_entrega_id?: string | null
           id?: string
           is_paid?: boolean | null
+          notificavel?: boolean
           numero?: number
           observacoes?: string | null
           payment_option_id?: string | null
@@ -1638,12 +1642,14 @@ export type Database = {
           cliente_id?: string
           coupon_id?: string | null
           created_at?: string
+          data_origem?: string | null
           delivery_date?: string | null
           delivery_mode?: string | null
           desconto?: number | null
           endereco_entrega_id?: string | null
           id?: string
           is_paid?: boolean | null
+          notificavel?: boolean
           numero?: number
           observacoes?: string | null
           payment_option_id?: string | null
@@ -3017,6 +3023,7 @@ export type Database = {
         }[]
       }
       auth_user_id_by_email: { Args: { _email: string }; Returns: string }
+      bump_notify_counter: { Args: { _chave: string }; Returns: number }
       categoria_visivel_para: {
         Args: { _cat_id: string; _cli_id: string }
         Returns: boolean
@@ -3026,6 +3033,7 @@ export type Database = {
         Returns: string[]
       }
       claim_customer_record: { Args: never; Returns: string }
+      cliente_conta_liberada: { Args: never; Returns: boolean }
       cliente_pode_ver_categoria: {
         Args: { _cat_id: string }
         Returns: boolean
@@ -3033,6 +3041,20 @@ export type Database = {
       cliente_pode_ver_produto: { Args: { _prod_id: string }; Returns: boolean }
       cliente_ve_payment_option: { Args: { _opt: string }; Returns: boolean }
       cliente_ve_shipping_option: { Args: { _opt: string }; Returns: boolean }
+      config_staff: {
+        Args: never
+        Returns: {
+          email_contato: string
+          email_new_orders: string
+          id: string
+          nome_empresa: string
+          warehouse_inactivity_default: number
+          warehouse_inactivity_popup: number
+          warehouse_popup_day: number
+          warehouse_popup_enabled: boolean
+          warehouse_popup_message: string
+        }[]
+      }
       consume_view_as_token: {
         Args: { _token: string }
         Returns: {
@@ -3049,6 +3071,7 @@ export type Database = {
         Args: { _empresa?: string; _nome?: string }
         Returns: string
       }
+      envio_permitido: { Args: { _canal: string }; Returns: Json }
       get_public_config: {
         Args: never
         Returns: {
@@ -3071,6 +3094,12 @@ export type Database = {
       is_ops_manager: { Args: never; Returns: boolean }
       is_staff_login: { Args: { _user_id: string }; Returns: boolean }
       is_subcustomer_of: { Args: { _parent_id: string }; Returns: boolean }
+      minha_conta_liberada: { Args: never; Returns: boolean }
+      pausar_envios: { Args: { _pausar: boolean }; Returns: string }
+      pedido_rollback_checkout: {
+        Args: { _pedido_id: string }
+        Returns: string
+      }
       preco_autoritativo: {
         Args: { _cliente_id: string; _produto_id: string; _qtd: number }
         Returns: number
@@ -3084,6 +3113,14 @@ export type Database = {
         Returns: string[]
       }
       registration_is_open: { Args: never; Returns: boolean }
+      set_suppress_order_notify: {
+        Args: { _minutos?: number; _on: boolean }
+        Returns: undefined
+      }
+      set_user_locations: {
+        Args: { _categoria_ids: string[]; _user_id: string }
+        Returns: number
+      }
       user_can_see_produto: { Args: { _produto_id: string }; Returns: boolean }
     }
     Enums: {
