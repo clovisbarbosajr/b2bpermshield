@@ -1394,7 +1394,7 @@ Deno.serve(async (req) => {
       let de = 0;
       for (;;) {
         const { data, error } = await adminClient.from("pedidos")
-          .select("b2bwave_order_id, status, total, subtotal, quantidade_total, is_paid, data_origem, notificavel")
+          .select("id, b2bwave_order_id, status, total, subtotal, quantidade_total, is_paid, data_origem, notificavel")
           .not("b2bwave_order_id", "is", null)
           .order("b2bwave_order_id", { ascending: true })
           .range(de, de + 999);
@@ -1554,6 +1554,73 @@ Deno.serve(async (req) => {
         if (!naOrigem.has(n)) { nSobrando++; if (sobrando.length < 20) sobrando.push(n); }
       }
 
+      // ---------- LINHAS DOS PEDIDOS (pedido_itens) ----------
+      // Sai de graca: o feed ja traz `order_products` em cada pedido, entao nao
+      // custa nenhuma chamada HTTP alem das paginas que este relatorio ja leu.
+      //
+      // CUIDADO com o que conta como defeito. `buildOrderItems` DESCARTA de
+      // proposito a linha cujo produto nao existe aqui ("sem produto local ->
+      // nao cria a linha, mas ja somou"). Ter MENOS linhas aqui do que la e
+      // legitimo, e acusar isso encheria o relatorio de alarme falso — coisa
+      // que ja fiz quatro vezes hoje.
+      //
+      // So dois casos sao inequivocos:
+      //   a) ZERO linhas aqui e o feed tem linhas — a assinatura exata da falha
+      //      que o proprio `upsertOrder` documenta: o DELETE passa, o INSERT
+      //      falha, e como o comparador `changed` so olha status/total/qtd, o
+      //      ciclo seguinte diz "skipped" e as linhas nunca voltam. Fica um
+      //      pedido com total certo e nenhuma linha, para sempre.
+      //   b) MAIS linhas aqui do que la — nao ha caminho legitimo para isso.
+      const itensSemNenhum: any[] = [];
+      const itensSobrando: any[] = [];
+      let nSemNenhum = 0, nItensSobrando = 0, nLinhasMenos = 0;
+      let itensOk = true;
+
+      try {
+        const linhasPorPedido = new Map<string, number>();
+        let dei = 0;
+        for (;;) {
+          const { data, error } = await adminClient.from("pedido_itens")
+            .select("pedido_id").order("pedido_id", { ascending: true }).range(dei, dei + 999);
+          if (error) throw new Error(error.message);
+          const parte = data ?? [];
+          for (const r of parte) {
+            const k = String((r as any).pedido_id);
+            linhasPorPedido.set(k, (linhasPorPedido.get(k) ?? 0) + 1);
+          }
+          if (parte.length === 0) break;
+          dei += parte.length;
+        }
+
+        if (!truncado) {
+          for (const [n, o] of naOrigem) {
+            const local = aqui.get(n);
+            if (!local || !(local as any).id) continue;
+            const ops = (o as any).order_products;
+            const nLa = Array.isArray(ops) ? ops.length : 0;
+            const nAqui = linhasPorPedido.get(String((local as any).id)) ?? 0;
+
+            if (nLa > 0 && nAqui === 0) {
+              nSemNenhum++;
+              if (itensSemNenhum.length < 20) {
+                itensSemNenhum.push({ pedido: n, linhas_la: nLa, status: (local as any).status });
+              }
+            } else if (nAqui > nLa) {
+              nItensSobrando++;
+              if (itensSobrando.length < 20) {
+                itensSobrando.push({ pedido: n, linhas_la: nLa, linhas_aqui: nAqui });
+              }
+            } else if (nAqui < nLa) {
+              // Esperado quando o produto da linha nao existe aqui. Contado, nao acusado.
+              nLinhasMenos++;
+            }
+          }
+        }
+      } catch (_e) {
+        itensOk = false;
+        truncado = true;
+      }
+
       return new Response(JSON.stringify({
         success: true,
         SO_LEITURA: "nenhum dado foi alterado",
@@ -1579,7 +1646,17 @@ Deno.serve(async (req) => {
         //                     este relatorio e consultado para decidir religar.
         identico: !truncado && nFaltando === 0 && nSobrando === 0
           && nStatus === 0 && nValor === 0 && nPagamento === 0
-          && nEscreveRecente === 0 && nReabre === 0,
+          && nEscreveRecente === 0 && nReabre === 0
+          && itensOk && nSemNenhum === 0 && nItensSobrando === 0,
+        linhas_dos_pedidos: itensOk ? {
+          pedido_sem_nenhuma_linha: nSemNenhum,
+          nota_sem_nenhuma: "assinatura da falha que o upsertOrder documenta: DELETE passou, INSERT falhou, e o ciclo seguinte diz 'skipped'. Pedido com total certo e nenhuma linha, que NAO se auto-cura",
+          linhas_sobrando_aqui: nItensSobrando,
+          exemplos_sem_nenhuma: itensSemNenhum,
+          exemplos_sobrando: itensSobrando,
+          pedidos_com_menos_linhas_aqui: nLinhasMenos,
+          nota_menos_linhas: "ESPERADO, nao e defeito: linha cujo produto nao existe aqui e descartada de proposito (o valor entra no total do mesmo jeito). O numero mede o quanto do historico esta incompleto",
+        } : { erro: "falha ao ler pedido_itens" },
         // Os TOTAIS sao o que decide se da para religar. As listas abaixo sao so
         // 20 exemplos cada.
         totais: {

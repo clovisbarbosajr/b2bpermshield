@@ -2090,3 +2090,38 @@ que e o que o refactor exigia. E `cliente_conta_liberada` resolve a ficha a
 partir de `auth.uid()`, mantem o atalho de staff no topo, e delega. Equivalente.
 
 **Nenhuma das 7 desfaz correcao aplicada.**
+
+---
+
+## cont. 45 — As linhas dos pedidos entram na comparacao
+
+Ultima tabela com peso que faltava. Antes de escrever, fui ver se valia: o feed
+ja traz `order_products` dentro de cada pedido, entao a comparacao **nao custa
+nenhuma chamada HTTP** alem das paginas que o `diff_orders` ja lia. E nada
+referencia `pedido_itens.id` (conferido nas migrations), entao o DELETE+INSERT
+que o sync faz nao arrasta nenhum vinculo junto.
+
+### O que ela procura, e o que ela se PROIBE de acusar
+
+`buildOrderItems` **descarta de proposito** a linha cujo produto nao existe
+aqui — o comentario no codigo e explicito: *"sem produto local -> nao cria a
+linha, mas ja somou"*. Ou seja, ter MENOS linhas aqui do que la e **legitimo**.
+Se eu acusasse isso, o relatorio encheria de alarme falso; seria a quinta vez
+hoje.
+
+So dois casos sao inequivocos, e so esses entram no veredito:
+
+**a) ZERO linhas aqui e o feed tem linhas.** E a assinatura exata de uma falha
+que o proprio `upsertOrder` documenta: o DELETE passa, o INSERT falha, e como o
+comparador `changed` so olha status/total/quantidade, o ciclo seguinte devolve
+"skipped" — as linhas **nunca voltam**. Fica um pedido com total certo e nenhuma
+linha, para sempre. Se existir algum assim hoje, este numero o encontra.
+
+**b) MAIS linhas aqui do que la.** Nao ha caminho legitimo.
+
+O terceiro caso (menos linhas aqui) e **contado e explicado**, fora do veredito:
+mede o quanto do historico esta incompleto por produto que nunca foi importado.
+
+`identico` do `diff_orders` passou a exigir `nSemNenhum === 0 &&
+nItensSobrando === 0`. Sem isso, um pedido sem nenhuma linha passaria como
+"identico" — e o relatorio existe justamente para pegar esse tipo de coisa.
