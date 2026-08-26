@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07111b">
+  <title>PermShield B2B — Administrator Access</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="auth-page auth-page--admin" data-page="admin">
+  <div class="cursor-glow" aria-hidden="true"></div>
+  <header class="topbar topbar--auth"><a class="brand" href="index.html"><img src="assets/permshield-logo.png" alt="PermShield Luxury Vinyl Flooring"></a><div class="topbar__meta"><span class="live-dot"></span> ADMINISTRATION / AUTHORIZED PERSONNEL</div><a class="back-top" href="index.html">← Back to portal</a></header>
+  <main class="auth-layout">
+    <section class="auth-story auth-story--admin" data-parallax>
+      <div class="story-grid" aria-hidden="true"></div>
+      <div class="shield-system" aria-hidden="true">
+        <svg viewBox="0 0 500 560"><path class="shield-ring ring-a" d="M250 22 445 92v151c0 142-87 231-195 285C142 474 55 385 55 243V92l195-70Z"/><path class="shield-ring ring-b" d="M250 90 378 136v99c0 93-57 152-128 187-71-35-128-94-128-187v-99l128-46Z"/><path class="shield-check" d="m176 249 49 51 105-123"/></svg>
+        <div class="orbit-label label-a">ACCESS</div><div class="orbit-label label-b">CONTROL</div><div class="orbit-label label-c">VERIFIED</div>
+      </div>
+      <div class="story-copy"><p class="overline">OPERATIONS CONTROL / 02</p><h1>Command the<br><em>whole floor.</em></h1><p>One secure entry point for the people coordinating inventory, customers, and every order in motion.</p><div class="system-status"><span><i></i> SYSTEMS OPERATIONAL</span><b>256-BIT SESSION</b></div></div>
+    </section>
+    <section class="auth-panel">
+      <div class="auth-card">
+        <div class="auth-card__head"><span>ADMIN ACCESS</span><b>02</b></div>
+        <div class="auth-intro"><small>SECURE WORKSPACE</small><h2>Welcome back.</h2><p>Sign in with your authorized PermShield credentials.</p></div>
+        <form class="auth-form" action="#" method="post" novalidate>
+          <label for="admin-user">Username</label>
+          <div class="auth-field"><span class="field-icon">⌁</span><input id="admin-user" name="username" autocomplete="username" placeholder="Enter your username" required></div>
+          <label for="admin-password">Password</label>
+          <div class="auth-field"><span class="field-icon">◆</span><input id="admin-password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required><button class="password-toggle" type="button" aria-label="Show password">SHOW</button></div>
+          <div class="auth-options"><label class="check"><input type="checkbox" name="remember"><span>Keep this device connected</span></label></div>
+          <button class="primary-button" type="submit"><span>Enter control center</span><b>↗</b></button>
+          <p class="form-status" aria-live="polite"></p>
+        </form>
+        <a class="back-link" href="index.html">← Back to login selection</a>
+      </div>
+      <p class="security-note"><i></i> Protected access · Activity may be monitored</p>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
+
