@@ -135,8 +135,12 @@ BEGIN
     --
     -- Nao cria mudez permanente: `n = 0` sempre vem com `desde` nulo (o ramo
     -- ELSE zera os dois juntos), e contador orfao e pego pelo teto de 2 horas.
-    -- O efeito colateral e a supressao poder viver alem de `ate` — que e o
-    -- comportamento CERTO enquanto houver lote vivo.
+    --
+    -- ATENCAO: por si so, `n` NAO protege nada. Quem decide e
+    -- `fn_order_status_notify`, e ate 20260826080000 ele olhava apenas
+    -- `ate > now()` — entao a supressao morria no fim da janela mesmo com lote
+    -- vivo, e esta contagem toda era decorativa. E 20260826080000 que faz o
+    -- leitor olhar `n` e `desde`. As duas andam juntas.
     _novo := CASE
                WHEN _desde IS NULL THEN 1                            -- linha legada, ou nenhum lote vivo
                WHEN now() - _desde > interval '120 minutes' THEN 1   -- auto-cura

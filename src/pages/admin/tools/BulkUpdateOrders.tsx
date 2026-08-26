@@ -123,7 +123,10 @@ const BulkUpdateOrders = () => {
       }
     }
 
-    setResults(res);
+    // O toast de sucesso fica DENTRO do try: fora dele, ele saia mesmo depois
+    // de uma excecao — o admin via um toast vermelho e um verde ao mesmo tempo,
+    // com a tabela em branco, e a importacao parcial era anunciada como sucesso.
+    toast.success(`Updated ${res.filter((r) => r.status === "ok").length} of ${rows.length} orders`);
     } catch (e: any) {
       // Sem isto, uma excecao no laco destravava a tela SEM mensagem nenhuma e
       // sem o toast final: importacao parcial, silenciosa. O laco so usa
@@ -131,6 +134,10 @@ const BulkUpdateOrders = () => {
       // "impossivel", e o custo de saber e uma linha.
       toast.error("Bulk update stopped: " + (e?.message ?? String(e)));
     } finally {
+      // `setResults` no `finally`, nao no `try`: numa excecao ele nunca rodava e
+      // a tabela ficava VAZIA — o admin perdia justamente o registro de quais
+      // linhas tinham passado antes da falha.
+      setResults(res);
       // `setImporting(false)` PRIMEIRO. Na versao anterior ele vinha depois do
       // `await`, e um `.then()` sem tratamento de rejeicao (rede caindo, sessao
       // expirando num lote longo) lancava dentro do `finally`: a tela ficava
@@ -145,7 +152,6 @@ const BulkUpdateOrders = () => {
         console.error("[bulk] release suppression threw:", e);
       }
     }
-    toast.success(`Updated ${res.filter((r) => r.status === "ok").length} of ${rows.length} orders`);
   };
 
   return (

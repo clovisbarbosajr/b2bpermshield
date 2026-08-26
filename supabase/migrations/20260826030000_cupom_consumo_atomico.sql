@@ -74,7 +74,13 @@ BEGIN
           INTO _d FROM public.coupons cp
           WHERE cp.id = NEW.coupon_id AND cp.ativo IS TRUE
             AND (cp.data_inicio IS NULL OR cp.data_inicio <= now())
-            AND (cp.data_fim    IS NULL OR cp.data_fim    >= now());
+            AND (cp.data_fim    IS NULL OR cp.data_fim    >= now())
+            -- Tambem confere ESGOTADO. Sem esta linha, pedido nascido cancelado
+            -- com cupom esgotado entrava com `coupon_id` preenchido e desconto
+            -- aplicado; se depois fosse reativado, a devolucao tentaria consumir,
+            -- falharia, e o desconto ficaria no pedido sem uso contabilizado.
+            -- O codigo anterior nao tinha essa frouxidao — eu a introduzi.
+            AND (cp.uso_maximo  IS NULL OR COALESCE(cp.uso_atual,0) < cp.uso_maximo);
         IF _d IS NULL THEN
           NEW.coupon_id := NULL;
         END IF;
