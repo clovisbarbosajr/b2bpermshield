@@ -1207,3 +1207,41 @@ parser de CSV ingenuo (`split(",")`) em 8 importadores.
 - **PADRAO QUE SE REPETE, anotado** - as tres vezes que um portao meu falhou, o
   sintoma foi o mesmo: ele SAIA ZERO sem ter olhado. Portao novo so vale depois
   de um mutante provar que ele reprova.
+
+### 25/08 (noite, cont. 21) - Banco COMPLETO, e um portao que eu desisti de fazer
+
+- **BANCO COMPLETO** - o dono rodou os 11 passos. A conferencia voltou 13/13 OK:
+  os 3 gatilhos, as 8 funcoes novas e as 2 colunas. As unicas tabelas com leitura
+  aberta que sobraram sao vocabulario (unidades de medida, nomes de status,
+  aliquotas de imposto) — sem preco, sem estoque, sem dado de cliente, deixadas
+  abertas de proposito em 20260825210000.
+- **FALHA MINHA NO EMPACOTAMENTO** - eu montei o runbook a partir de uma lista
+  escrita a mao e ESQUECI a `20260825220000_item_exige_variante.sql`, que ja
+  estava aprovada desde a rodada 7. So apareceu porque a propria consulta de
+  conferencia acusou `fn_item_exige_variante FALTA`. Entregue em separado e
+  rodada; o backup do historico voltou 0, entao nenhum pedido antigo estava no
+  estado que o gatilho recusa.
+- **ERRO MEU que chegou na tela do dono** - mandei
+  `SELECT valor FROM sync_state WHERE chave = ...`. As colunas sao `value` e
+  `key`, e o valor e JSONB. Ele levou o erro no meio do runbook. Segunda consulta
+  minha a quebrar na mao dele.
+- **TENTEI virar portao e DESISTI** - escrevi `scripts/check-diagnosticos.mjs`
+  para conferir nome de coluna nas consultas que vivem dentro de COMENTARIO nas
+  migrations (que nem o Postgres nem o `tsc` olham). Primeira versao: 451 alarmes
+  falsos, lia comentario em portugues como SQL. Segunda: 38 alarmes falsos, lia
+  corpo de funcao comentado na secao de ROLLBACK. REMOVI o arquivo em vez de
+  deixar um portao que grita a toa — e exatamente o modo de falha que eu venho
+  denunciando nos outros portoes, e manter um assim seria pior que nao ter.
+- **O QUE FICA NO LUGAR** - disciplina, nao codigo: antes de mandar consulta para
+  o dono, conferir cada nome de coluna contra o `CREATE TABLE`/`ADD COLUMN` da
+  migration. Foi o que fiz nas duas ultimas — as duas rodaram de primeira.
+  Se isso falhar de novo, ai sim vale gastar o tempo de fazer o portao direito
+  (provavelmente parseando SQL de verdade, nao com regex).
+
+**FALTA AO DONO:** ligar "Confirm email" e "Secure password change" no painel,
+publish, e pedir deploy de send-email / stripe-checkout / register-customer /
+company-member no chat do Lovable.
+
+**ATENCAO REGISTRADA:** `envio_pausado` esta FALSE. Nao sai nada hoje porque nao
+ha cron nenhum, mas antes de religar a sincronizacao essa trava tem que voltar
+para TRUE — e o freio de mao.
