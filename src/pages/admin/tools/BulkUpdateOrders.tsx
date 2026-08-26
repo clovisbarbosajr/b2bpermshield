@@ -39,6 +39,28 @@ const BulkUpdateOrders = () => {
     setImporting(true);
     const res: Result[] = [];
 
+    // REGRA NUMERO UM (a mesma escrita no topo de `b2bwave-sync/index.ts`):
+    // operacao em MASSA sobre pedidos suprime notificacao ANTES de comecar.
+    // Este laco faz um UPDATE de status por linha — sem isto, uma planilha de
+    // 500 pedidos vira 500 SMS no momento em que o gatilho de status for
+    // religado. Foi assim que o incidente de 25/ago aconteceu, só que pelo sync.
+    //
+    // A janela cobre o lote inteiro com folga. A supressao e contada por
+    // referencia no banco (20260826010000), entao ligar aqui nao atrapalha um
+    // sync que esteja rodando, nem o sync desliga a nossa.
+    const minutos = Math.max(10, Math.ceil(rows.length / 100) * 5);
+    const { error: supErr } = await supabase.rpc("set_suppress_order_notify" as any, {
+      _on: true, _minutos: minutos,
+    });
+    if (supErr) {
+      // Falhar aqui ABORTA. Rodar o lote sem supressao e o cenario do incidente:
+      // melhor a planilha nao subir do que subir disparando mensagem.
+      setImporting(false);
+      toast.error("Could not pause notifications — nothing was updated. " + supErr.message);
+      return;
+    }
+
+    try {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const orderNumberRaw = r["order_number"]?.trim();
@@ -102,7 +124,21 @@ const BulkUpdateOrders = () => {
     }
 
     setResults(res);
-    setImporting(false);
+    } finally {
+      // `setImporting(false)` PRIMEIRO. Na versao anterior ele vinha depois do
+      // `await`, e um `.then()` sem tratamento de rejeicao (rede caindo, sessao
+      // expirando num lote longo) lancava dentro do `finally`: a tela ficava
+      // presa em "Updating..." ate recarregar, e a excecao ainda mascarava o
+      // erro original do `try`.
+      setImporting(false);
+      try {
+        const { error } = await supabase.rpc("set_suppress_order_notify" as any, { _on: false, _minutos: 0 });
+        if (error) console.error("[bulk] release suppression failed:", error.message);
+      } catch (e) {
+        // Nao aborta: a janela de supressao expira sozinha.
+        console.error("[bulk] release suppression threw:", e);
+      }
+    }
     toast.success(`Updated ${res.filter((r) => r.status === "ok").length} of ${rows.length} orders`);
   };
 

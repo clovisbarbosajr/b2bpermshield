@@ -337,12 +337,13 @@ const Checkout = () => {
     if (!couponCode.trim()) return;
     setCouponApplying(true);
     setCouponError("");
-    const { data } = await supabase
-      .from("coupons")
-      .select("*")
-      .eq("codigo", couponCode.trim().toUpperCase())
-      .eq("ativo", true)
-      .maybeSingle();
+    // Pergunta FECHADA, nao acesso a tabela. A politica antiga
+    // (`USING (ativo = true)`) deixava qualquer conta baixar a lista inteira de
+    // cupons com um GET sem filtro — e o cadastro aqui e aberto. Ver
+    // 20260826050000_cupom_nao_e_catalogo_publico.sql.
+    const { data: achados } = await supabase
+      .rpc("cupom_por_codigo" as any, { _codigo: couponCode.trim() });
+    const data = Array.isArray(achados) ? (achados[0] ?? null) : (achados ?? null);
 
     if (!data) {
       setCouponError("Coupon not found or inactive");
@@ -717,10 +718,17 @@ const Checkout = () => {
       // Tokens que o banco levanta com texto reconhecivel. Sem isto o cliente
       // via a mensagem crua do Postgres na tela.
       const msg = error?.message ?? "";
+      // Tokens de 20260826040000. Sem tradução o cliente veria o texto CRU do
+      // Postgres na tela — regra da casa: erro de programador não chega ao
+      // cliente.
       toast.error(
         /ORDERING_DISABLED/i.test(msg)
           ? "Ordering is currently disabled for this account. Please contact us."
-          : "Error: " + msg
+          : /PAYMENT_OPTION_NOT_ALLOWED/i.test(msg)
+            ? "That payment option isn't available for your account. Please pick another one."
+            : /SHIPPING_OPTION_NOT_ALLOWED/i.test(msg)
+              ? "That shipping option isn't available for your account. Please pick another one."
+              : "Error: " + msg
       );
       setLoading(false);
       return;

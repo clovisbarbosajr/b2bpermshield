@@ -476,7 +476,55 @@ async function upsertOrder(
   if (opts.notify && CRON_SECRET && podeNotificar) {
     const ageMs = Date.now() - new Date(submittedAt as string).getTime();
     if (ageMs < 2 * 24 * 60 * 60 * 1000) {
-      await fireNewOrderNotification(db, numero, total, clienteId, orderId).catch(() => {});
+      // JA AVISAMOS SOBRE ESTE PEDIDO? `INSERT` aqui nao significa "pedido
+      // novo no mundo" — significa "linha nova nesta tabela". Apagar os
+      // pedidos e reimportar faz TODOS voltarem por este ramo, e os das
+      // ultimas 48h disparavam o aviso outra vez.
+      //
+      // O `notification_log` e a unica memoria que SOBREVIVE a exclusao dos
+      // pedidos, entao e ele quem responde. Nao ha FK: comparo pelo
+      // `order_numero` que o proprio `fireNewOrderNotification` grava no
+      // payload.
+      //
+      // `origem`: `pedidos.numero` NAO e unico — o portal e o B2BWave escrevem
+      // no mesmo espaco de inteiros. Sem este filtro, um pedido #1500 fechado no
+      // portal calaria para sempre o aviso do pedido #1500 vindo do B2BWave.
+      //
+      // O `error` e lido explicitamente: `postgrest-js` NAO LANCA sem
+      // `.throwOnError()` — erro de rede, RLS ou coluna vira `{data:null,error}`.
+      // Ler so `data` fazia a falha virar `antes=null` -> "nao avisei ainda" ->
+      // NOTIFICA. Era falha-ABERTO com comentario prometendo o contrario.
+      let jaAvisado = false;
+      // `status = "sent"` e o coracao disto. O `dispatchEvent` grava linha em
+      // TODO nao-envio, nao so em envio: torneira fechada, evento desligado,
+      // sem destinatario, falha de provedor — todas viram linha com
+      // `status = "failed"`.
+      //
+      // Sem este filtro o dedupe leria "ja anunciei" onde nada foi anunciado. E
+      // como a torneira esta FECHADA hoje (20260825180000 termina com
+      // `pausar_envios(true)`), TODO pedido importado agora ganha uma linha de
+      // skip — e o aviso dele ficaria selado para sempre, mesmo depois de o
+      // dono religar tudo. O conserto teria criado um silencio permanente.
+      const { data: antes, error: errLog } = await db.from("notification_log")
+        .select("id").eq("event", "new_order").eq("status", "sent")
+        .eq("payload->>origem", "b2bwave")
+        .eq("payload->>order_numero", String(numero)).limit(1);
+      if (errLog) {
+        // Nao sei se ja avisei. Nao avisar e o erro barato (o admin ve o pedido
+        // na tela); avisar de novo e o caro. Mas deixa RASTRO — senao este vira
+        // um nao-envio invisivel, que e a coisa que este projeto mais combate.
+        jaAvisado = true;
+        await db.from("notification_log").insert({
+          event: "new_order_dedupe_erro", channel: "-", recipient: "-", status: "failed",
+          error: "nao consegui conferir se este pedido ja foi anunciado: " + errLog.message,
+          payload: { order_numero: numero, origem: "b2bwave" },
+        }).then(() => {}, () => {});
+      } else {
+        jaAvisado = (antes?.length ?? 0) > 0;
+      }
+      if (!jaAvisado) {
+        await fireNewOrderNotification(db, numero, total, clienteId, orderId).catch(() => {});
+      }
     }
   }
   return "created";
@@ -489,7 +537,14 @@ async function fireNewOrderNotification(db: any, numero: number, total: number, 
     headers: { "Content-Type": "application/json", "x-cron-secret": CRON_SECRET, "apikey": ANON_KEY, "Authorization": `Bearer ${ANON_KEY}` },
     body: JSON.stringify({
       event: "new_order",
+      // Pedido do B2BWave NAO avisa o cliente daqui. Ele ja recebeu a
+      // confirmacao de la — ver o comentario do e-mail rico logo abaixo.
+      somente_admin: true,
       vars: {
+        // Marca de PROCEDENCIA no proprio registro da notificacao. E o que
+        // permite o dedupe distinguir o pedido #N do B2BWave do pedido #N do
+        // portal — `pedidos.numero` colide entre os dois.
+        origem: "b2bwave",
         // `order_id` = UUID, nao o `numero`. `pedidos.numero` NAO e unico (app e
         // B2BWave escrevem no mesmo espaco de inteiros), e a barreira de idade
         // busca por este campo: com o numero, ela podia ler o pedido ERRADO e

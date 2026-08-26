@@ -131,7 +131,25 @@ Deno.serve(async (req) => {
         if (ownCli) safeCustomer = { email: ownCli.email, phone: ownCli.telefone, whatsapp: ownCli.telefone };
       }
     }
-    const r = await dispatchEvent(db, event, vars, safeCustomer);
+    // `somente_admin` so restringe (tira o cliente da lista). Nao ha caminho em
+    // que aceitar isto faca sair MAIS mensagem, entao nao precisa de checagem de
+    // papel — diferente de tudo o mais neste arquivo.
+    //
+    // JA `vars` e texto livre do chamador, e o `logRow` do dispatch grava
+    // `payload = vars`. Como o cadastro e ABERTO, uma conta qualquer podia
+    // POSTar `new_order` com `order_numero` inventado e `origem:"b2bwave"`, e
+    // plantar em `notification_log` a linha que faz o sync CALAR o aviso de um
+    // pedido de verdade. Envenenar o dedupe pela porta da frente.
+    //
+    // Basta impedir a forja de `origem`: o dedupe do sync exige as DUAS marcas
+    // (`origem = "b2bwave"` E o numero). Sem conseguir plantar `origem`, a linha
+    // do atacante nunca casa, por mais numero que ele invente.
+    //
+    // `order_numero` fica como esta de proposito — os modelos de mensagem o
+    // usam, e para o cliente ele ja vem do pedido dele na tela.
+    if (!isStaff && !viaCron) delete (vars as any).origem;
+    const r = await dispatchEvent(db, event, vars, safeCustomer,
+      { somenteAdmin: body?.somente_admin === true });
     return json(r);
   } catch (e) {
     console.error("notify-dispatch error:", e);

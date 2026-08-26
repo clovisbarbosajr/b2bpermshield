@@ -186,6 +186,11 @@ const EMAIL_TYPE_DEFS: Array<{ tipo: string; label: string; vars: Array<{ v: str
 
 export default function Notificacoes() {
   const [loading, setLoading] = useState(true);
+  // TORNEIRA GERAL (`sync_state.envio_pausado`). Cala TODOS os canais de uma
+  // vez, e ate 26/ago so existia em SQL: o admin podia mexer em canal, testar e
+  // nao receber nada, sem nada na tela explicando por que.
+  const [envioPausado, setEnvioPausado] = useState<boolean | null>(null);
+  const [pausando, setPausando] = useState(false);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
@@ -267,6 +272,15 @@ export default function Notificacoes() {
       sb.from('notification_recipients').select('*').order('created_at'),
     ]);
     setChannels((c.data as Channel[]) ?? []);
+    // O `error` e lido. Descarta-lo fazia a falha de leitura virar `false`, e a
+    // faixa anunciava "Sending is active" com toda confianca — mentira
+    // especifica, porque a torneira esta FECHADA desde 20260825180000. Uma
+    // faixa criada para acabar com "testei e nao recebi, e nada explicava"
+    // nao pode ser a proxima coisa a enganar.
+    // Linha ausente (sem erro) = nunca foi pausado = liberado.
+    const { data: pausa, error: pausaErr } = await sb.from('sync_state')
+      .select('value').eq('key', 'envio_pausado').maybeSingle();
+    setEnvioPausado(pausaErr ? null : (((pausa as any)?.value?.on ?? false) === true));
     setEvents((e.data as EventRow[]) ?? []);
     setRecipients((r.data as Recipient[]) ?? []);
 
@@ -615,6 +629,21 @@ export default function Notificacoes() {
     return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
   }
 
+  const alternarPausa = async (pausar: boolean) => {
+    setPausando(true);
+    // Vai pela RPC, nao por UPDATE direto: e ela que confere o papel de admin
+    // (a partir de 20260826010000, DESpausar exige admin de verdade — nem a
+    // service key abre).
+    const { error } = await sb.rpc('pausar_envios', { _pausar: pausar });
+    if (error) {
+      toast.error(pausar ? 'Could not pause sending' : 'Could not resume sending', { description: error.message });
+    } else {
+      setEnvioPausado(pausar);
+      toast.success(pausar ? 'All sending paused' : 'Sending resumed');
+    }
+    setPausando(false);
+  };
+
   return (
     <div className="p-4 sm:p-6 max-w-4xl">
       <div className="flex items-center gap-3 mb-6">
@@ -622,6 +651,42 @@ export default function Notificacoes() {
         <div>
           <h1 className="text-2xl font-bold">Notifications</h1>
           <p className="text-sm text-muted-foreground">Configure channels, events, and recipients.</p>
+        </div>
+      </div>
+
+      {/* TORNEIRA GERAL — fica ACIMA das abas de proposito: enquanto estiver
+          pausado, nada do que esta abaixo tem efeito, e isso precisa ser a
+          primeira coisa que se le nesta tela. */}
+      {/* TRES estados, nao dois. Esconder a faixa quando a leitura falha
+          repetiria o defeito que ela veio consertar: sistema mudo sem nada na
+          tela dizendo por que. */}
+      <div className={`mb-6 rounded-lg border p-4 ${
+        envioPausado === null ? 'border-destructive/40 bg-destructive/10'
+        : envioPausado ? 'border-amber-500/40 bg-amber-500/10'
+        : 'border-border bg-muted/40'}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-semibold">
+              {envioPausado === null ? "Could not read the master switch — state unknown"
+                : envioPausado ? 'Sending is PAUSED — nothing goes out'
+                : 'Sending is active'}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {envioPausado === null
+                ? 'Do not trust anything below until this is resolved: sending may be off without the settings showing it.'
+                : envioPausado
+                  ? 'This master switch overrides everything below: channels, events and recipients are ignored while it is on.'
+                  : 'Emails and SMS can leave, subject to the per-hour limits and the settings below.'}
+            </p>
+          </div>
+          <Button
+            variant={envioPausado ? 'default' : 'outline'}
+            disabled={pausando || envioPausado === null}
+            onClick={() => alternarPausa(!envioPausado)}
+          >
+            {pausando ? 'Working…' : envioPausado === null ? 'Unavailable'
+              : envioPausado ? 'Resume sending' : 'Pause all sending'}
+          </Button>
         </div>
       </div>
 

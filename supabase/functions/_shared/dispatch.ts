@@ -156,7 +156,13 @@ async function alertAdmin(db: Db, event: string, vars: Record<string, unknown>, 
   });
 }
 
-export async function dispatchEvent(db: Db, event: string, vars: Record<string, unknown>, customer?: Record<string, unknown>) {
+export async function dispatchEvent(
+  db: Db,
+  event: string,
+  vars: Record<string, unknown>,
+  customer?: Record<string, unknown>,
+  opts?: { somenteAdmin?: boolean },
+) {
   // Erro aqui NAO pode ser tratado como "nenhum canal ligado": com `ch = {}`
   // todo destino cai em "channel disabled", que por decisao e SKIP e nao
   // FAILURE — entao `failures` fica vazio, o alerta ao admin nao dispara, e a
@@ -218,7 +224,18 @@ export async function dispatchEvent(db: Db, event: string, vars: Record<string, 
       if (chans.includes("whatsapp") && r.whatsapp) targets.push({ channel: "whatsapp", to: r.whatsapp });
     }
   }
-  if (evt.notify_customer) {
+  // SOMENTE ADMIN. Usado por dado que entrou por IMPORTACAO, nao por acao do
+  // cliente: pedido vindo do B2BWave ja foi confirmado LA, e o aviso daqui para
+  // o cliente sempre foi duplicata. Reimportar a base inteira fazia essa
+  // duplicata virar SMS em lote para cliente real — o cenario que o dono
+  // nomeou depois do incidente de 25/ago.
+  //
+  // Esta opcao so TIRA destinatario, nunca acrescenta. Por isso e segura de
+  // aceitar de qualquer chamador, sem autorizacao nova.
+  if (evt.notify_customer && opts?.somenteAdmin) {
+    await logRow(db, event, "-", "(customer)",
+      { ok: false, error: "skip: somente_admin — dado importado nao avisa o cliente" }, vars);
+  } else if (evt.notify_customer) {
     if (!customer) {
       await logRow(db, event, "-", "(customer)", { ok: false, error: "skip: notify_customer on but no customer data passed to this event" }, vars);
     } else {
