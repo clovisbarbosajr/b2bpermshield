@@ -2254,3 +2254,42 @@ O gerador tinha "7" fixo em quatro lugares; virou `len(PASSOS)`. Um deles nao
 interpolou de primeira — a secao final era uma string concatenada que eu nao
 tinha convertido em f-string, e saiu `PASSO {len(PASSOS) + 4}` literal no
 arquivo do dono. Peguei conferindo a saida, nao o codigo.
+
+---
+
+## cont. 49 — Duas dividas reexaminadas; as duas ficam, e eu quase inventei um defeito
+
+Depois de pagar a do pedido minimo, fui as outras.
+
+### `nome_produto`/`sku` como texto do cliente — FICA
+
+Sao lidos por 12 arquivos, entre eles **4 telas de relatorio**. Trocar a origem
+do texto mexe em todas. E o dano e so de documento: preco, produto, variante e
+quantidade da linha ja sao validados no servidor — o cliente nao muda dinheiro,
+estoque nem acesso, so o texto do proprio pedido. O motivo original da divida se
+sustenta.
+
+### Reserva presa em pedido apagado — NAO E DEFEITO VIVO, e eu quase disse que era
+
+Encontrei `supabase.from("pedidos").delete()` em `OrderDetail.tsx:468` e escrevi
+para mim mesmo que a divida estava errada: existia caminho de tela, e toda
+reserva do pedido vazava.
+
+Fui ler a funcao inteira antes de reportar. **As duas linhas acima** apagam os
+ITENS primeiro, de proposito (o comentario explica: era para nao deixar item
+orfao). Nesse caminho o pedido pai ainda existe quando o gatilho de item roda —
+ele le o status e devolve a reserva certo.
+
+O outro caminho, `pedido_rollback_checkout`, so apaga pedido SEM itens.
+
+Sobra o `DELETE FROM pedidos` direto no SQL editor: cascateia com o pai ja
+invisivel, e ai o gatilho nao devolve — o que e **deliberado**, para nao devolver
+duas vezes quando a reserva ja saiu pelo cancelamento.
+
+Ou seja: a divida estava certa e eu estava errado. Achei lendo meia funcao;
+quase virou "defeito de dinheiro encontrado" num relatorio para o dono. E a
+quinta vez hoje que o erro tem a mesma forma — **olhar um escopo menor do que o
+dado tem** — so que desta vez para o lado do alarme, nao do silencio.
+
+Anotei as duas conferencias na tabela de dividas, com o motivo, para o proximo
+leitor nao refazer a investigacao.

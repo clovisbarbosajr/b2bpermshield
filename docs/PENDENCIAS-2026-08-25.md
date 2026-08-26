@@ -150,13 +150,13 @@ nenhum preço daquela régua está sendo gravado.
 
 | Item | Por que não foi feito |
 |---|---|
-| `nome_produto`/`sku` do item ainda são texto do cliente | Travar exigiria replicar em SQL a formatação da variante — segunda cópia de uma regra que diverge. É texto no documento, não decisão de preço ou acesso. Conserto certo: o servidor montar a linha do PDF a partir do produto |
+| `nome_produto`/`sku` do item ainda são texto do cliente | **Reconferido em 25/ago: fica.** São lidos por 12 arquivos, entre eles 4 telas de relatório — trocar a origem do texto mexe em tudo isso. E o dano é só de documento: preço, produto, variante e quantidade da linha já são validados no servidor, então o cliente não muda dinheiro, estoque nem acesso; só o texto do próprio pedido. Conserto certo continua sendo o servidor montar a linha a partir do produto |
 
 | Enumeração por **tempo** de resposta no login por e-mail | E-mail inexistente responde em duas consultas; cliente ativo passa por RPC, geração de link e envio síncrono. Fechar exige responder antes de enviar (fila) |
 | Cupom aplicado por UPDATE de staff não revalida | Só o INSERT valida. Risco interno (exige papel de staff) |
 | Isenções por `b2bwave_order_id` em ~6 gatilhos | Concessão temporária à fonte externa. **Remover no desligamento do B2BWave** |
 | Gatilhos que o sync aciona | Conferidos um a um em `scripts/checar-sync-preflight.py`; os 8 sem isenção automática têm veredito gravado lá. Rodar de novo antes de religar |
-| Reserva presa se o pedido for apagado sem apagar itens antes | Herdado do comportamento do produto-pai; sem caminho de tela |
+| Reserva presa se o pedido for apagado sem apagar itens antes | **Reconferido em 25/ago: continua sem caminho vivo.** A tela do admin (`OrderDetail`) apaga os ITENS primeiro — nesse caminho o pedido pai ainda existe, o gatilho lê o status e devolve certo. O `pedido_rollback_checkout` só apaga pedido SEM itens. Sobra o `DELETE FROM pedidos` direto no SQL editor, que cascateia com o pai já invisível e não devolve — deliberado, para não devolver duas vezes |
 
 ---
 
