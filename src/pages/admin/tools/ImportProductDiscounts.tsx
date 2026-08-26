@@ -7,20 +7,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
+import { parseCSV } from "@/lib/csv";
 const TEMPLATE_HEADERS = ["product_sku", "discount_percent", "price_list_name"];
 const TEMPLATE_ROW = ["PROD-001", "15", "Tabela Revendedores"];
-
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
-  return lines.slice(1).map((line) => {
-    const vals = line.split(",");
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => { row[h] = (vals[i] ?? "").trim().replace(/^"|"$/g, ""); });
-    return row;
-  });
-}
 
 type Result = { row: number; sku: string; status: "ok" | "error"; message: string };
 

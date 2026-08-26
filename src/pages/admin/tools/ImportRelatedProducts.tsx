@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { parseCSV } from "@/lib/csv";
 // IMPORTA RELATED PRODUCTS do export de produtos do B2BWave.
 // A API do B2BWave NÃO expõe related products (confirmado na documentação oficial),
 // mas o export (Products > Export no admin deles) inclui as colunas:
@@ -19,37 +20,6 @@ import { fetchAllRows } from "@/lib/fetchAllRows";
 
 // Parser CSV RFC-4180 (aspas, vírgula dentro de campo, quebra de linha em campo).
 // O parser "split por vírgula" dos outros importers quebraria com o export real.
-function parseCSV(text: string): Record<string, string>[] {
-  // Excel salva CSV com BOM — sem strip, o 1º cabeçalho vira "﻿product_sku" e não casa.
-  text = text.replace(/^﻿/, "");
-  const rows: string[][] = [];
-  let field = "", row: string[] = [], inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; }
-        else inQuotes = false;
-      } else field += ch;
-    } else if (ch === '"') inQuotes = true;
-    else if (ch === ",") { row.push(field); field = ""; }
-    else if (ch === "\n" || ch === "\r") {
-      if (ch === "\r" && text[i + 1] === "\n") i++;
-      row.push(field); field = "";
-      if (row.some((c) => c.trim() !== "")) rows.push(row);
-      row = [];
-    } else field += ch;
-  }
-  row.push(field);
-  if (row.some((c) => c.trim() !== "")) rows.push(row);
-  if (rows.length < 2) return [];
-  const headers = rows[0].map((h) => h.trim().toLowerCase());
-  return rows.slice(1).map((vals) => {
-    const r: Record<string, string> = {};
-    headers.forEach((h, i) => { r[h] = (vals[i] ?? "").trim(); });
-    return r;
-  });
-}
 
 // Lê .xlsx/.xls (export do B2BWave) e devolve no MESMO formato do parseCSV:
 // linhas como objetos com chaves de cabeçalho em minúsculas.

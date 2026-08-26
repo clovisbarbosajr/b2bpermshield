@@ -8,20 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
+import { parseCSV } from "@/lib/csv";
 const TEMPLATE_HEADERS = ["company", "name", "email", "phone", "address", "city", "state", "country", "zip", "website"];
 const TEMPLATE_ROW = ["Acme Corp", "John Doe", "john@acme.com", "555-1234", "123 Main St", "New York", "NY", "United States", "10001", "acme.com"];
-
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
-  return lines.slice(1).map((line) => {
-    const vals = line.match(/(".*?"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g) ?? line.split(",");
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => { row[h] = (vals[i] ?? "").trim().replace(/^"|"$/g, ""); });
-    return row;
-  });
-}
 
 type Result = { row: number; email: string; status: "ok" | "error"; message: string };
 

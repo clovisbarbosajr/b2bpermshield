@@ -1245,3 +1245,51 @@ company-member no chat do Lovable.
 **ATENCAO REGISTRADA:** `envio_pausado` esta FALSE. Nao sai nada hoje porque nao
 ha cron nenhum, mas antes de religar a sincronizacao essa trava tem que voltar
 para TRUE — e o freio de mao.
+
+### 25/08 (noite, cont. 22) - LEVA C: leitor de CSV unico
+
+- **CONFIRMADO** - NOVE telas tinham a propria `parseCSV`, e OITO quebravam a
+  linha com `split(",")` ou com uma regex que nao entende aspas. O estrago nao e
+  erro na tela: e DADO ERRADO GRAVADO COMO CERTO. Campo com virgula entre aspas
+  (`"Acme, Inc"`, `"Rua A, 100"`) desloca TODAS as colunas seguintes — a
+  quantidade passa a ler o preco, e o numero que entra e plausivel.
+  A regex antiga tinha furo pior: `[^,]+` nao casa campo VAZIO, entao `a,,b`
+  devolvia dois valores em vez de tres e a linha inteira andava uma coluna a
+  partir da primeira celula em branco.
+- **FEITO** - `src/lib/csv.ts` com o leitor correto (o de `ImportRelatedProducts`,
+  o unico que estava certo), promovido a lugar unico. As 9 telas passaram a
+  usa-lo. Entende aspas, `""` literal, campo vazio, quebra de linha DENTRO de
+  campo, CRLF e BOM.
+- **11 testes, e VIGIA PROVADA POR MUTANTE** - "ignora aspas" acende 3 testes.
+- **ACHADO NO MUTANTE, e nao e defeito** - o mutante "nao tira o BOM" PASSOU.
+  Investiguei em vez de forcar o teste: o `trim()` do JavaScript ja remove U+FEFF
+  (BOM conta como espaco em branco na spec). Ou seja, a linha que eu escrevi para
+  remover o BOM e REDUNDANTE. Mantida como cinto extra, com o comentario dizendo
+  isso; o teste protege o COMPORTAMENTO, nao aquela linha.
+  (Registro porque a tentacao era mexer no teste ate ele "pegar" — seria mentira.)
+- **DOIS MUTANTES MEUS NAO CHEGARAM A SER APLICADOS** e eu quase li o verde como
+  prova: o de "leitor ingenuo" quebrou o arquivo (o teste nao rodou, saiu
+  "no tests") e o do BOM nao alterou nada por escape errado no shell. So percebi
+  conferindo o codigo de saida e o diff. Mutante que nao foi plantado nao prova
+  nada, e "passou" nesse caso significa "nao testei".
+
+### 25/08 (noite, cont. 23) - PENDENCIA COM O DONO: teste do e-mail de cadastro
+
+- **FEITO PELO DONO** - no painel do Auth: Auto-confirm email DESLIGADO,
+  "Require re-authentication for password changes" LIGADO, HIBP LIGADO, senha
+  minima 8. (Ele tinha ligado o Auto-confirm por engano seguindo uma orientacao
+  errada do assistente do Lovable, e desligou depois.)
+- **PENDENTE, COM RISCO REGISTRADO** - o e-mail de confirmacao NAO foi testado.
+  Com Auto-confirm desligado, se o mailer do Auth nao estiver entregando,
+  NINGUEM CONSEGUE SE CADASTRAR. Nao machuca hoje (sistema fora do ar), mas
+  precisa estar testado antes do lancamento — senao o primeiro cliente trava e
+  o dono so descobre por reclamacao.
+- **NAO DA PARA FAZER POR SQL** - o e-mail so e disparado por um cadastro de
+  verdade; nao existe comando que force o envio sem criar a conta. E criar conta
+  esta fora do que eu faco. O dono faz o cadastro e roda:
+  `SELECT email, created_at, confirmation_sent_at, email_confirmed_at
+   FROM auth.users ORDER BY created_at DESC LIMIT 5;`
+  `confirmation_sent_at` preenchido = disparou.
+- **RECOMENDADO AO DONO** - baixar o "Rate limit for sending emails" de 1000 para
+  50/hora. Com cadastro aberto, mil e-mails/hora e amplificador ao alcance de
+  qualquer um.

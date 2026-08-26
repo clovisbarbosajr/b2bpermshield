@@ -7,22 +7,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
+import { parseCSV } from "@/lib/csv";
 const TEMPLATE_HEADERS = ["order_number", "status", "tracking_number", "delivery_date"];
 const TEMPLATE_ROW = ["1001", "complete", "BR123456789", "2024-12-31"];
 
 const VALID_STATUSES = ["submitted", "ready_for_pickup", "partial", "on_hold", "sent", "complete", "cancelled"];
-
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
-  return lines.slice(1).map((line) => {
-    const vals = line.split(",");
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => { row[h] = (vals[i] ?? "").trim().replace(/^"|"$/g, ""); });
-    return row;
-  });
-}
 
 type Result = { row: number; orderNumber: string; status: "ok" | "error"; message: string };
 
