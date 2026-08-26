@@ -53,7 +53,13 @@ export type StockVariant = {
 
 export type StockStatus = { nome: string; permite_comprar?: boolean | null };
 
-/** Nomes em pt do `produtos.status_produto` → nomes em en de `product_statuses`. */
+/** Nomes em pt do `produtos.status_produto` → nomes em en de `product_statuses`.
+ *
+ * ESTA MESMA TABELA EXISTE NO BANCO, em `fn_item_produto_valido`
+ * (migration 20260825330000). Mexeu aqui, mexa lá — senão a trava do banco para
+ * de casar e vira decoração: nada bate, e como a regra é conservadora
+ * ("não achou, não bloqueia"), ela simplesmente nunca dispara.
+ */
 const NAME_MAP: Record<string, string> = {
   disponivel: "available",
   indisponivel: "not available",
