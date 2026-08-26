@@ -756,9 +756,17 @@ const Checkout = () => {
       // Tokens de 20260825330000. Sem isto o cliente via o texto CRU do Postgres
       // na tela: "ITEM_PRODUTO_INATIVO: product 6f2a-... is not available".
       const produtoIndisponivel = /ITEM_PRODUTO_INATIVO|ITEM_PRODUTO_NAO_VENDAVEL/i.test(itensError.message);
-      const isStock = !precisaVariante && !produtoIndisponivel
+      // Token de 20260825390000. O valor real vai na mensagem do banco; extraio
+      // para o cliente saber QUANTO falta, em vez de "pedido pequeno demais".
+      const minimo = /ORDER_BELOW_MINIMUM/i.test(itensError.message);
+      const minimoValor = itensError.message.match(/below the minimum ([\d.]+)/i)?.[1];
+      const isStock = !precisaVariante && !produtoIndisponivel && !minimo
         && /insufficient_stock|check_violation|insufficient stock/i.test(itensError.message);
-      toast.error(precisaVariante
+      toast.error(minimo
+        ? (minimoValor
+            ? `Your order is below the minimum of $${minimoValor} for this account. Please add more items.`
+            : "Your order is below the minimum for this account. Please add more items.")
+        : precisaVariante
         ? "One of the items needs an option (size/color) chosen. Please open the product and pick one."
         : produtoIndisponivel
           ? "One of the items is no longer available for ordering. Please remove it from your cart and try again."

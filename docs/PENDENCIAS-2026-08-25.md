@@ -3,8 +3,9 @@
 Este é o arquivo de estado. O histórico detalhado, com o raciocínio de cada
 conserto e cada erro cometido no caminho, está em `LOG-TRABALHO.md`.
 
-**A fila de defeitos acabou.** As levas A a H foram varridas e fechadas. O que
-resta é (1) rodar SQL, (2) publicar, (3) duas decisões do dono.
+**A fila de defeitos acabou.** As levas A a H foram varridas e fechadas, e a
+dívida do **pedido mínimo** (seção 4) foi paga depois — virou a 8ª migration.
+O que resta é (1) rodar SQL, (2) publicar, (3) duas decisões do dono.
 
 ---
 
@@ -24,6 +25,7 @@ Cada arquivo tem, dentro dele: consulta de **backup** para rodar antes, o
 | 5 | `20260825360000_preco_exige_conta_liberada.sql` | **Ler a lista do backup** — são os clientes que perdem acesso à régua de preço |
 | 6 | `20260825370000_view_as_diz_a_verdade.sql` | |
 | 7 | `20260825380000_cupom_consumo_no_servidor.sql` | **Mandar o retorno do backup** — mostra o quanto deixou de ser contado |
+| 8 | `20260825390000_pedido_minimo_no_servidor.sql` | **Mandar o retorno do backup** — quantos pedidos já entraram abaixo do mínimo. Testar os dois lados depois |
 
 > Se qualquer passo der erro, **pare** e avise. Não pule para o próximo.
 
@@ -149,7 +151,7 @@ nenhum preço daquela régua está sendo gravado.
 | Item | Por que não foi feito |
 |---|---|
 | `nome_produto`/`sku` do item ainda são texto do cliente | Travar exigiria replicar em SQL a formatação da variante — segunda cópia de uma regra que diverge. É texto no documento, não decisão de preço ou acesso. Conserto certo: o servidor montar a linha do PDF a partir do produto |
-| Pedido mínimo só é checado no navegador | O pedido é criado numa chamada e os itens em outra; no INSERT não há item para somar. Abuso de baixa gravidade — o cliente paga o que pediu |
+
 | Enumeração por **tempo** de resposta no login por e-mail | E-mail inexistente responde em duas consultas; cliente ativo passa por RPC, geração de link e envio síncrono. Fechar exige responder antes de enviar (fila) |
 | Cupom aplicado por UPDATE de staff não revalida | Só o INSERT valida. Risco interno (exige papel de staff) |
 | Isenções por `b2bwave_order_id` em ~6 gatilhos | Concessão temporária à fonte externa. **Remover no desligamento do B2BWave** |
@@ -174,13 +176,13 @@ está legível no histórico do git. Remover do arquivo não basta.
 
 Não entram no `npm test` (são Python; a suíte é Node — amarrar uma à outra
 troca um risco por outro). São conferências deliberadas, e **os quatro já
-rodaram sobre as 7 migrations pendentes**:
+rodaram sobre as 8 migrations pendentes**:
 
 | Script | O que garante | Resultado |
 |---|---|---|
-| `scripts/conferir-colunas.py` | nenhuma coluna citada que não exista | **7 OK** |
+| `scripts/conferir-colunas.py` | nenhuma coluna citada que não exista | **8 OK** |
 | `scripts/conferir-regressao-funcao.py` | nenhuma refaz função e desfaz correção aplicada | **nenhuma desfaz** |
-| `scripts/gerar-runbook.py` | o SQL do seu arquivo bate com o do repositório | **16 blocos conferidos** |
+| `scripts/gerar-runbook.py` | o SQL do seu arquivo bate com o do repositório | **18 blocos conferidos** |
 | `scripts/checar-sync-preflight.py` | nenhum gatilho novo dispara sobre os ~1.150 pedidos importados | **8 conferidos à mão, nenhum dispara** |
 
 Os três primeiros nasceram de erro meu que chegou perto do seu banco; o quarto,

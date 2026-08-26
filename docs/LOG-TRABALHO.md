@@ -2194,3 +2194,63 @@ ou acesso, e agora tem botao para roda-la.
 O que falta depende inteiramente do dono: rodar os 7 SQL, publicar, pedir o
 deploy das 5 edge functions, e clicar nos dois botoes. Inventar uma nona
 verificacao seria atividade, nao trabalho.
+
+---
+
+## cont. 48 — A divida do pedido minimo foi paga
+
+Reabri a lista de dividas aceitas procurando o que ainda dava para fechar de
+verdade. Uma dava: **o pedido minimo so era conferido no navegador**.
+
+O motivo registrado para nao ter sido feita era este:
+
+    "O pedido e criado numa chamada e os itens em outra;
+     no INSERT nao ha item para somar."
+
+Verdade — e por isso gatilho BEFORE INSERT em `pedidos` nao resolve. Mas o
+momento certo ja existia no schema e eu nao tinha visto: o `Checkout` insere
+TODOS os itens em UMA chamada, e um gatilho **POR STATEMENT** em `pedido_itens`
+roda uma vez so, depois da ultima linha. Nesse instante o pedido esta completo.
+
+`FOR EACH ROW` seria o erro obvio: reprovaria no primeiro item de todo carrinho,
+com o subtotal ainda parcial. Gatilho que reprova pedido legitimo e pior do que
+a regra nao existir.
+
+### Uma pergunta que fiz no meio, e que valia mais que a resposta
+
+Ao ler o fluxo, vi que `fn_pedido_total_appside` calcula desconto, imposto e
+frete a partir de `NEW.subtotal` — **numero que vem do cliente**. Parei a
+implementacao para conferir se algo reconcilia isso com a soma dos itens, porque
+se nao reconciliasse o defeito seria muito maior do que o minimo: o cliente
+escolheria a base do proprio total.
+
+Reconcilia: `trg_pedido_recompute_subtotal` (AFTER INSERT em `pedido_itens`)
+reescreve `pedidos.subtotal` com a soma dos itens, e esse UPDATE dispara o
+recalculo do total. Preocupacao infundada — mas era conferir antes de afirmar,
+nao supor.
+
+### Decisoes de escopo
+
+O gatilho **soma os itens direto**, em vez de ler `p.subtotal`. O recompute e
+FOR EACH ROW e o meu e FOR EACH STATEMENT; a ordem entre eles e garantida pelo
+Postgres, mas depender disso e apostar numa garantia que eu nao preciso.
+
+Isentos, com motivo: staff (admin acrescentando linha em pedido fechado nao pode
+esbarrar no minimo do cliente), sync e pedido importado (a regra de la nao e
+esta), e cliente sem minimo configurado.
+
+A mensagem carrega o VALOR, e a tela extrai: "below the minimum of $X" em vez de
+"pedido pequeno demais". Saber quanto falta e a diferenca entre um aviso util e
+um beco.
+
+### Conferido
+
+`check-migrations` (174 arquivos), `conferir-colunas` (**8 OK**),
+`conferir-regressao-funcao` (a funcao e NOVA, nao sobrescreve nada), `npm test`
+verde. Runbook regerado: **8 passos, 18 blocos**, com o gatilho novo ja na
+consulta de conferencia final.
+
+O gerador tinha "7" fixo em quatro lugares; virou `len(PASSOS)`. Um deles nao
+interpolou de primeira — a secao final era uma string concatenada que eu nao
+tinha convertido em f-string, e saiu `PASSO {len(PASSOS) + 4}` literal no
+arquivo do dono. Peguei conferindo a saida, nao o codigo.

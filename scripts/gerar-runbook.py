@@ -62,6 +62,11 @@ PASSOS = [
          titulo="Limite de uso do cupom deixa de ser honra", risco="MÉDIO", retorno=True,
          oque="Quem contava o uso do cupom era o navegador. Bastava não fazer essa chamada para reusar um cupom de uso único quantas vezes quisesse. Agora conta no servidor — e devolve quando o pedido é cancelado, para cartão recusado não queimar o cupom.",
          obs="A consulta de backup mostra **o quanto deixou de ser contado** até aqui: compara o contador de cada cupom com os pedidos vivos que o usam.\n>\n> **Me mande o retorno** — se a diferença for grande, vale rever quais cupons ainda estão ativos."),
+
+    dict(arq="20260825390000_pedido_minimo_no_servidor.sql",
+         titulo="Pedido mínimo deixa de ser só do navegador", risco="MÉDIO", retorno=True,
+         oque="O valor mínimo que você configura por cliente só era conferido na tela. Quem fechasse o carrinho sem passar por essa conferência entrava abaixo do mínimo do mesmo jeito. Agora quem confere é o servidor, e a regra passa a valer de verdade.",
+         obs="A consulta de backup mostra **quantos pedidos já entraram abaixo do mínimo** de cada cliente. Nada do passado é alterado — ela só mede.\n>\n> **Me mande o retorno.** Se aparecer cliente com muitos, vale conferir se o mínimo dele está configurado do jeito que você quer.\n>\n> Depois de rodar, teste os DOIS lados: carrinho **abaixo** do mínimo tem que ser recusado com mensagem clara, e carrinho **acima** tem que passar. Sem o segundo teste, um gatilho que recusa tudo passaria por \"funcionando\" e a loja pararia de vender."),
 ]
 
 # As edge functions que precisam de deploy. `b2bwave-sync` entrou depois: o
@@ -86,7 +91,7 @@ def corpo_executavel(sql):
     return sql[i + 1:j].strip()
 
 
-out = ["""# Runbook — 7 migrations pendentes
+CAB = """# Runbook — {N} migrations pendentes
 
 Continuação do lote de 25/ago. **As 12 anteriores já rodaram.**
 
@@ -97,7 +102,8 @@ Onde estiver **📩 me mande o retorno**, rode só a consulta de conferência pr
 me mande o resultado, e espere antes de rodar o SQL daquele passo.
 
 ---
-"""]
+"""
+out = [CAB.replace("{N}", str(len(PASSOS)))]
 
 corpos_escritos = {}
 
@@ -107,7 +113,7 @@ for n, p in enumerate(PASSOS, start=1):
     corpo = corpo_executavel(sql)
     corpos_escritos[p["arq"]] = corpo
 
-    out.append(f"\n## PASSO {n} de 7 — {p['titulo']}\n")
+    out.append(f"\n## PASSO {n} de {len(PASSOS)} — {p['titulo']}\n")
     out.append(f"**Risco: {p['risco']}**" + ("  ·  **📩 me mande o retorno**" if p["retorno"] else "") + "\n")
     out.append(f"`{p['arq']}`\n")
     out.append(f"\n{p['oque']}\n")
@@ -120,8 +126,8 @@ for n, p in enumerate(PASSOS, start=1):
         out.append(f"\n### Rode isto\n\n```sql\n{corpo}\n```\n")
     out.append("\n---\n")
 
-out.append("""
-## PASSO 8 — Conferência final
+out.append(f"""
+## PASSO {len(PASSOS) + 1} — Conferência final
 
 **📩 me mande o retorno**
 
@@ -134,6 +140,8 @@ WITH esperado(item, tipo) AS (
     ('trg_cupom_devolve_status',    'gatilho_pedidos'),
     ('trg_cupom_devolve_delete',    'gatilho_pedidos'),
     ('trg_activity_log_identidade', 'gatilho_log'),
+    ('trg_pedido_minimo',            'gatilho_itens'),
+    ('fn_pedido_minimo',            'funcao'),
     ('conta_liberada_de',           'funcao'),
     ('fn_lock_item_cols',           'funcao'),
     ('fn_item_produto_valido',      'funcao'),
@@ -180,26 +188,26 @@ SELECT (SELECT count(*) FROM cron.job)               AS crons,
 
 ---
 
-## PASSO 9 — Publish
+## PASSO {len(PASSOS) + 2} — Publish
 
 ---
 
-## PASSO 10 — Deploy das edge functions, no chat do Lovable
+## PASSO {len(PASSOS) + 3} — Deploy das edge functions, no chat do Lovable
 
-""" + " · ".join(f"`{e}`" for e in EDGE) + """
+""" + " · ".join(f"`{e}`" for e in EDGE) + f"""
 
 > 🔴 **ATENÇÃO**
 >
 > Push no GitHub **não** publica edge function. Sem este passo, as correções de
 > e-mail, pagamento, cadastro e equipe não entram.
 >
-> **`b2bwave-sync` entrou na lista depois** — a comparação do PASSO 11 vive
+> **`b2bwave-sync` entrou na lista depois** — a comparação do último passo vive
 > dentro dela e mudou várias vezes. Sem o deploy, ela roda com o critério ANTIGO
 > e pode dizer "idêntico" para pedido que não está.
 
 ---
 
-## PASSO 11 — Me avisar
+## PASSO {len(PASSOS) + 4} — Me avisar
 
 Aí eu comparo os dois sistemas, só leitura, sem enviar nada: pedidos
 (`diff_orders`) e catálogo — produtos, variantes, régua de preço e clientes
