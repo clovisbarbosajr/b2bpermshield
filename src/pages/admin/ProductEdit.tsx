@@ -255,6 +255,20 @@ const ProductEdit = () => {
 
     // Save sub-data — se um insert de privacidade/preço falhar, avisa e NÃO declara
     // sucesso (o estado segue em memória, é só reenviar).
+    // Estoque de variante invalido PARA o save, em vez de virar 0.
+    const variantesRuins = variants
+      .filter((v: any) => (v.codigo ?? "").trim())
+      .filter((v: any) => {
+        const n = Number(String(v.quantidade ?? "").trim());
+        return !Number.isFinite(n) || n < 0;
+      })
+      .map((v: any) => String(v.codigo).trim());
+    if (variantesRuins.length > 0) {
+      setSaving(false);
+      toast.error(`Invalid stock quantity on: ${variantesRuins.join(", ")}. Use a whole number of 0 or more.`);
+      return;
+    }
+
     try {
       await saveSubData(productId!);
     } catch (e: any) {
@@ -390,7 +404,12 @@ const ProductEdit = () => {
     const campos = (v: any) => ({
       codigo: String(v.codigo).trim(),
       ativo: v.ativo ?? true,
-      quantidade: Number(v.quantidade) || 0,
+      // Validado ANTES do save (ver `handleSave`): aqui ja e numero.
+      // Antes era `Number(x) || 0`, que ZERAVA o estoque da variante em silencio
+      // — digitar algo invalido, ou apagar o campo por engano, gravava 0. E
+      // depois de 20260825320000 zero significa "tamanho esgotado" para o
+      // cliente.
+      quantidade: Math.trunc(Number(v.quantidade)),
       imagem_url: v.imagem_url || null,
       valores_opcao: v.valores_opcao ?? [],
     });

@@ -1496,3 +1496,27 @@ a maioria delas e `.in(ids)` limitada pelo tamanho do carrinho.
 - **NAO MEXIDO, de proposito** - as leituras `.in(ids)` do carrinho/checkout
   (limitadas pelo tamanho do carrinho) e as tabelas pequenas. Paginar tudo seria
   churn sem ganho.
+
+### 25/08 (noite, cont. 30) - CORRIJO UMA AFIRMACAO MINHA + estoque de variante zerado
+
+- **AFIRMACAO MINHA ERRADA, corrigida** - eu disse ao dono (e escrevi na
+  migration) que NADA repunha estoque de variante e que, com o B2BWave
+  desligado, viraria "catraca de mao unica ate zero". EXAGERADO: `ProductEdit`
+  grava `produto_variantes.quantidade` a mao, por variante, e esse caminho
+  funciona.
+  O que de fato NAO existe e o check-in de PRODUCAO creditar a variante:
+  `producao_pedidos` nao tem `variante_id` (a producao e registrada por PRODUTO),
+  entao o gatilho soma so em `produtos.estoque_total`. Consequencia real: com o
+  B2BWave desligado, cada container credita o pai e alguem distribui entre os
+  tamanhos na mao. O conserto de verdade muda o FLUXO DE TRABALHO do dono
+  (`producao_pedidos` ganhar `variante_id` e a tela pedir o tamanho), entao e
+  decisao dele. Texto da migration reescrito com esse peso.
+- **ERRO MEU, pego por mim** - ao consertar isso escrevi
+  `Number(v.__quantidadeOriginal)`, um campo que EU INVENTEI e que nao existe:
+  daria sempre 0, ou seja, exatamente o bug que eu estava consertando. Refeito.
+- **CONFIRMADO E CORRIGIDO** - `ProductEdit` gravava
+  `quantidade: Number(v.quantidade) || 0` nas variantes. Digitar algo invalido,
+  ou apagar o campo por engano, ZERAVA o estoque daquele tamanho em silencio — e
+  depois de 20260825320000 zero significa "esgotado" para o cliente. Agora o save
+  PARA e diz quais variantes estao com valor invalido, no mesmo padrao que a tela
+  ja usa para os descontos.

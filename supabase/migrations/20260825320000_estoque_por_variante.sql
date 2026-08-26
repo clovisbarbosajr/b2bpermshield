@@ -314,17 +314,27 @@ COMMIT;
 -- e uma linha por variante MAIS a do pai contaria o mesmo movimento duas vezes.
 -- O log continua por produto, como sempre foi.
 --
--- FALTA UMA VIA DE ENTRADA PARA A VARIANTE — e isto precisa entrar na fila
--- JUNTO, nao depois. Nada no sistema DEVOLVE estoque para uma variante: o
--- check-in de producao credita so `produtos.estoque_total` (20260619210000), a
--- API publica so mexe no pai, e o ajuste manual do admin so escreve no pai.
--- A partir daqui cada pedido concluido decrementa `produto_variantes.quantidade`
--- de forma permanente, e as UNICAS reposicoes sao o feed do B2BWave (que vai ser
--- desligado) e a digitacao manual no ProductEdit.
+-- A ENTRADA DE ESTOQUE POR VARIANTE E MANUAL, e isso precisa ser combinado
+-- antes do B2BWave ser desligado.
 --
--- No dia em que o B2BWave morrer, o estoque de variante vira CATRACA DE MAO
--- UNICA ate zero: a vitrine mostra "esgotado" por tamanho enquanto a producao
--- credita so o produto-pai.
+-- (Correcao de uma afirmacao minha anterior: eu tinha dito que NADA repunha
+-- estoque de variante e que viraria "catraca de mao unica". Exagerado —
+-- `ProductEdit` grava `produto_variantes.quantidade` a mao, por variante, e esse
+-- caminho continua funcionando.)
+--
+-- O que de fato NAO existe: o check-in de PRODUCAO creditar a variante.
+-- `producao_pedidos` nao tem `variante_id` (20260619200000) — a producao e
+-- registrada por PRODUTO — entao o gatilho de check-in (20260619210000) soma so
+-- em `produtos.estoque_total`. A API publica idem.
+--
+-- Consequencia pratica: com o B2BWave desligado, cada container recebido credita
+-- o produto-pai, e alguem precisa distribuir esse total entre os tamanhos na mao,
+-- na tela do produto. Se ninguem fizer, a vitrine mostra "esgotado" por tamanho
+-- enquanto o pai tem saldo.
+--
+-- O conserto de verdade e `producao_pedidos` ganhar `variante_id` e a tela de
+-- producao pedir o tamanho — mas isso muda o fluxo de trabalho do dono, entao e
+-- decisao dele, nao minha. Anotado na fila COM esse peso.
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------
