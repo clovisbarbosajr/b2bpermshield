@@ -1623,3 +1623,30 @@ corrompe a EXPLICACAO do que aconteceu.
 - **DECLARADO** - isto NAO limpa linha forjada que ja exista (a linha em si e
   evidencia), e NAO impede staff de registrar acao errada. O que fecha e assinar
   com o nome de OUTRA pessoa, que era o que tornava o log inutil.
+
+### 25/08 (noite, cont. 34) - Colunas de item que o cliente ainda gravava
+
+- **CONFIRMADO** - a policy de INSERT em `pedido_itens` valida so a posse do
+  pedido. `preco_unitario`/`subtotal` ja eram reescritos e `variante_id` ja tinha
+  gatilho, mas ficaram DE FORA: `quantidade_enviada`, `status_linha` e
+  `backorder`. O cliente criava o item JA MARCADO COMO ENVIADO — na tela do
+  deposito o pedido aparece despachado sem ninguem ter despachado nada.
+- **FEITO** - `20260825350000`: BEFORE INSERT que zera os tres. Isenta sync,
+  conexao direta, e os tres papeis de staff (o deposito precisa preencher).
+
+- **RECUEI DE UMA PARTE, e a razao importa.** Eu tinha escrito a trava tambem
+  para `nome_produto` e `sku`, copiando do produto. Fui conferir e o Checkout
+  monta o nome como "<produto> (<tamanho/cor>)", com o rotulo vindo de
+  `formatOpcao` (`src/lib/variants.ts`), que trata varios formatos de
+  `valores_opcao` — texto, numero e OBJETO com `option_name`/`value`. Copiar so
+  `produtos.nome` APAGARIA a variante da linha do pedido: o PDF e o e-mail
+  passariam a mostrar "Cano de cobre" onde antes mostravam
+  "Cano de cobre (3/4 pol)", e o deposito separaria errado.
+  Cheguei a escrever a versao em SQL que remonta o rotulo — e apaguei: seria uma
+  SEGUNDA copia de uma regra de formatacao, que diverge no dia em que alguem
+  mexer num lado so. Ja tenho uma dessas (a traducao de status em
+  20260825330000), e aquela so se justifica porque decide BLOQUEIO, nao texto.
+  Peso real: e texto no documento, nao decisao de preco, estoque ou acesso.
+  Anotado como divida, com o conserto certo escrito no proprio arquivo — o
+  servidor MONTAR a linha do PDF a partir de `produto_id` + `variante_id` em vez
+  de confiar no texto gravado.
