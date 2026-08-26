@@ -1685,3 +1685,38 @@ Os dois vieram da revisao do cetico sobre 20260825280000 e estavam na minha fila
   terceira copia dela no projeto, e eu venho denunciando exatamente isso.
 - **PROVA MECANICA** - as duas funcoes de previsualizacao sao identicas as vivas
   fora da checagem nova.
+
+### 25/08 (noite, cont. 36) - Cupom: limite de uso deixa de ser honra
+
+Divida que eu declarei em 20260825260000 e adiei DE PROPOSITO. Voltei a ela.
+
+- **O PROBLEMA** - quem consumia o cupom era o NAVEGADOR
+  (`increment_coupon_usage`, chamada pelo Checkout depois de fechar o pedido).
+  Um cliente que simplesmente NAO fizesse a chamada nunca incrementava
+  `uso_atual` e reusava um cupom de uso unico quantas vezes quisesse. O preco de
+  cada pedido saia certo; o LIMITE e que nao existia.
+- **POR QUE ESTAVA ASSIM** - a chamada tinha sido movida para o fim do fluxo por
+  decisao deliberada anterior: antes rodava no submit, e cartao recusado QUEIMAVA
+  o cupom sem venda nenhuma. Trazer o incremento para o INSERT sem mais nada
+  reintroduziria aquele bug — foi por isso que eu adiei em vez de fazer errado.
+- **FEITO** - `20260825380000`: consumo IDEMPOTENTE marcado no proprio pedido
+  (`pedidos.cupom_consumido`), com DEVOLUCAO quando o pedido morre.
+    INSERT com cupom          -> incrementa e marca
+    vira 'cancelled'          -> devolve e desmarca
+    apagado (rollback)        -> devolve
+    reativado                 -> consome de novo
+  Assim cartao recusado NAO queima o cupom (o pedido vira cancelado ou e apagado
+  pelo `pedido_rollback_checkout`), e o cliente nao escolhe mais se conta.
+- **BACKFILL cuidadoso** - pedido VIVO que ja tem cupom entra marcado como
+  consumido. Sem isso, o primeiro cancelamento de um pedido antigo devolveria um
+  uso que nunca foi contado e o contador ficaria abaixo da realidade.
+- **CORRIDA tratada** - o UPDATE do incremento tem o `WHERE uso_atual < uso_maximo`
+  de novo, porque entre a tela aplicar e o pedido entrar outro cliente pode ter
+  gastado a ultima unidade. Se esgotou na corrida, NAO marca e NAO derruba o
+  pedido: o desconto ja foi validado no INSERT, e recusar o pedido inteiro por um
+  uso a mais seria pior para o cliente do que absorver. Declarado no arquivo.
+- **A RPC virou no-op em vez de ser dropada** - o front ainda podia chama-la em
+  algum caminho, e "funcao nao existe" apareceria na tela do cliente no meio do
+  fechamento. Ela nao faz nada e diz por que.
+- **FRONT limpo** - o `bumpCouponUsage` e as duas chamadas sairam, junto com um
+  comentario que agora mentiria ("agora sim consome o cupom").

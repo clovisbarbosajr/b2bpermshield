@@ -774,7 +774,6 @@ const Checkout = () => {
     const { data: fresh } = await supabase.from("pedidos")
       .select("subtotal, desconto, sales_tax, shipping_costs, total").eq("id", pedido.id).maybeSingle();
     const finalTotal = Number((fresh as any)?.total ?? recalcGrossTotal);
-    const couponApplied = Number((fresh as any)?.desconto ?? 0) > 0;
 
     // O banco e a AUTORIDADE do preco, e ele pode discordar da tela: cupom
     // recusado por validade/uso (o servidor zera `coupon_id`), preco de produto
@@ -808,11 +807,17 @@ const Checkout = () => {
     // SÓ é chamado quando o pedido REALMENTE se concretiza: antes isto rodava aqui,
     // ANTES do pagamento — cartão recusado cancelava o pedido mas o cupom já tinha
     // sido consumido (cupom de uso único ficava queimado sem venda nenhuma).
-    const bumpCouponUsage = async () => {
-      if (coupon && couponApplied) {
-        await supabase.rpc("increment_coupon_usage", { _coupon_id: coupon.id });
-      }
-    };
+    // O CUPOM E CONSUMIDO NO SERVIDOR desde 20260825380000.
+    //
+    // Aqui existia um `bumpCouponUsage()` que chamava `increment_coupon_usage`
+    // depois de fechar o pedido. Quem contava o uso era o NAVEGADOR — e um
+    // cliente que simplesmente nao fizesse a chamada reusava um cupom de uso
+    // unico quantas vezes quisesse. O preco de cada pedido saia certo; o LIMITE
+    // e que nao existia.
+    //
+    // Agora um gatilho conta no INSERT do pedido e DEVOLVE quando ele e
+    // cancelado ou apagado — o que resolve o motivo de a contagem estar no fim
+    // do fluxo: cartao recusado nao queima mais o cupom.
 
     // Stripe card payment
     if (payByCard) {
@@ -861,7 +866,6 @@ const Checkout = () => {
           .from("pedidos")
           .update({ is_paid: true, payment_intent_id: paymentIntent.id } as any)
           .eq("id", pedido.id);
-        await bumpCouponUsage(); // pagamento aprovado → agora sim consome o cupom
         // Notificações em BACKGROUND (keepalive) — o cliente NÃO espera os emails.
         const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerCompany };
         const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
@@ -888,7 +892,6 @@ const Checkout = () => {
       return;
     }
 
-    await bumpCouponUsage(); // pedido sem cartão: confirmado no submit
     // Notificações em BACKGROUND (keepalive) — o cliente NÃO espera os emails.
     const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerCompany };
     const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));
