@@ -114,13 +114,16 @@ BEGIN
   -- Cancelar pedido pago e operacao de ATENDIMENTO, com estorno. Nao e desfazer
   -- de checkout.
   --
-  -- HONESTIDADE: isto MITIGA, nao FECHA. No caminho de erro de rede o front
-  -- nunca chega a gravar `is_paid`/`payment_intent_id` — quem carimba e o
-  -- webhook do Stripe. Entao este guard so dispara se o webhook chegar antes da
-  -- chamada da RPC: e corrida, nao trava. Fechar de verdade exige o
-  -- `create_payment_intent` gravar `payment_intent_id` no pedido JA ao criar a
-  -- intent, para o banco ter sinal de "houve tentativa de cobranca". Anotado na
-  -- fila. Hoje o Stripe esta desligado, entao o caminho nem roda.
+  -- ISTO FECHA (desde 25/ago, a correcao veio junto).
+  --
+  -- Eu tinha escrito aqui que isto era so MITIGACAO, porque no caminho de erro de
+  -- rede o front nunca chegava a gravar `payment_intent_id` — quem carimbava era
+  -- o webhook, entao o guard virava corrida.
+  --
+  -- Consertado do outro lado: `stripe-checkout` agora carimba
+  -- `payment_intent_id` no pedido no INSTANTE em que cria a intencao de
+  -- cobranca, nao quando ela confirma. O banco passa a ter sinal de "ha cobranca
+  -- em curso" desde o comeco, e este guard vale a partir dali.
   IF EXISTS (
     SELECT 1 FROM public.pedidos
     WHERE id = _pedido_id

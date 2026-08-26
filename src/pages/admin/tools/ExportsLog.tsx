@@ -61,8 +61,12 @@ const ExportsLog = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Type</TableHead>
-                  <TableHead>Started at</TableHead>
-                  <TableHead>Ended at</TableHead>
+                  {/* Era "Started at" / "Ended at" e as DUAS mostravam
+                    * `created_at` — a mesma data duas vezes, como se o export
+                    * tivesse durado zero. `export_logs` nao tem hora de termino;
+                    * tem `registros`, que era o dado util e nao aparecia. */}
+                  <TableHead>Date</TableHead>
+                  <TableHead className="text-right">Records</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead />
                 </TableRow>
@@ -74,7 +78,7 @@ const ExportsLog = () => {
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.tipo}</TableCell>
                     <TableCell>{formatDate(r.created_at)}</TableCell>
-                    <TableCell>{formatDate(r.created_at)}</TableCell>
+                    <TableCell className="text-right">{r.registros ?? 0}</TableCell>
                     <TableCell><Badge variant={r.status === "concluido" || r.status === "Finished" ? "default" : "secondary"}>{r.status ?? "Finished"}</Badge></TableCell>
                     <TableCell className="text-right">
                       {r.arquivo_url ? (

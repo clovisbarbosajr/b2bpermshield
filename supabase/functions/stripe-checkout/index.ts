@@ -216,6 +216,30 @@ Deno.serve(async (req) => {
         automatic_payment_methods: { enabled: true },
       });
 
+      // CARIMBA A INTENCAO NO PEDIDO, AGORA.
+      //
+      // Antes, `payment_intent_id` so era gravado quando o pagamento CONFIRMAVA
+      // (webhook ou `confirm_payment`). Entre criar a intencao e confirmar, o
+      // banco nao tinha sinal nenhum de que havia cobranca em curso — e o guard
+      // `ROLLBACK_PAID` de `pedido_rollback_checkout` (20260825250000) le
+      // exatamente esse campo.
+      //
+      // Consequencia: se o `confirmCardPayment` devolvesse erro de REDE depois de
+      // a cobranca passar, o Checkout chamava o desfazer e o pedido PAGO virava
+      // 'cancelled', liberando a reserva de estoque. O guard existia mas era
+      // corrida — so pegava se o webhook chegasse antes.
+      //
+      // Com o carimbo aqui, o guard passa a valer desde o instante em que a
+      // cobranca comeca. Falhar em gravar NAO impede o pagamento: o cliente esta
+      // com o cartao na tela, e recusar aqui seria pior que a corrida.
+      const { error: carimboErr } = await adminClient
+        .from("pedidos")
+        .update({ payment_intent_id: paymentIntent.id } as any)
+        .eq("id", pedido_id);
+      if (carimboErr) {
+        console.error(`[stripe-checkout] nao consegui carimbar payment_intent_id no pedido ${pedido_id}: ${carimboErr.message}`);
+      }
+
       return new Response(
         JSON.stringify({
           success: true,

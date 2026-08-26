@@ -1720,3 +1720,22 @@ Divida que eu declarei em 20260825260000 e adiei DE PROPOSITO. Voltei a ela.
   fechamento. Ela nao faz nada e diz por que.
 - **FRONT limpo** - o `bumpCouponUsage` e as duas chamadas sairam, junto com um
   comentario que agora mentiria ("agora sim consome o cupom").
+
+### 25/08 (noite, cont. 37) - Fecha a corrida do pagamento + log de export
+
+- **CORRIDA FECHADA, e eu tinha declarado que ficaria aberta.** Em
+  `20260825250000` escrevi que o guard `ROLLBACK_PAID` MITIGAVA e nao FECHAVA:
+  no caminho de erro de rede o front nunca gravava `payment_intent_id` (quem
+  carimba e o webhook), entao o guard so pegava se o webhook chegasse antes.
+  Consertado do outro lado: `stripe-checkout` passa a carimbar
+  `payment_intent_id` no pedido no INSTANTE em que cria a intencao de cobranca,
+  nao quando ela confirma. O banco ganha sinal de "ha cobranca em curso" desde o
+  comeco, e o guard vale a partir dali — pedido pago para de poder ser cancelado
+  pelo desfazer do checkout.
+  Falhar em gravar NAO impede o pagamento: o cliente esta com o cartao na tela, e
+  recusar ali seria pior que a corrida. Registra e segue.
+  O texto da 20260825250000 foi atualizado — ele dizia que a corrida ficava.
+- **CORRIGIDO** - `ExportsLog` mostrava "Started at" e "Ended at" com a MESMA
+  data (`created_at` nas duas), como se todo export tivesse durado zero.
+  `export_logs` nao tem hora de termino; tem `registros`, que era o dado util e
+  nao aparecia. Agora e "Date" e "Records".
