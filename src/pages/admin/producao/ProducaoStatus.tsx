@@ -215,8 +215,18 @@ const ProducaoStatus = () => {
   const startReceive = (r: Row) => { setReceivingId(r.id); setRecvQty(String(r.quantidade)); };
 
   const checkIn = async (r: Row) => {
-    const q = parseInt(recvQty);
-    if (!(q >= 0)) { toast.error("Enter a valid received quantity."); return; }
+    const q = parseInt(recvQty, 10);
+    // `q >= 0` ACEITAVA ZERO, e zero aqui e uma armadilha permanente:
+    // o gatilho do banco so soma quando a quantidade e MAIOR que zero
+    // (`IF _qtd > 0`), mas a linha ja fica marcada como recebida
+    // (`recebido_em` preenchido). Como a condicao do gatilho e
+    // `OLD.recebido_em IS NULL`, ele NUNCA MAIS dispara para esse item.
+    // Resultado: mercadoria que chegou de verdade jamais entra no inventario,
+    // e a tela diz "recebido". Perda silenciosa e irreversivel pela tela.
+    if (!Number.isFinite(q) || q < 1) {
+      toast.error("Received quantity must be at least 1. If nothing arrived, leave the item as pending instead of receiving it with 0.");
+      return;
+    }
     if (!confirm(`Receive ${q} of "${r.produtos?.nome}"? This adds ${q} to inventory and cannot be undone here.`)) return;
     setBusy(r.id);
     const { error } = await supabase.from("producao_pedidos")

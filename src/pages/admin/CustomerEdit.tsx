@@ -180,9 +180,19 @@ const CustomerEdit = () => {
         .from("user_roles")
         .upsert({ user_id: userId, role: "cliente" }, { onConflict: "user_id" });
 
-      await syncPrivacyGroups(newCliente.id);
-      await syncPaymentOptions(newCliente.id);
-      await syncShippingOptions(newCliente.id);
+      try {
+        await syncPrivacyGroups(newCliente.id);
+        await syncPaymentOptions(newCliente.id);
+        await syncShippingOptions(newCliente.id);
+      } catch (e: any) {
+        // A ficha FOI criada; o que falhou foi uma das listas. Dizer as duas
+        // coisas, senao o usuario refaz o cadastro inteiro e cria duplicata.
+        setSaving(false);
+        toast.error(`Customer created, but a list failed to save — ${e?.message ?? e}`);
+        log("created", "customer", newCliente.id, form.empresa || form.nome);
+        navigate(`/admin/customers/${newCliente.id}`);
+        return;
+      }
       setSaving(false);
       toast.success("Customer created with login access");
       log("created", "customer", newCliente.id, form.empresa || form.nome);
@@ -198,9 +208,18 @@ const CustomerEdit = () => {
     const { error } = await supabase.from("clientes").update(payload).eq("id", cliente.id);
     if (error) { toast.error("Error saving"); setSaving(false); return; }
 
-    await syncPrivacyGroups(cliente.id);
-    await syncPaymentOptions(cliente.id);
-    await syncShippingOptions(cliente.id);
+    try {
+      await syncPrivacyGroups(cliente.id);
+      await syncPaymentOptions(cliente.id);
+      await syncShippingOptions(cliente.id);
+    } catch (e: any) {
+      // NAO cai no `toast.success`. Antes, os seis erros dessas tres funcoes
+      // eram descartados e a tela dizia "Customer saved" com a lista vazia no
+      // banco.
+      setSaving(false);
+      toast.error(String(e?.message ?? e));
+      return;
+    }
     setSaving(false);
     toast.success("Customer saved");
     log("updated", "customer", cliente.id, form.empresa || form.nome);
@@ -226,7 +245,15 @@ const CustomerEdit = () => {
     })()),
     disable_ordering: form.disable_ordering,
     discount: form.discount,
-    minimum_order_value: form.minimum_order_value ? parseFloat(form.minimum_order_value) : null,
+    // `parseFloat("abc")` e NaN, e `JSON.stringify(NaN)` vira `null` — digitar
+    // qualquer coisa no campo APAGAVA o pedido minimo e a tela dizia "salvo".
+    // O input e texto puro, entao lixo entra facil.
+    minimum_order_value: (() => {
+      const bruto = String(form.minimum_order_value ?? "").trim();
+      if (bruto === "") return null;
+      const v = Number(bruto);
+      return Number.isFinite(v) && v >= 0 ? v : null;
+    })(),
     admin_comments: form.admin_comments || null,
     tabela_preco_id: form.tabela_preco_id && form.tabela_preco_id !== '__none__' ? form.tabela_preco_id : null,
     tax_customer_group_id: form.tax_customer_group_id && form.tax_customer_group_id !== '__none__' ? form.tax_customer_group_id : null,
@@ -247,32 +274,48 @@ const CustomerEdit = () => {
     user_id: userId,
   });
 
-  const syncPrivacyGroups = async (customerId: string) => {
-    await supabase.from("cliente_privacy_groups").delete().eq("cliente_id", customerId);
-    if (clientePrivacyGroups.length > 0) {
-      await supabase.from("cliente_privacy_groups").insert(
-        clientePrivacyGroups.map(pgId => ({ cliente_id: customerId, privacy_group_id: pgId }))
-      );
+  // As tres listas abaixo eram "apaga tudo e reinsere", com os SEIS erros
+  // descartados. Se o delete passava e o insert falhava, a lista ficava VAZIA no
+  // banco, o estado continuava em memoria (some no F5), e a tela dizia
+  // "Customer saved".
+  //
+  // Nestas tres, lista vazia significa RESTRICAO, nao liberacao: o cliente perde
+  // os grupos de privacidade, as formas de pagamento privadas (Zelle, wire, Pay
+  // Later) e os fretes negociados. Ou seja, o cliente para de conseguir comprar
+  // do jeito combinado — e ninguem sabe por que.
+  //
+  // `throw` de proposito, e os DOIS pontos de chamada envolvem em try/catch (ver
+  // `handleSave`): o erro de verdade aparece, em vez de o fluxo seguir para o
+  // `toast.success`.
+  const regravaLista = async (
+    tabela: string,
+    colunaCliente: string,
+    colunaItem: string,
+    customerId: string,
+    ids: string[],
+    rotulo: string,
+  ) => {
+    const { error: delErr } = await supabase.from(tabela as any).delete().eq(colunaCliente, customerId);
+    if (delErr) throw new Error(`${rotulo}: ${delErr.message}`);
+    if (ids.length === 0) return;
+    const { error: insErr } = await supabase.from(tabela as any).insert(
+      ids.map((id) => ({ [colunaCliente]: customerId, [colunaItem]: id })) as any,
+    );
+    if (insErr) {
+      // O delete ja passou. Dizer isso na cara, em vez de deixar o usuario achar
+      // que nada mudou.
+      throw new Error(`${rotulo}: ${insErr.message} — a lista anterior foi apagada, refaca a selecao e salve de novo.`);
     }
   };
 
-  const syncPaymentOptions = async (customerId: string) => {
-    await supabase.from("cliente_payment_options").delete().eq("cliente_id", customerId);
-    if (selectedPaymentOptions.length > 0) {
-      await supabase.from("cliente_payment_options").insert(
-        selectedPaymentOptions.map(optId => ({ cliente_id: customerId, payment_option_id: optId }))
-      );
-    }
-  };
+  const syncPrivacyGroups = (customerId: string) =>
+    regravaLista("cliente_privacy_groups", "cliente_id", "privacy_group_id", customerId, clientePrivacyGroups, "Privacy groups");
 
-  const syncShippingOptions = async (customerId: string) => {
-    await supabase.from("cliente_shipping_options").delete().eq("cliente_id", customerId);
-    if (selectedShippingOptions.length > 0) {
-      await supabase.from("cliente_shipping_options").insert(
-        selectedShippingOptions.map(optId => ({ cliente_id: customerId, shipping_option_id: optId }))
-      );
-    }
-  };
+  const syncPaymentOptions = (customerId: string) =>
+    regravaLista("cliente_payment_options", "cliente_id", "payment_option_id", customerId, selectedPaymentOptions, "Payment options");
+
+  const syncShippingOptions = (customerId: string) =>
+    regravaLista("cliente_shipping_options", "cliente_id", "shipping_option_id", customerId, selectedShippingOptions, "Shipping options");
 
   const togglePrivacyGroup = (pgId: string) => {
     setClientePrivacyGroups(prev =>

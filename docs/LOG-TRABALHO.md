@@ -1126,3 +1126,68 @@ FLAG (`--targett`) fazia o tsc RECUSAR rodar e o portao imprimia "OK". E TS2448
   Corrigido com `fonts.googleapis.com` em `style-src` e `fonts.gstatic.com` em
   `font-src`. Reteste: 54 fontes carregadas, Inter e Space Grotesk presentes,
   tela renderiza. Se eu tivesse so escrito o arquivo, o site subiria sem fonte.
+
+### 25/08 (noite, cont. 19) - LEVA C: perda de dado (parte 1)
+
+O cacador achou MAIS do que a anotacao previa, e o contexto novo (B2BWave sera
+desligado, este vira o sistema principal) coloca perda de dado acima de tudo.
+
+- **CONFIRMADO E CORRIGIDO — o export de produtos era um backup mentiroso.**
+  `ProductExport` fazia `.select()` solto: o PostgREST corta em 1000 linhas SEM
+  erro. E este e o UNICO caminho de saida de dados do sistema. Backup que perde
+  tudo acima da linha 1000 e pior que backup nenhum: com nenhum voce sabe que nao
+  tem; com este voce acha que tem. Paginado com `fetchAllRows` + `.order("id")`.
+  A tabela de precos junto, pelo mesmo motivo.
+- **DE BRINDE** - o filtro de grupo de privacidade do export casava so por
+  `grupo_nome`, mas o ProductEdit grava `privacy_group_id` E `grupo_nome`, e ha
+  dado legado com UUID no campo de nome. Produtos desses grupos sumiam do export.
+  Agora casa pelos tres.
+
+- **CONFIRMADO E CORRIGIDO — `ImportRelatedProducts` apagava sem recriar.**
+  A leitura de produtos truncava em 1000 (erro descartado), entao do produto 1001
+  em diante nenhum codigo resolvia, `relIds` ficava vazio — e o `delete` era a
+  PRIMEIRA linha do bloco, incondicional. O fluxo caia no ramo "codigos nao
+  encontrados" DEPOIS de ter apagado. E `produtos_relacionados` NAO TEM OUTRA
+  FONTE: a API do B2BWave nao expoe related products, e o sync foi proibido de
+  tocar nessa tabela depois de ja ter apagado tudo uma vez.
+  Agora: paginado, erro lancado, e nao apaga antes de saber que vai recriar.
+  "Sem codigo no arquivo" tambem deixou de significar "apague os relacionados".
+
+- **CONFIRMADO E CORRIGIDO — funcionario virava IRRESTRITO em silencio.**
+  `user_locations` e a UNICA lista do sistema em que vazio significa VE TUDO
+  (`OR NOT EXISTS ...` na policy de categorias). A tela fazia delete+insert em
+  duas requisicoes; se a aba morresse no meio, o funcionario restrito passava a
+  ver TODAS as localidades, sem a tela nem ter dito que salvou. A tela ja checava
+  o erro do insert e avisava — mas nao ha aviso possivel para a aba que morre.
+  `20260825310000`: RPC `set_user_locations`, admin-only, delete+insert na MESMA
+  transacao.
+
+- **CONFIRMADO E CORRIGIDO — check-in de producao com 0 e armadilha permanente.**
+  A tela aceitava `q >= 0`. Com 0, o gatilho nao soma (`IF _qtd > 0`) mas
+  `recebido_em` fica preenchido — e como a condicao e `OLD.recebido_em IS NULL`,
+  ele NUNCA MAIS dispara para aquele item. Mercadoria que chegou de verdade
+  jamais entra no inventario, e a tela diz "recebido". Agora exige >= 1, com
+  mensagem dizendo o que fazer se nada chegou.
+
+- **CONFIRMADO E CORRIGIDO** - `ImportOrders` fazia `parseInt(x) || 1`: "abc"
+  virava 1, "0" virava 1, "10 caixas" virava 10. O PRECO, na linha seguinte, ja
+  era validado com isNaN — faltou so a quantidade.
+
+- **CONFIRMADO E CORRIGIDO** - as tres listas do `CustomerEdit` (privacidade,
+  pagamento, frete) eram delete+insert com os SEIS erros descartados, seguidos de
+  `toast.success` incondicional. Lista vazia aqui RESTRINGE (o cliente perde
+  Zelle, wire, Pay Later, fretes negociados) — a anotacao antiga dizia que
+  liberava, e estava errada. Agora lancam erro e os dois pontos de chamada
+  tratam. (Escrevi um comentario dizendo que os chamadores tratavam ANTES de
+  eles tratarem; peguei conferindo e consertei o codigo, nao o comentario.)
+
+- **CONFIRMADO E CORRIGIDO** - `minimum_order_value` no CustomerEdit: o input e
+  texto puro e `parseFloat("abc")` e NaN, que o `JSON.stringify` manda como
+  `null`. Digitar qualquer coisa APAGAVA o pedido minimo e a tela dizia "salvo".
+
+**AINDA NA FILA desta leva (nao feito):** o sync sobrescrevendo `estoque_total` e
+revertendo check-in de producao a cada ciclo (precisa de decisao do dono sobre
+quem manda no estoque durante a transicao); estoque de VARIANTE que nunca da
+baixa; `pedido_itens` aceitando produto desativado/privado; `ImportCustomers`
+duplicando cadastro; `ImportProductVariants` duplicando ao rodar duas vezes; e o
+parser de CSV ingenuo (`split(",")`) em 8 importadores.

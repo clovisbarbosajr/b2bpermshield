@@ -86,7 +86,16 @@ const ImportOrders = () => {
         continue;
       }
 
-      const quantity = parseInt(r["quantity"]) || 1;
+      // `parseInt(x) || 1` transformava lixo em 1 SEM AVISAR: "abc" virava 1,
+      // "0" virava 1, "10 caixas" virava 10. Num import de pedido historico isso
+      // e quantidade errada gravada como se fosse certa — e o preco, na linha
+      // seguinte, JA era validado com isNaN. Faltou so a quantidade.
+      const quantityRaw = String(r["quantity"] ?? "").trim();
+      const quantity = Number(quantityRaw);
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        res.push({ row: i + 2, status: "error", message: `Invalid quantity "${quantityRaw}" — must be a whole number of 1 or more` });
+        continue;
+      }
       const price = parseFloat(r["price"]);
       if (isNaN(price)) {
         groupRowErrors.push({ row: i + 2, key, status: "error", message: `Invalid price: ${r["price"]}` });

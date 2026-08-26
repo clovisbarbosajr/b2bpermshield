@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { exportToCSV } from "@/lib/export-csv";
 
+import { fetchAllRows } from "@/lib/fetchAllRows";
 const AdminProductExport = () => {
   const [priceLists, setPriceLists] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -31,11 +32,22 @@ const AdminProductExport = () => {
   const handleExport = async () => {
     setExporting(true);
     try {
-      // Fetch products with category
-      let query = supabase.from("produtos").select("*, categorias(nome)");
-      if (selectedCategory !== "all") query = query.eq("categoria_id", selectedCategory);
-      const { data: products, error } = await query;
-      if (error) throw error;
+      // PAGINADO. Antes era um `.select()` solto: o PostgREST corta em 1000
+      // linhas SEM erro, entao o CSV saia com 1000 produtos e cara de completo.
+      //
+      // Isto aqui e o UNICO caminho de saida de dados do sistema. Um backup que
+      // silenciosamente perde tudo acima da linha 1000 e pior que backup nenhum:
+      // com nenhum voce sabe que nao tem; com este voce acha que tem.
+      //
+      // `.order("id")` e obrigatorio — `.range()` vira LIMIT/OFFSET, e no
+      // Postgres LIMIT/OFFSET sem ORDER BY nao tem ordem definida: linha
+      // repetida numa pagina e faltando na outra.
+      const products = await fetchAllRows<any>((from, to) => {
+        let q = supabase.from("produtos").select("*, categorias(nome)")
+          .order("id", { ascending: true }).range(from, to);
+        if (selectedCategory !== "all") q = q.eq("categoria_id", selectedCategory);
+        return q;
+      });
       if (!products?.length) { toast.error("No products found"); setExporting(false); return; }
 
       // Fetch price list items if specific price list selected
@@ -43,7 +55,13 @@ const AdminProductExport = () => {
       let priceListNames: string[] = [];
 
       if (selectedPriceList === "all") {
-        const { data: allItems } = await supabase.from("tabela_preco_itens").select("produto_id, preco, tabela_preco_id, tabelas_preco(nome)");
+        // Paginado pelo mesmo motivo: com varias tabelas de preco, `tabela_preco_itens`
+        // passa de 1000 linhas facil, e o corte silencioso zera o preco de parte
+        // dos produtos NO CSV — sem nenhum aviso.
+        const allItems = await fetchAllRows<any>((from, to) =>
+          supabase.from("tabela_preco_itens")
+            .select("produto_id, preco, tabela_preco_id, tabelas_preco(nome)")
+            .order("id", { ascending: true }).range(from, to));
         (allItems ?? []).forEach((item: any) => {
           const plName = item.tabelas_preco?.nome || item.tabela_preco_id;
           if (!priceMap[plName]) priceMap[plName] = {};
@@ -54,7 +72,10 @@ const AdminProductExport = () => {
         const pl = priceLists.find(p => p.id === selectedPriceList);
         const plName = pl?.nome || selectedPriceList;
         priceListNames = [plName];
-        const { data: items } = await supabase.from("tabela_preco_itens").select("produto_id, preco").eq("tabela_preco_id", selectedPriceList);
+        const items = await fetchAllRows<any>((from, to) =>
+          supabase.from("tabela_preco_itens").select("produto_id, preco")
+            .eq("tabela_preco_id", selectedPriceList)
+            .order("id", { ascending: true }).range(from, to));
         priceMap[plName] = {};
         (items ?? []).forEach((item: any) => { priceMap[plName][item.produto_id] = item.preco; });
       }
@@ -64,8 +85,15 @@ const AdminProductExport = () => {
       if (selectedPrivacyGroup) {
         const pg = privacyGroups.find(g => g.id === selectedPrivacyGroup);
         if (pg) {
-          const { data: access } = await supabase.from("produto_acesso").select("produto_id").eq("grupo_nome", pg.nome);
-          const accessIds = new Set((access ?? []).map(a => a.produto_id));
+          // Casa pelo ID do grupo E pelo nome: `ProductEdit` grava os dois
+          // (`privacy_group_id` e `grupo_nome`), e ha dado legado com UUID
+          // gravado no campo de nome. Filtrar so por nome perdia esses produtos
+          // do export, calado.
+          const access = await fetchAllRows<any>((from, to) =>
+            supabase.from("produto_acesso").select("produto_id")
+              .or(`privacy_group_id.eq.${pg.id},grupo_nome.eq.${pg.nome},grupo_nome.eq.${pg.id}`)
+              .order("id", { ascending: true }).range(from, to));
+          const accessIds = new Set((access ?? []).map((a: any) => a.produto_id));
           filteredProducts = products.filter(p => accessIds.has(p.id));
         }
       }

@@ -8,6 +8,7 @@ import { Upload, CheckCircle, XCircle, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
+import { fetchAllRows } from "@/lib/fetchAllRows";
 // IMPORTA RELATED PRODUCTS do export de produtos do B2BWave.
 // A API do B2BWave NÃO expõe related products (confirmado na documentação oficial),
 // mas o export (Products > Export no admin deles) inclui as colunas:
@@ -97,7 +98,22 @@ const ImportRelatedProducts = () => {
     const res: Result[] = [];
 
     // Mapas locais: por b2bwave_id (preferido) e por sku (código pode repetir — 1º vence).
-    const { data: produtos } = await supabase.from("produtos").select("id, sku, b2bwave_id");
+    // PAGINADO e com ERRO CHECADO.
+    //
+    // Antes: `.select()` solto, `error` descartado. O PostgREST corta em 1000
+    // linhas SEM erro — do produto 1001 em diante o SKU nao era encontrado, todo
+    // codigo relacionado virava "missing", `relIds` ficava vazio, e o `delete`
+    // la embaixo APAGAVA os vinculos existentes sem recriar nada.
+    //
+    // `produtos_relacionados` nao tem outra fonte: a API do B2BWave nao expoe
+    // related products, e o proprio sync foi proibido de tocar nessa tabela
+    // depois de ja ter apagado tudo uma vez. Perder aqui e perder de vez.
+    //
+    // `fetchAllRows` LANCA em erro — falha de rede deixa de ser indistinguivel
+    // de "tabela vazia".
+    const produtos = await fetchAllRows<any>((from, to) =>
+      supabase.from("produtos").select("id, sku, b2bwave_id")
+        .order("id", { ascending: true }).range(from, to));
     const byB2bId = new Map<string, string>();
     const bySku = new Map<string, string>();
     for (const p of (produtos ?? []) as any[]) {
@@ -105,7 +121,7 @@ const ImportRelatedProducts = () => {
       if (p.sku && !bySku.has(p.sku.toLowerCase())) bySku.set(p.sku.toLowerCase(), p.id);
     }
 
-    let linked = 0, cleared = 0;
+    let linked = 0;
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const label = r["product_name"] || r["product_sku"] || r["b2b_product_id"] || "—";
@@ -127,23 +143,46 @@ const ImportRelatedProducts = () => {
         if (rid && rid !== mainId && !relIds.includes(rid)) relIds.push(rid);
         else if (!rid) missing.push(code);
       }
-      await supabase.from("produtos_relacionados").delete().eq("produto_id", mainId);
-      if (relIds.length) {
-        const { error } = await supabase.from("produtos_relacionados").insert(
-          relIds.map((rid) => ({ produto_id: mainId, produto_relacionado_id: rid, comprar_junto: false })),
-        );
-        if (error) { res.push({ row: i + 2, product: label, status: "error", message: error.message }); continue; }
-        linked += relIds.length;
-        res.push({
-          row: i + 2, product: label, status: "ok",
-          message: `${relIds.length} linked${missing.length ? ` · not found: ${missing.join(", ")}` : ""}`,
-        });
-      } else if (relCodes.length) {
-        res.push({ row: i + 2, product: label, status: "error", message: `Related codes not found: ${missing.join(", ")}` });
-      } else {
-        cleared++;
-        res.push({ row: i + 2, product: label, status: "skip", message: "No related products in file" });
+      // NAO APAGA ANTES DE SABER QUE VAI RECRIAR.
+      //
+      // O `delete` era a PRIMEIRA linha deste bloco, incondicional. Quando o
+      // arquivo trazia codigos e NENHUM resolvia — linha 1001+ por causa da
+      // truncagem, ou codigo errado no CSV — o fluxo caia no ramo "Related codes
+      // not found" DEPOIS de ter apagado. A tela reportava erro e o dado ja
+      // tinha ido, sem outra fonte de onde voltar.
+      if (!relIds.length) {
+        if (relCodes.length) {
+          res.push({
+            row: i + 2, product: label, status: "error",
+            message: `Related codes not found: ${missing.join(", ")} — nothing was changed for this product.`,
+          });
+        } else {
+          // Arquivo sem codigo nenhum para esta linha: NAO e ordem de limpar.
+          // Antes isto contava como `cleared` — mas o delete ja tinha rodado, e
+          // "sem codigo no arquivo" virava "apague os relacionados deste
+          // produto". Agora nao mexe.
+          res.push({ row: i + 2, product: label, status: "skip", message: "No related products in file — unchanged" });
+        }
+        continue;
       }
+
+      // Erro no delete tambem PARA: seguir para o insert com o delete falhado
+      // duplicaria os vinculos.
+      const { error: delErr } = await supabase.from("produtos_relacionados").delete().eq("produto_id", mainId);
+      if (delErr) {
+        res.push({ row: i + 2, product: label, status: "error", message: `Could not clear existing links: ${delErr.message}` });
+        continue;
+      }
+
+      const { error } = await supabase.from("produtos_relacionados").insert(
+        relIds.map((rid) => ({ produto_id: mainId, produto_relacionado_id: rid, comprar_junto: false })),
+      );
+      if (error) { res.push({ row: i + 2, product: label, status: "error", message: error.message }); continue; }
+      linked += relIds.length;
+      res.push({
+        row: i + 2, product: label, status: "ok",
+        message: `${relIds.length} linked${missing.length ? ` · not found: ${missing.join(", ")}` : ""}`,
+      });
     }
 
     setResults(res);

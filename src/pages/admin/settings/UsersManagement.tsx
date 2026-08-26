@@ -160,19 +160,25 @@ const UsersManagement = () => {
     }
 
     // Sincroniza os LOCAIS (categorias de topo). Vazio = sem restrição (vê tudo).
-    // Por isso o insert PRECISA ser checado: se o delete passa e o insert falha, o
-    // usuário fica sem NENHUMA amarração — o que significa "vê TODAS as
-    // localizações". Falha silenciosa aqui AMPLIAVA acesso (fail-open).
-    await supabase.from("user_locations").delete().eq("user_id", editUser.user_id);
-    if (editLocs.size > 0) {
-      const { error: locErr } = await supabase.from("user_locations")
-        .insert([...editLocs].map((cid) => ({ user_id: editUser.user_id, categoria_id: cid })));
-      if (locErr) {
-        toast.error("Failed to save location access — the user is now UNRESTRICTED. Fix and save again: " + locErr.message);
-        setSaving(false);
-        fetchData();
-        return;
-      }
+    //
+    // ATOMICO, via RPC (20260825310000). Antes eram DUAS requisições: um delete
+    // e um insert. O insert era checado e avisava "the user is now
+    // UNRESTRICTED" — mas não há aviso possível para a aba que MORRE entre as
+    // duas. Nessa janela o funcionário restrito passava a ver TODAS as
+    // localizações, em silêncio, sem a tela nem ter dito que salvou.
+    //
+    // A RPC faz os dois na mesma transação: passam juntos ou nenhum passa.
+    const { error: locErr } = await (supabase as any).rpc("set_user_locations", {
+      _user_id: editUser.user_id,
+      _categoria_ids: [...editLocs],
+    });
+    if (locErr) {
+      // Nada foi alterado — a transação inteira voltou atrás. Diferente de antes,
+      // aqui dá para prometer isso.
+      toast.error("Failed to save location access — nothing was changed: " + locErr.message);
+      setSaving(false);
+      fetchData();
+      return;
     }
 
     // Update password if provided
