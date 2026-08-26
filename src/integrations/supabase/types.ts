@@ -1586,6 +1586,7 @@ export type Database = {
           cliente_id: string
           coupon_id: string | null
           created_at: string
+          cupom_consumido: boolean
           data_origem: string | null
           delivery_date: string | null
           delivery_mode: string | null
@@ -1614,6 +1615,7 @@ export type Database = {
           cliente_id: string
           coupon_id?: string | null
           created_at?: string
+          cupom_consumido?: boolean
           data_origem?: string | null
           delivery_date?: string | null
           delivery_mode?: string | null
@@ -1642,6 +1644,7 @@ export type Database = {
           cliente_id?: string
           coupon_id?: string | null
           created_at?: string
+          cupom_consumido?: boolean
           data_origem?: string | null
           delivery_date?: string | null
           delivery_mode?: string | null
@@ -2216,6 +2219,7 @@ export type Database = {
           ativo: boolean | null
           codigo: string
           created_at: string | null
+          estoque_reservado: number
           id: string
           imagem_url: string | null
           produto_id: string
@@ -2227,6 +2231,7 @@ export type Database = {
           ativo?: boolean | null
           codigo: string
           created_at?: string | null
+          estoque_reservado?: number
           id?: string
           imagem_url?: string | null
           produto_id: string
@@ -2238,6 +2243,7 @@ export type Database = {
           ativo?: boolean | null
           codigo?: string
           created_at?: string | null
+          estoque_reservado?: number
           id?: string
           imagem_url?: string | null
           produto_id?: string
@@ -3066,6 +3072,7 @@ export type Database = {
           user_id: string
         }[]
       }
+      conta_liberada_de: { Args: { _cli_id: string }; Returns: boolean }
       create_view_as_token: { Args: { _customer_id: string }; Returns: string }
       ensure_my_cliente_record: {
         Args: { _empresa?: string; _nome?: string }
