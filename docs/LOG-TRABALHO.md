@@ -1293,3 +1293,35 @@ para TRUE — e o freio de mao.
 - **RECOMENDADO AO DONO** - baixar o "Rate limit for sending emails" de 1000 para
   50/hora. Com cadastro aberto, mil e-mails/hora e amplificador ao alcance de
   qualquer um.
+
+### 25/08 (noite, cont. 24) - PENDENCIA FECHADA + importadores que duplicavam
+
+- **FECHADO** - o dono fez o cadastro de teste em `/cadastro` e o e-mail de
+  confirmacao CHEGOU, com o texto certo. O mailer do Auth entrega. Nao precisou
+  ligar notificacao nenhuma — esse e-mail sai pelo mailer do proprio Supabase
+  Auth, caminho separado do nosso `send-email`.
+- **NOTA** - o "Add user" do painel NAO serve para esse teste: cria o usuario por
+  dentro e pula o e-mail de confirmacao.
+
+- **CONFIRMADO E CORRIGIDO** - `ImportCustomers` duplicava cadastro por TRES
+  caminhos, e nao ha UNIQUE em `clientes.email` para segurar:
+    1. `.in()` sem paginacao — do milesimo cliente ja cadastrado em diante,
+       `isExisting` virava false e criava linha nova;
+    2. o `error` era descartado — `.in()` com milhares de e-mails estoura o
+       tamanho da URL, o erro voltava, era ignorado, o conjunto ficava VAZIO e
+       TODA linha do CSV virava INSERT: duplicata da base inteira numa tacada;
+    3. `.in()` diferencia maiuscula de minuscula, mas a escrita usa `.ilike()` —
+       `John@Acme.com` na base e `john@acme.com` no CSV nao casavam.
+  Agora le a coluna inteira paginada, compara em minusculas, FALHA ALTO se a
+  leitura der erro (seguir com conjunto vazio duplicaria a base), escapa os
+  curingas do LIKE no UPDATE (`_` e comum em e-mail e podia acertar OUTRO
+  cliente), e marca no conjunto o que acabou de entrar — duas linhas do MESMO
+  arquivo com o mesmo e-mail nao duplicam mais entre si.
+
+- **CONFIRMADO E CORRIGIDO** - `ImportProductVariants` era INSERT puro, sem
+  dedupe. Rodar o mesmo arquivo duas vezes duplicava TODAS as variantes, e o
+  carrinho passava a mostrar dois "Tam M" para o cliente escolher, cada um com
+  seu estoque. Agora casa por `(produto_id, codigo)` e ATUALIZA em vez de criar.
+  A leitura dos produtos-pai tambem truncava em 1000: do produto 1001 em diante
+  a variante era descartada com "Parent product not found" — mensagem mentirosa,
+  porque o produto existe. E o estoque agora e validado (era `parseInt` cru).

@@ -9,6 +9,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 const TEMPLATE_HEADERS = ["company", "name", "email", "phone", "address", "city", "state", "country", "zip", "website"];
 const TEMPLATE_ROW = ["Acme Corp", "John Doe", "john@acme.com", "555-1234", "123 Main St", "New York", "NY", "United States", "10001", "acme.com"];
 
@@ -43,13 +44,38 @@ const ImportCustomers = () => {
     // default: reimportar a planilha (mesmo pra corrigir 1 linha) derrubava TODOS
     // os clientes aprovados pra pendente/inativo — perdiam acesso ao portal — e
     // apagava nome/empresa de quem não tinha essas colunas no CSV.
-    const csvEmails = rows.map((r) => r["email"]?.trim()).filter(Boolean) as string[];
+    // O DEDUPE tinha tres defeitos, e os TRES levavam a cadastro DUPLICADO —
+    // e nao ha UNIQUE em `clientes.email` para segurar (a unica UNIQUE da tabela
+    // e a de `user_id`).
+    //
+    //   1. `.in()` sem paginacao: o PostgREST corta em 1000 linhas SEM erro. Do
+    //      milesimo cliente ja cadastrado em diante, `isExisting` virava false e
+    //      o import criava linha nova.
+    //   2. O `error` era descartado. `.in()` com milhares de e-mails estoura o
+    //      tamanho da URL (e requisicao GET); o erro voltava, era ignorado, o
+    //      conjunto ficava VAZIO e TODA linha do CSV virava INSERT — duplicata
+    //      da base inteira numa tacada.
+    //   3. `.in()` diferencia maiuscula de minuscula, mas a escrita usa
+    //      `.ilike()`. Base com `John@Acme.com` e CSV com `john@acme.com` nao
+    //      casavam no dedupe e criavam duplicata.
+    //
+    // Conserto: le a coluna INTEIRA, paginada, e compara em minusculas. Sao os
+    // e-mails de todos os clientes — dezenas de KB, nao e caro, e e a unica
+    // forma de nao depender do tamanho da URL nem do limite de 1000.
     const existingEmails = new Set<string>();
-    if (csvEmails.length > 0) {
-      const { data: existing } = await supabase.from("clientes").select("email").in("email", csvEmails);
-      for (const c of existing ?? []) {
+    try {
+      const todos = await fetchAllRows<{ email: string | null }>((from, to) =>
+        supabase.from("clientes").select("email")
+          .order("id", { ascending: true }).range(from, to));
+      for (const c of todos) {
         if (c.email) existingEmails.add(String(c.email).trim().toLowerCase());
       }
+    } catch (e: any) {
+      // FALHA ALTO. Seguir com o conjunto vazio significaria duplicar a base
+      // inteira, calado. `fetchAllRows` lanca em erro justamente para isto.
+      toast.error("Could not read existing customers — import cancelled so nothing gets duplicated: " + (e?.message ?? e));
+      setImporting(false);
+      return;
     }
 
     for (let i = 0; i < rows.length; i++) {
@@ -59,7 +85,8 @@ const ImportCustomers = () => {
         res.push({ row: i + 2, email: "—", status: "error", message: "Missing email" });
         continue;
       }
-      const isExisting = existingEmails.has(email.toLowerCase());
+      const emailLc = email.toLowerCase();
+      const isExisting = existingEmails.has(emailLc);
 
       const payload: any = { email };
       // Só grava o que veio preenchido no CSV — coluna ausente/vazia não apaga o
@@ -100,11 +127,18 @@ const ImportCustomers = () => {
       // o `existingEmails` que a tela já carregou acima.
       let error: any = null;
       if (isExisting) {
-        const r2 = await supabase.from("clientes").update(payload).ilike("email", email);
+        // `likeEscape`: `_` e `%` sao curinga no LIKE, e `_` e comum em e-mail
+        // (`john_doe@x.com`). Sem escapar, o UPDATE podia acertar OUTRO cliente.
+        const r2 = await supabase.from("clientes").update(payload)
+          .ilike("email", email.replace(/[\\%_]/g, (m) => `\\${m}`));
         error = r2.error;
       } else {
         const r2 = await supabase.from("clientes").insert(payload);
         error = r2.error;
+        // Duas linhas do MESMO arquivo com o mesmo e-mail duplicariam entre si,
+        // porque o conjunto so tem o que ja estava no banco. Marca o que acabou
+        // de entrar.
+        if (!error) existingEmails.add(emailLc);
       }
       if (error) {
         res.push({ row: i + 2, email, status: "error", message: error.message });

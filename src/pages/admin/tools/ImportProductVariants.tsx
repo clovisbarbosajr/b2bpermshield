@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 const TEMPLATE_HEADERS = ["parent_sku", "variant_sku", "variant_name", "option_value", "price", "stock"];
 const TEMPLATE_ROW = ["PROD-001", "PROD-001-AZ", "Azul 1L", "Azul", "45.90", "100"];
 
@@ -37,10 +38,39 @@ const ImportProductVariants = () => {
     setImporting(true);
     const res: Result[] = [];
 
-    // Fetch all produtos skuâ†’id map
-    const { data: produtos } = await supabase.from("produtos").select("id, sku");
+    // PAGINADO e com ERRO CHECADO. Antes era `.select()` solto: o PostgREST corta
+    // em 1000 linhas SEM erro, entao do produto 1001 em diante o SKU do pai nao
+    // era encontrado e a variante era descartada com "Parent product not found" —
+    // mensagem mentirosa, porque o produto existe.
+    let produtos: any[];
+    let existentes: any[];
+    try {
+      produtos = await fetchAllRows<any>((from, to) =>
+        supabase.from("produtos").select("id, sku")
+          .order("id", { ascending: true }).range(from, to));
+      // Variantes JA cadastradas, para nao duplicar (ver abaixo).
+      existentes = await fetchAllRows<any>((from, to) =>
+        supabase.from("produto_variantes").select("id, produto_id, codigo")
+          .order("id", { ascending: true }).range(from, to));
+    } catch (e: any) {
+      toast.error("Could not read products/variants — import cancelled: " + (e?.message ?? e));
+      setImporting(false);
+      return;
+    }
+
     const skuMap: Record<string, string> = {};
-    (produtos ?? []).forEach((p: any) => { if (p.sku) skuMap[p.sku] = p.id; });
+    produtos.forEach((p: any) => { if (p.sku) skuMap[p.sku] = p.id; });
+
+    // NAO EXISTE UNIQUE em (produto_id, codigo) — o proprio ProductEdit comenta
+    // isso. Sem este mapa, rodar o MESMO arquivo duas vezes duplicava todas as
+    // variantes, e o carrinho passava a mostrar dois "Tam M" para o cliente
+    // escolher, cada um com seu estoque.
+    const variantesPorChave = new Map<string, string>();
+    for (const v of existentes) {
+      if (v.produto_id && v.codigo) {
+        variantesPorChave.set(`${v.produto_id}|${String(v.codigo).trim().toLowerCase()}`, v.id);
+      }
+    }
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
@@ -58,20 +88,40 @@ const ImportProductVariants = () => {
         continue;
       }
 
-      const price = r["price"] ? parseFloat(r["price"]) : null;
-      const stock = r["stock"] ? parseInt(r["stock"]) : 0;
+      const stockBruto = String(r["stock"] ?? "").trim();
+      const stock = stockBruto === "" ? 0 : Number(stockBruto);
+      if (!Number.isInteger(stock) || stock < 0) {
+        res.push({ row: i + 2, sku: variantSku, status: "error", message: `Invalid stock "${stockBruto}"` });
+        continue;
+      }
 
-      const { error } = await (supabase.from("produto_variantes") as any).insert({
+      const chave = `${parentId}|${variantSku.trim().toLowerCase()}`;
+      const jaExiste = variantesPorChave.get(chave);
+
+      const dados: any = {
         produto_id: parentId,
         codigo: variantSku,
         valores_opcao: r["option_value"] ? [r["option_value"]] : [],
-        quantidade: isNaN(stock) ? 0 : stock,
-      });
+        quantidade: stock,
+      };
+
+      let error: any = null;
+      if (jaExiste) {
+        // ATUALIZA em vez de criar outra. Antes, reimportar o mesmo arquivo
+        // duplicava a variante inteira.
+        const r2 = await (supabase.from("produto_variantes") as any).update(dados).eq("id", jaExiste);
+        error = r2.error;
+      } else {
+        const r2 = await (supabase.from("produto_variantes") as any).insert(dados).select("id").single();
+        error = r2.error;
+        // Duas linhas do MESMO arquivo com a mesma variante duplicariam entre si.
+        if (!error && r2.data?.id) variantesPorChave.set(chave, r2.data.id);
+      }
 
       if (error) {
         res.push({ row: i + 2, sku: variantSku, status: "error", message: error.message });
       } else {
-        res.push({ row: i + 2, sku: variantSku, status: "ok", message: "Inserted" });
+        res.push({ row: i + 2, sku: variantSku, status: "ok", message: jaExiste ? "Updated" : "Inserted" });
       }
     }
 
