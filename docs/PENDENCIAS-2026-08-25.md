@@ -176,7 +176,33 @@ ou acesso, e o próprio relatório diz isso no corpo.
 
 ---
 
-## 2. DECISÕES DO DONO — travam trabalho meu
+## 2. DECISÃO DO DONO — TOMADA em 26/ago
+
+**O sistema é ESPELHO. O B2BWave manda em tudo.**
+
+Palavras dele: *"nosso sistema NÃO está sendo alimentado manualmente. TUDO vem
+de lá — estoque vem de lá, produtos vêm de lá, pedidos vêm de lá. O nosso até
+então é pra ser um espelho de lá."*
+
+Isso resolve o que estava em aberto na seção 2 antiga, e vale como regra geral:
+
+- **Estoque:** o número do B2BWave vence, sempre. Diferença aqui é deriva a
+  corrigir, não check-in local. A comparação passou a tratar assim, e o estoque
+  entrou no veredito.
+- **Produto que sumiu de lá:** desativado aqui. Não apagado — `pedido_itens`
+  referencia produto sem cascata, então o banco recusa apagar produto vendido; e
+  desativar se auto-corrige se ele voltar.
+- **Pedido que sumiu de lá:** apagado aqui (botão, com lista confirmada).
+- **Divergência de valor:** o valor de lá vence. O sync sobrescreve sozinho.
+- **Nada é preenchido por conta própria.** Campo que a API não entrega fica
+  VAZIO, para ser preenchido no B2BWave e vir no ciclo seguinte.
+
+Quando o B2BWave for desligado, esta seção deixa de valer e este sistema passa a
+ser a fonte — aí a regra inverte.
+
+---
+
+## 2.1. O que ainda depende do dono
 
 ### 2.1 Durante a transição, quem manda no estoque?
 

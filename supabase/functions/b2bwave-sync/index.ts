@@ -1197,6 +1197,46 @@ Deno.serve(async (req) => {
         if (!error) priceRows += chunk.length;
       }
 
+      // ----- PRODUTO QUE SUMIU DE LA E DESATIVADO AQUI -----
+      //
+      // Decisao do dono (26/ago): "TUDO vem de la — estoque, produtos, pedidos.
+      // O nosso e um espelho". Entao produto apagado no B2BWave nao pode
+      // continuar vendavel aqui. A comparacao daquele dia achou 9 assim.
+      //
+      // DESATIVA, nao apaga, e a escolha e deliberada:
+      //   - `pedido_itens.produto_id` referencia `produtos` SEM cascata
+      //     (20260317043654:134), entao o banco RECUSA apagar produto que esta
+      //     em qualquer pedido. Apagar seria um erro por produto vendido.
+      //   - desativar e REVERSIVEL, e se auto-corrige: se o produto voltar ao
+      //     feed, o upsert acima grava `ativo: p.is_active !== false` e ele
+      //     volta sozinho. Numa leitura parcial da origem, o estrago dura um
+      //     ciclo — apagar duraria para sempre.
+      //
+      // TRAVA: se a origem devolveu menos de 80% do que temos aqui, a leitura
+      // provavelmente veio pela metade. Desativar em massa por leitura ruim e o
+      // tipo de coisa que so aparece quando o cliente reclama que sumiu produto.
+      let desativados = 0;
+      const idsNoFeed = new Set(
+        (allProducts || []).map((pr: any) => String((pr?.product || pr)?.id ?? "")).filter(Boolean)
+      );
+      if (idsNoFeed.size > 0 && idsNoFeed.size >= (existingProds || []).length * 0.8) {
+        const sumidos = (existingProds || []).filter(
+          (pr: any) => pr.b2bwave_id && !idsNoFeed.has(String(pr.b2bwave_id)) && pr.ativo !== false
+        );
+        for (const pr of sumidos) {
+          const { error } = await adminClient.from("produtos")
+            .update({ ativo: false }).eq("id", (pr as any).id);
+          if (!error) desativados++;
+        }
+        if (desativados > 0) {
+          await adminClient.from("notification_log").insert({
+            event: "produto_sumiu_da_origem", channel: "-", recipient: "-", status: "failed",
+            error: `${desativados} produto(s) nao vieram mais no feed do B2BWave e foram DESATIVADOS aqui`,
+            payload: { quantidade: desativados, origem: "b2bwave" },
+          }).then(() => {}, () => {});
+        }
+      }
+
       // ----- PRECO QUE SAIU DA REGUA LA, SAI DAQUI TAMBEM -----
       //
       // Ate 26/ago esta tabela so recebia `upsert`, NUNCA `delete`. Preco
@@ -1390,7 +1430,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         success: true,
         samples: errorSamples,
-        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${precosObsoletos} stale prices removed, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${deleted} stale deleted${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
+        message: `${synced} updated/created, ${skipped} unchanged, ${desativados} deactivated (gone from origin), ${priceRows} prices, ${precosObsoletos} stale prices detected, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${deleted} stale deleted${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
       }), { headers: jsonHeaders });
     }
 
@@ -2440,6 +2480,9 @@ Deno.serve(async (req) => {
         && nVarFalta === 0 && nVarSobra === 0 && nVarQtd === 0
         && tabelasSemPar.length === 0 && nReguaFalta === 0 && nReguaPreco === 0
         && nReguaObsoleta === 0
+        // Estoque entra no veredito: o sistema e espelho, entao numero
+        // diferente do B2BWave e defeito, nao decisao pendente.
+        && nEstoqueDif === 0
         && nCliFalta === 0 && nCliStatus === 0 && nCliBloqueio === 0;
 
       return new Response(JSON.stringify({
@@ -2480,7 +2523,13 @@ Deno.serve(async (req) => {
         },
         estoque_de_produto: {
           diferente: nEstoqueDif,
-          nota: "NAO conta como divergencia do sync: enquanto a decisao 2.1 nao for tomada, todo check-in de producao feito aqui aparece como diferenca legitima",
+          // DECIDIDO pelo dono em 26/ago: "nosso sistema NAO esta sendo
+          // alimentado manualmente. TUDO vem de la — estoque, produtos,
+          // pedidos. O nosso e um espelho".
+          //
+          // Enquanto isso valer, diferenca de estoque e DIVERGENCIA, nao
+          // "check-in local legitimo", e entra no veredito como o resto.
+          nota: "espelho: o estoque vem do B2BWave. Diferenca aqui e deriva a corrigir, nao check-in local",
           exemplos: prodEstoque,
         },
         exemplos: {
