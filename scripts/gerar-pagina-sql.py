@@ -66,10 +66,13 @@ SELECT 'lista de cupons fechada (0 = fechada)', 'politica antiga',
    AND policyname='Authenticated read active coupons'
 UNION ALL
 SELECT 'colunas de dinheiro trancadas (4 = ok)', 'trava do cliente',
+       -- `~` com barra-s-asterisco, nao `LIKE` com espaco literal: as linhas sao
+       -- ALINHADAS com varios espacos antes do `:=`, entao dois dos quatro
+       -- padroes com LIKE nunca casavam e a conferencia dizia 2 com tudo certo.
+       -- Verificador que subconta assusta a toa e, na proxima, e ignorado.
        (SELECT count(*)::text FROM regexp_split_to_table(pg_get_functiondef(
           'public.fn_lock_privileged_cliente_cols()'::regprocedure), chr(10)) l
-         WHERE l LIKE '%NEW.minimum_order_value :=%' OR l LIKE '%NEW.pais :=%'
-            OR l LIKE '%NEW.discount %:=%' OR l LIKE '%NEW.admin_comments %:=%')
+         WHERE l ~ 'NEW\.(minimum_order_value|pais|discount|admin_comments)\s*:=')
 UNION ALL
 SELECT 'cupom consumido no mesmo comando (1 = ok)', 'consumo atomico',
        (SELECT count(*)::text FROM regexp_split_to_table(pg_get_functiondef(
