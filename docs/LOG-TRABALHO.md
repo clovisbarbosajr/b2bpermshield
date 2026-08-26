@@ -1467,3 +1467,32 @@ Veredito: SEGURO COM RESSALVA nas duas. As ressalvas eram reais.
 - **DE BRINDE** - o re-order tambem passou a descontar o `estoque_reservado` da
   variante, igual ao carrinho e ao checkout. Sem isso ele ofereceria uma
   quantidade que a trava nova do banco recusaria.
+
+### 25/08 (noite, cont. 29) - LEVA F: truncagem silenciosa em 1000 linhas
+
+Varri o `src/` inteiro por `.select()` sem `.range()`/`.limit()`/`.single()`:
+131 leituras em 45 arquivos. Filtrei pelas tabelas que PODEM passar de 1000
+linhas — as pequenas (status de produto, formas de pagamento, categorias) nunca
+chegam la, e enche-las de paginacao seria ruido. Sobraram 56 em 20 arquivos, e
+a maioria delas e `.in(ids)` limitada pelo tamanho do carrinho.
+
+- **CORRIGIDO, o que mais importava** - `Catalogo.tsx`: a loja do cliente lia
+  `produtos` sem paginar. Acima de mil produtos ela simplesmente TERMINAVA, em
+  ordem alfabetica, sem aviso e sem "carregar mais". Hoje sao ~327; o problema
+  aparece sozinho quando o catalogo crescer.
+- **QUASE CAUSEI UMA REGRESSAO, e peguei conferindo** - paginar obriga a ordenar
+  por coluna UNICA (`id`), senao `.range()` (que vira LIMIT/OFFSET) pode repetir
+  linha numa pagina e perder outra. Mas a consulta antiga vinha `.order("nome")`
+  e a ordenacao "default" da tela so PRESERVAVA essa ordem (`return 0`). Com a
+  mudanca, o catalogo passaria a sair na ordem de CADASTRO — o cliente veria a
+  vitrine embaralhada da noite para o dia. Ordem alfabetica agora e explicita, em
+  memoria.
+- **CORRIGIDOS os 3 importadores que faltavam** (`ImportCustomerPrices`,
+  `ImportOrders`, `ImportProductDiscounts`): liam `clientes`/`produtos` inteiros
+  sem paginar, entao acima da linha 1000 a linha do CSV era descartada com
+  "Customer not found" / "Product not found" — mensagem MENTIROSA, porque o
+  registro existe. No `ImportOrders` isso e pior: pedido historico nao tem de
+  onde voltar depois que o B2BWave for desligado.
+- **NAO MEXIDO, de proposito** - as leituras `.in(ids)` do carrinho/checkout
+  (limitadas pelo tamanho do carrinho) e as tabelas pequenas. Paginar tudo seria
+  churn sem ganho.

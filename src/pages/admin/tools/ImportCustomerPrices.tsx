@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 const TEMPLATE_HEADERS = ["customer_email", "product_sku", "price"];
 const TEMPLATE_ROW = ["john@acme.com", "PROD-001", "89.90"];
 
@@ -38,12 +39,19 @@ const ImportCustomerPrices = () => {
     const res: Result[] = [];
 
     // Fetch clientes emailâ†’id map
-    const { data: clientes } = await supabase.from("clientes").select("id, email");
+    // PAGINADO: sem isto, do milesimo cliente em diante o e-mail nao era
+    // encontrado e a linha do CSV era descartada com "Customer not found" —
+    // mensagem mentirosa, porque o cliente existe.
+    const clientes = await fetchAllRows<any>((from, to) =>
+      supabase.from("clientes").select("id, email")
+        .order("id", { ascending: true }).range(from, to));
     const emailMap: Record<string, string> = {};
     (clientes ?? []).forEach((c: any) => { emailMap[c.email] = c.id; });
 
     // Fetch produtos skuâ†’id map
-    const { data: produtos } = await supabase.from("produtos").select("id, sku");
+    const produtos = await fetchAllRows<any>((from, to) =>
+      supabase.from("produtos").select("id, sku")
+        .order("id", { ascending: true }).range(from, to));
     const skuMap: Record<string, string> = {};
     (produtos ?? []).forEach((p: any) => { if (p.sku) skuMap[p.sku] = p.id; });
 

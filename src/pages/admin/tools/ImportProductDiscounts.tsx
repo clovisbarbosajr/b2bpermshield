@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 const TEMPLATE_HEADERS = ["product_sku", "discount_percent", "price_list_name"];
 const TEMPLATE_ROW = ["PROD-001", "15", "Tabela Revendedores"];
 
@@ -38,7 +39,11 @@ const ImportProductDiscounts = () => {
     const res: Result[] = [];
 
     // Fetch produtos skuâ†’id map
-    const { data: produtos } = await supabase.from("produtos").select("id, sku");
+    // PAGINADO: sem isto o desconto nao era importado para os produtos acima da
+    // linha 1000, com "Product not found" — e o produto existe.
+    const produtos = await fetchAllRows<any>((from, to) =>
+      supabase.from("produtos").select("id, sku")
+        .order("id", { ascending: true }).range(from, to));
     const skuMap: Record<string, string> = {};
     (produtos ?? []).forEach((p: any) => { if (p.sku) skuMap[p.sku] = p.id; });
 

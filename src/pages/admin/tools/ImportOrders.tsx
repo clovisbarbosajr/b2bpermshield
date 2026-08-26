@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 const TEMPLATE_HEADERS = ["customer_email", "product_sku", "quantity", "price", "status", "po_number", "delivery_date"];
 const TEMPLATE_ROW = ["john@acme.com", "PROD-001", "10", "45.90", "submitted", "PO-2024-001", "2024-12-31"];
 
@@ -46,12 +47,19 @@ const ImportOrders = () => {
     const res: Result[] = [];
 
     // Fetch clientes emailâ†’id map
-    const { data: clientes } = await supabase.from("clientes").select("id, email");
+    // PAGINADO: sem isto, do milesimo cliente em diante o pedido historico era
+    // descartado com "Customer not found" — e pedido historico nao tem de onde
+    // voltar depois que o B2BWave for desligado.
+    const clientes = await fetchAllRows<any>((from, to) =>
+      supabase.from("clientes").select("id, email")
+        .order("id", { ascending: true }).range(from, to));
     const emailMap: Record<string, string> = {};
     (clientes ?? []).forEach((c: any) => { emailMap[c.email] = c.id; });
 
     // Fetch produtos skuâ†’{id, nome, preco} map
-    const { data: produtos } = await supabase.from("produtos").select("id, sku, nome, preco");
+    const produtos = await fetchAllRows<any>((from, to) =>
+      supabase.from("produtos").select("id, sku, nome, preco")
+        .order("id", { ascending: true }).range(from, to));
     const skuMap: Record<string, { id: string; nome: string; preco: number | null }> = {};
     (produtos ?? []).forEach((p: any) => { if (p.sku) skuMap[p.sku] = { id: p.id, nome: p.nome, preco: p.preco }; });
 

@@ -16,6 +16,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice, PriceResult } from "@/lib/pricing";
 import { catalogCategoryButtons, descendantIds, ancestorChain } from "@/lib/categoryTree";
 
+import { fetchAllRows } from "@/lib/fetchAllRows";
 type Produto = {
   id: string; nome: string; descricao: string | null; preco: number; sku: string;
   imagem_url: string | null; estoque_total: number; estoque_reservado: number;
@@ -73,8 +74,23 @@ const Catalogo = () => {
     const fetchData = async () => {
       // Privacidade (categoria/produto privado) é imposta no RLS: estas queries já
       // retornam SÓ o que o cliente pode ver. Aqui resta apenas o filtro de STATUS.
+      // `produtos` PAGINADO: e a unica das tres que passa de 1000 linhas, e o
+      // PostgREST corta ai SEM erro. A loja do cliente simplesmente TERMINAVA no
+      // milesimo produto, em ordem alfabetica — sem aviso, sem "carregar mais".
+      // Hoje sao ~327; o problema aparece sozinho quando o catalogo crescer.
+      //
+      // `.order("id")` dentro do `fetchAllRows` e obrigatorio: `.range()` vira
+      // LIMIT/OFFSET, e sem ordem por coluna UNICA o Postgres pode repetir uma
+      // linha numa pagina e perder outra. A ordenacao por nome, que e a que o
+      // cliente ve, e feita depois, em memoria.
+      const prodPromise = fetchAllRows<any>((from, to) =>
+        supabase.from("produtos").select("*").eq("ativo", true)
+          .order("id", { ascending: true }).range(from, to))
+        .then((data) => ({ data, error: null }))
+        .catch((e) => ({ data: null, error: e }));
+
       const [prodRes, catRes, statusRes] = await Promise.all([
-        supabase.from("produtos").select("*").eq("ativo", true).order("nome"),
+        prodPromise,
         supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("ordem").order("nome"),
         supabase.from("product_statuses").select("nome, permite_comprar, permite_visualizar, cor"),
       ]);
@@ -269,7 +285,15 @@ const Catalogo = () => {
     if (sortBy === "name_desc") return b.nome.localeCompare(a.nome);
     if (sortBy === "price_asc") return getPrice(a) - getPrice(b);
     if (sortBy === "price_desc") return getPrice(b) - getPrice(a);
-    return 0;
+    // ORDEM PADRAO = alfabetica, em memoria.
+    //
+    // Antes a consulta vinha com `.order("nome")` e o "default" so preservava
+    // essa ordem (`return 0`). Ao paginar, a consulta passou a ordenar por `id`
+    // — obrigatorio, porque `.range()` vira LIMIT/OFFSET e sem coluna UNICA o
+    // Postgres pode repetir uma linha numa pagina e perder outra. Sem esta
+    // linha, o catalogo passaria a sair na ordem de CADASTRO, e o cliente veria
+    // a vitrine embaralhada da noite para o dia.
+    return a.nome.localeCompare(b.nome);
   });
 
   const disponivel = (p: Produto) => p.estoque_total - p.estoque_reservado;
