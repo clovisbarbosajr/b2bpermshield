@@ -15,110 +15,121 @@ DIR = 'supabase/migrations'
 DESTINO = sys.argv[1] if len(sys.argv) > 1 else 'C:/Users/clovi/Desktop/PermShield-SQL.html'
 
 PASSOS = [
-    ("20260825320000_estoque_por_variante.sql",
-     "Estoque de tamanho/cor passa a dar baixa",
-     "Rode fora de horário de pico — trava a tabela de variantes durante o preenchimento e a loja espera alguns segundos."),
-    ("20260825330000_item_produto_valido.sql",
-     "Item de pedido recusa produto desativado ou privado", None),
-    ("20260825340000_log_auditoria_nao_forjavel.sql",
-     "Log de auditoria deixa de ser forjável", None),
-    ("20260825350000_trava_colunas_item.sql",
-     "Item não nasce mais marcado como enviado", None),
-    ("20260825360000_preco_exige_conta_liberada.sql",
-     "Cliente suspenso para de ler sua régua de preço", None),
-    ("20260825370000_view_as_diz_a_verdade.sql",
-     "O “ver como” para de mentir", None),
-    ("20260825380000_cupom_consumo_no_servidor.sql",
-     "Limite de uso do cupom deixa de ser honra", None),
-    ("20260825390000_pedido_minimo_no_servidor.sql",
-     "Pedido mínimo deixa de ser só do navegador",
-     "Depois de rodar, teste os dois lados: carrinho abaixo do mínimo tem que ser recusado, e carrinho acima tem que passar."),
+    ("20260826010000_supressao_nao_encurta.sql",
+     "Um lote para de desligar a proteção do outro", None),
+    ("20260826080000_supressao_vale_com_lote_vivo.sql",
+     "A proteção passa a valer enquanto o lote estiver rodando",
+     "Esta e a de cima andam JUNTAS: uma escreve a contagem, esta faz o sistema olhar para ela. Sozinha, nenhuma das duas resolve."),
+    ("20260826020000_cliente_nao_edita_dinheiro.sql",
+     "Cliente para de editar o próprio pedido mínimo", None),
+    ("20260826030000_cupom_consumo_atomico.sql",
+     "Cupom de uso único deixa de ser ilimitado",
+     "Depois de rodar, teste os dois lados: pedido com cupom válido tem que aplicar o desconto; um segundo pedido com o mesmo cupom de uso único tem que entrar SEM desconto."),
+    ("20260826040000_opcao_de_frete_e_pagamento_valida.sql",
+     "Condição de pagamento que você não concedeu para de ser escolhível",
+     "Teste os dois lados: pedido com opção pública tem que passar; opção privada não atribuída tem que ser recusada."),
+    ("20260826050000_cupom_nao_e_catalogo_publico.sql",
+     "A lista de cupons deixa de ser legível por qualquer conta",
+     "Depois desta, o cupom só volta a funcionar quando o site for publicado. Por isso as três etapas — SQL, deploy e publish — têm que ser na mesma sessão."),
+    ("20260826060000_revoga_claim_customer_record.sql",
+     "Função de adoção de ficha sai do alcance do cliente", None),
+    ("20260826070000_dedupe_marca_o_historico.sql",
+     "O registro antigo ganha a marca de origem",
+     "Me mande o retorno da consulta de conferência que está dentro deste arquivo: ela mostra quantas linhas foram marcadas e confirma que nenhuma do portal foi marcada por engano."),
 ]
 
-CONFERENCIA = """WITH esperado(item, tipo) AS (
+CONFERENCIA = """WITH esperado(o_que_e, item, tipo) AS (
   VALUES
-    ('a_trg_lock_item_cols',        'gatilho_itens'),
-    ('trg_item_produto_valido',     'gatilho_itens'),
-    ('trg_pedido_minimo',           'gatilho_itens'),
-    ('trg_cupom_consome',           'gatilho_pedidos'),
-    ('trg_cupom_devolve_status',    'gatilho_pedidos'),
-    ('trg_cupom_devolve_delete',    'gatilho_pedidos'),
-    ('trg_activity_log_identidade', 'gatilho_log'),
-    ('conta_liberada_de',           'funcao'),
-    ('fn_lock_item_cols',           'funcao'),
-    ('fn_item_produto_valido',      'funcao'),
-    ('fn_cupom_consome',            'funcao'),
-    ('fn_pedido_minimo',            'funcao'),
-    ('fn_activity_log_identidade',  'funcao'),
-    ('cupom_consumido',             'coluna_pedidos'),
-    ('estoque_reservado',           'coluna_variantes')
+    ('recusa frete/pagamento nao atribuido', 'a_trg_pedido_opcoes_validas', 'gatilho'),
+    ('idem (a funcao)',                      'fn_pedido_opcoes_validas',    'funcao'),
+    ('consulta fechada de cupom',            'cupom_por_codigo',            'funcao'),
+    ('acelera o "ja avisei este pedido?"',   'notification_log_dedupe_idx', 'indice')
 )
-SELECT e.tipo, e.item,
+SELECT e.o_que_e, e.item,
   CASE
-    WHEN e.tipo = 'gatilho_itens' AND EXISTS (
-      SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.pedido_itens'::regclass
-        AND NOT t.tgisinternal AND t.tgname = e.item) THEN 'OK'
-    WHEN e.tipo = 'gatilho_pedidos' AND EXISTS (
+    WHEN e.tipo = 'gatilho' AND EXISTS (
       SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.pedidos'::regclass
-        AND NOT t.tgisinternal AND t.tgname = e.item) THEN 'OK'
-    WHEN e.tipo = 'gatilho_log' AND EXISTS (
-      SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.activity_logs'::regclass
         AND NOT t.tgisinternal AND t.tgname = e.item) THEN 'OK'
     WHEN e.tipo = 'funcao' AND EXISTS (
       SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'public' AND p.proname = e.item) THEN 'OK'
-    WHEN e.tipo = 'coluna_pedidos' AND EXISTS (
-      SELECT 1 FROM information_schema.columns c
-      WHERE c.table_schema = 'public' AND c.table_name = 'pedidos'
-        AND c.column_name = e.item) THEN 'OK'
-    WHEN e.tipo = 'coluna_variantes' AND EXISTS (
-      SELECT 1 FROM information_schema.columns c
-      WHERE c.table_schema = 'public' AND c.table_name = 'produto_variantes'
-        AND c.column_name = e.item) THEN 'OK'
+    WHEN e.tipo = 'indice' AND EXISTS (
+      SELECT 1 FROM pg_indexes WHERE schemaname = 'public'
+        AND tablename = 'notification_log' AND indexname = e.item) THEN 'OK'
     ELSE 'FALTA'
-  END AS situacao
+  END
 FROM esperado e
-ORDER BY situacao, e.tipo, e.item;"""
+UNION ALL
+SELECT 'lista de cupons fechada (0 = fechada)', 'politica antiga',
+       count(*)::text FROM pg_policies
+ WHERE schemaname='public' AND tablename='coupons'
+   AND policyname='Authenticated read active coupons'
+UNION ALL
+SELECT 'colunas de dinheiro trancadas (4 = ok)', 'trava do cliente',
+       (SELECT count(*)::text FROM regexp_split_to_table(pg_get_functiondef(
+          'public.fn_lock_privileged_cliente_cols()'::regprocedure), chr(10)) l
+         WHERE l LIKE '%NEW.minimum_order_value :=%' OR l LIKE '%NEW.pais :=%'
+            OR l LIKE '%NEW.discount %:=%' OR l LIKE '%NEW.admin_comments %:=%')
+UNION ALL
+SELECT 'cupom consumido no mesmo comando (1 = ok)', 'consumo atomico',
+       (SELECT count(*)::text FROM regexp_split_to_table(pg_get_functiondef(
+          'public.fn_pedido_total_appside()'::regprocedure), chr(10)) l
+         WHERE l LIKE '%UPDATE public.coupons%')
+UNION ALL
+SELECT 'supressao olha lote vivo (1 = ok)', 'trava de lote',
+       (SELECT count(*)::text FROM regexp_split_to_table(pg_get_functiondef(
+          'public.fn_order_status_notify()'::regprocedure), chr(10)) l
+         WHERE l LIKE '%120 minutes%')
+UNION ALL
+SELECT 'gatilhos de notificacao (D+D = desligados)', 'devem seguir desligados',
+       COALESCE((SELECT string_agg(tgenabled::text, '+' ORDER BY tgname) FROM pg_trigger
+                  WHERE tgname IN ('trg_low_stock_notify','trg_order_status_notify')
+                    AND NOT tgisinternal), 'nao existem');"""
 
 PRE_CHECK = """-- Diz, bloco a bloco, o que JA esta no banco. Rode esta ANTES de tudo.
 -- APLICADO = pode pular esse bloco.  FALTA = precisa rodar.
 WITH alvo(passo, bloco, tipo, item) AS (
   VALUES
-    (1, 'Estoque de tamanho/cor',        'coluna',  'produto_variantes.estoque_reservado'),
-    (2, 'Item recusa produto invalido',  'gatilho', 'pedido_itens.trg_item_produto_valido'),
-    (3, 'Log de auditoria nao forjavel', 'gatilho', 'activity_logs.trg_activity_log_identidade'),
-    (4, 'Item nao nasce enviado',        'gatilho', 'pedido_itens.a_trg_lock_item_cols'),
-    (5, 'Preco exige conta liberada',    'politica','tabela_preco_itens'),
-    (6, 'O "ver como" diz a verdade',    'funcao',  'conta_liberada_de'),
-    (7, 'Limite de uso do cupom',        'coluna',  'pedidos.cupom_consumido'),
-    (8, 'Pedido minimo no servidor',     'gatilho', 'pedido_itens.trg_pedido_minimo')
+    (1, 'Lote nao desliga protecao do outro', 'campo_n',   'suppress_order_notify'),
+    (2, 'Protecao vale com lote vivo',        'corpo_fn',  'fn_order_status_notify'),
+    (3, 'Cliente nao edita dinheiro',         'corpo_fn2', 'fn_lock_privileged_cliente_cols'),
+    (4, 'Cupom sem corrida',                  'corpo_fn3', 'fn_pedido_total_appside'),
+    (5, 'Frete/pagamento validos',            'gatilho',   'a_trg_pedido_opcoes_validas'),
+    (6, 'Cupom nao e catalogo',               'funcao',    'cupom_por_codigo'),
+    (7, 'claim_customer_record revogada',     'sem_grant', 'claim_customer_record'),
+    (8, 'Historico marcado',                  'indice',    'notification_log_dedupe_idx')
 )
 SELECT a.passo, a.bloco,
   CASE
-    WHEN a.tipo = 'coluna' AND EXISTS (
-      SELECT 1 FROM information_schema.columns c
-       WHERE c.table_schema = 'public'
-         AND c.table_name  = split_part(a.item, '.', 1)
-         AND c.column_name = split_part(a.item, '.', 2)) THEN 'APLICADO'
+    WHEN a.tipo = 'campo_n' AND EXISTS (
+      SELECT 1 FROM public.sync_state
+       WHERE key = a.item AND value ? 'desde') THEN 'APLICADO'
+    WHEN a.tipo = 'corpo_fn' AND pg_get_functiondef(
+      'public.fn_order_status_notify()'::regprocedure) LIKE '%120 minutes%' THEN 'APLICADO'
+    WHEN a.tipo = 'corpo_fn2' AND pg_get_functiondef(
+      'public.fn_lock_privileged_cliente_cols()'::regprocedure)
+      LIKE '%minimum_order_value%' THEN 'APLICADO'
+    WHEN a.tipo = 'corpo_fn3' AND pg_get_functiondef(
+      'public.fn_pedido_total_appside()'::regprocedure)
+      LIKE '%UPDATE public.coupons%' THEN 'APLICADO'
     WHEN a.tipo = 'gatilho' AND EXISTS (
-      SELECT 1 FROM pg_trigger t
-       WHERE t.tgrelid = ('public.' || split_part(a.item, '.', 1))::regclass
-         AND NOT t.tgisinternal
-         AND t.tgname = split_part(a.item, '.', 2)) THEN 'APLICADO'
+      SELECT 1 FROM pg_trigger t WHERE t.tgrelid = 'public.pedidos'::regclass
+        AND NOT t.tgisinternal AND t.tgname = a.item) THEN 'APLICADO'
     WHEN a.tipo = 'funcao' AND EXISTS (
       SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
        WHERE n.nspname = 'public' AND p.proname = a.item) THEN 'APLICADO'
-    -- O bloco 5 nao cria objeto novo: ele acrescenta uma condicao a politicas
-    -- que ja existem. So da para reconhece-lo pelo TEXTO da politica.
-    WHEN a.tipo = 'politica' AND EXISTS (
-      SELECT 1 FROM pg_policies pol
-       WHERE pol.schemaname = 'public' AND pol.tablename = a.item
-         AND COALESCE(pol.qual, '') LIKE '%cliente_conta_liberada%') THEN 'APLICADO'
+    -- Revogada = ninguem alem do dono tem EXECUTE.
+    WHEN a.tipo = 'sem_grant' AND NOT EXISTS (
+      SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = a.item
+         AND p.proacl::text LIKE '%authenticated=X%') THEN 'APLICADO'
+    WHEN a.tipo = 'indice' AND EXISTS (
+      SELECT 1 FROM pg_indexes WHERE schemaname = 'public'
+        AND tablename = 'notification_log' AND indexname = a.item) THEN 'APLICADO'
     ELSE 'FALTA'
   END AS situacao
 FROM alvo a
 ORDER BY a.passo;"""
-
 
 EDGE = ["send-email", "stripe-checkout", "register-customer", "company-member", "b2bwave-sync"]
 
@@ -174,7 +185,8 @@ cards.append(card(TOTAL, "Conferência final", None,
 
 edge_html = "".join(f'<li><code>{html.escape(e)}</code></li>' for e in EDGE)
 
-PAGINA = f'''<title>SQL do PermShield</title>
+PAGINA = f'''<meta charset="utf-8">
+<title>SQL do PermShield</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -273,8 +285,9 @@ PAGINA = f'''<title>SQL do PermShield</title>
 
 <div class="env">
   <div class="topo">
-    <h1>SQL pendente — rodar no editor do Lovable</h1>
+    <h1>SQL de 26/ago — notificação e preço</h1>
     <p>Comece pelo bloco <b>0</b>: ele diz o que já está no banco e o que falta. Depois, os oito, um de cada vez, na ordem. Marque o número ao terminar; a marcação fica salva se você fechar a página.</p>
+    <p><b>As três etapas — SQL, deploy das edge functions e publish — têm que ser na mesma sessão.</b> Entre o bloco 6 e o publish, o cupom fica sem funcionar no portal.</p>
   </div>
 
   <div class="barra">
@@ -299,7 +312,7 @@ PAGINA = f'''<title>SQL do PermShield</title>
 </div>
 
 <script>
-  const CHAVE = "permshield-sql-8";
+  const CHAVE = "permshield-sql-26ago";
   const total = {TOTAL};
   const feitos = new Set(JSON.parse(localStorage.getItem(CHAVE) || "[]"));
 

@@ -43,10 +43,19 @@ WITH t AS (
   -- ---------- Supressao temporaria (a de lote) ----------
   UNION ALL
   SELECT 4, 'supressao de lote (suppress_order_notify)',
+         -- MESMA regra que `fn_order_status_notify` usa depois de 20260826080000:
+         -- janela valida OU lote vivo (limitado pelo teto de 2h). A versao
+         -- anterior desta consulta olhava so a janela, entao dizia "inativa"
+         -- com o banco suprimindo — um painel contradizendo a funcao que ele
+         -- existe para explicar.
          COALESCE((SELECT CASE
                      WHEN COALESCE((value->>'on')::boolean, false)
-                          AND COALESCE((value->>'ate')::timestamptz, '-infinity') > now()
-                       THEN 'ATIVA ate ' || (value->>'ate') || '  (lotes vivos: ' || COALESCE(value->>'n','?') || ')'
+                          AND (COALESCE((value->>'ate')::timestamptz, '-infinity') > now()
+                               OR (COALESCE((value->>'n')::integer, 0) > 0
+                                   AND COALESCE((value->>'desde')::timestamptz, '-infinity')
+                                       > now() - interval '120 minutes'))
+                       THEN 'ATIVA  (ate ' || COALESCE(value->>'ate','?')
+                            || ', lotes vivos: ' || COALESCE(value->>'n','?') || ')'
                      ELSE 'inativa' END
                      FROM public.sync_state WHERE key = 'suppress_order_notify'), 'linha ausente'),
          'ligada por sync/lote enquanto roda; expira sozinha. Inativa e o normal em repouso', false
