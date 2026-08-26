@@ -2159,8 +2159,8 @@ Deno.serve(async (req) => {
         // escreve 13 tabelas; entre esta e a `diff_orders`, quatro ficam de fora.
         nao_comparado: {
           tabelas: ["categorias", "brands", "representantes",
-                    "privacy_groups", "company_activities", "pedido_itens"],
-          nota: "sao metadados de catalogo e as linhas do historico de pedidos; nenhuma decide preco de pedido novo. `pedido_itens` e a que mais pesa das que sobraram: erro ali sai no PDF do pedido antigo",
+                    "privacy_groups", "company_activities"],
+          nota: "so metadados de catalogo — nenhuma decide preco, estoque ou acesso. `pedido_itens` saiu desta lista: passou a ser comparada pelo `diff_orders`, que ja tem as linhas no feed",
         },
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });

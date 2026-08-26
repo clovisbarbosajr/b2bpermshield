@@ -43,7 +43,11 @@ e-mail, pagamento, cadastro e equipe não entram.
 ### 1.4 Avisar, para eu rodar a comparação com o B2BWave
 
 Duas comparações, as duas só leitura: `diff_orders` (pedidos) e
-`diff_catalog` (produtos, variantes, régua de preço, clientes) — esta última criada em 25/ago,
+`diff_catalog` (produtos, variantes, régua de preço, clientes) — esta última criada em 25/ago.
+O `diff_orders` também compara as **linhas** dos pedidos. Fora de conferência
+ficam só metadados de catálogo (categorias, marcas, representantes, grupos de
+privacidade, atividades) — nenhum decide preço, estoque ou acesso.
+Criada em 25/ago,
 porque a comparação antiga cobria só pedidos e o sync escreve 13 tabelas.
 **`diff_catalog` nunca foi executada** — a primeira rodada é prova, não formalidade.
 
