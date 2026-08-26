@@ -2125,3 +2125,37 @@ mede o quanto do historico esta incompleto por produto que nunca foi importado.
 `identico` do `diff_orders` passou a exigir `nSemNenhum === 0 &&
 nItensSobrando === 0`. Sem isso, um pedido sem nenhuma linha passaria como
 "identico" — e o relatorio existe justamente para pegar esse tipo de coisa.
+
+---
+
+## cont. 46 — Botao para a conferencia, senao ela nao roda
+
+Fui preparar o passo seguinte — rodar as comparacoes quando o dono terminar — e
+esbarrei no obvio: **nao havia como disparar**.
+
+A `b2bwave-sync` tem `verify_jwt = false`, mas isso e deliberado e esta certo: o
+proprio handler exige `x-cron-secret` OU usuario logado **com papel admin**.
+Conferido, nao ha buraco ali. So que, na pratica, isso quer dizer que a
+comparacao so roda por `curl` com token de admin na mao — e a tela do sync tem
+botao para tudo que ESCREVE e nenhum para o que so LE.
+
+Cartao novo em `B2BWaveSync.tsx`, separado dos botoes de sync de proposito
+(tudo o resto daquela tela escreve; este nao): **Comparar Pedidos** e
+**Comparar Catalogo**, com o veredito em texto, o JSON completo num
+`<details>`, e um botao de copiar — o JSON e o que eu preciso receber.
+
+Detalhe que quase passou: as duas devolvem o veredito com nome DIFERENTE —
+`identico` (pedidos) e `veredito` (catalogo). Ler so um deixaria metade sem
+resumo. O mesmo para o truncamento: `truncado` numa, `leitura_truncada` noutra.
+As duas formas estao tratadas.
+
+### Verificacao
+
+`npm test` passa (tsc incluso). Subi o servidor de desenvolvimento e pedi o
+modulo ao Vite: transforma sem erro, 200, e o cartao esta na saida. Console sem
+erro.
+
+**O que NAO consegui verificar:** a aparencia do cartao renderizado. A rota e
+protegida e exige login de admin — entrar com senha e coisa que eu nao faco. O
+que da para afirmar e que compila, transforma e nao quebra o modulo; se algo
+estiver torto visualmente, aparece na primeira vez que ele abrir a tela.

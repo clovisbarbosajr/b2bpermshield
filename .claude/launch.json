@@ -2,9 +2,22 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 8080
+    },
+    {
       "name": "csp-check",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["C:/Users/clovi/AppData/Local/Temp/claude/C--Users-clovi-Desktop-Projetos--permshield-review/c6b50af4-5289-4eae-9121-fec216178614/scratchpad/serve-csp.mjs", "dist", "4179"],
+      "runtimeArgs": [
+        "C:/Users/clovi/AppData/Local/Temp/claude/C--Users-clovi-Desktop-Projetos--permshield-review/c6b50af4-5289-4eae-9121-fec216178614/scratchpad/serve-csp.mjs",
+        "dist",
+        "4179"
+      ],
       "port": 4179
     }
   ]

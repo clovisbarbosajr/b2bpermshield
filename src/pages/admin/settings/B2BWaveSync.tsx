@@ -7,7 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
   RefreshCw, Package, FolderTree, Users, DollarSign, ShoppingCart,
-  Tag, UserCheck, CheckCircle2, AlertCircle, Loader2, StopCircle
+  Tag, UserCheck, CheckCircle2, AlertCircle, Loader2, StopCircle, Search, Copy
 } from "lucide-react";
 
 type SyncStatus = "idle" | "loading" | "success" | "error";
@@ -48,6 +48,43 @@ const B2BWaveSync = () => {
   const [orderTotalItems, setOrderTotalItems] = useState(0);
   const [orderTotalErrors, setOrderTotalErrors] = useState(0);
   const stopRef = useRef(false);
+
+  // ── Conferência (SÓ LEITURA) ────────────────────────────────────────────────
+  // Estas duas comparam este sistema com o B2BWave sem escrever nada. Existem
+  // porque a decisão de religar a sincronização depende do resultado delas, e
+  // sem botão o único jeito seria `curl` com token de admin na mão.
+  const [conferindo, setConferindo] = useState<string | null>(null);
+  const [conferencia, setConferencia] = useState<Record<string, any>>({});
+
+  const rodarConferencia = async (action: string, rotulo: string) => {
+    setConferindo(action);
+    setConferencia((c) => ({ ...c, [action]: null }));
+    try {
+      const { data, error } = await supabase.functions.invoke("b2bwave-sync", {
+        body: { action },
+      });
+      if (error) throw error;
+      setConferencia((c) => ({ ...c, [action]: data }));
+      // O veredito de cada uma tem nome diferente: `identico` (pedidos) e
+      // `veredito` (catálogo). Ler só um deixaria metade sem resumo no toast.
+      const ok = data?.identico === true || data?.veredito?.startsWith("IDENTICO");
+      const inconclusivo = data?.truncado === true || data?.leitura_truncada === true;
+      if (inconclusivo) toast.warning(`${rotulo}: inconclusivo — alguma leitura falhou`);
+      else if (ok) toast.success(`${rotulo}: idêntico`);
+      else toast.warning(`${rotulo}: há divergências — veja os números`);
+    } catch (err: any) {
+      setConferencia((c) => ({ ...c, [action]: { erro: err.message || "falhou" } }));
+      toast.error(`${rotulo}: ${err.message || "falhou"}`);
+    }
+    setConferindo(null);
+  };
+
+  const copiarConferencia = (action: string) => {
+    const txt = JSON.stringify(conferencia[action], null, 2);
+    navigator.clipboard.writeText(txt)
+      .then(() => toast.success("Resultado copiado"))
+      .catch(() => toast.error("Não consegui copiar — selecione o texto à mão"));
+  };
 
   // Status PERSISTENTE — lido de sync_log no banco (não some ao recarregar a página).
   const [lastRuns, setLastRuns] = useState<any[]>([]);
@@ -229,6 +266,75 @@ const B2BWaveSync = () => {
           </div>
         </Card>
       )}
+
+      {/* Conferência: SÓ LEITURA. Fica separada dos botões de sync de propósito —
+          tudo daqui para baixo ESCREVE, e isto aqui não. */}
+      <Card className="mb-4 border-blue-500/30 bg-blue-500/5">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Search className="h-4 w-4" /> Conferência — só leitura
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Compara este sistema com o B2BWave sem alterar nada e sem enviar e-mail ou SMS.
+            É o que decide se dá para religar a sincronização.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { action: "diff_orders", rotulo: "Pedidos", desc: "pedidos, status, valores e as linhas de cada um" },
+              { action: "diff_catalog", rotulo: "Catálogo", desc: "produtos, tamanhos/cores, régua de preço e clientes" },
+            ].map((c) => (
+              <Button
+                key={c.action}
+                variant="outline"
+                onClick={() => rodarConferencia(c.action, c.rotulo)}
+                disabled={conferindo !== null}
+                className="gap-1"
+                title={c.desc}
+              >
+                {conferindo === c.action ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                Comparar {c.rotulo}
+              </Button>
+            ))}
+          </div>
+
+          {Object.entries(conferencia).map(([action, r]) =>
+            !r ? null : (
+              <div key={action} className="rounded-md border bg-background p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">
+                    {action === "diff_orders" ? "Pedidos" : "Catálogo"}
+                  </span>
+                  <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs"
+                          onClick={() => copiarConferencia(action)}>
+                    <Copy className="h-3 w-3" /> Copiar
+                  </Button>
+                </div>
+                {r.erro ? (
+                  <p className="text-sm text-destructive">{r.erro}</p>
+                ) : (
+                  <p className="mb-2 text-sm">
+                    {r.truncado || r.leitura_truncada
+                      ? <span className="font-medium text-amber-600 dark:text-amber-500">Inconclusivo — alguma leitura falhou, não use para decidir</span>
+                      : (r.identico === true || String(r.veredito || "").startsWith("IDENTICO"))
+                        ? <span className="font-medium text-green-600 dark:text-green-500">Idêntico nos campos comparados</span>
+                        : <span className="font-medium text-amber-600 dark:text-amber-500">Há divergências</span>}
+                  </p>
+                )}
+                {/* O JSON inteiro fica disponível: os números é que decidem, e é
+                    isto que eu preciso receber para analisar. */}
+                <details>
+                  <summary className="cursor-pointer text-xs text-muted-foreground">Ver o resultado completo</summary>
+                  <pre className="mt-2 max-h-80 overflow-auto rounded bg-muted p-2 text-[11px] leading-relaxed">
+                    {JSON.stringify(r, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            )
+          )}
+        </CardContent>
+      </Card>
 
       {connectionOk !== null && (
         <Card className={`mb-4 border ${connectionOk ? "border-green-500/30 bg-green-500/5" : "border-destructive/30 bg-destructive/5"}`}>
