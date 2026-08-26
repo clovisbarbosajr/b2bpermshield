@@ -205,6 +205,70 @@ const B2BWaveSync = () => {
     stopRef.current = true;
   };
 
+  // FANTASMAS — pedidos que existem aqui e sumiram do B2BWave.
+  //
+  // DOIS PASSOS de proposito. O primeiro so CONTA e mostra a lista; apagar
+  // exige um segundo clique, depois de o admin ver os numeros. Exclusao de
+  // pedido nao tem desfazer — o pedido nao existe mais na origem para
+  // reimportar — entao ninguem apaga por engano num clique so.
+  const limparFantasmas = async () => {
+    setOrderSyncing(true);
+    setOrderProgress("Conferindo quais pedidos sumiram do B2BWave…");
+    try {
+      const { data, error } = await supabase.functions.invoke("b2bwave-sync", {
+        body: { action: "limpar_fantasmas", dry_run: true },
+      });
+      if (error) throw error;
+
+      // O servidor ABORTA sozinho quando a leitura parece incompleta (teto de
+      // sanidade, origem vazia, resposta invalida). Aqui so mostro o motivo.
+      if (data?.abortado) {
+        toast.error("Não apaguei nada", { description: data.motivo });
+        setOrderProgress("⚠ " + data.motivo);
+        setOrderSyncing(false);
+        return;
+      }
+
+      const n = data?.fantasmas ?? 0;
+      if (n === 0) {
+        toast.success("Nenhum pedido sobrando — o clone está fechado deste lado.");
+        setOrderProgress("✅ Nenhum pedido existe aqui sem existir no B2BWave.");
+        setOrderSyncing(false);
+        return;
+      }
+
+      const lista = (data?.numeros ?? []).join(", ");
+      const ok = confirm(
+        `${n} pedido(s) existem aqui e NÃO existem mais no B2BWave:\n\n${lista}\n\n` +
+        `Apagar? Isto NÃO tem desfazer — eles não estão mais na origem para reimportar.\n\n` +
+        `(Os itens de cada pedido vão junto.)`
+      );
+      if (!ok) {
+        setOrderProgress(`ℹ ${n} fantasmas encontrados. Nada foi apagado.`);
+        setOrderSyncing(false);
+        return;
+      }
+
+      setOrderProgress(`Apagando ${n} pedido(s)…`);
+      const { data: r2, error: e2 } = await supabase.functions.invoke("b2bwave-sync", {
+        body: { action: "limpar_fantasmas", dry_run: false },
+      });
+      if (e2) throw e2;
+      if (r2?.abortado) {
+        toast.error("Não apaguei nada", { description: r2.motivo });
+        setOrderProgress("⚠ " + r2.motivo);
+      } else {
+        toast.success(`${r2?.apagados ?? 0} pedido(s) apagados`);
+        setOrderProgress(`✅ ${r2?.apagados ?? 0} apagados${(r2?.falhas?.length ?? 0) > 0 ? `, ${r2.falhas.length} falharam` : ""}`);
+      }
+    } catch (err: any) {
+      toast.error("Falhou: " + (err?.message ?? String(err)));
+      setOrderProgress("❌ " + (err?.message ?? String(err)));
+    }
+    setOrderSyncing(false);
+    fetchLastRuns();
+  };
+
   // HISTORICO COMPLETO — a acao `sync_orders_all`, que traz TODO pedido do
   // B2BWave, inclusive os anteriores a 2025, e nao notifica ninguem
   // (`skipPre2025 = false`, `notify = false` no servidor).
@@ -483,6 +547,16 @@ const B2BWaveSync = () => {
               >
                 {orderSyncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                 {orderSyncing ? "Syncing..." : "Sync All Orders"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                disabled={orderSyncing}
+                onClick={limparFantasmas}
+                title="Procura pedidos que existem aqui e não existem mais no B2BWave. Mostra a lista antes de apagar."
+              >
+                <StopCircle className="h-3 w-3" /> Limpar pedidos que sumiram
               </Button>
               <Button
                 variant="outline"

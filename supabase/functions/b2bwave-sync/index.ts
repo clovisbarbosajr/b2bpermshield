@@ -2481,6 +2481,138 @@ Deno.serve(async (req) => {
       }, null, 2), { headers: jsonHeaders });
     }
 
+    // ========================================================================
+    // LIMPAR FANTASMAS — pedido que existe aqui e sumiu do B2BWave.
+    //
+    // O sync nunca soube apagar: so cria e atualiza. Entao toda exclusao feita
+    // la desde sempre deixou um pedido morto aqui. A Jessika confirmou que
+    // apagar e rotina ("a gente deleta ordem quando o cliente faz merda, ou
+    // precisamos migrar 2 ordens, ou nao tem o material e o cliente cancela").
+    // Sem isto, o clone nunca fecha.
+    //
+    // NAO RODA SOZINHA, e nao entra em cron nenhum. E destrutiva e sem
+    // desfazer: pedido apagado aqui nao existe mais la para reimportar. Quem
+    // dispara e o admin, no botao, depois de ver o numero.
+    //
+    // `dry_run: true` (o padrao) so CONTA. Apagar exige `dry_run: false`
+    // explicito — errar para o lado de nao apagar.
+    // ========================================================================
+    if (action === "limpar_fantasmas") {
+      const inicio = Date.now();
+      const soContar = body.dry_run !== false;
+
+      // 1) Tudo que existe na origem. Truncou = ABORTA.
+      //
+      // Esta e a trava que importa. Uma leitura parcial faz TODO pedido que nao
+      // chegou parecer apagado — e o comando apagaria a base inteira. Resposta
+      // nao-array e leitura FALHA, nao lista vazia.
+      const naOrigem = new Set<number>();
+      let paginas = 0;
+      for (;;) {
+        if (Date.now() - inicio > 100_000) {
+          return new Response(JSON.stringify({
+            success: false, abortado: true,
+            motivo: "a leitura da origem passou do tempo — NAO apaguei nada",
+          }), { status: 409, headers: jsonHeaders });
+        }
+        const d = await fetchOrdersPage(username, apiKey, paginas + 1);
+        if (!Array.isArray(d)) {
+          return new Response(JSON.stringify({
+            success: false, abortado: true,
+            motivo: "a origem devolveu resposta invalida — NAO apaguei nada",
+            paginas_lidas: paginas,
+          }), { status: 409, headers: jsonHeaders });
+        }
+        if (d.length === 0) break;
+        for (const it of d) {
+          if (!it) continue;
+          const o = (it as any).order || it;
+          if (!o) continue;
+          const n = parseInt(o.id) || 0;
+          if (n > 0) naOrigem.add(n);
+        }
+        paginas++;
+        if (d.length < ORDERS_PER_PAGE) break;
+      }
+
+      // Origem vazia so pode ser falha. Nao ha cenario real com zero pedidos.
+      if (naOrigem.size === 0) {
+        return new Response(JSON.stringify({
+          success: false, abortado: true,
+          motivo: "a origem devolveu ZERO pedidos — isso e falha de leitura, nao base vazia. NAO apaguei nada",
+        }), { status: 409, headers: jsonHeaders });
+      }
+
+      // 2) Tudo que existe aqui e diz ter vindo de la.
+      const aqui: Array<{ id: string; numero: number }> = [];
+      let de = 0;
+      for (;;) {
+        const { data, error } = await adminClient.from("pedidos")
+          .select("id, b2bwave_order_id")
+          .not("b2bwave_order_id", "is", null)
+          .order("b2bwave_order_id", { ascending: true })
+          .range(de, de + 999);
+        if (error) throw new Error("falha ao ler pedidos: " + error.message);
+        const parte = data ?? [];
+        for (const r of parte) aqui.push({ id: (r as any).id, numero: Number((r as any).b2bwave_order_id) });
+        if (parte.length === 0) break;
+        de += parte.length;
+      }
+
+      const fantasmas = aqui.filter((r) => !naOrigem.has(r.numero));
+
+      // 3) TETO DE SANIDADE. Apagar 18 e manutencao; apagar 800 e acidente.
+      //
+      // Se a origem mudou de forma de paginar, ou o feed veio pela metade sem
+      // avisar, o numero explode — e e exatamente ai que o comando NAO pode
+      // obedecer. 10% ou 150, o que for menor.
+      const teto = Math.min(150, Math.ceil(aqui.length * 0.1));
+      if (fantasmas.length > teto) {
+        return new Response(JSON.stringify({
+          success: false, abortado: true,
+          motivo: `${fantasmas.length} pedidos apareceram como sumidos, acima do teto de ${teto}. Isso tem cara de leitura incompleta, nao de exclusao real. NAO apaguei nada.`,
+          na_origem: naOrigem.size, aqui: aqui.length, paginas_lidas: paginas,
+          exemplos: fantasmas.slice(0, 20).map((r) => r.numero),
+        }), { status: 409, headers: jsonHeaders });
+      }
+
+      if (soContar) {
+        return new Response(JSON.stringify({
+          success: true, dry_run: true,
+          SO_LEITURA: "nenhum dado foi alterado",
+          na_origem: naOrigem.size, aqui: aqui.length, paginas_lidas: paginas,
+          fantasmas: fantasmas.length,
+          numeros: fantasmas.map((r) => r.numero).sort((a, b) => a - b),
+          segundos: Math.round((Date.now() - inicio) / 1000),
+        }, null, 2), { headers: jsonHeaders });
+      }
+
+      // 4) Apaga, um por um, e deixa RASTRO de cada um.
+      //
+      // Um por um, nao `in()`: se um falhar, os outros seguem e eu sei qual
+      // falhou. `pedido_itens` vai junto por CASCADE.
+      let apagados = 0;
+      const falhas: any[] = [];
+      for (const r of fantasmas) {
+        const { error } = await adminClient.from("pedidos").delete().eq("id", r.id);
+        if (error) { falhas.push({ pedido: r.numero, erro: error.message }); continue; }
+        apagados++;
+        await adminClient.from("notification_log").insert({
+          event: "pedido_fantasma_apagado", channel: "-", recipient: "-", status: "failed",
+          error: `pedido ${r.numero} existia aqui e nao existe mais no B2BWave`,
+          payload: { order_numero: r.numero, origem: "b2bwave" },
+        }).then(() => {}, () => {});
+      }
+
+      return new Response(JSON.stringify({
+        success: true, dry_run: false,
+        na_origem: naOrigem.size, aqui_antes: aqui.length,
+        apagados, falhas,
+        numeros: fantasmas.map((r) => r.numero).sort((a, b) => a - b),
+        segundos: Math.round((Date.now() - inicio) / 1000),
+      }, null, 2), { headers: jsonHeaders });
+    }
+
     // Mede como a API de pedidos pagina. O backfill voltou "done" com 1 pagina de
     // 9 pedidos, com 1.147 no banco — ou seja, `orders.json?page=N` sozinho NAO
     // varre o historico. Outros endpoints deste mesmo sync usam
