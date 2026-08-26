@@ -1995,3 +1995,54 @@ o dia consertando no codigo.
 
 Diferenca real desta rodada: nenhum bloco SQL mudou — so a prosa dos passos 10
 e 11. A posicao dele no documento nao muda.
+
+---
+
+## cont. 43 — Conferir nome de coluna antes de mandar o dono rodar
+
+Minha falha mais repetida do dia nao foi de logica: foi **inventar nome de
+coluna**. `sync_state.valor` (o certo e `value`) chegou na tela do dono como
+erro de SQL. O `check-migrations.mjs` pega sintaxe; nome que nao existe passa
+batido por ele.
+
+`scripts/conferir-colunas.py` monta o schema lendo as 173 migrations em ordem
+(CREATE TABLE, ADD/DROP COLUMN, RENAME) e procura, nas pendentes, referencia
+`tabela.coluna` que nao exista.
+
+### O alarme falso, e o que ele ensinou
+
+Primeira rodada: **tres suspeitos**, todos falsos.
+
+    p.b2bwave_order_id  -> `produtos` nao tem essa coluna
+    p.status            -> idem
+    x.categoria_id      -> `produto_cliente_acesso` nao tem
+
+Nos tres, o apelido estava certo no lugar onde aparece: `JOIN public.pedidos p`,
+`FROM public.categoria_cliente_acesso x`. O erro era meu: eu resolvia apelido
+por **arquivo inteiro**, e o ultimo `p` do arquivo ganhava. Apelido e de
+statement.
+
+Quarta vez hoje que quase entrego um verificador que grita errado — o de
+gatilhos acusava os 24, o de preco acusaria quase todo produto, o de secao
+acusaria todo produto como faltando, e agora este. O padrao e sempre o mesmo:
+**a ferramenta olha um escopo maior do que o dado tem**.
+
+Conserto conservador: apelido ligado a mais de uma tabela no arquivo vira
+AMBIGUO e nao e julgado. Perde alcance nesses casos; em troca nao mente. O caso
+que mais importa — prefixo que e NOME DE TABELA, como o `sync_state.valor` que
+quebrou na tela — nao usa apelido e continua coberto.
+
+### Mutante
+
+Migration falsa com `sync_state.valor` e `pedidos.total_geral`: acusou as duas.
+Removida, volta a limpo. Sem isso, "7 OK" nao provava nada.
+
+### Resultado
+
+**Os 7 SQL pendentes nao citam nenhuma coluna inexistente.**
+
+### Por que NAO virou portao do `npm test`
+
+E Python; a suite e Node. Amarrar `npm test` a um interpretador que pode nao
+existir noutra maquina troca um risco por outro. Fica como pre-voo deliberado,
+mesma categoria do `checar-sync-preflight.py`: rodar antes de entregar SQL.
