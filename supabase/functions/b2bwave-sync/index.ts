@@ -266,7 +266,7 @@ function buildOrderItems(orderProducts: any[], productSkuToId: Map<string, strin
   return { rows, qty, sum };
 }
 
-type ExistingOrder = { id: string; status: string; total: number; subtotal: number; quantidade_total: number; data_origem: string | null };
+type ExistingOrder = { id: string; status: string; total: number; subtotal: number; quantidade_total: number; data_origem: string | null; linhas: number };
 
 // Insere OU atualiza um pedido (espelha status/cancelamento/edição/total). Nunca apaga.
 // Retorna "created" | "updated" | "skipped" | "error".
@@ -418,8 +418,15 @@ async function upsertOrder(
     // Agora a ausencia de linha, tendo linha na origem, e motivo suficiente para
     // reescrever. `itemRows.length > 0` evita o caso legitimo do pedido que
     // tambem nao tem item la.
-    const semLinhasAqui = (ex.quantidade_total ?? 0) === 0 && itemsQty > 0;
-    const precisaItens = itemRows.length > 0 && semLinhasAqui;
+    // CONTA A LINHA DE VERDADE, nao `quantidade_total`.
+    //
+    // A primeira versao usava `ex.quantidade_total === 0`, e era codigo morto:
+    // com `itemsQty > 0`, o proprio `changed` ja dava true pelo termo de
+    // quantidade, entao `precisaItens` nunca decidia nada. E pior — nao atingia
+    // o alvo: os 16 pedidos vazios tem `quantidade_total` CORRETO e zero linhas
+    // em `pedido_itens`. E exatamente por isso que "com tudo batendo" o ciclo
+    // dizia `skipped` e eles nunca se curavam.
+    const precisaItens = itemRows.length > 0 && (ex.linhas ?? 0) === 0;
 
     if (!changed && !precisaReparar && !precisaItens) return "skipped";
     const pago = pickPago(o);
@@ -433,7 +440,12 @@ async function upsertOrder(
       //  momento em que a trava entrou, tres linhas acima, e sobreviveu ao diff
       //  intacta — e o primeiro comentario que alguem le ao abrir este objeto.)
       //
-      // `notificavel`, porem, so sobe de false para true quando o pedido e
+      // (O bloco abaixo descrevia o comportamento ANTIGO, em que o UPDATE
+      //  tambem subia `notificavel`. Nao sobe mais — ver o comentario logo
+      //  acima do objeto. As duas razoes seguem valendo como historico de por
+      //  que a subida era condicional antes de ser removida por completo.)
+      //
+      // `notificavel` so subia de false para true quando o pedido era
       // GENUINAMENTE recente. Duas razoes:
       //   - subir incondicionalmente reduzia duas defesas a uma: os 1150 pedidos
       //     passariam a depender so de `order_notify_max_age_days`, uma linha
@@ -442,16 +454,24 @@ async function upsertOrder(
       //   - e apagava o kill-switch manual: admin calava um pedido, o proximo
       //     tick do sync ressuscitava. O COMMENT da coluna promete o contrario.
       // Descer para false continua incondicional: sem data, nao fala.
-      // O SYNC NUNCA DA VOZ A UM PEDIDO. So tira.
+      // O SYNC SO DA VOZ NO INSERT de pedido com menos de 7 dias (ver o ramo de
+      // INSERT, `notificavel: recenteDeVerdade`). Em pedido que JA EXISTE, ele
+      // nunca sobe a marca — so pode descer.
       //
       // Ate aqui o reparo (preencher a `data_origem` que faltava) tambem gravava
       // `notificavel: true`. A comparacao de 26/ago mostrou o tamanho disso: 32
       // pedidos ganhariam voz no proximo ciclo, sem ninguem ter pedido —
       // sincronizacao de DADO virando permissao de FALAR.
       //
-      // Agora o reparo grava so a data. Quem devolve a voz a um pedido e uma
-      // acao humana, nunca um efeito colateral do sync. Descer para `false`
-      // (sem data, nao fala) continua incondicional.
+      // Agora o reparo grava so a data. Descer para `false` (sem data, nao fala)
+      // continua incondicional.
+      //
+      // A TROCA, dita por inteiro: um pedido criado hoje cuja data a origem nao
+      // soube informar no primeiro ciclo nasce mudo, e o reparo do ciclo
+      // seguinte NAO o solta mais. Antes ele se recuperava sozinho. E populacao
+      // pequena, mas a perda e permanente, e hoje NAO existe botao no admin para
+      // devolver a voz — o conserto e SQL a mao. Criar esse controle esta na
+      // fila; ate la, e este o preco de o sync nunca falar por conta propria.
       ...(submittedAt
         ? (podeGravarData ? { data_origem: submittedAt } : {})
         : { notificavel: false }),
@@ -526,7 +546,9 @@ async function upsertOrder(
   }).select("id").single();
   if (ins.error || !ins.data) return "error";
   const orderId = ins.data.id;
-  existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: quantidade, data_origem: submittedAt });
+  // `linhas`: acabamos de inserir os itens, entao o pedido tem exatamente os
+  // que vieram do feed. Sem este campo o objeto nao e um `ExistingOrder`.
+  existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: quantidade, data_origem: submittedAt, linhas: itemRows.length });
   if (itemRows.length > 0) {
     // Mesmo buraco do caminho de UPDATE, e pelo mesmo motivo: sem checar o erro,
     // um pedido NOVO ficava com zero itens e retornava "created" — e como o
@@ -539,7 +561,10 @@ async function upsertOrder(
     const insItens = await db.from("pedido_itens").insert(itemRows.map((r) => ({ ...r, pedido_id: orderId })));
     if (insItens.error) {
       await db.from("pedidos").update({ quantidade_total: 0 }).eq("id", orderId);
-      existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: 0, data_origem: submittedAt });
+      // Caminho de ERRO ao inserir itens: o pedido ficou sem linha nenhuma, e e
+      // exatamente isso que `linhas: 0` diz. No proximo ciclo `precisaItens`
+      // pega e reescreve.
+      existing.set(numero, { id: orderId, status, total, subtotal, quantidade_total: 0, data_origem: submittedAt, linhas: 0 });
       return "error";
     }
   }
@@ -673,7 +698,30 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
   if (exErr) throw new Error("falha ao ler pedidos existentes: " + exErr.message);
   const existing = new Map<number, ExistingOrder>();
   for (const e of existingOrders || []) {
-    existing.set(e.b2bwave_order_id, { id: e.id, status: e.status, total: Number(e.total), subtotal: Number(e.subtotal), quantidade_total: e.quantidade_total ?? 0, data_origem: (e as any).data_origem ?? null });
+    existing.set(e.b2bwave_order_id, { id: e.id, status: e.status, total: Number(e.total), subtotal: Number(e.subtotal), quantidade_total: e.quantidade_total ?? 0, data_origem: (e as any).data_origem ?? null, linhas: 0 });
+  }
+
+  // QUANTAS LINHAS cada pedido tem AQUI, de verdade.
+  //
+  // `quantidade_total` nao serve para isto: os 16 pedidos vazios achados na
+  // comparacao de 26/ago tem `quantidade_total` CORRETO e zero linhas em
+  // `pedido_itens` — e por isso que o ciclo dizia "skipped" e eles nunca se
+  // curavam. Uma consulta por lote, nao uma por pedido.
+  //
+  // Falha aqui NAO derruba o lote: `linhas` fica 0 para todos, e o unico efeito
+  // e reescrever itens de pedido que ja os tinha. Desperdicio, nao perda.
+  const idsLocais = [...existing.values()].map((e) => e.id);
+  if (idsLocais.length > 0) {
+    const porPedido = new Map<string, number>();
+    for (let i = 0; i < idsLocais.length; i += 200) {
+      const lote = idsLocais.slice(i, i + 200);
+      const { data: linhas } = await db.from("pedido_itens").select("pedido_id").in("pedido_id", lote);
+      for (const r of linhas || []) {
+        const k = String((r as any).pedido_id);
+        porPedido.set(k, (porPedido.get(k) ?? 0) + 1);
+      }
+    }
+    for (const e of existing.values()) e.linhas = porPedido.get(String(e.id)) ?? 0;
   }
   const [clientesTodos, produtosTodos] = await Promise.all([
     lerTudo("clientes", "id, email", db),
@@ -1148,6 +1196,29 @@ Deno.serve(async (req) => {
       //    pode estar fora por filtro, nao por exclusao.
       // 3. So apaga par (produto, tabela) que a origem NAO tem mais. Par que ela
       //    tem foi reescrito no upsert acima.
+      // ⚠ NAO APAGA. CONTA E REGISTRA.
+      //
+      // A versao anterior APAGAVA, e o cetico derrubou as tres travas que eu
+      // achava suficientes. `sync_products` roda de HORA EM HORA, sozinho:
+      //
+      //  (a) Preco que o ADMIN definiu aqui e indistinguivel de "a origem
+      //      removeu". `TabelasPreco.tsx`, `ProductEdit.tsx` e o importador de
+      //      descontos escrevem nesta tabela. Par criado por eles que o B2BWave
+      //      nao precifica seria apagado no ciclo seguinte.
+      //  (b) Tabela de preco cujo NOME nao casa (renomeada aqui, espaco a mais,
+      //      acento) sai inteira do conjunto "a origem tem" — e a coluna de
+      //      preco daquela tabela seria apagada por completo. Um rename viraria
+      //      milhares de exclusoes.
+      //  (c) `pricesByProduct.size > 0` distingue VAZIO de NAO-VAZIO, nao
+      //      INTEIRO de PARCIAL. `fetchAllPaginated` encerra em pagina curta e
+      //      no teto de 200 paginas sem sinalizar truncamento.
+      //
+      // Enquanto nao houver como saber a ORIGEM de cada linha, apagar e chute.
+      // Entao ele so CONTA e grava um exemplo no log — o dono ve o numero e
+      // decide, que e a mesma disciplina que usei no resto desta leva.
+      //
+      // O conserto de verdade e uma coluna `origem` em `tabela_preco_itens`
+      // ('b2bwave' | 'local'), e so 'b2bwave' ser apagavel. Esta na fila.
       let precosObsoletos = 0;
       if (pricesByProduct.size > 0 && tpItens.length > 0) {
         // Pares que a origem afirma existir, no formato "produtoLocal|tabelaLocal".
@@ -1167,18 +1238,26 @@ Deno.serve(async (req) => {
           // seguro e nao apagar nada deste lote.
           if (errLer || !atuais) continue;
 
+          // So conta par de TABELA que a origem precificou nesta rodada. Sem
+          // isto, tabela que a origem nao tocou apareceria inteira como
+          // "obsoleta" — foi a quebra (b) do cetico.
+          const tabelasDaOrigem = new Set(tpItens.map((r: any) => r.tabela_preco_id));
           const sobrando = atuais.filter(
-            (r: any) => !paresDaOrigem.has(`${r.produto_id}|${r.tabela_preco_id}`)
+            (r: any) => tabelasDaOrigem.has(r.tabela_preco_id)
+              && !paresDaOrigem.has(`${r.produto_id}|${r.tabela_preco_id}`)
           );
-          for (const r of sobrando) {
-            const { error: errDel } = await adminClient
-              .from("tabela_preco_itens")
-              .delete()
-              .eq("produto_id", (r as any).produto_id)
-              .eq("tabela_preco_id", (r as any).tabela_preco_id);
-            if (!errDel) precosObsoletos++;
-          }
+          precosObsoletos += sobrando.length;
         }
+      }
+
+      // Deixa RASTRO, uma linha por rodada. Contador dentro da string da
+      // mensagem some do historico; esta linha fica.
+      if (precosObsoletos > 0) {
+        await adminClient.from("notification_log").insert({
+          event: "preco_obsoleto_detectado", channel: "-", recipient: "-", status: "failed",
+          error: `${precosObsoletos} precos existem aqui e a origem nao tem mais. NAO foram apagados.`,
+          payload: { quantidade: precosObsoletos, origem: "b2bwave" },
+        }).then(() => {}, () => {});
       }
 
       // ----- Variantes / opções de produto (Size/Color etc.) -----
@@ -1687,20 +1766,16 @@ Deno.serve(async (req) => {
           reparoPendente.push({ pedido: n, data: dataOrigem, notificavel_hoje: local.notificavel });
         }
 
-        // ESPELHA o `changed` do upsertOrder, com igualdade CRUA (sem arredondar).
-        // O `cent()` (cinquenta linhas ACIMA) e para dinheiro de verdade; este e
-        // para responder "o proximo tick escreve?", que e outra pergunta.
+        // ESPELHA o `changed` do upsertOrder — e agora em CENTAVOS, como ele.
         //
-        // (Estas linhas ja diziam que o ruido de float fazia o sync RELIGAR
-        //  `notificavel` num pedido de menos de 7 dias. Isso deixou de ser
-        //  verdade com a trava de data: ruido so acontece em pedido que JA tem
-        //  `data_origem`, e ai `podeGravarData` e falso e o patch nem toca a
-        //  marca. A frase contradizia o comentario dezenove linhas abaixo —
-        //  quinta vez nesta sessao que um comentario meu sobreviveu a mudanca
-        //  que o tornou falso.)
+        // Enquanto este ficou cru e o `changed` passou a arredondar, o relatorio
+        // acusava ~449 pedidos que o sync NAO ia tocar. Portao que acusa o que
+        // nao vai acontecer e portao que fica vermelho para sempre, e este e o
+        // relatorio que decide religar os SMS.
+        const centDiff = (x: any) => Math.round((Number(x) || 0) * 100);
         const vaiEscrever = statusOrigem !== local.status
-          || Number(local.total) !== totalOrigem
-          || Number(local.subtotal) !== subtotalOrigem
+          || centDiff(local.total) !== centDiff(totalOrigem)
+          || centDiff(local.subtotal) !== centDiff(subtotalOrigem)
           || (local.quantidade_total ?? 0) !== qtdOrigem;
         if (vaiEscrever) {
           nVaiEscrever++;
@@ -2528,7 +2603,15 @@ Deno.serve(async (req) => {
       const PAGES_PER_TICK = body.pages || 6;
       let page = await getOrdersCursor(adminClient);
 
+      // ORCAMENTO DE TEMPO. Sem ele, uma pagina de 500 pedidos que precisem de
+      // escrita pode estourar o tempo da Edge Function — e ai o cursor nao
+      // avanca e o `finally` da supressao pode nao rodar, deixando o sistema
+      // mudo ate a validade de 20 min expirar. Melhor terminar menos paginas.
+      const INICIO_TICK = Date.now();
+      const ORCAMENTO_TICK_MS = 60_000;
+
       for (let i = 0; i < PAGES_PER_TICK; i++) {
+        if (Date.now() - INICIO_TICK > ORCAMENTO_TICK_MS) break;
         let data: any;
         try {
           data = await fetchOrdersPage(username, apiKey, page);
@@ -2538,30 +2621,28 @@ Deno.serve(async (req) => {
         }
         if (!Array.isArray(data) || data.length === 0) { reachedEnd = true; break; }
 
-        // Fast-skip: página inteira pré-2025 → não toca o banco (histórico antigo).
-        const allPre2025 = data.every((it: any) => {
-          const o = it.order || it;
-          const s = o.submitted_at || o.created_at || "";
-          return s && new Date(s).getFullYear() < 2025;
-        });
-        if (!allPre2025) {
-          // `skipPre2025 = false`: o dono quer CLONE PERFEITO — todo pedido,
-          // inclusive os de 2024 e antes, e toda EDICAO feita neles la.
-          // Com `true`, uma correcao num pedido antigo nunca chegava aqui, e o
-          // clone ficava congelado naquele pedido para sempre.
-          //
-          // Trazer o antigo NAO da voz a ele: completude de DADO e permissao de
-          // FALAR sao coisas separadas neste sistema. Pedido velho entra com
-          // `notificavel: recenteDeVerdade` = false (a data e antiga), e o aviso
-          // de pedido novo exige menos de 48h. Ele entra mudo, por construcao.
-          const r = await processOrderSlice(adminClient, data, false, true);
-          created += r.created; updated += r.updated; skipped += r.skipped; errors += r.errors;
-        } else {
-          skipped += data.length;
-        }
+        // O ATALHO "pagina inteira pre-2025 -> nao toca o banco" FOI REMOVIDO.
+        //
+        // Ele existia para poupar trabalho, e passou a anular o proprio conserto
+        // que eu tinha acabado de fazer: a API pagina do mais novo para o mais
+        // velho, entao as paginas onde moram os ~1.639 pedidos faltantes sao
+        // INTEIRAMENTE pre-2025 e eram descartadas antes de chegar aqui. Passar
+        // `skipPre2025 = false` sem tirar isto so alcancava a pagina de
+        // fronteira — o comentario prometia o clone completo e o codigo, quinze
+        // linhas acima, cancelava a promessa.
+        //
+        // Trazer o antigo NAO da voz a ele: completude de DADO e permissao de
+        // FALAR sao coisas separadas aqui. Pedido velho entra com
+        // `notificavel = false` (a data e antiga) e o aviso de pedido novo exige
+        // menos de 48h. Entra mudo, por construcao — nao por sorte de filtro.
+        const r = await processOrderSlice(adminClient, data, false, true);
+        created += r.created; updated += r.updated; skipped += r.skipped; errors += r.errors;
 
         if (data.length < 500) { reachedEnd = true; break; } // última página → reinicia ciclo
         page++;
+        // CURSOR SALVO A CADA PAGINA, nao so no fim. Se o tick morrer no meio,
+        // o proximo recomecava da primeira pagina deste tick e refazia tudo.
+        await setOrdersCursor(adminClient, page);
       }
 
       // `page` já aponta para a próxima página não processada (foi incrementado após

@@ -48,8 +48,25 @@ export function usePortalTheme(classesBody: string[]) {
     const acrescentadas = classesBody.filter((c) => !body.classList.contains(c));
     acrescentadas.forEach((c) => body.classList.add(c));
 
+    // FUNDO POR ESTILO INLINE, de proposito.
+    //
+    // O `index.css` do app define `body { background-color: hsl(var(--background)) }`
+    // e, medindo no navegador, era essa regra que vencia — o `body` ficava
+    // TRANSPARENTE. Passava despercebido porque `html` recebe o fundo escuro
+    // pela mesma regra do tema, mas a ordem entre as folhas nao e garantida:
+    // o Vite injeta o CSS do app dinamicamente, e no build de producao a
+    // ordem pode inverter. Aparencia que depende de sorte de cascata quebra
+    // sozinha um dia, e num login isso e tela branca sobre texto branco.
+    //
+    // Estilo inline vence qualquer folha. O fallback existe para o caso de
+    // `styles.css` nao carregar: sem ele, `var(--night)` invalido devolveria
+    // transparente e o problema voltaria pela outra porta.
+    const fundoAntes = body.style.background;
+    body.style.background = "var(--night, #07111b)";
+
     return () => {
       acrescentadas.forEach((c) => body.classList.remove(c));
+      body.style.background = fundoAntes;
       tema.remove();
       fontes.remove();
     };

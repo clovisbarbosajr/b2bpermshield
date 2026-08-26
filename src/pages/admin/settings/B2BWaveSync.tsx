@@ -240,11 +240,18 @@ const B2BWaveSync = () => {
           `Histórico: página ${pagina} — ${criados} novos, ${atualizados} atualizados, ${erros} erros`
         );
         if (!data?.hasMore) break;
-        pagina = data?.nextPage ?? pagina + 1;
-        desloc = data?.nextOffset ?? 0;
-        // Trava de seguranca: se o servidor devolver sempre o mesmo cursor, o
-        // laco giraria para sempre queimando chamada. 400 cobre ~20 mil pedidos.
-        if (chamadas > 400) { setOrderProgress("⚠ Parei em 400 chamadas — me avise."); break; }
+        const proxPagina = data?.nextPage ?? pagina + 1;
+        const proxDesloc = data?.nextOffset ?? 0;
+        // NAO-PROGRESSO, nao contador fixo. O teto de 400 que eu tinha posto
+        // cobria ~20 mil pedidos, e o proprio arquivo estima ~32 mil no
+        // historico: a importacao pararia em ~62% avisando que parou, mas sem
+        // ter trazido tudo. Girar em falso e o que precisa ser detectado.
+        if (proxPagina === pagina && proxDesloc === desloc) {
+          setOrderProgress("⚠ O servidor devolveu o mesmo ponto duas vezes — parei para não girar em falso.");
+          break;
+        }
+        pagina = proxPagina;
+        desloc = proxDesloc;
       }
       toast.success(`Histórico importado: ${criados} novos, ${atualizados} atualizados`);
       setOrderProgress(`✅ Histórico completo: ${criados} novos, ${atualizados} atualizados, ${erros} erros`);
