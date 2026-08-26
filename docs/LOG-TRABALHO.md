@@ -1739,3 +1739,64 @@ Divida que eu declarei em 20260825260000 e adiei DE PROPOSITO. Voltei a ela.
   data (`created_at` nas duas), como se todo export tivesse durado zero.
   `export_logs` nao tem hora de termino; tem `registros`, que era o dado util e
   nao aparecia. Agora e "Date" e "Records".
+
+---
+
+## cont. 38 — Pre-voo do religamento do sync
+
+Enquanto o dono roda as 7 migrations, adiantei a verificacao que precisa passar
+ANTES de a sincronizacao voltar.
+
+**Por que.** O incidente de 25/ago comecou assim: uma correcao de paginacao fez o
+sync reconciliar 1.147 pedidos, cada mudanca de status bateu num gatilho de
+notificacao, e sairam 1.508 SMS. Depois daquele dia o banco ganhou uma duzia de
+gatilhos NOVOS. A pergunta e: quando o sync voltar e reescrever esses ~1.150
+pedidos, **qual gatilho vai agir sobre eles?**
+
+`scripts/checar-sync-preflight.py` responde. Para cada gatilho nas tabelas que o
+sync escreve (`pedidos`, `pedido_itens`, `produtos`, `produto_variantes`,
+`clientes`), procura no corpo da funcao uma isencao que deixe o sync passar.
+
+**Nao e portao** — nao roda no `npm test` e nao reprova nada. E relatorio.
+
+### Dois erros no proprio verificador, antes de ele servir
+
+1. **Acusava os 24.** O extrator do corpo da funcao exigia `\n$$;`, e quase toda
+   funcao deste projeto termina `END $$;` na MESMA linha. O corpo vinha vazio, e
+   sem corpo nao ha isencao para achar. Verificador que acusa tudo e tao inutil
+   quanto um que nao acusa nada — a diferenca e que este da a sensacao de ter
+   trabalhado. Troquei por varredura dos delimitadores `$$`.
+
+2. **Alarme falso em dois isentos.** Eu so procurava a forma direta
+   (`b2bwave_order_id IS NOT NULL`). Varias funcoes escrevem o contrario — *"so
+   age se NAO for do sync"* (`IF NEW.b2bwave_order_id IS NULL THEN ... END IF`).
+   `fn_pedido_total_appside` e `fn_release_stock_on_item_delete` apareciam como
+   desprotegidos sendo que estao entre os mais protegidos.
+
+### Os 8 sem isencao automatica — conferidos um a um
+
+Nenhum e problema. Todos ficaram gravados em `VEREDITOS`, dentro do script, para
+a proxima leitura nao refazer a investigacao:
+
+| Gatilho | Por que o sync nao o aciona |
+|---|---|
+| `trg_block_unapproved_suborder` | Casa por `c.user_id = auth.uid()`; o sync usa service key, `auth.uid()` e NULL, nenhuma linha casa |
+| `trg_cupom_devolve_delete` | Exige `OLD.coupon_id IS NOT NULL`; o sync nunca mapeia cupom |
+| `trg_low_stock_notify` | Tres travas: canal desligado, so ao **CRUZAR** o limite (nao a cada update), teto de 10/hora com contador sincrono |
+| `trg_order_status_notify` | Trava A1 (`notificavel IS NOT TRUE`). O sync **grava** o campo explicitamente (`notificavel: recenteDeVerdade`) — nao cai no `DEFAULT true` da coluna |
+| `trg_subuser_inherit_pricelist` | So PREENCHE tabela de preco nula; nunca sobrescreve |
+| `update_{clientes,pedidos,produtos}_updated_at` | So `NEW.updated_at = now()` |
+
+O que mais me preocupava era o `trg_low_stock_notify`: ele dispara em
+`AFTER UPDATE OF estoque_total` em `produtos`, e o sync toca todo produto a cada
+ciclo — e o irmao exato do gatilho que causou o incidente. Salva a condicao de
+**cruzamento**: `_avail_old > limite AND _avail_new <= limite`. Reescrever o
+mesmo numero nao cruza nada. E se um lote cruzar de verdade, o teto de 10/hora
+segura o resto.
+
+### Mutante
+
+Criei um gatilho falso em `pedidos` e rodei: o relatorio acusou
+`trg_mutante_teste` como **NOVO, NUNCA CONFERIDO**. Removi, voltou a limpo.
+Antes do mutante o "limpo" nao provava nada — era o mesmo sintoma dos tres
+portoes que ja falharam em silencio neste projeto: **saia zero sem ter olhado**.
