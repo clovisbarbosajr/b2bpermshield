@@ -1594,3 +1594,32 @@ As cinco ultimas ja estavam fora do menu; o que fechei foi o LINK DIRETO.
 `fuso_horario`. Dentro do app ninguem le (moeda e "USD" fixo, datas usam o fuso
 do navegador), MAS a edge `api` os devolve em `GET /config`. Remover as colunas
 derrubaria esse endpoint para qualquer integrador externo.
+
+### 25/08 (noite, cont. 33) - Log de auditoria era forjavel por qualquer um
+
+Item que o cetico achou de passagem na revisao das travas de pedido e que eu
+tinha anotado na fila. E o pior tipo de defeito de dado: nao corrompe o sistema,
+corrompe a EXPLICACAO do que aconteceu.
+
+- **CONFIRMADO** - a policy de INSERT em `activity_logs` era
+  `WITH CHECK (auth.uid() IS NOT NULL)` — "qualquer autenticado", e com cadastro
+  ABERTO isso e qualquer pessoa. E o app manda TODOS os campos de identidade do
+  lado do cliente (`useActivityLog.ts`): `user_id`, `user_email`, `user_name`.
+  Um POST direto grava a linha que quiser, assinada com o nome de quem quiser —
+  numa tabela cuja LEITURA e admin-only. Forja plantada exatamente onde o dono
+  vai olhar para entender o que aconteceu.
+- **FEITO** - `20260825340000`, em duas camadas:
+  1. so STAFF insere (conferi: nenhuma pagina do PORTAL usa o hook — os 8
+     chamadores sao todos telas de admin);
+  2. um gatilho REESCREVE `user_id`/`user_email`/`user_name` a partir da sessao
+     do servidor. Reescreve em vez de validar: validar exigiria recusar, e
+     recusar quebraria o app por um campo preenchido errado sem ma intencao.
+     Reescrever nao quebra nada e nao deixa forjar.
+- **FEITO** - o hook parou de mandar identidade do navegador. Mandar seria, na
+  melhor das hipoteses, ruido — o servidor sobrescreve.
+- **A consulta de BACKUP acha forja que ja exista**: linha cujo `user_email` nao
+  bate com o e-mail do login que ela diz ser. Numa gravacao legitima os dois
+  sempre casam. E uma segunda lista quem escreveu no log SEM ser staff.
+- **DECLARADO** - isto NAO limpa linha forjada que ja exista (a linha em si e
+  evidencia), e NAO impede staff de registrar acao errada. O que fecha e assinar
+  com o nome de OUTRA pessoa, que era o que tornava o log inutil.
