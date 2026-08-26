@@ -1650,3 +1650,38 @@ corrompe a EXPLICACAO do que aconteceu.
   Anotado como divida, com o conserto certo escrito no proprio arquivo — o
   servidor MONTAR a linha do PDF a partir de `produto_id` + `variante_id` em vez
   de confiar no texto gravado.
+
+### 25/08 (noite, cont. 35) - Preco de cliente suspenso + "View As" mentiroso
+
+Os dois vieram da revisao do cetico sobre 20260825280000 e estavam na minha fila.
+
+**Cliente suspenso lia a regua de preco inteira**
+
+- **CONFIRMADO** - as policies de `tabela_preco_itens`, `tabelas_preco`,
+  `variante_precos`, `produto_precos_cliente` e `produto_descontos` escopam por
+  TABELA DE PRECO e nao olham a situacao da conta.
+- **HOJE NAO VAZA, e nao vaza POR ACIDENTE**: `ensure_my_cliente_record` cria a
+  ficha com `tabela_preco_id = NULL`, e `NULL = x` e NULL. A protecao e efeito
+  colateral, nao regra.
+- **ONDE APARECE**: voce atribui tabela de preco e DEPOIS suspende o cliente. A
+  ficha continua com a tabela. Ele perde o catalogo, mas continua lendo
+  `produto_id -> preco` e a regua de desconto INTEIROS. E a mesma inteligencia
+  comercial que 20260825210000 fechou, por outra porta, para quem voce acabou de
+  tirar de casa.
+- **FEITO** - `20260825360000`. **PROVA MECANICA**: script comparou as cinco
+  policies com as versoes vivas — identicas fora do `cliente_conta_liberada()`.
+
+**O "View As" mostrava catalogo cheio para cliente que ve vazio**
+
+- **CONFIRMADO** - a 280000 so alcancou o caminho REAL (que usa `auth.uid()`). As
+  funcoes de previsualizacao recebem o cliente-ALVO por parametro e nao ganharam
+  a checagem. Nao e furo de seguranca, e furo de DIAGNOSTICO — e pior de outro
+  jeito: e a ferramenta que existe para responder "o que ele esta vendo?" dando a
+  resposta errada. O dono conclui que esta tudo certo e o cliente continua sem
+  comprar.
+- **FEITO** - `20260825370000`. A lista de status bloqueados passa a existir UMA
+  vez, em `conta_liberada_de(_cli_id)`; as duas portas (a do proprio usuario e a
+  do cliente-alvo) chamam a mesma funcao. **Eu ia duplicar a lista** — seria a
+  terceira copia dela no projeto, e eu venho denunciando exatamente isso.
+- **PROVA MECANICA** - as duas funcoes de previsualizacao sao identicas as vivas
+  fora da checagem nova.
