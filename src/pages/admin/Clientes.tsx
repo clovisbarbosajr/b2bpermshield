@@ -33,6 +33,7 @@ const AdminClientes = () => {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ ...emptyFilters });
   const [lastOrders, setLastOrders] = useState<Record<string, string>>({});
+  const [gruposPorCliente, setGruposPorCliente] = useState<Record<string, string[]>>({});
   const [priceLists, setPriceLists] = useState<any[]>([]);
   const [reps, setReps] = useState<any[]>([]);
   const [privacyGroups, setPrivacyGroups] = useState<any[]>([]);
@@ -62,6 +63,18 @@ const AdminClientes = () => {
 
     if (data && data.length > 0) {
       const clienteIds = data.map((c: any) => c.id);
+
+      // Vinculo cliente <-> grupo de privacidade. NAO era carregado, por isso o
+      // filtro "Privacy group" existia na tela e nao filtrava nada.
+      const { data: vinculos } = await supabase
+        .from("cliente_privacy_groups").select("cliente_id, privacy_group_id")
+        .in("cliente_id", clienteIds);
+      const porCliente: Record<string, string[]> = {};
+      (vinculos ?? []).forEach((v: any) => {
+        (porCliente[v.cliente_id] ??= []).push(v.privacy_group_id);
+      });
+      setGruposPorCliente(porCliente);
+
       const { data: orders } = await supabase
         .from("pedidos").select("cliente_id, created_at").in("cliente_id", clienteIds)
         .order("created_at", { ascending: false });
@@ -95,6 +108,30 @@ const AdminClientes = () => {
     if (f.salesRep && c.representante_id !== f.salesRep) return false;
     if (f.priceList && c.tabela_preco_id !== f.priceList) return false;
     if (f.country && f.country !== "__all__" && !(c.pais ?? "").toLowerCase().includes(f.country.toLowerCase())) return false;
+
+    // ----------------------------------------------------------------------
+    // Os quatro abaixo EXISTIAM na tela e nao filtravam nada: o `<Select>`
+    // gravava no estado e a lista continuava igual. O usuario escolhia, via a
+    // mesma lista, e concluia que "nao tem ninguem com esse filtro" — resposta
+    // errada, e nao da para perceber.
+    // ----------------------------------------------------------------------
+
+    if (f.activity && (c as any).activity !== f.activity) return false;
+
+    // A data do ultimo pedido ja estava calculada (`lastOrders`) e ja aparecia
+    // na coluna da tabela. Faltava so comparar.
+    const ultimo = lastOrders[c.id];
+    if (f.latestOrderFrom) {
+      if (!ultimo) return false;                       // sem pedido nenhum
+      if (ultimo.slice(0, 10) < f.latestOrderFrom) return false;
+    }
+    if (f.latestOrderTo) {
+      if (!ultimo) return false;
+      if (ultimo.slice(0, 10) > f.latestOrderTo) return false;
+    }
+
+    if (f.privacyGroup && !(gruposPorCliente[c.id] ?? []).includes(f.privacyGroup)) return false;
+
     return true;
   });
 
@@ -262,10 +299,21 @@ const AdminClientes = () => {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 text-sm mt-3">
           <div>
             <Label className="text-xs text-primary">Use in app by admin</Label>
-            <Select value={filters.useInAppByAdmin || "__all__"} onValueChange={v => setFilter("useInAppByAdmin", v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8"><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent><SelectItem value="__all__">All</SelectItem><SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem></SelectContent>
-            </Select>
+            {/* FILTRO REMOVIDO em 25/ago/2026: nao ha coluna correspondente em
+              * `clientes`. Nao era "filtro que nao filtra" por descuido — era
+              * filtro SEM LASTRO NENHUM: nao existe o dado que ele diz filtrar.
+              * Os outros quatro desta tela foram CONSERTADOS; este nao tinha o
+              * que consertar.
+              *
+              * PARA VOLTAR: criar a coluna primeiro (`clientes.use_in_app_by_admin`
+              * ou equivalente), decidir quem a escreve, e so entao descomentar.
+              *
+              * <Select value={filters.useInAppByAdmin || "__all__"} onValueChange={v => setFilter("useInAppByAdmin", v === "__all__" ? "" : v)}>
+              *   <SelectTrigger className="h-8"><SelectValue placeholder="All" /></SelectTrigger>
+              *   <SelectContent><SelectItem value="__all__">All</SelectItem><SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem></SelectContent>
+              * </Select>
+              */}
+            <p className="text-xs text-muted-foreground h-8 flex items-center">—</p>
           </div>
           <div><Label className="text-xs text-primary">Latest Order From</Label><Input type="date" value={filters.latestOrderFrom} onChange={e => setFilter("latestOrderFrom", e.target.value)} className="h-8" /></div>
           <div><Label className="text-xs text-primary">Latest Order To</Label><Input type="date" value={filters.latestOrderTo} onChange={e => setFilter("latestOrderTo", e.target.value)} className="h-8" /></div>

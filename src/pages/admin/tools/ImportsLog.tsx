@@ -88,11 +88,19 @@ const ImportsLog = () => {
                 <TableRow key={log.id}>
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{fmtDate(log.created_at)}</TableCell>
                   <TableCell className="text-sm capitalize">{log.tipo || log.type || "—"}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{log.arquivo || log.file_name || "—"}</TableCell>
-                  <TableCell className="text-right">{log.registros || log.records || 0}</TableCell>
-                  <TableCell className="text-right">{log.erros || log.errors || 0}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{log.arquivo_nome || "—"}</TableCell>
+                  <TableCell className="text-right">{log.registros_total || 0}</TableCell>
+                  <TableCell className="text-right">{log.registros_erro || 0}</TableCell>
                   <TableCell>
-                    <Badge variant={(log.status === "success" || log.status === "ok") ? "default" : "destructive"}>
+                    {/* "partial" e um resultado LEGITIMO (algumas linhas
+                      * entraram, outras nao) e pintava de VERMELHO junto com as
+                      * falhas totais. Os importadores gravam "success" ou
+                      * "partial"; so falha de verdade merece vermelho. */}
+                    <Badge variant={
+                      (log.status === "success" || log.status === "ok") ? "default"
+                        : log.status === "partial" ? "secondary"
+                        : "destructive"
+                    }>
                       {log.status || "unknown"}
                     </Badge>
                   </TableCell>

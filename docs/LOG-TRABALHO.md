@@ -1520,3 +1520,41 @@ a maioria delas e `.in(ids)` limitada pelo tamanho do carrinho.
   depois de 20260825320000 zero significa "esgotado" para o cliente. Agora o save
   PARA e diz quais variantes estao com valor invalido, no mesmo padrao que a tela
   ja usa para os descontos.
+
+### 25/08 (noite, cont. 31) - Filtros de cliente e log de importacao
+
+Cacador confirmou item por item. **Nao removi nada que funciona** — e a anotacao
+estava errada em dois pontos, para melhor e para pior.
+
+**Filtros da tela Clientes: eram 18, e 13 JA funcionavam.** Nao era caso de
+remover o painel. Dos 5 quebrados:
+- **CONSERTADOS 4** — "Activity", "Latest Order From", "Latest Order To" e
+  "Privacy group". Os tres primeiros eram 3 linhas de `if`: o dado ja estava em
+  memoria (o mapa `lastOrders` ate ja aparecia na coluna da tabela). O de
+  privacidade precisou carregar o vinculo `cliente_privacy_groups`, que o
+  `fetchData` nao trazia — por isso o `<Select>` existia e nao filtrava.
+- **REMOVIDO 1** — "Use in app by admin". Nao era filtro quebrado, era filtro SEM
+  LASTRO: nao existe coluna correspondente em `clientes`. Comentado, com o passo
+  para voltar (criar a coluna PRIMEIRO).
+- O efeito do defeito era pior do que parece: o usuario escolhia o filtro, via a
+  mesma lista, e concluia "nao tem ninguem assim". Resposta errada, sem sintoma.
+
+**ImportsLog: nao era fantasma, era QUEBRADA — e a anotacao errou a causa.** Ela
+nao seleciona colunas inexistentes (faz `select("*")`, que nunca erra); ela LE
+propriedades que nao existem no objeto: `log.arquivo`, `log.registros`,
+`log.erros`. Os nomes reais sao `arquivo_nome`, `registros_total`,
+`registros_erro`. Resultado: 3 das 6 colunas SEMPRE vazias, com o dado la no
+banco (7 telas gravam certo). Corrigido — 3 linhas.
+- **DE BRINDE** - o selo de status pintava "partial" de VERMELHO junto com falha
+  total. "Partial" e resultado legitimo (algumas linhas entraram). Agora so falha
+  de verdade fica vermelha.
+
+**ACHADOS DO CACADOR que mudam o plano das outras telas:**
+- `moeda`/`fuso_horario` NAO sao fantasma: a edge `api` os devolve em
+  `GET /config` (`api/index.ts:222`). Se eu removesse as COLUNAS, derrubaria o
+  endpoint. Dentro do app ninguem le (moeda e "USD" fixo, datas usam o fuso do
+  navegador) — mas o dado sai para integrador externo.
+- `ImportsLog` e um DUPLICADO quebrado: `ExportsLog` tem uma aba "Imports" que le
+  a mesma tabela com os nomes CERTOS. As duas ja estao fora do menu.
+- `PdfCatalog` e a UNICA das telas mortas ainda VISIVEL no menu, e ela sempre da
+  erro: manda `type: "catalog"` e a funcao so aceita `pedido_id`. Prioridade.
