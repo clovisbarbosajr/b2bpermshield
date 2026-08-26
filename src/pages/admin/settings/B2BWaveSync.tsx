@@ -251,7 +251,10 @@ const B2BWaveSync = () => {
 
       setOrderProgress(`Apagando ${n} pedido(s)…`);
       const { data: r2, error: e2 } = await supabase.functions.invoke("b2bwave-sync", {
-        body: { action: "limpar_fantasmas", dry_run: false },
+        // Manda a lista que o admin ACABOU de confirmar. Sem ela o servidor
+        // recalcula do zero, e um pedido apagado no B2BWave entre os dois
+        // cliques seria apagado aqui sem ter aparecido na confirmação.
+        body: { action: "limpar_fantasmas", dry_run: false, numeros: data?.numeros ?? [] },
       });
       if (e2) throw e2;
       if (r2?.abortado) {

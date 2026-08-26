@@ -2513,7 +2513,7 @@ Deno.serve(async (req) => {
           return new Response(JSON.stringify({
             success: false, abortado: true,
             motivo: "a leitura da origem passou do tempo — NAO apaguei nada",
-          }), { status: 409, headers: jsonHeaders });
+          }), { headers: jsonHeaders });
         }
         const d = await fetchOrdersPage(username, apiKey, paginas + 1);
         if (!Array.isArray(d)) {
@@ -2521,7 +2521,7 @@ Deno.serve(async (req) => {
             success: false, abortado: true,
             motivo: "a origem devolveu resposta invalida — NAO apaguei nada",
             paginas_lidas: paginas,
-          }), { status: 409, headers: jsonHeaders });
+          }), { headers: jsonHeaders });
         }
         if (d.length === 0) break;
         for (const it of d) {
@@ -2540,7 +2540,7 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({
           success: false, abortado: true,
           motivo: "a origem devolveu ZERO pedidos — isso e falha de leitura, nao base vazia. NAO apaguei nada",
-        }), { status: 409, headers: jsonHeaders });
+        }), { headers: jsonHeaders });
       }
 
       // 2) Tudo que existe aqui e diz ter vindo de la.
@@ -2559,7 +2559,21 @@ Deno.serve(async (req) => {
         de += parte.length;
       }
 
-      const fantasmas = aqui.filter((r) => !naOrigem.has(r.numero));
+      let fantasmas = aqui.filter((r) => !naOrigem.has(r.numero));
+
+      // SO APAGA O QUE FOI CONFIRMADO.
+      //
+      // A tela mostra a lista no primeiro passo e confirma no segundo. Sem esta
+      // intersecao, o segundo passo recalcula do zero — e um pedido apagado no
+      // B2BWave ENTRE os dois cliques seria apagado aqui sem nunca ter aparecido
+      // na confirmacao. O dialogo viraria enfeite.
+      //
+      // Intersecao, nao substituicao: numero que o chamador mandou mas que
+      // VOLTOU a existir na origem nao e apagado.
+      if (Array.isArray(body.numeros) && body.numeros.length > 0) {
+        const confirmados = new Set(body.numeros.map((x: any) => Number(x)));
+        fantasmas = fantasmas.filter((r) => confirmados.has(r.numero));
+      }
 
       // 3) TETO DE SANIDADE. Apagar 18 e manutencao; apagar 800 e acidente.
       //
@@ -2573,7 +2587,7 @@ Deno.serve(async (req) => {
           motivo: `${fantasmas.length} pedidos apareceram como sumidos, acima do teto de ${teto}. Isso tem cara de leitura incompleta, nao de exclusao real. NAO apaguei nada.`,
           na_origem: naOrigem.size, aqui: aqui.length, paginas_lidas: paginas,
           exemplos: fantasmas.slice(0, 20).map((r) => r.numero),
-        }), { status: 409, headers: jsonHeaders });
+        }), { headers: jsonHeaders });
       }
 
       if (soContar) {
@@ -2593,7 +2607,9 @@ Deno.serve(async (req) => {
       // falhou. `pedido_itens` vai junto por CASCADE.
       let apagados = 0;
       const falhas: any[] = [];
+      let interrompido = false;
       for (const r of fantasmas) {
+        if (Date.now() - inicio > 140_000) { interrompido = true; break; }
         const { error } = await adminClient.from("pedidos").delete().eq("id", r.id);
         if (error) { falhas.push({ pedido: r.numero, erro: error.message }); continue; }
         apagados++;
@@ -2608,6 +2624,10 @@ Deno.serve(async (req) => {
         success: true, dry_run: false,
         na_origem: naOrigem.size, aqui_antes: aqui.length,
         apagados, falhas,
+        // `interrompido`: parou pelo tempo, nao terminou. Sem este campo o
+        // admin leria "apagados: 40" achando que era tudo.
+        interrompido,
+        ...(interrompido ? { aviso: "parei pelo tempo — rode de novo para terminar" } : {}),
         numeros: fantasmas.map((r) => r.numero).sort((a, b) => a - b),
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });
