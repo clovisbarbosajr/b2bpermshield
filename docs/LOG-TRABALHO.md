@@ -2337,3 +2337,82 @@ antes de publicar — as duas fontes carregam de verdade, contador e marcacao
 funcionam, nao rola de lado, contraste passa nos dois temas, console limpo.
 
 **Nao editar o HTML a mao.** Editar o gerador e rodar de novo.
+
+---
+
+## cont. 51 — O medo do dono virou requisito: PROVA de que o SMS nao volta
+
+O dono voltou dizendo, em 26/ago, o que precisava: certeza de que nao sai
+e-mail nem SMS por sincronizacao — **nem rodando sync manual, nem apagando tudo
+e reimportando do zero**. E disse por que: *"tivemos um prejuizo enorme
+financeiro e moral, por ter que avisar a todos os clientes dessa nossa falha
+absurda"*.
+
+Isso muda o criterio. Nao serve "acho que esta seguro". Ele pediu agentes e
+cetico em TODA mudanca, com o cetico repetindo ate voltar limpo.
+
+### O que os agentes acharam (3 investigacoes em paralelo)
+
+**O vazamento real, e era o cenario que ele nomeou.** Apagar os pedidos e clicar
+em "Sync Orders" chama a acao `cron_orders`, a unica que passa `notify = true`.
+Todo pedido cai no ramo de INSERT e volta como "criado"; os de menos de 48h
+disparam o aviso de PEDIDO NOVO — SMS para cliente real, sobre pedido que ele ja
+foi avisado. Causa: `fireNewOrderNotification` nao distingue "pedido novo no
+mundo" de "linha nova nesta tabela".
+
+**A minha hipotese principal estava ERRADA.** Eu suspeitava do `DEFAULT true` de
+`pedidos.notificavel`. O cetico provou que nao: o sync grava a coluna
+explicitamente nos dois ramos, o default nunca e herdado, e nao ha AFTER INSERT
+que notifique. Registrar isso importa mais do que registrar os acertos.
+
+**Seis furos de dinheiro**, num agente separado. O mais ironico: o cliente podia
+zerar o proprio `minimum_order_value` por PATCH — **anulando a migration que eu
+tinha escrito no dia anterior**. Tirei a regra do navegador, pus no banco, e ela
+continuava editavel por outra porta.
+
+### O que ficou (7 migrations + front)
+
+Notificacao: pedido importado nao fala mais com o cliente; dedupe por
+`(origem, numero)` contra linha `sent`; supressao com contagem de referencia;
+update em massa por CSV suprime antes de rodar; torneira geral ganhou tela.
+
+Dinheiro: cupom de uso unico deixa de ser ilimitado sob corrida (consumo
+atomico); cliente para de editar minimo/pais/desconto/anotacao; opcao privada de
+frete e pagamento exige atribuicao; lista de cupons deixa de ser legivel;
+`claim_customer_record` perde o EXECUTE.
+
+### Tres rodadas de cetico derrubaram 16 coisas MINHAS
+
+Vale listar as que teriam custado caro:
+
+1. **A primeira migration nao aplicava.** `CREATE OR REPLACE` nao renomeia
+   parametro de entrada nem troca tipo de retorno. O dono teria rodado, visto
+   42P13, e NADA teria sido aplicado — nem a parte principal, que estava no
+   mesmo BEGIN/COMMIT.
+2. **O dedupe falhava ABERTO.** Desestruturei so `data`; `postgrest-js` nunca
+   lanca, entao qualquer erro virava "ainda nao avisei" e NOTIFICAVA. O `catch`
+   que escrevi era codigo morto e o comentario prometia o contrario.
+3. **Minha auto-cura nunca dispararia.** Eu resetava o contador quando a janela
+   vencia; o cron roda a cada 15 min pedindo 20, entao ela nunca vence. Um lote
+   morto deixaria o sistema MUDO para sempre, em silencio — o defeito que este
+   projeto mais combate, e eu ia introduzir um.
+4. **Eu ia trancar o dono do lado de fora.** Minha regra de "so admin logado
+   reabre a torneira" ignorava que ele acessa o banco pelo editor do Lovable,
+   onde nao ha sessao — e a torneira esta FECHADA. Desisti da mudanca e
+   registrei o motivo no proprio arquivo.
+5. **Eu apaguei uma guarda que existia**: "pedido que ja nasce cancelado nao
+   consome cupom". Sem ela o uso ficava queimado para sempre, porque a devolucao
+   e AFTER UPDATE **OF status** e nunca houve mudanca de status.
+6. **O dedupe tratava NAO-ENVIO como "ja avisei".** Com a torneira fechada hoje,
+   todo pedido importado ganharia uma linha de skip e o aviso ficaria selado
+   para sempre — o conserto criaria um silencio permanente.
+
+O padrao das seis: **eu prometia no comentario o oposto do que o codigo fazia**.
+Nenhuma foi pega por teste; todas por leitura adversarial.
+
+### Um residuo conferido e descartado
+
+O cetico apontou de passagem que o papel `warehouse` cairia fora dos dois ramos
+da trava de colunas de `clientes`. Fui ver: `is_ops_manager()` cobre admin e
+manager, e a politica de warehouse em `clientes` e **SELECT**. Ele nao tem
+UPDATE, entao nao alcanca o gatilho. Nao e divida.
