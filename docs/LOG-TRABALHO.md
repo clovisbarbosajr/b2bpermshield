@@ -1800,3 +1800,79 @@ Criei um gatilho falso em `pedidos` e rodei: o relatorio acusou
 `trg_mutante_teste` como **NOVO, NUNCA CONFERIDO**. Removi, voltou a limpo.
 Antes do mutante o "limpo" nao provava nada — era o mesmo sintoma dos tres
 portoes que ja falharam em silencio neste projeto: **saia zero sem ter olhado**.
+
+---
+
+## cont. 39 — A comparacao passa a cobrir catalogo, nao so pedidos
+
+O dono condicionou religar a sincronizacao a ter "100% de certeza que ja esta
+TUDO sincronizado". Fui conferir o que a comparacao existente cobria: **so
+pedidos**. O sync escreve 13 tabelas.
+
+`diff_catalog`, irma do `diff_orders`, cobre agora produtos, variantes e
+clientes — as tres onde divergencia custa dinheiro ou acesso. So leitura,
+nenhum insert/update/delete.
+
+### O que ela compara, e por que so isso
+
+| Entidade | Chave | Campos |
+|---|---|---|
+| Produtos | `b2bwave_id` | existencia, preco, ativo |
+| Variantes | `(produto, codigo)` com trim | existencia, quantidade |
+| Clientes | e-mail minusculo | existencia, status, `disable_ordering` |
+
+Nao comparo descricao, imagem, dimensoes: divergencia de texto vira ruido e
+afoga preco e estoque, que sao o que importa.
+
+`estoque_total` fica em **secao separada**, fora do veredito. Enquanto a decisao
+2.1 (quem manda no estoque durante a transicao) nao for tomada, todo check-in de
+producao feito aqui aparece como diferenca — e legitima. Dentro do veredito, ela
+diria "DIVERGENTE" para sempre e o relatorio perderia a utilidade. De quebra, o
+numero dimensiona a decisao 2.1 para o dono.
+
+### Tres erros meus, achados no cetico, todos da mesma familia
+
+Escrevi a comparacao lendo o mapeamento do sync — e mesmo assim errei tres vezes
+**a fonte do dado**:
+
+1. **Endpoint errado.** Usei `fetchAllPaginated("products.json")`; o
+   `sync_products` usa `fetchAllPages`. Paginacao diferente devolve lista
+   diferente — eu compararia contra um universo que o sync nao escreve.
+
+2. **Campo errado nas variantes.** Escrevi `o.variants ?? o.product_variants`.
+   O sync le **so** `product_variants`. Se o feed trouxer os dois, eu acusaria
+   diferenca em variante perfeita.
+
+3. **O pior: o preco nao esta em `products.json`.** Ele vem de
+   `product_prices.json`, pela tabela DEFAULT, com cascata de fallbacks — o
+   proprio arquivo avisa que "products.json muitas vezes NAO traz price". Eu
+   comparava com `o.wholesale_price`, que na maioria dos produtos nem vem.
+   O relatorio acusaria **quase todo produto**.
+
+O terceiro e o mesmo defeito do verificador de gatilhos de hoje de manha, que
+acusava os 24: relatorio que grita em toda linha nao e lido, e da a sensacao de
+ter trabalhado. Replicar a cascata inteira do `sync_products` foi o conserto.
+
+E uma quarta: eu tinha escrito uma copia do `lerTudo` que **ja existia** no
+arquivo. Apagada — duas copias da mesma regra divergem, e a que ninguem le e a
+que fica errada.
+
+### Guardas que ficaram
+
+- Leitura que falha **nao** vira lista vazia. Resposta nao-array marca truncado;
+  sem isso, falha de rede viraria "todo produto daqui esta sobrando".
+- `truncou_em` diz **qual** leitura falhou. So `leitura_truncada: true` nao
+  distingue "tenta de novo" de "o endpoint mudou".
+- Preco so e comparado se as tabelas de preco foram lidas. Senao, falha de
+  leitura viraria "todo produto com preco errado".
+- Truncou em qualquer ponto -> veredito **INCONCLUSIVO**, nunca "IDENTICO".
+  Os contadores continuam visiveis: da para ver o que leu, sem que isso vire
+  conclusao.
+- Dinheiro comparado em centavos inteiros (`0.1 + 0.2 !== 0.3`).
+
+### O que eu NAO posso afirmar
+
+Nao rodei. Ela fala com a API do B2BWave e precisa de deploy e credencial.
+Esta typechecada, e so-leitura (conferido por varredura), e cada criterio foi
+lido contra o upsert correspondente — mas isso nao e o mesmo que ter rodado.
+A primeira execucao e uma prova, nao uma formalidade.

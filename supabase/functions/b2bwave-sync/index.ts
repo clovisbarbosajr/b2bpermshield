@@ -1611,6 +1611,336 @@ Deno.serve(async (req) => {
       }, null, 2), { headers: jsonHeaders });
     }
 
+    // ========================================================================
+    // COMPARACAO DO CATALOGO — produtos, variantes e clientes.
+    //
+    // Irma do `diff_orders`, que so cobria pedidos. O dono pediu prova de que
+    // "TUDO" esta sincronizado antes de religar; o sync escreve 13 tabelas e so
+    // uma tinha conferencia.
+    //
+    // SO LEITURA. Nenhum insert/update/delete. Se um dia alguem acrescentar
+    // escrita aqui, quebra a unica garantia que faz este endpoint seguro de
+    // rodar a qualquer hora.
+    //
+    // O criterio de comparacao e o MESMO do upsert de cada entidade (o valor
+    // MAPEADO, nao o cru). Comparar o cru diria "diferente" para todo produto,
+    // porque `is_active` (bool) nunca e igual a `ativo` depois do `!== false`.
+    // ========================================================================
+    if (action === "diff_catalog") {
+      const inicio = Date.now();
+      const LIMITE_EX = 20;
+      let truncado = false;
+      // QUAL leitura falhou. So `leitura_truncada: true` nao diz se e para
+      // tentar de novo (rede) ou investigar (endpoint mudou) — e o relatorio
+      // vira um beco sem saida.
+      const truncouEm: string[] = [];
+
+      // A leitura local pagina pelo `lerTudo` que ja existe neste arquivo — o
+      // PostgREST corta em 1000 SEM erro, e foi esse corte silencioso que
+      // produziu o incidente dos 1.508 SMS. Eu tinha escrito uma copia identica
+      // aqui; duas copias da mesma regra divergem, e a que ninguem le e a que
+      // fica errada.
+
+      const num = (x: any) => { const n = parseFloat(x); return Number.isFinite(n) ? n : 0; };
+      // Centavos: `0.1 + 0.2 !== 0.3` em ponto flutuante, e um relatorio que
+      // acusa mil produtos por residuo binario nao e lido por ninguem.
+      const mesmoDinheiro = (a: any, b: any) => Math.round(num(a) * 100) === Math.round(num(b) * 100);
+
+      // ---------- PRODUTOS ----------
+      const prodOrigem = new Map<number, any>();
+      let prodTrunc = false;
+      try {
+        // `fetchAllPages`, o MESMO que o `sync_products` usa. Eu tinha escrito
+        // `fetchAllPaginated` (o de `?paginated=1&per_page=500`): endpoint que
+        // pagina de outro jeito devolve outra lista, e o relatorio compararia
+        // contra um universo diferente do que o sync escreve.
+        const lista = await fetchAllPages("products.json", username, apiKey);
+        // Resposta nao-array e leitura FALHA, nao lista vazia. Tratar como vazia
+        // faria o relatorio declarar todo produto daqui "sobrando".
+        if (!Array.isArray(lista)) {
+          prodTrunc = true;
+        } else {
+          for (const it of lista) {
+            const o = (it as any).product || it;
+            const n = parseInt(o.id) || 0;
+            if (n > 0) prodOrigem.set(n, o);
+          }
+        }
+      } catch (_e) { prodTrunc = true; }
+      if (prodTrunc) { truncado = true; truncouEm.push("products.json"); }
+
+      // PRECO: `products.json` muitas vezes NAO traz preco algum — a fonte real
+      // e `product_prices.json` (um registro por produto x tabela), resolvido
+      // pela tabela DEFAULT. Eu tinha comparado com `o.wholesale_price`, campo
+      // que na maioria dos produtos nem vem: o relatorio acusaria quase todos e
+      // ninguem leria o resto. Este bloco replica a cascata do `sync_products`.
+      let precoTrunc = false;
+      const precoPorProduto = new Map<number, Map<number, number>>();
+      let tabelaPadraoId: number | null = null;
+      try {
+        const pls = await fetchAllPages("price_lists.json", username, apiKey);
+        if (!Array.isArray(pls)) throw new Error("price_lists nao-array");
+        for (const pl of pls) if ((pl as any).is_default === true) tabelaPadraoId = Number((pl as any).id);
+        const pps = await fetchAllPaginated("product_prices.json", username, apiKey);
+        if (!Array.isArray(pps)) throw new Error("product_prices nao-array");
+        for (const pp of pps) {
+          const pid = Number((pp as any).product_id), plid = Number((pp as any).pricelist_id);
+          const val = parseFloat((pp as any).price ?? "0") || 0;
+          if (!pid || !plid) continue;
+          if (!precoPorProduto.has(pid)) precoPorProduto.set(pid, new Map());
+          precoPorProduto.get(pid)!.set(plid, val);
+        }
+      } catch (_e) { precoTrunc = true; }
+      if (precoTrunc) { truncado = true; truncouEm.push("price_lists.json / product_prices.json (preco nao comparado)"); }
+
+      // A MESMA cascata do `sync_products`: tabela padrao -> primeira tabela com
+      // valor > 0 -> `p.price`/`wholesale_price`/`base_price` -> MSRP.
+      const precoDaOrigem = (o: any): number => {
+        const m = precoPorProduto.get(Number(o.id));
+        let base = 0;
+        if (m) {
+          if (tabelaPadraoId != null && m.has(tabelaPadraoId)) base = m.get(tabelaPadraoId)!;
+          else { const primeiro = [...m.values()].find(v => v > 0); if (primeiro) base = primeiro; }
+        }
+        const atacado = base || parseFloat(o.price || o.wholesale_price || o.base_price || "0") || 0;
+        const msrp = parseFloat(o.price_msrp || o.retail_price || o.price_retail || "0") || 0;
+        return atacado || msrp;
+      };
+
+      const prodAqui = new Map<number, any>();
+      for (const r of await lerTudo(
+        "produtos", "id, b2bwave_id, sku, nome, preco, ativo, estoque_total", adminClient)) {
+        if ((r as any).b2bwave_id != null) prodAqui.set(Number((r as any).b2bwave_id), r);
+      }
+
+      const prodFaltando: any[] = [];
+      const prodSobrando: any[] = [];
+      const prodPreco: any[] = [];
+      const prodAtivo: any[] = [];
+      const prodEstoque: any[] = [];
+      let nPrecoDif = 0, nAtivoDif = 0, nEstoqueDif = 0, nProdFalta = 0, nProdSobra = 0;
+
+      if (!prodTrunc) {
+        for (const [n, o] of prodOrigem) {
+          const local = prodAqui.get(n);
+          if (!local) {
+            nProdFalta++;
+            if (prodFaltando.length < LIMITE_EX) prodFaltando.push({ b2bwave_id: n, sku: o.sku, nome: o.name });
+            continue;
+          }
+          const precoLa = precoDaOrigem(o);
+          // Preco so e comparavel se a leitura das tabelas de preco deu certo.
+          // Sem esta guarda, falha em `product_prices.json` viraria "todo produto
+          // esta com preco errado" — panico em cima de uma leitura que falhou.
+          if (!precoTrunc && !mesmoDinheiro(precoLa, local.preco)) {
+            nPrecoDif++;
+            if (prodPreco.length < LIMITE_EX) {
+              prodPreco.push({ b2bwave_id: n, sku: local.sku, la: precoLa, aqui: num(local.preco) });
+            }
+          }
+          const ativoLa = o.is_active !== false;
+          if (ativoLa !== (local.ativo === true)) {
+            nAtivoDif++;
+            if (prodAtivo.length < LIMITE_EX) {
+              prodAtivo.push({ b2bwave_id: n, sku: local.sku, la: ativoLa, aqui: local.ativo });
+            }
+          }
+          // ESTOQUE fica SEPARADO de proposito. Enquanto a decisao 2.1 (quem
+          // manda no estoque durante a transicao) nao for tomada, TODO check-in
+          // de producao feito aqui aparece como divergencia — e legitimo, nao e
+          // falha do sync. Misturado com preco e ativo, afogaria o sinal real.
+          const estoqueLa = parseInt(o.quantity ?? o.stock ?? "0") || 0;
+          if (estoqueLa !== (parseInt(local.estoque_total) || 0)) {
+            nEstoqueDif++;
+            if (prodEstoque.length < LIMITE_EX) {
+              prodEstoque.push({ b2bwave_id: n, sku: local.sku, la: estoqueLa, aqui: local.estoque_total });
+            }
+          }
+        }
+        for (const [n, r] of prodAqui) {
+          if (!prodOrigem.has(n)) {
+            nProdSobra++;
+            if (prodSobrando.length < LIMITE_EX) prodSobrando.push({ b2bwave_id: n, sku: (r as any).sku });
+          }
+        }
+      }
+
+      // ---------- VARIANTES ----------
+      // Chave: (produto local, codigo) com trim — o mesmo par que o upsert usa.
+      // Sem o trim, codigo com espaco nas pontas viraria "falta la" + "sobra aqui".
+      const varAqui = new Map<string, any>();
+      for (const r of await lerTudo(
+        "produto_variantes", "id, produto_id, codigo, quantidade, ativo", adminClient)) {
+        varAqui.set((r as any).produto_id + "|" + String((r as any).codigo ?? "").trim(), r);
+      }
+      // Produtos locais que VIERAM no feed — so esses podem julgar "sobra".
+      const locaisNoFeed = new Set<string>();
+      for (const [n, r] of prodAqui) {
+        if (prodOrigem.has(n)) locaisNoFeed.add(String((r as any).id));
+      }
+      const idLocalPorB2b = new Map<number, string>();
+      for (const [n, r] of prodAqui) idLocalPorB2b.set(n, String((r as any).id));
+
+      const varFaltando: any[] = [];
+      const varSobrando: any[] = [];
+      const varQtd: any[] = [];
+      let nVarQtd = 0, nVarFalta = 0, nVarSobra = 0;
+      const vistasNoFeed = new Set<string>();
+
+      if (!prodTrunc) {
+        for (const [n, o] of prodOrigem) {
+          const idLocal = idLocalPorB2b.get(n);
+          if (!idLocal) continue;   // produto ausente ja foi contado acima
+          // SO `product_variants` — e o unico campo que o `sync_products` le
+          // (`Array.isArray(p.product_variants) ? ... : []`). Eu tinha posto
+          // `o.variants` na frente; se o feed trouxer os dois, o relatorio
+          // compararia contra um campo que o sync ignora e acusaria diferenca
+          // em variante que esta perfeita.
+          const vs = (o as any).product_variants;
+          if (!Array.isArray(vs)) continue;
+          for (const v of vs) {
+            const codigo = String(v.code || v.sku || (o.id + "-var")).trim();
+            const chave = idLocal + "|" + codigo;
+            vistasNoFeed.add(chave);
+            const local = varAqui.get(chave);
+            if (!local) {
+              nVarFalta++;
+              if (varFaltando.length < LIMITE_EX) varFaltando.push({ produto_b2bwave: n, codigo });
+              continue;
+            }
+            const qLa = parseInt(v.quantity || "0") || 0;
+            if (qLa !== (parseInt((local as any).quantidade) || 0)) {
+              nVarQtd++;
+              if (varQtd.length < LIMITE_EX) {
+                varQtd.push({ produto_b2bwave: n, codigo, la: qLa, aqui: (local as any).quantidade });
+              }
+            }
+          }
+        }
+        // Sobra aqui: so conta variante de produto QUE VEIO no feed. Variante de
+        // produto ausente ja esta contada como produto faltando; contar de novo
+        // aqui inflaria o numero e mandaria procurar no lugar errado.
+        for (const [chave, r] of varAqui) {
+          const idProd = chave.split("|")[0];
+          if (locaisNoFeed.has(idProd) && !vistasNoFeed.has(chave)) {
+            nVarSobra++;
+            if (varSobrando.length < LIMITE_EX) {
+              varSobrando.push({ produto_local: idProd, codigo: (r as any).codigo });
+            }
+          }
+        }
+      }
+
+      // ---------- CLIENTES ----------
+      // Correlacao por E-MAIL minusculo — e a chave que o upsert usa
+      // (`existingMap.get(email.toLowerCase())`), nao `b2bwave_id`.
+      const cliOrigem = new Map<string, any>();
+      let cliTrunc = false;
+      try {
+        const lista = await fetchAllPages("customers.json", username, apiKey);
+        if (!Array.isArray(lista)) {
+          cliTrunc = true;
+        } else {
+          for (const it of lista) {
+            const c = (it as any).customer || it;
+            const em = String(c.email ?? "").trim().toLowerCase();
+            if (em) cliOrigem.set(em, c);
+          }
+        }
+      } catch (_e) { cliTrunc = true; }
+      if (cliTrunc) { truncado = true; truncouEm.push("customers.json"); }
+
+      const cliAqui = new Map<string, any>();
+      for (const r of await lerTudo(
+        "clientes", "id, email, nome, status, disable_ordering", adminClient)) {
+        const em = String((r as any).email ?? "").trim().toLowerCase();
+        if (em) cliAqui.set(em, r);
+      }
+
+      const cliFaltando: any[] = [];
+      const cliSobrando: any[] = [];
+      const cliStatus: any[] = [];
+      const cliBloqueio: any[] = [];
+      let nCliStatus = 0, nCliBloqueio = 0, nCliFalta = 0, nCliSobra = 0;
+
+      if (!cliTrunc) {
+        for (const [em, c] of cliOrigem) {
+          const local = cliAqui.get(em);
+          if (!local) {
+            nCliFalta++;
+            if (cliFaltando.length < LIMITE_EX) cliFaltando.push({ email: em, empresa: c.company_name });
+            continue;
+          }
+          const statusLa = c.approved === false ? "pendente" : (c.is_active === false ? "inativo" : "ativo");
+          if (statusLa !== String((local as any).status ?? "")) {
+            nCliStatus++;
+            if (cliStatus.length < LIMITE_EX) {
+              cliStatus.push({ email: em, la: statusLa, aqui: (local as any).status });
+            }
+          }
+          const bloqLa = c.disable_ordering === true;
+          if (bloqLa !== ((local as any).disable_ordering === true)) {
+            nCliBloqueio++;
+            if (cliBloqueio.length < LIMITE_EX) {
+              cliBloqueio.push({ email: em, la: bloqLa, aqui: (local as any).disable_ordering });
+            }
+          }
+        }
+        // "Sobrando" aqui NAO e defeito: cliente cadastrado direto no PermShield
+        // (o cadastro publico) nunca existiu no B2BWave. O numero e informativo.
+        for (const [em, r] of cliAqui) {
+          if (!cliOrigem.has(em)) {
+            nCliSobra++;
+            if (cliSobrando.length < LIMITE_EX) cliSobrando.push({ email: em, nome: (r as any).nome });
+          }
+        }
+      }
+
+      const limpo = !truncado
+        && nProdFalta === 0 && nProdSobra === 0 && nPrecoDif === 0 && nAtivoDif === 0
+        && nVarFalta === 0 && nVarSobra === 0 && nVarQtd === 0
+        && nCliFalta === 0 && nCliStatus === 0 && nCliBloqueio === 0;
+
+      return new Response(JSON.stringify({
+        success: true,
+        // Se a leitura truncou, NADA aqui prova identidade. O campo vem primeiro
+        // para nao ser lido depois da conclusao.
+        leitura_truncada: truncado,
+        truncou_em: truncouEm,
+        veredito: truncado
+          ? "INCONCLUSIVO — a leitura da origem falhou ou truncou; nao use este relatorio para decidir"
+          : (limpo ? "IDENTICO nos campos comparados" : "DIVERGENTE — veja os contadores"),
+        produtos: {
+          na_origem: prodOrigem.size, aqui: prodAqui.size,
+          faltando_aqui: nProdFalta, sobrando_aqui: nProdSobra,
+          preco_diferente: nPrecoDif, ativo_diferente: nAtivoDif,
+        },
+        variantes: {
+          aqui: varAqui.size,
+          faltando_aqui: nVarFalta, sobrando_aqui: nVarSobra, quantidade_diferente: nVarQtd,
+        },
+        clientes: {
+          na_origem: cliOrigem.size, aqui: cliAqui.size,
+          faltando_aqui: nCliFalta, sobrando_aqui: nCliSobra,
+          status_diferente: nCliStatus, bloqueio_diferente: nCliBloqueio,
+        },
+        estoque_de_produto: {
+          diferente: nEstoqueDif,
+          nota: "NAO conta como divergencia do sync: enquanto a decisao 2.1 nao for tomada, todo check-in de producao feito aqui aparece como diferenca legitima",
+          exemplos: prodEstoque,
+        },
+        exemplos: {
+          produto_faltando: prodFaltando, produto_sobrando: prodSobrando,
+          produto_preco: prodPreco, produto_ativo: prodAtivo,
+          variante_faltando: varFaltando, variante_sobrando: varSobrando,
+          variante_quantidade: varQtd,
+          cliente_faltando: cliFaltando, cliente_sobrando: cliSobrando,
+          cliente_status: cliStatus, cliente_bloqueio: cliBloqueio,
+        },
+        segundos: Math.round((Date.now() - inicio) / 1000),
+      }, null, 2), { headers: jsonHeaders });
+    }
+
     // Mede como a API de pedidos pagina. O backfill voltou "done" com 1 pagina de
     // 9 pedidos, com 1.147 no banco — ou seja, `orders.json?page=N` sozinho NAO
     // varre o historico. Outros endpoints deste mesmo sync usam

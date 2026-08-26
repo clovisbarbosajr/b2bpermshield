@@ -42,6 +42,11 @@ e-mail, pagamento, cadastro e equipe não entram.
 
 ### 1.4 Avisar, para eu rodar a comparação com o B2BWave
 
+Duas comparações, as duas só leitura: `diff_orders` (pedidos) e
+`diff_catalog` (produtos, variantes, clientes) — esta última criada em 25/ago,
+porque a comparação antiga cobria só pedidos e o sync escreve 13 tabelas.
+**`diff_catalog` nunca foi executada** — a primeira rodada é prova, não formalidade.
+
 Comparo pedido a pedido, só leitura, sem enviar nada — conferido: o
 `diff_orders` não tem `insert`/`update`/`upsert`/`delete`, e pagina os dois
 lados (foi a falta de paginação que causou o incidente dos 1.508 SMS). **A sincronização só volta
