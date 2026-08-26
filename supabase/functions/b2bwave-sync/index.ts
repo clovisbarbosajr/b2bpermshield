@@ -402,7 +402,17 @@ async function upsertOrder(
     // inutil sem fim, e o relatorio de comparacao vermelho eternamente.
     //
     // `Math.round(x * 100)` compara o que o banco de fato guarda.
-    const cent = (x: number) => Math.round((Number(x) || 0) * 100);
+    // O `+ 1e-6` NAO e frescura. `2080.615` em binario e `2080.61499999999978`,
+    // entao `x * 100` da `208061.4999...` e o arredondamento cai para BAIXO —
+    // enquanto o Postgres, que trabalha em decimal, guarda `2080.62`. Um centavo
+    // de diferenca que nunca some: a comparacao de 26/ago achou dois pedidos
+    // (987 e 1766) reescritos a cada ciclo por isso, e o relatorio ficava
+    // vermelho para sempre por causa deles.
+    //
+    // O epsilon so empurra o valor de volta para o lado decimal certo. Conferido
+    // que nao estraga caso legitimo: 10.005 continua subindo, 10.0049999
+    // continua descendo.
+    const cent = (x: number) => Math.round((Number(x) || 0) * 100 + 1e-6);
     const changed = ex.status !== status
       || cent(ex.total) !== cent(total)
       || cent(ex.subtotal) !== cent(subtotal)
@@ -1821,7 +1831,9 @@ Deno.serve(async (req) => {
         // acusava ~449 pedidos que o sync NAO ia tocar. Portao que acusa o que
         // nao vai acontecer e portao que fica vermelho para sempre, e este e o
         // relatorio que decide religar os SMS.
-        const centDiff = (x: any) => Math.round((Number(x) || 0) * 100);
+        // Mesmo epsilon do `cent()` do upsertOrder — ver a explicacao la. Sem
+        // ele o relatorio acusa pedido que o sync nao vai tocar.
+        const centDiff = (x: any) => Math.round((Number(x) || 0) * 100 + 1e-6);
         const vaiEscrever = statusOrigem !== local.status
           || centDiff(local.total) !== centDiff(totalOrigem)
           || centDiff(local.subtotal) !== centDiff(subtotalOrigem)
