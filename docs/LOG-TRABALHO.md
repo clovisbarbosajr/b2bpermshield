@@ -1915,3 +1915,51 @@ confusao e exatamente como um relatorio vira ordem de apagar coisa boa.
 Sobraram `categorias`, `brands`, `representantes`, `privacy_groups`,
 `company_activities` e `pedido_itens`. Nenhuma decide preco de pedido novo; a
 que mais pesa e `pedido_itens`, que sai no PDF do pedido antigo.
+
+---
+
+## cont. 41 — A comparacao passa a falhar por partes, nao inteira
+
+A `diff_catalog` tem ~430 linhas que nunca rodaram. O `catch` externo do arquivo
+devolve `{error}` com 500 e mais nada: um `null` num canto e o dono ficaria sem
+nenhum numero, sem saber que parte quebrou, e o conserto custaria um redeploy so
+para descobrir onde. Prometi que ela funcionaria de primeira; blindar e o que
+mais se aproxima disso sem poder executar.
+
+**Cada leitura virou secao isolada.** Falhou, ela se nomeia em
+`secoes_com_erro`, forca INCONCLUSIVO, e as outras seguem reportando.
+
+**Elementos nulos no feed.** `(it as any).product || it` estoura se `it` for
+`null`. Tres lugares: produtos, clientes e `product_variants`.
+
+### O erro que o cetico pegou, e era o que mais importava
+
+Na primeira versao a secao so registrava o erro. Mas leitura local que falha
+deixa o mapa **vazio** — e a comparacao rodava mesmo assim, acusando **todo
+produto como "faltando aqui"**. Veredito correto (INCONCLUSIVO) com numeros
+histericos ao lado. Terceira vez hoje que eu quase entrego um relatorio que
+grita em toda linha: o verificador de gatilhos acusava os 24, o comparador de
+preco acusaria quase todo produto, e agora este.
+
+`secao()` passou a devolver se deu certo, e as **seis** comparacoes ficaram
+atras do proprio gate:
+
+| Comparacao | Gate |
+|---|---|
+| produtos | `!prodTrunc && okProd` |
+| variantes | `!prodTrunc && okProd && okVar` |
+| regua sem par | `!precoTrunc && okTab` |
+| regua precos | `!prodTrunc && !precoTrunc && okProd && okTab && okRegua` |
+| regua obsoleta | idem |
+| clientes | `!cliTrunc && okCli` |
+
+Conferido por varredura que nenhuma comparacao ficou solta.
+
+### O que eu continuo NAO podendo afirmar
+
+Nao rodei, e nao da para rodar aqui: a logica vive dentro do `Deno.serve` e fala
+com a API do B2BWave. Escrever um teste que reimplementa o padrao provaria o
+teste, nao o codigo — e esse e exatamente o defeito dos portoes que ja falharam
+em silencio neste projeto. **A primeira execucao e a prova.** O que da para
+dizer: typechecada, so-leitura, criterio conferido campo a campo contra os
+upserts, e agora falha por partes em vez de inteira.

@@ -1635,6 +1635,24 @@ Deno.serve(async (req) => {
       // vira um beco sem saida.
       const truncouEm: string[] = [];
 
+      // Secao que estoura NAO derruba o relatorio inteiro. O `catch` la de fora
+      // devolve so `{error}` com 500 — o dono ficaria sem nenhum numero e sem
+      // saber qual parte quebrou, e o conserto custaria um redeploy so para
+      // descobrir. Cada secao falha sozinha, se nomeia, e forca INCONCLUSIVO.
+      const secoesComErro: string[] = [];
+      // Devolve se DEU CERTO. Quem compara precisa saber: leitura local que
+      // falhou deixa o mapa VAZIO, e comparar contra mapa vazio acusaria todo
+      // produto como "faltando aqui" — veredito certo, numeros histericos. Um
+      // relatorio que grita em toda linha nao e lido.
+      const secao = async (rotulo: string, fn: () => Promise<void>): Promise<boolean> => {
+        try { await fn(); return true; }
+        catch (e: any) {
+          secoesComErro.push(rotulo + ": " + (e?.message || String(e)));
+          truncado = true;
+          return false;
+        }
+      };
+
       // A leitura local pagina pelo `lerTudo` que ja existe neste arquivo — o
       // PostgREST corta em 1000 SEM erro, e foi esse corte silencioso que
       // produziu o incidente dos 1.508 SMS. Eu tinha escrito uma copia identica
@@ -1661,7 +1679,9 @@ Deno.serve(async (req) => {
           prodTrunc = true;
         } else {
           for (const it of lista) {
+            if (!it) continue;                 // elemento nulo no feed estoura em `.product`
             const o = (it as any).product || it;
+            if (!o) continue;
             const n = parseInt(o.id) || 0;
             if (n > 0) prodOrigem.set(n, o);
           }
@@ -1714,10 +1734,12 @@ Deno.serve(async (req) => {
       };
 
       const prodAqui = new Map<number, any>();
-      for (const r of await lerTudo(
-        "produtos", "id, b2bwave_id, sku, nome, preco, ativo, estoque_total", adminClient)) {
-        if ((r as any).b2bwave_id != null) prodAqui.set(Number((r as any).b2bwave_id), r);
-      }
+      const okProd = await secao("ler produtos daqui", async () => {
+        for (const r of await lerTudo(
+          "produtos", "id, b2bwave_id, sku, nome, preco, ativo, estoque_total", adminClient)) {
+          if ((r as any).b2bwave_id != null) prodAqui.set(Number((r as any).b2bwave_id), r);
+        }
+      });
 
       const prodFaltando: any[] = [];
       const prodSobrando: any[] = [];
@@ -1726,7 +1748,7 @@ Deno.serve(async (req) => {
       const prodEstoque: any[] = [];
       let nPrecoDif = 0, nAtivoDif = 0, nEstoqueDif = 0, nProdFalta = 0, nProdSobra = 0;
 
-      if (!prodTrunc) {
+      if (!prodTrunc && okProd) {
         for (const [n, o] of prodOrigem) {
           const local = prodAqui.get(n);
           if (!local) {
@@ -1775,10 +1797,12 @@ Deno.serve(async (req) => {
       // Chave: (produto local, codigo) com trim — o mesmo par que o upsert usa.
       // Sem o trim, codigo com espaco nas pontas viraria "falta la" + "sobra aqui".
       const varAqui = new Map<string, any>();
-      for (const r of await lerTudo(
-        "produto_variantes", "id, produto_id, codigo, quantidade, ativo", adminClient)) {
-        varAqui.set((r as any).produto_id + "|" + String((r as any).codigo ?? "").trim(), r);
-      }
+      const okVar = await secao("ler variantes daqui", async () => {
+        for (const r of await lerTudo(
+          "produto_variantes", "id, produto_id, codigo, quantidade, ativo", adminClient)) {
+          varAqui.set((r as any).produto_id + "|" + String((r as any).codigo ?? "").trim(), r);
+        }
+      });
       // Produtos locais que VIERAM no feed — so esses podem julgar "sobra".
       const locaisNoFeed = new Set<string>();
       for (const [n, r] of prodAqui) {
@@ -1793,7 +1817,7 @@ Deno.serve(async (req) => {
       let nVarQtd = 0, nVarFalta = 0, nVarSobra = 0;
       const vistasNoFeed = new Set<string>();
 
-      if (!prodTrunc) {
+      if (!prodTrunc && okProd && okVar) {
         for (const [n, o] of prodOrigem) {
           const idLocal = idLocalPorB2b.get(n);
           if (!idLocal) continue;   // produto ausente ja foi contado acima
@@ -1805,6 +1829,7 @@ Deno.serve(async (req) => {
           const vs = (o as any).product_variants;
           if (!Array.isArray(vs)) continue;
           for (const v of vs) {
+            if (!v) continue;                  // idem, dentro de product_variants
             const codigo = String(v.code || v.sku || (o.id + "-var")).trim();
             const chave = idLocal + "|" + codigo;
             vistasNoFeed.add(chave);
@@ -1845,21 +1870,25 @@ Deno.serve(async (req) => {
       // `continue` quando nao acha — em SILENCIO. Uma regua inteira pode nunca
       // estar sendo gravada sem nada reclamar. E o primeiro numero deste bloco.
       const tabelasAqui = new Map<string, string>();   // nome minusculo -> id local
-      for (const r of await lerTudo("tabelas_preco", "id, nome", adminClient)) {
-        tabelasAqui.set(String((r as any).nome ?? "").toLowerCase(), String((r as any).id));
-      }
+      const okTab = await secao("ler tabelas de preco daqui", async () => {
+        for (const r of await lerTudo("tabelas_preco", "id, nome", adminClient)) {
+          tabelasAqui.set(String((r as any).nome ?? "").toLowerCase(), String((r as any).id));
+        }
+      });
       const tabelasSemPar: string[] = [];
-      if (!precoTrunc) {
+      if (!precoTrunc && okTab) {
         for (const [, nome] of nomeTabelaOrigem) {
           if (!tabelasAqui.has(nome.toLowerCase())) tabelasSemPar.push(nome);
         }
       }
 
       const reguaAqui = new Map<string, number>();     // "produto|tabela" -> preco
-      for (const r of await lerTudo(
-        "tabela_preco_itens", "produto_id, tabela_preco_id, preco", adminClient)) {
-        reguaAqui.set((r as any).produto_id + "|" + (r as any).tabela_preco_id, num((r as any).preco));
-      }
+      const okRegua = await secao("ler regua de preco daqui", async () => {
+        for (const r of await lerTudo(
+          "tabela_preco_itens", "produto_id, tabela_preco_id, preco", adminClient)) {
+          reguaAqui.set((r as any).produto_id + "|" + (r as any).tabela_preco_id, num((r as any).preco));
+        }
+      });
 
       const reguaFaltando: any[] = [];
       const reguaPreco: any[] = [];
@@ -1868,7 +1897,7 @@ Deno.serve(async (req) => {
       // Pares (produto, tabela) que a ORIGEM tem — para achar o inverso depois.
       const paresDaOrigem = new Set<string>();
 
-      if (!prodTrunc && !precoTrunc) {
+      if (!prodTrunc && !precoTrunc && okProd && okTab && okRegua) {
         for (const [prodB2b, porTabela] of precoPorProduto) {
           const idLocalProd = idLocalPorB2b.get(prodB2b);
           if (!idLocalProd) continue;              // produto ausente ja foi contado
@@ -1905,7 +1934,7 @@ Deno.serve(async (req) => {
       //
       // So julga linha cujo produto VEIO no feed — sem o feed daquele produto
       // nao da para saber se o preco sumiu ou se a leitura e que nao o trouxe.
-      if (!prodTrunc && !precoTrunc) {
+      if (!prodTrunc && !precoTrunc && okProd && okTab && okRegua) {
         const b2bPorLocalProd = new Map<string, number>();
         for (const [b2b, loc] of idLocalPorB2b) b2bPorLocalProd.set(loc, b2b);
         for (const chave of reguaAqui.keys()) {
@@ -1931,7 +1960,9 @@ Deno.serve(async (req) => {
           cliTrunc = true;
         } else {
           for (const it of lista) {
+            if (!it) continue;                 // idem: elemento nulo estoura em `.customer`
             const c = (it as any).customer || it;
+            if (!c) continue;
             const em = String(c.email ?? "").trim().toLowerCase();
             if (em) cliOrigem.set(em, c);
           }
@@ -1940,11 +1971,13 @@ Deno.serve(async (req) => {
       if (cliTrunc) { truncado = true; truncouEm.push("customers.json"); }
 
       const cliAqui = new Map<string, any>();
-      for (const r of await lerTudo(
-        "clientes", "id, email, nome, status, disable_ordering", adminClient)) {
-        const em = String((r as any).email ?? "").trim().toLowerCase();
-        if (em) cliAqui.set(em, r);
-      }
+      const okCli = await secao("ler clientes daqui", async () => {
+        for (const r of await lerTudo(
+          "clientes", "id, email, nome, status, disable_ordering", adminClient)) {
+          const em = String((r as any).email ?? "").trim().toLowerCase();
+          if (em) cliAqui.set(em, r);
+        }
+      });
 
       const cliFaltando: any[] = [];
       const cliSobrando: any[] = [];
@@ -1952,7 +1985,7 @@ Deno.serve(async (req) => {
       const cliBloqueio: any[] = [];
       let nCliStatus = 0, nCliBloqueio = 0, nCliFalta = 0, nCliSobra = 0;
 
-      if (!cliTrunc) {
+      if (!cliTrunc && okCli) {
         for (const [em, c] of cliOrigem) {
           const local = cliAqui.get(em);
           if (!local) {
@@ -1998,8 +2031,9 @@ Deno.serve(async (req) => {
         // para nao ser lido depois da conclusao.
         leitura_truncada: truncado,
         truncou_em: truncouEm,
+        secoes_com_erro: secoesComErro,
         veredito: truncado
-          ? "INCONCLUSIVO — a leitura da origem falhou ou truncou; nao use este relatorio para decidir"
+          ? "INCONCLUSIVO — alguma leitura falhou ou truncou (veja `truncou_em` e `secoes_com_erro`); nao use este relatorio para decidir"
           : (limpo ? "IDENTICO nos campos comparados" : "DIVERGENTE — veja os contadores"),
         produtos: {
           na_origem: prodOrigem.size, aqui: prodAqui.size,
