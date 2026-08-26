@@ -3137,6 +3137,10 @@ export type Database = {
         Args: { _minutos?: number; _on: boolean }
         Returns: undefined
       }
+      set_suppress_stock_notify: {
+        Args: { _minutos?: number; _on: boolean }
+        Returns: undefined
+      }
       set_user_locations: {
         Args: { _categoria_ids: string[]; _user_id: string }
         Returns: number
