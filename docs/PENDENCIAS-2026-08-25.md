@@ -7,10 +7,18 @@
 > reimport e seis furos de dinheiro. Cinco rodadas de cético derrubaram **19
 > coisas minhas** antes de a última voltar limpa.
 >
-> **ORDEM OBRIGATÓRIA, na mesma sessão:** 1) os 8 SQL · 2) push + deploy das edge
-> functions `b2bwave-sync` **e** `notify-dispatch` (as duas juntas — uma sozinha
-> reabre o furo) · 3) publish. Entre o bloco 6 e o publish o cupom fica sem
-> funcionar no portal.
+> **ORDEM OBRIGATÓRIA, na mesma sessão:** 1) os 8 SQL · 2) push · 3) deploy de
+> **`notify-dispatch` PRIMEIRO**, depois `b2bwave-sync` · 4) publish · 5) só por
+> último, se quiser, abrir a torneira (`pausar_envios(false)`).
+>
+> A ordem entre as duas edge functions não é detalhe: a guarda `somente_admin`
+> mora dentro do `notify-dispatch`. Subir o `b2bwave-sync` primeiro faz ele
+> mandar a marca para um destinatário que ainda não sabe lê-la — o campo é
+> ignorado e o cliente volta para a lista. O cron roda a cada 15 min, então a
+> janela é real. E o pior não é o risco em si: é você **acreditar** que a
+> proteção está de pé e decidir religar em cima dessa crença.
+>
+> Entre o bloco 6 e o publish o cupom fica sem funcionar no portal.
 >
 > **Não tocar no botão "Resume sending"** (tela de Notifications) antes do deploy
 > das edge functions: ele abre a torneira geral, e com o sync antigo ainda no ar

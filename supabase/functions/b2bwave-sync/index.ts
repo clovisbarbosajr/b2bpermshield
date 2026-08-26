@@ -1615,10 +1615,16 @@ Deno.serve(async (req) => {
         }
 
         // ESPELHA o `changed` do upsertOrder, com igualdade CRUA (sem arredondar).
-        // O `cent()` abaixo e para dinheiro de verdade; este e para responder "o
-        // proximo tick escreve?". Com ruido de float, o sync reescreve e — em
-        // pedido de menos de 7 dias — RELIGA `notificavel`, apagando o
-        // kill-switch do admin. Arredondar aqui esconderia exatamente isso.
+        // O `cent()` (cinquenta linhas ACIMA) e para dinheiro de verdade; este e
+        // para responder "o proximo tick escreve?", que e outra pergunta.
+        //
+        // (Estas linhas ja diziam que o ruido de float fazia o sync RELIGAR
+        //  `notificavel` num pedido de menos de 7 dias. Isso deixou de ser
+        //  verdade com a trava de data: ruido so acontece em pedido que JA tem
+        //  `data_origem`, e ai `podeGravarData` e falso e o patch nem toca a
+        //  marca. A frase contradizia o comentario dezenove linhas abaixo —
+        //  quinta vez nesta sessao que um comentario meu sobreviveu a mudanca
+        //  que o tornou falso.)
         const vaiEscrever = statusOrigem !== local.status
           || Number(local.total) !== totalOrigem
           || Number(local.subtotal) !== subtotalOrigem
@@ -1630,7 +1636,9 @@ Deno.serve(async (req) => {
           }
         }
 
-        // O QUE REALMENTE IMPORTA: qual escrita ainda mexe em `notificavel`.
+        // QUAL ESCRITA AINDA MEXE EM `notificavel` — a resposta esta em
+        // `nReabre`, computado acima; aqui embaixo nao ha codigo, so o registro
+        // de por que o segundo contador saiu.
         //
         // Antes da trava de data, escrever em QUALQUER pedido recente religava
         // `notificavel`. Nao mais: o `upsertOrder` so sobe a marca no REPARO —
