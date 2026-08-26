@@ -2046,3 +2046,47 @@ Removida, volta a limpo. Sem isso, "7 OK" nao provava nada.
 E Python; a suite e Node. Amarrar `npm test` a um interpretador que pode nao
 existir noutra maquina troca um risco por outro. Fica como pre-voo deliberado,
 mesma categoria do `checar-sync-preflight.py`: rodar antes de entregar SQL.
+
+---
+
+## cont. 44 — As pendentes desfazem alguma correcao ja aplicada?
+
+`CREATE OR REPLACE FUNCTION` sobrescreve o corpo INTEIRO. Se eu escrevi a versao
+pendente a partir de uma copia antiga, rodar ela **desfaz** a correcao que ja
+esta no ar — sem erro, sem aviso, e o PASSO 8 diria `OK` porque a funcao existe.
+Nao e hipotese: hoje mesmo uma substituicao minha apagou o cabecalho de duas
+funcoes de migrations que eu ja tinha mandado rodar.
+
+`scripts/conferir-regressao-funcao.py` acha, para cada funcao redefinida pelas 7
+pendentes, a ultima definicao anterior, e conta o que sai e o que entra.
+
+### Resultado
+
+**Cinco so ACRESCENTAM** (0 linhas removidas) — nada desfeito:
+`fn_reserve_stock_on_order_item`, `fn_release_stock_on_item_delete`,
+`fn_adjust_stock_on_order_status`, `categoria_visivel_para`,
+`produto_visivel_para`.
+
+**Sete sao NOVAS.**
+
+**Duas reescrevem de verdade**, e as duas foram conferidas a mao:
+
+`increment_coupon_usage` (−9/+2) — vira no-op de proposito. O consumo passou
+para o gatilho. Ja documentado no proprio arquivo.
+
+`cliente_conta_liberada` (−22/+4) — o caso que exigia atencao. Entre as 22
+linhas removidas estava:
+
+    SELECT COALESCE(dono.status, me.status)::text, ...
+    LEFT JOIN public.clientes dono ON dono.id = me.parent_customer_id
+
+Isto e **sub-usuario herdando a situacao da empresa**: empresa suspensa suspende
+o funcionario. Se tivesse sumido, sub-usuario passaria a ser julgado pelo
+proprio status — e funcionario de empresa suspensa voltaria a ver preco.
+
+Fui ver: o trecho **migrou inteiro** para `conta_liberada_de(_cli_id)`, LEFT
+JOIN incluso, so trocando a chave de `me.user_id = _uid` para `me.id = _cli_id`,
+que e o que o refactor exigia. E `cliente_conta_liberada` resolve a ficha a
+partir de `auth.uid()`, mantem o atalho de staff no topo, e delega. Equivalente.
+
+**Nenhuma das 7 desfaz correcao aplicada.**
