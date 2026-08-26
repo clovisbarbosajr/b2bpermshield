@@ -364,13 +364,44 @@ async function upsertOrder(
     // Com ela, o primeiro ciclo do sync grava a data real da origem e devolve a
     // voz a quem merece. Custa um UPDATE por pedido, uma unica vez.
     const precisaReparar = submittedAt !== null && !ex.data_origem;
+
+    // A DATA SO ANDA PARA TRAS. Nunca para a frente.
+    //
+    // Antes `data_origem` era regravada INCONDICIONALMENTE toda vez que a origem
+    // informasse algo. Se o B2BWave devolvesse uma `submitted_at` atualizada de
+    // um pedido antigo — edicao la, correcao de fuso, migracao de base — a
+    // cascata era esta:
+    //   1. o pedido de 2025 passa a ter `data_origem` recente;
+    //   2. `recenteDeVerdade` vira true e o MESMO update religa `notificavel`;
+    //   3. os tres portoes de idade passam a medir contra a data nova;
+    //   4. o cliente recebe SMS sobre uma compra velha.
+    // A forma exata do incidente de 25/ago, entrando pela data em vez do teto.
+    //
+    // Gravar so quando esta VAZIA (o reparo acima) ou quando a nova e mais
+    // ANTIGA mata a cascata na origem: sem data nova "recente", nao ha
+    // `notificavel` religado nem portao enganado.
+    //
+    // Custo aceito, dito por inteiro: QUALQUER avanco de data e ignorado, nao
+    // so o de fuso. Um pedido importado com data de 2020 que a origem depois
+    // corrija para 2026 fica em 2020 — e mudo — para sempre. Falha fechada, mas
+    // nao sao "alguns minutos": e permanente, e o conserto e a mao.
+    const _dtAtual = ex.data_origem ? new Date(ex.data_origem).getTime() : null;
+    const _dtNova  = submittedAt ? new Date(submittedAt).getTime() : null;
+    const podeGravarData = _dtNova !== null && Number.isFinite(_dtNova)
+      && (_dtAtual === null || !Number.isFinite(_dtAtual) || _dtNova < _dtAtual);
     const changed = ex.status !== status || Number(ex.total) !== total ||
       Number(ex.subtotal) !== subtotal || (ex.quantidade_total ?? 0) !== quantidade;
     if (!changed && !precisaReparar) return "skipped";
     const pago = pickPago(o);
     const upd = await db.from("pedidos").update({
       status, subtotal, total, quantidade_total: quantidade,
-      // `data_origem` SEMPRE que a origem informar — e o dado verdadeiro.
+      // `data_origem` so quando `podeGravarData` (ver a trava acima): quando
+      // esta VAZIA, ou quando a data da origem e mais ANTIGA que a guardada.
+      // Nunca para a frente.
+      //
+      // (Esta linha ja dizia "SEMPRE que a origem informar". Ficou falsa no
+      //  momento em que a trava entrou, tres linhas acima, e sobreviveu ao diff
+      //  intacta — e o primeiro comentario que alguem le ao abrir este objeto.)
       //
       // `notificavel`, porem, so sobe de false para true quando o pedido e
       // GENUINAMENTE recente. Duas razoes:
@@ -382,7 +413,18 @@ async function upsertOrder(
       //     tick do sync ressuscitava. O COMMENT da coluna promete o contrario.
       // Descer para false continua incondicional: sem data, nao fala.
       ...(submittedAt
-        ? { data_origem: submittedAt, ...(recenteDeVerdade ? { notificavel: true } : {}) }
+        ? (podeGravarData
+            // `notificavel` sobe SO no REPARO (`_dtAtual === null`): pedido que
+            // nunca teve data, e portanto nunca teve voz. Com a data andando
+            // para TRAS dentro dos 7 dias, `recenteDeVerdade` tambem fica true —
+            // e religar ali apagaria o kill-switch do admin num pedido velho.
+            // Fechar so a direcao comum e deixar a rara aberta seria pior que
+            // nao fechar: da confianca sem dar protecao.
+            ? { data_origem: submittedAt,
+                ...(_dtAtual === null && recenteDeVerdade ? { notificavel: true } : {}) }
+            // Data igual ou mais nova: nao mexe. Nem na data, nem em
+            // `notificavel` — este ramo e a trava descrita acima.
+            : {})
         : { notificavel: false }),
       // So entra no patch quando o B2BWave realmente informou — ver pickPago.
       ...(pago === undefined ? {} : { is_paid: pago }),
@@ -1554,7 +1596,7 @@ Deno.serve(async (req) => {
             // NOTA: este contador cobre so o reparo. `notificavel: true` tambem
             // e gravado em QUALQUER update de pedido recente, mesmo com
             // `data_origem` ja presente — esse caso cai em
-            // `proximo_tick_escreve_em_pedido_recente`, que e o numero a olhar.
+            // `proximo_tick_religa_notificavel`, que e o numero a olhar.
             reparoReabre.push({ pedido: n, data_origem: dataOrigem, notificavel_hoje: local.notificavel });
           }
         }
@@ -1578,19 +1620,24 @@ Deno.serve(async (req) => {
           }
         }
 
-        // O QUE REALMENTE IMPORTA: escrever num pedido velho e inofensivo (nao
-        // mexe em `notificavel` e ainda esbarra na trava de idade). O risco e
-        // escrever num pedido RECENTE, porque ai o `upsertOrder` grava
-        // `notificavel: true` e apaga o kill-switch do admin.
+        // O QUE REALMENTE IMPORTA: qual escrita ainda mexe em `notificavel`.
         //
-        // `nVaiEscrever` sozinho travaria o portao para sempre: o proprio
-        // `changed` compara float cru, entao os 1.147 aparecem eternamente. Um
-        // portao que nunca fica verde e um portao que todo mundo ignora — foi o
-        // argumento que me fez tirar `nReparo`, e eu tinha reconstruido o mesmo
-        // problema aqui.
+        // Antes da trava de data, escrever em QUALQUER pedido recente religava
+        // `notificavel`. Nao mais: o `upsertOrder` so sobe a marca no REPARO —
+        // quando `data_origem` esta VAZIA aqui. Pedido recente cuja data ja bate
+        // com a origem passou a ser inofensivo.
+        //
+        // Contar os inofensivos deixaria este portao vermelho PARA SEMPRE, ja
+        // que o `changed` compara float cru e os 1.147 reaparecem a cada leitura.
+        // Portao que nunca fica verde e portao que todo mundo aprende a ignorar
+        // — foi o argumento que me fez tirar `nReparo` daqui, e eu tinha
+        // reconstruido o mesmo problema com outro nome.
         const recente = dataOrigem !== null
           && (Date.now() - new Date(dataOrigem).getTime()) < TETO_DIAS_IMPORTADO_MS;
-        if (vaiEscrever && recente) {
+        // `local.data_origem` VAZIA = o proximo tick vai reparar, e o reparo e o
+        // unico caminho que ainda religa `notificavel`.
+        const vaiRepararEReligar = !local.data_origem && recente;
+        if (vaiEscrever && vaiRepararEReligar) {
           nEscreveRecente++;
           if (escreveRecenteEx.length < 20) {
             escreveRecenteEx.push({ pedido: n, data_origem: dataOrigem, notificavel_hoje: local.notificavel, status: { la: statusOrigem, aqui: local.status } });
@@ -1723,7 +1770,7 @@ Deno.serve(async (req) => {
           reparo_pendente: nReparo,
           reparo_reabre_notificavel: nReabre,
           proximo_tick_escreve: nVaiEscrever,
-          proximo_tick_escreve_em_pedido_recente: nEscreveRecente,
+          proximo_tick_religa_notificavel: nEscreveRecente,
         },
         aviso: truncado
           ? "LEITURA INCOMPLETA — a lista da origem nao terminou. `sobrando_aqui` aqui NAO significa lixo: sao pedidos que a origem ainda nao listou. Rode de novo com budget_ms maior."
@@ -1737,7 +1784,7 @@ Deno.serve(async (req) => {
           reparo_pendente: reparoPendente,
           reparo_reabre_notificavel: reparoReabre,
           proximo_tick_escreve: vaiEscreverEx,
-          proximo_tick_escreve_em_pedido_recente: escreveRecenteEx,
+          proximo_tick_religa_notificavel: escreveRecenteEx,
         },
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });
