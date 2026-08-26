@@ -1440,7 +1440,22 @@ Deno.serve(async (req) => {
 
       // Load existing customers for comparison
       // PAGINADO: truncar aqui fazia o sync reinserir cliente a cada ciclo.
-      const existingCustomers = await lerTudo("clientes", "id, email, nome, empresa, telefone, status, tabela_preco_id, representante_id, endereco, cidade, cep, created_at, discount, parent_customer_id", adminClient);
+      // TODAS as colunas que o sync grava precisam vir aqui.
+      //
+      // A comparacao abaixo passou a iterar sobre o payload inteiro. Coluna que
+      // NAO estivesse neste SELECT chegaria como `undefined`, seria lida como
+      // diferente do valor da origem, e o sync reescreveria TODO cliente a cada
+      // ciclo — ruido eterno, e a ficha do cliente sendo sobrescrita sem motivo
+      // de 15 em 15 minutos.
+      //
+      // Se um campo novo entrar no payload, ele precisa entrar aqui tambem.
+      const existingCustomers = await lerTudo(
+        "clientes",
+        "id, email, nome, empresa, telefone, status, tabela_preco_id, representante_id, " +
+        "endereco, endereco2, cidade, estado, cep, pais, website, company_number, " +
+        "discount, minimum_order_value, customer_reference_code, admin_comments, " +
+        "disable_ordering, billing_same_as_contact, is_active, created_at, parent_customer_id",
+        adminClient);
       const existingMap = new Map<string, any>();
       for (const c of existingCustomers || []) existingMap.set(c.email.toLowerCase(), c);
 
@@ -1505,12 +1520,46 @@ Deno.serve(async (req) => {
           // Backfill one-shot da data real + dados de endereço.
           const dateFixNeeded = !!row.created_at && existing.created_at &&
             Math.abs(Date.parse(existing.created_at) - Date.parse(row.created_at)) > 1000;
-          const changed = existing.nome !== row.nome || existing.empresa !== row.empresa ||
-            existing.telefone !== row.telefone || existing.status !== row.status ||
-            (row.tabela_preco_id !== undefined && existing.tabela_preco_id !== row.tabela_preco_id) ||
-            (row.representante_id !== undefined && existing.representante_id !== row.representante_id) ||
-            existing.endereco !== row.endereco || existing.cidade !== row.cidade || existing.cep !== row.cep ||
-            Number(existing.discount ?? 0) !== Number(row.discount ?? 0) || dateFixNeeded;
+          // COMPARA TODOS OS CAMPOS QUE O SYNC GRAVA, nao uma lista escolhida a
+          // mao.
+          //
+          // A versao anterior olhava 11 campos. Ficavam de fora, entre outros:
+          // `estado`, `pais`, `endereco2`, `minimum_order_value`,
+          // `disable_ordering`, `is_active`, `website`, `company_number`,
+          // `customer_reference_code`, `admin_comments`,
+          // `billing_same_as_contact`. Mudar qualquer um deles no B2BWave dava
+          // "nao mudou" aqui, e a alteracao NUNCA chegava.
+          //
+          // Dois desses decidem coisa seria: `disable_ordering` (se o cliente
+          // pode comprar) e `minimum_order_value` (o minimo que o servidor
+          // exige desde 20260825390000). O dono pediu clone identico —
+          // "TUDO que esta la tem que estar no nosso, alteracoes, updates".
+          //
+          // Iterar sobre `row` e melhor que listar: campo novo acrescentado ao
+          // payload amanha entra na comparacao sozinho. Lista escrita a mao
+          // envelhece em silencio, que foi exatamente o que aconteceu aqui.
+          const iguais = (a: unknown, b2: unknown) => {
+            // NULL e "" vem do mesmo lugar: `c.campo || null` no payload contra
+            // coluna que pode ter string vazia. Tratar como diferente faria o
+            // sync reescrever a ficha inteira todo ciclo.
+            const va = a === null || a === undefined ? "" : a;
+            const vb = b2 === null || b2 === undefined ? "" : b2;
+            if (typeof va === "number" || typeof vb === "number") {
+              return Number(va || 0) === Number(vb || 0);
+            }
+            if (typeof va === "boolean" || typeof vb === "boolean") {
+              return Boolean(va) === Boolean(vb);
+            }
+            return String(va) === String(vb);
+          };
+          const camposMudados = Object.keys(row).filter((k) => {
+            // `created_at` tem tratamento proprio (`dateFixNeeded`): a origem
+            // manda com precisao diferente e a comparacao textual daria
+            // "mudou" sempre.
+            if (k === "created_at") return false;
+            return !iguais((existing as any)[k], (row as any)[k]);
+          });
+          const changed = camposMudados.length > 0 || dateFixNeeded;
           if (changed) {
             const r = await adminClient.from("clientes").update(row).eq("id", existing.id);
             if (r.error) errors++; else synced++;
