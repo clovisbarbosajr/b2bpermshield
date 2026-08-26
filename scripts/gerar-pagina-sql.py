@@ -80,6 +80,46 @@ SELECT e.tipo, e.item,
 FROM esperado e
 ORDER BY situacao, e.tipo, e.item;"""
 
+PRE_CHECK = """-- Diz, bloco a bloco, o que JA esta no banco. Rode esta ANTES de tudo.
+-- APLICADO = pode pular esse bloco.  FALTA = precisa rodar.
+WITH alvo(passo, bloco, tipo, item) AS (
+  VALUES
+    (1, 'Estoque de tamanho/cor',        'coluna',  'produto_variantes.estoque_reservado'),
+    (2, 'Item recusa produto invalido',  'gatilho', 'pedido_itens.trg_item_produto_valido'),
+    (3, 'Log de auditoria nao forjavel', 'gatilho', 'activity_logs.trg_activity_log_identidade'),
+    (4, 'Item nao nasce enviado',        'gatilho', 'pedido_itens.a_trg_lock_item_cols'),
+    (5, 'Preco exige conta liberada',    'politica','tabela_preco_itens'),
+    (6, 'O "ver como" diz a verdade',    'funcao',  'conta_liberada_de'),
+    (7, 'Limite de uso do cupom',        'coluna',  'pedidos.cupom_consumido'),
+    (8, 'Pedido minimo no servidor',     'gatilho', 'pedido_itens.trg_pedido_minimo')
+)
+SELECT a.passo, a.bloco,
+  CASE
+    WHEN a.tipo = 'coluna' AND EXISTS (
+      SELECT 1 FROM information_schema.columns c
+       WHERE c.table_schema = 'public'
+         AND c.table_name  = split_part(a.item, '.', 1)
+         AND c.column_name = split_part(a.item, '.', 2)) THEN 'APLICADO'
+    WHEN a.tipo = 'gatilho' AND EXISTS (
+      SELECT 1 FROM pg_trigger t
+       WHERE t.tgrelid = ('public.' || split_part(a.item, '.', 1))::regclass
+         AND NOT t.tgisinternal
+         AND t.tgname = split_part(a.item, '.', 2)) THEN 'APLICADO'
+    WHEN a.tipo = 'funcao' AND EXISTS (
+      SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = a.item) THEN 'APLICADO'
+    -- O bloco 5 nao cria objeto novo: ele acrescenta uma condicao a politicas
+    -- que ja existem. So da para reconhece-lo pelo TEXTO da politica.
+    WHEN a.tipo = 'politica' AND EXISTS (
+      SELECT 1 FROM pg_policies pol
+       WHERE pol.schemaname = 'public' AND pol.tablename = a.item
+         AND COALESCE(pol.qual, '') LIKE '%cliente_conta_liberada%') THEN 'APLICADO'
+    ELSE 'FALTA'
+  END AS situacao
+FROM alvo a
+ORDER BY a.passo;"""
+
+
 EDGE = ["send-email", "stripe-checkout", "register-customer", "company-member", "b2bwave-sync"]
 
 
@@ -100,11 +140,15 @@ TOTAL = len(blocos) + 1   # + a conferência final
 def card(n, titulo, arq, aviso, sql, tipo="sql"):
     av = (f'<p class="aviso">{html.escape(aviso)}</p>' if aviso else '')
     sub = (f'<p class="arq">{html.escape(arq)}</p>' if arq else '')
+    # O passo 0 e conferencia, nao trabalho: fica fora da contagem, senao o
+    # progresso diria 1/10 antes de o dono ter rodado nada.
+    fora = ' data-fora="1"' if n == 0 else ''
+    rot = "0" if n == 0 else str(n)
     return f'''<section class="passo" id="p{n}">
   <header class="cab">
     <label class="marca">
-      <input type="checkbox" class="feito" data-n="{n}" aria-label="Marcar passo {n} como feito">
-      <span class="num"><b>{n}</b></span>
+      <input type="checkbox" class="feito" data-n="{n}" aria-label="Marcar passo {n} como feito"{fora}>
+      <span class="num"><b>{rot}</b></span>
     </label>
     <div class="tit">
       <h2>{html.escape(titulo)}</h2>
@@ -119,7 +163,10 @@ def card(n, titulo, arq, aviso, sql, tipo="sql"):
 </section>'''
 
 
-cards = []
+cards = [card(0, "Antes de tudo: o que já está aplicado?", None,
+              "Rode esta primeiro. O que voltar APLICADO você pula; o que voltar FALTA você roda. "
+              "Nenhum dos 8 blocos foi rodado ainda até onde eu sei — esta consulta confirma no banco, "
+              "em vez de você confiar na minha memória.", PRE_CHECK)]
 for i, b in enumerate(blocos, start=1):
     cards.append(card(i, b["titulo"], b["arq"], b["aviso"], b["sql"]))
 cards.append(card(TOTAL, "Conferência final", None,
@@ -227,7 +274,7 @@ PAGINA = f'''<title>SQL do PermShield</title>
 <div class="env">
   <div class="topo">
     <h1>SQL pendente — rodar no editor do Lovable</h1>
-    <p>Oito blocos, um de cada vez, na ordem. Marque o número ao terminar cada um; a marcação fica salva se você fechar a página.</p>
+    <p>Comece pelo bloco <b>0</b>: ele diz o que já está no banco e o que falta. Depois, os oito, um de cada vez, na ordem. Marque o número ao terminar; a marcação fica salva se você fechar a página.</p>
   </div>
 
   <div class="barra">
@@ -262,8 +309,10 @@ PAGINA = f'''<title>SQL do PermShield</title>
       cx.checked = feitos.has(n);
       cx.closest(".passo").classList.toggle("ok", cx.checked);
     }});
-    document.getElementById("cont").textContent = feitos.size + "/" + total;
-    document.getElementById("trilho").style.width = (feitos.size / total * 100) + "%";
+    // O passo 0 nao conta.
+    const n = [...feitos].filter(x => x > 0).length;
+    document.getElementById("cont").textContent = n + "/" + total;
+    document.getElementById("trilho").style.width = (n / total * 100) + "%";
   }}
 
   document.querySelectorAll(".feito").forEach(cx => {{
