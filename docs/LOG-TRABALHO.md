@@ -2159,3 +2159,38 @@ erro.
 protegida e exige login de admin — entrar com senha e coisa que eu nao faco. O
 que da para afirmar e que compila, transforma e nao quebra o modulo; se algo
 estiver torto visualmente, aparece na primeira vez que ele abrir a tela.
+
+---
+
+## cont. 47 — O arquivo de estado volta a dizer a verdade
+
+O `PENDENCIAS-2026-08-25.md` e o arquivo que ancora "onde estamos" — e a
+instrucao do dono manda le-lo primeiro. Depois de varios turnos de trabalho ele
+tinha ficado para tras, e pior: minhas emendas sucessivas truncaram a secao 1.4
+no meio de uma frase ("Criada em 25/ago," seguido de outro paragrafo).
+
+Arquivo de estado desatualizado e a mesma classe de defeito que passei o dia
+consertando no codigo: a coisa que existe para dizer a verdade dizendo outra.
+
+Reescrevi a secao 1.4 inteira (agora com os DOIS botoes da tela, o que cada um
+compara, e o aviso de que nenhuma das duas jamais rodou) e acrescentei a secao
+5.1 com os quatro pre-voos.
+
+Rodei os quatro de novo agora, para o que esta escrito la ser verdade HOJE e nao
+"era verdade quando escrevi":
+
+    conferir-colunas.py           -> 7 OK, nenhuma coluna inexistente
+    checar-sync-preflight.py      -> nenhum gatilho novo; os 8 com veredito
+    gerar-runbook.py              -> 16 blocos conferidos contra o repositorio
+    conferir-regressao-funcao.py  -> 14 funcoes, nenhuma desfaz correcao
+
+## Onde a fila esta, de verdade
+
+**Do meu lado nao sobrou trabalho produtivo.** A fila de defeitos fechou nas
+levas A-H; o que veio depois foi conferencia, e ela tambem acabou: os 7 SQL
+estao verificados em quatro frentes, a comparacao cobre tudo que decide dinheiro
+ou acesso, e agora tem botao para roda-la.
+
+O que falta depende inteiramente do dono: rodar os 7 SQL, publicar, pedir o
+deploy das 5 edge functions, e clicar nos dois botoes. Inventar uma nona
+verificacao seria atividade, nao trabalho.

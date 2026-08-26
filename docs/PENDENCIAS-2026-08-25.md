@@ -40,21 +40,26 @@ publicada daria "idêntico" com o critério errado.
 Push no GitHub **não** publica edge function. Sem este passo, as correções de
 e-mail, pagamento, cadastro e equipe não entram.
 
-### 1.4 Avisar, para eu rodar a comparação com o B2BWave
+### 1.4 Avisar — aí rodam as duas conferências
 
-Duas comparações, as duas só leitura: `diff_orders` (pedidos) e
-`diff_catalog` (produtos, variantes, régua de preço, clientes) — esta última criada em 25/ago.
-O `diff_orders` também compara as **linhas** dos pedidos. Fora de conferência
-ficam só metadados de catálogo (categorias, marcas, representantes, grupos de
-privacidade, atividades) — nenhum decide preço, estoque ou acesso.
-Criada em 25/ago,
-porque a comparação antiga cobria só pedidos e o sync escreve 13 tabelas.
-**`diff_catalog` nunca foi executada** — a primeira rodada é prova, não formalidade.
+Na tela **B2B Wave Sync**, cartão **“Conferência — só leitura”**, dois botões:
 
-Comparo pedido a pedido, só leitura, sem enviar nada — conferido: o
-`diff_orders` não tem `insert`/`update`/`upsert`/`delete`, e pagina os dois
-lados (foi a falta de paginação que causou o incidente dos 1.508 SMS). **A sincronização só volta
-depois disso, e a notificação só quando o dono mandar.**
+| Botão | O que compara |
+|---|---|
+| **Comparar Pedidos** | pedidos, status, valores, pagamento e **as linhas** de cada pedido |
+| **Comparar Catálogo** | produtos, tamanhos/cores, **régua de preço** e clientes |
+
+Nenhuma das duas escreve nada, e nenhuma envia e-mail ou SMS. Clique nas duas e
+me mande o resultado (tem botão de copiar).
+
+Fora de conferência ficam só metadados de catálogo — categorias, marcas,
+representantes, grupos de privacidade e atividades. Nenhum decide preço, estoque
+ou acesso, e o próprio relatório diz isso no corpo.
+
+> **Nenhuma das duas jamais foi executada.** A primeira rodada é prova, não
+> formalidade — a `diff_catalog` tem ~430 linhas que nunca rodaram.
+
+**A sincronização só volta depois disso, e a notificação só quando você mandar.**
 
 ---
 
@@ -162,6 +167,28 @@ próprio (SPF é o que evita o e-mail cair em spam).
 
 **Com o dono, não comigo:** trocar a senha do admin `jess@zapsupplies.com`, que
 está legível no histórico do git. Remover do arquivo não basta.
+
+---
+
+## 5.1 PRÉ-VOOS — rodados por mim antes de te entregar SQL
+
+Não entram no `npm test` (são Python; a suíte é Node — amarrar uma à outra
+troca um risco por outro). São conferências deliberadas, e **os quatro já
+rodaram sobre as 7 migrations pendentes**:
+
+| Script | O que garante | Resultado |
+|---|---|---|
+| `scripts/conferir-colunas.py` | nenhuma coluna citada que não exista | **7 OK** |
+| `scripts/conferir-regressao-funcao.py` | nenhuma refaz função e desfaz correção aplicada | **nenhuma desfaz** |
+| `scripts/gerar-runbook.py` | o SQL do seu arquivo bate com o do repositório | **16 blocos conferidos** |
+| `scripts/checar-sync-preflight.py` | nenhum gatilho novo dispara sobre os ~1.150 pedidos importados | **8 conferidos à mão, nenhum dispara** |
+
+Os três primeiros nasceram de erro meu que chegou perto do seu banco; o quarto,
+do incidente dos 1.508 SMS. Cada um foi provado com um mutante antes de eu
+confiar nele.
+
+> **Não edite `RODAR-NO-PERMSHIELD-parte2.md` à mão** — ele é gerado. Edite
+> `scripts/gerar-runbook.py` e rode de novo.
 
 ---
 
