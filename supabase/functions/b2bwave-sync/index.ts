@@ -1677,10 +1677,16 @@ Deno.serve(async (req) => {
       let precoTrunc = false;
       const precoPorProduto = new Map<number, Map<number, number>>();
       let tabelaPadraoId: number | null = null;
+      // Nome de cada tabela da origem: e por NOME (minusculo) que o sync casa
+      // com a tabela local, entao o nome tem que vir junto.
+      const nomeTabelaOrigem = new Map<number, string>();
       try {
         const pls = await fetchAllPages("price_lists.json", username, apiKey);
         if (!Array.isArray(pls)) throw new Error("price_lists nao-array");
-        for (const pl of pls) if ((pl as any).is_default === true) tabelaPadraoId = Number((pl as any).id);
+        for (const pl of pls) {
+          nomeTabelaOrigem.set(Number((pl as any).id), String((pl as any).name ?? ""));
+          if ((pl as any).is_default === true) tabelaPadraoId = Number((pl as any).id);
+        }
         const pps = await fetchAllPaginated("product_prices.json", username, apiKey);
         if (!Array.isArray(pps)) throw new Error("product_prices nao-array");
         for (const pp of pps) {
@@ -1831,6 +1837,89 @@ Deno.serve(async (req) => {
         }
       }
 
+      // ---------- REGUA DE PRECO (tabela_preco_itens) ----------
+      // A tabela mais cara que faltava: divergencia aqui sai dinheiro em TODO
+      // pedido futuro, nao so no historico.
+      //
+      // O sync casa a tabela da origem com a local pelo NOME em minusculo, e
+      // `continue` quando nao acha — em SILENCIO. Uma regua inteira pode nunca
+      // estar sendo gravada sem nada reclamar. E o primeiro numero deste bloco.
+      const tabelasAqui = new Map<string, string>();   // nome minusculo -> id local
+      for (const r of await lerTudo("tabelas_preco", "id, nome", adminClient)) {
+        tabelasAqui.set(String((r as any).nome ?? "").toLowerCase(), String((r as any).id));
+      }
+      const tabelasSemPar: string[] = [];
+      if (!precoTrunc) {
+        for (const [, nome] of nomeTabelaOrigem) {
+          if (!tabelasAqui.has(nome.toLowerCase())) tabelasSemPar.push(nome);
+        }
+      }
+
+      const reguaAqui = new Map<string, number>();     // "produto|tabela" -> preco
+      for (const r of await lerTudo(
+        "tabela_preco_itens", "produto_id, tabela_preco_id, preco", adminClient)) {
+        reguaAqui.set((r as any).produto_id + "|" + (r as any).tabela_preco_id, num((r as any).preco));
+      }
+
+      const reguaFaltando: any[] = [];
+      const reguaPreco: any[] = [];
+      const reguaObsoleta: any[] = [];
+      let nReguaFalta = 0, nReguaPreco = 0, nReguaPares = 0, nReguaObsoleta = 0;
+      // Pares (produto, tabela) que a ORIGEM tem — para achar o inverso depois.
+      const paresDaOrigem = new Set<string>();
+
+      if (!prodTrunc && !precoTrunc) {
+        for (const [prodB2b, porTabela] of precoPorProduto) {
+          const idLocalProd = idLocalPorB2b.get(prodB2b);
+          if (!idLocalProd) continue;              // produto ausente ja foi contado
+          for (const [tabB2b, precoLa] of porTabela) {
+            const nome = nomeTabelaOrigem.get(tabB2b);
+            if (nome == null) continue;            // tabela desconhecida na origem
+            const idLocalTab = tabelasAqui.get(nome.toLowerCase());
+            if (!idLocalTab) continue;             // ja contado em `tabelasSemPar`
+            nReguaPares++;
+            const chave = idLocalProd + "|" + idLocalTab;
+            paresDaOrigem.add(chave);
+            if (!reguaAqui.has(chave)) {
+              nReguaFalta++;
+              if (reguaFaltando.length < LIMITE_EX) {
+                reguaFaltando.push({ produto_b2bwave: prodB2b, tabela: nome, preco_la: precoLa });
+              }
+              continue;
+            }
+            if (!mesmoDinheiro(precoLa, reguaAqui.get(chave))) {
+              nReguaPreco++;
+              if (reguaPreco.length < LIMITE_EX) {
+                reguaPreco.push({ produto_b2bwave: prodB2b, tabela: nome,
+                                  la: precoLa, aqui: reguaAqui.get(chave) });
+              }
+            }
+          }
+        }
+      }
+
+      // PRECO OBSOLETO. O sync so faz `upsert` em `tabela_preco_itens` — nunca
+      // `delete`. Preco TIRADO de uma regua no B2BWave continua valendo aqui
+      // para sempre, e o cliente segue comprando pelo valor antigo. Isto nao e
+      // so lacuna do relatorio: e dinheiro saindo errado, em silencio.
+      //
+      // So julga linha cujo produto VEIO no feed — sem o feed daquele produto
+      // nao da para saber se o preco sumiu ou se a leitura e que nao o trouxe.
+      if (!prodTrunc && !precoTrunc) {
+        const b2bPorLocalProd = new Map<string, number>();
+        for (const [b2b, loc] of idLocalPorB2b) b2bPorLocalProd.set(loc, b2b);
+        for (const chave of reguaAqui.keys()) {
+          const [idProd] = chave.split("|");
+          const b2b = b2bPorLocalProd.get(idProd);
+          if (b2b == null || !prodOrigem.has(b2b)) continue;
+          if (paresDaOrigem.has(chave)) continue;
+          nReguaObsoleta++;
+          if (reguaObsoleta.length < LIMITE_EX) {
+            reguaObsoleta.push({ produto_b2bwave: b2b, preco_aqui: reguaAqui.get(chave) });
+          }
+        }
+      }
+
       // ---------- CLIENTES ----------
       // Correlacao por E-MAIL minusculo — e a chave que o upsert usa
       // (`existingMap.get(email.toLowerCase())`), nao `b2bwave_id`.
@@ -1899,6 +1988,8 @@ Deno.serve(async (req) => {
       const limpo = !truncado
         && nProdFalta === 0 && nProdSobra === 0 && nPrecoDif === 0 && nAtivoDif === 0
         && nVarFalta === 0 && nVarSobra === 0 && nVarQtd === 0
+        && tabelasSemPar.length === 0 && nReguaFalta === 0 && nReguaPreco === 0
+        && nReguaObsoleta === 0
         && nCliFalta === 0 && nCliStatus === 0 && nCliBloqueio === 0;
 
       return new Response(JSON.stringify({
@@ -1919,6 +2010,18 @@ Deno.serve(async (req) => {
           aqui: varAqui.size,
           faltando_aqui: nVarFalta, sobrando_aqui: nVarSobra, quantidade_diferente: nVarQtd,
         },
+        regua_de_preco: {
+          // Regua da origem que nao tem tabela de mesmo nome aqui: o sync PULA
+          // essas em silencio. Se vier nome nesta lista, nenhum preco daquela
+          // regua esta sendo gravado.
+          tabelas_sem_par_aqui: tabelasSemPar,
+          pares_comparados: nReguaPares,
+          aqui: reguaAqui.size,
+          faltando_aqui: nReguaFalta,
+          preco_diferente: nReguaPreco,
+          obsoleto_aqui: nReguaObsoleta,
+          nota_obsoleto: "o sync nunca APAGA de tabela_preco_itens: preco tirado da regua no B2BWave continua valendo aqui. Se este numero nao for zero, o cliente esta comprando por valor que a origem ja removeu",
+        },
         clientes: {
           na_origem: cliOrigem.size, aqui: cliAqui.size,
           faltando_aqui: nCliFalta, sobrando_aqui: nCliSobra,
@@ -1934,6 +2037,8 @@ Deno.serve(async (req) => {
           produto_preco: prodPreco, produto_ativo: prodAtivo,
           variante_faltando: varFaltando, variante_sobrando: varSobrando,
           variante_quantidade: varQtd,
+          regua_faltando: reguaFaltando, regua_preco: reguaPreco,
+          regua_obsoleta: reguaObsoleta,
           cliente_faltando: cliFaltando, cliente_sobrando: cliSobrando,
           cliente_status: cliStatus, cliente_bloqueio: cliBloqueio,
         },
@@ -1942,9 +2047,9 @@ Deno.serve(async (req) => {
         // e a mesma armadilha de tratar leitura truncada como igualdade. O sync
         // escreve 13 tabelas; entre esta e a `diff_orders`, quatro ficam de fora.
         nao_comparado: {
-          tabelas: ["tabela_preco_itens", "categorias", "brands", "representantes",
+          tabelas: ["categorias", "brands", "representantes",
                     "privacy_groups", "company_activities", "pedido_itens"],
-          nota: "a mais cara delas e `tabela_preco_itens` (a regua de preco por cliente): divergencia ali sai dinheiro em todo pedido futuro",
+          nota: "sao metadados de catalogo e as linhas do historico de pedidos; nenhuma decide preco de pedido novo. `pedido_itens` e a que mais pesa das que sobraram: erro ali sai no PDF do pedido antigo",
         },
         segundos: Math.round((Date.now() - inicio) / 1000),
       }, null, 2), { headers: jsonHeaders });

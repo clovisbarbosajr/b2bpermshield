@@ -43,7 +43,7 @@ e-mail, pagamento, cadastro e equipe não entram.
 ### 1.4 Avisar, para eu rodar a comparação com o B2BWave
 
 Duas comparações, as duas só leitura: `diff_orders` (pedidos) e
-`diff_catalog` (produtos, variantes, clientes) — esta última criada em 25/ago,
+`diff_catalog` (produtos, variantes, régua de preço, clientes) — esta última criada em 25/ago,
 porque a comparação antiga cobria só pedidos e o sync escreve 13 tabelas.
 **`diff_catalog` nunca foi executada** — a primeira rodada é prova, não formalidade.
 
@@ -115,6 +115,23 @@ escondia produtos da loja; 6 telas que não faziam nada saíram do ar.
 
 **Cabeçalhos de segurança** — CSP, anti-clickjacking, cache. Testado servindo o
 site com eles num navegador: a primeira versão quebrava as fontes.
+
+---
+
+## 3.1 DEFEITO ENCONTRADO, AGUARDANDO MEDIÇÃO
+
+**Preço obsoleto nunca sai da régua.** `tabela_preco_itens` só recebe `upsert`
+do sync — nunca `delete`. Preço **tirado** de uma régua no B2BWave continua
+valendo aqui para sempre, e o cliente segue comprando pelo valor antigo.
+
+Não consertei de propósito: apagar linha de preço automaticamente é destrutivo,
+e uma leitura parcial da origem viraria "sumiram os preços do cliente". A
+`diff_catalog` agora conta `obsoleto_aqui`. **Se vier zero, não há o que
+consertar** — se não vier, o conserto é decisão sua, com o número na mão.
+
+No mesmo bloco: `tabelas_sem_par_aqui` mostra régua da origem sem tabela de
+mesmo nome aqui. O sync pula essas em silêncio; se aparecer nome nessa lista,
+nenhum preço daquela régua está sendo gravado.
 
 ---
 

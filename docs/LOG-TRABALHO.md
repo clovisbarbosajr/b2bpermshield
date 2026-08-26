@@ -1876,3 +1876,42 @@ Nao rodei. Ela fala com a API do B2BWave e precisa de deploy e credencial.
 Esta typechecada, e so-leitura (conferido por varredura), e cada criterio foi
 lido contra o upsert correspondente — mas isso nao e o mesmo que ter rodado.
 A primeira execucao e uma prova, nao uma formalidade.
+
+---
+
+## cont. 40 — A regua de preco entra na comparacao, e um defeito aparece
+
+Estendi a `diff_catalog` para cobrir `tabela_preco_itens`, que eu mesmo tinha
+marcado como "a mais cara que falta": divergencia ali sai dinheiro em **todo
+pedido futuro**, nao so no historico. Deu para reusar a leitura de
+`product_prices.json` que o bloco de preco base ja fazia.
+
+### Dois buracos que so apareceram ao escrever a comparacao
+
+**1. Regua inteira pode nao estar sendo gravada, em silencio.**
+O sync casa a tabela de preco da origem com a local pelo NOME em minusculo, e
+faz `continue` quando nao acha. Sem reclamar, sem log. Se alguem renomear uma
+tabela de preco de um lado so, todos os precos dela param de ser gravados e
+nada avisa. Virou o primeiro numero do bloco: `tabelas_sem_par_aqui`.
+
+**2. DEFEITO REAL: preco obsoleto nunca sai.**
+`tabela_preco_itens` so recebe `upsert` — o sync **nunca apaga**. Preco TIRADO
+de uma regua no B2BWave continua valendo aqui para sempre, e o cliente segue
+comprando pelo valor antigo.
+
+Nao consertei de proposito. Apagar linha de preco automaticamente e destrutivo,
+e uma leitura parcial da origem viraria "some com os precos do cliente" — o
+proprio arquivo ja aprendeu isso nas variantes ("Falha na leitura: NAO mexe nas
+variantes deste produto"). Primeiro medir: o relatorio agora conta
+`obsoleto_aqui`. Se vier zero, nao ha o que consertar. Se nao vier, o conserto
+e decisao do dono, com o numero na mao.
+
+O contador so julga linha cujo produto VEIO no feed. Sem o feed daquele produto
+nao da para distinguir "o preco sumiu" de "a leitura nao trouxe" — e essa
+confusao e exatamente como um relatorio vira ordem de apagar coisa boa.
+
+### O que saiu da lista de nao-comparado
+
+Sobraram `categorias`, `brands`, `representantes`, `privacy_groups`,
+`company_activities` e `pedido_itens`. Nenhuma decide preco de pedido novo; a
+que mais pesa e `pedido_itens`, que sai no PDF do pedido antigo.
