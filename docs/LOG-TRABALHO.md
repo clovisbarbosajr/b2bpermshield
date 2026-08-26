@@ -1963,3 +1963,35 @@ teste, nao o codigo — e esse e exatamente o defeito dos portoes que ja falhara
 em silencio neste projeto. **A primeira execucao e a prova.** O que da para
 dizer: typechecada, so-leitura, criterio conferido campo a campo contra os
 upserts, e agora falha por partes em vez de inteira.
+
+---
+
+## cont. 42 — O runbook passa a ser gerado, nao mantido a mao
+
+A fila do dono esta parada ha tres turnos e o runbook que ele tem **embute o
+SQL**. Se um arquivo de migration mudasse depois de eu ter gerado o arquivo, ele
+rodaria a versao velha e o PASSO 8 acusaria `FALTA` sem ninguem entender por que.
+
+Escrevi a conferencia byte a byte: os 7 corpos batem. Depois **mutei** um
+arquivo (`SELECT 1;` antes do `COMMIT;`) e a conferencia acusou
+`MUDOU (o runbook tem versao ANTIGA)`. Restaurei. Sem o mutante, "todos batem"
+nao provava nada — mesmo sintoma dos portoes que ja falharam em silencio aqui.
+
+### O defeito de processo, que era o de verdade
+
+O gerador so existia no scratchpad, e eu tinha corrigido a lista de deploy
+(incluir `b2bwave-sync`) **direto no markdown**. Ou seja: regerar o runbook
+apagaria a correcao em silencio. Duas fontes para a mesma coisa, e a que eu
+editei nao era a fonte.
+
+`scripts/gerar-runbook.py` resolve: gera do repositorio, ja com a `b2bwave-sync`
+na lista, e **confere no fim** que cada corpo escrito bate com o arquivo — sai
+com codigo 1 se nao bater. O cabecalho avisa para nao editar o .md a mao.
+
+Aceita caminho por argumento, para gerar num temporario e diferenciar antes de
+sobrescrever: o dono pode estar no meio da execucao, e trocar o arquivo debaixo
+dele sem olhar o que muda seria eu repetindo, na documentacao, o erro que passei
+o dia consertando no codigo.
+
+Diferenca real desta rodada: nenhum bloco SQL mudou — so a prosa dos passos 10
+e 11. A posicao dele no documento nao muda.
