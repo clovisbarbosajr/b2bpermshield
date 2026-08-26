@@ -42,7 +42,7 @@ Messaging Service); a documentação deles é explícita.
 
 | Trava | O que faz |
 |---|---|
-| Supressão em massa | O sync avisa o banco antes de um lote e o gatilho não dispara. Tem validade: se o processo morrer, expira sozinha. |
+| Supressão em massa | O sync avisa o banco antes de um lote e o gatilho não dispara. Se o processo morrer no meio, o contador fica órfão e o silêncio dura até 120 minutos depois do início — não até o fim da janela pedida. |
 | Teto horário síncrono | 20 pedidos/hora para `order_status`, 10 para `low_stock`. Contador incrementado na mesma transação do UPDATE — vale desde o primeiro pedido do lote. |
 | Teto no alerta ao admin | 5/hora. Era 1 e-mail por falha, sem limite. |
 | Gatilho desligado | O SQL deixa o gatilho desabilitado. Religar é passo manual, verificado. |

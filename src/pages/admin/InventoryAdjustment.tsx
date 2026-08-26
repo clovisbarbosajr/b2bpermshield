@@ -50,6 +50,12 @@ const InventoryAdjustment = () => {
   // Linhas que não entraram no último Save — ficam listadas na tela em vez de
   // sumirem com um toast que nomeava só a primeira.
   const [falhas, setFalhas] = useState<string[]>([]);
+  // Linhas em que o ESTOQUE FOI salvo mas o historico nao. Lista separada de
+  // proposito: o card de `falhas` diz "the quantity you typed is still in the
+  // table", e para estas duas coisas isso e falso — o estoque entrou e a
+  // quantidade digitada foi limpa. Misturar as duas fazia a tela mentir sobre o
+  // banco no meio de uma contagem fisica.
+  const [avisos, setAvisos] = useState<string[]>([]);
 
   const fetchData = async () => {
     // Pagina de verdade: esta tela lista TUDO sem paginação de UI, entao acima de
@@ -122,7 +128,58 @@ const InventoryAdjustment = () => {
     if (changes.length === 0) { toast.error("Enter a new quantity in at least one line."); return; }
     if (!confirm(`Apply inventory adjustment to ${changes.length} product(s)?`)) return;
     setSaving(true);
+
+    // REGRA NUMERO UM (a mesma do topo de `b2bwave-sync/index.ts`): operacao em
+    // MASSA suprime notificacao ANTES de comecar — e a pergunta certa e QUAL
+    // GATILHO ela acorda, nao qual tabela ela toca.
+    //
+    // Esta tela grava `estoque_total` uma vez por linha, e `estoque_total` e
+    // coluna vigiada por `trg_low_stock_notify`. Uma contagem fisica de 40 itens
+    // que derrube 12 abaixo do limite vira 10 alertas (o teto de 10/h) e 2
+    // engolidos — engolidos COM rastro (o ramo do teto grava `low_stock_teto`),
+    // mas sem contagem por produto. O teto e ALARME, nao licenca.
+    //
+    // A chave e a de ESTOQUE (`set_suppress_stock_notify`), nao a de pedidos: as
+    // duas sao contadas por referencia no banco, entao ligar aqui nao atrapalha
+    // um sync que esteja rodando, nem o sync desliga a nossa.
+    // Piso de 30 min, nao 10: `desde` e COMPARTILHADO e fica ancorado no
+    // PRIMEIRO lote da sequencia. Se um sync orfao abriu a sequencia ha 110
+    // minutos, esta chamada herda aquele `desde` e o silencio morre em 10 — no
+    // meio da contagem. O SQL ja limita em 120, entao pedir mais nao custa nada.
+    const minutosSup = Math.max(30, Math.ceil(changes.length / 100) * 5);
+    const { error: supErr } = await supabase.rpc("set_suppress_stock_notify" as any, {
+      _on: true, _minutos: minutosSup,
+    });
+    if (supErr) {
+      // Falhar aqui ABORTA, e nada e gravado. Rodar o lote sem supressao e o
+      // cenario do incidente de 25/ago: melhor a contagem nao subir do que subir
+      // disparando alerta por produto.
+      setSaving(false);
+      toast.error("Could not pause stock alerts — nothing was saved. " + supErr.message);
+      return;
+    }
+
+    // Limpa os cards do Save ANTERIOR — so AQUI, depois de o confirm ter sido
+    // aceito E de a supressao ter dado certo. Esta lista so existe no estado do
+    // componente (nao vai para `estoque_log` nem para `activity_logs`), entao
+    // apaga-la num gesto que nao faz nada — cancelar o confirm, ou um abort que
+    // termina em "nothing was saved" — destroi a unica copia que existe. A
+    // versao anterior limpava antes do abort da RPC e violava a propria regra que
+    // o comentario estabelecia vinte linhas acima.
+    setFalhas([]); setAvisos([]);
+
     let ok = 0; const failed: string[] = [];
+    // Ids que REALMENTE entraram no banco. A versao anterior inferia isso
+    // filtrando `changes` por prefixo de nome em `failed` — e essa inferencia
+    // quebrava exatamente quando mais custava: numa excecao, `failed` continha
+    // so a mensagem do aborto, nenhum nome casava, e a tela limpava as 37
+    // quantidades que o laco NUNCA chegou a gravar, dizendo ao operador que
+    // continuavam na tabela. Contagem fisica perdida com a tela mentindo.
+    const idsOk: string[] = [];
+    const avisosLocais: string[] = [];
+    let abortou = false;
+    let msgAborto = "";
+    try {
     for (const { p, q, diff } of changes) {
       // Rele o estoque AGORA. A contagem fisica pode levar horas: com o update
       // ABSOLUTO sobre o valor carregado no mount, todo pedido concluido no
@@ -142,11 +199,22 @@ const InventoryAdjustment = () => {
       const { error } = await supabase.from("produtos").update({ estoque_total: q }).eq("id", p.id);
       if (error) { failed.push(`${p.nome}: ${error.message}`); continue; }
       // Histórico de estoque (mesma tabela que o ajuste unitário da tela Inventory usa).
-      await supabase.from("estoque_log").insert({
+      //
+      // O `error` e LIDO. Sem isto, RLS negando `estoque_log` fazia a tela dizer
+      // "40 products adjusted" com o historico da contagem fisica VAZIO, em
+      // silencio — e o subtitulo da propria tela promete ao operador que toda
+      // mudanca fica registrada. Nao derruba a linha (o estoque JA foi gravado, e
+      // reverter aqui seria pior), mas aparece no card AMBAR de avisos — lista
+      // `avisos`, NAO `falhas`. A distincao nao e cosmetica: o card de `falhas`
+      // diz "the quantity you typed is still in the table", e para esta linha as
+      // duas metades sao falsas. Trocar por `failed.push` reintroduz a tela
+      // mentindo sobre o banco no meio de uma contagem fisica.
+      const { error: logErr } = await supabase.from("estoque_log").insert({
         produto_id: p.id, quantidade_anterior: p.estoque_total, quantidade_nova: q,
         motivo: [reference && `Ref ${reference}`, memo].filter(Boolean).join(" — ") || "Inventory adjustment",
         usuario_id: user?.id ?? null,
       });
+      if (logErr) avisosLocais.push(`${p.nome}: stock saved, but the history entry failed — ${logErr.message}`);
       // Log de atividade DETALHADO (Settings → Activity Logs).
       await log("updated", "inventory", p.id, p.sku ? `${p.nome} (${p.sku})` : p.nome, {
         category: catPath(p.categoria_id),
@@ -154,25 +222,97 @@ const InventoryAdjustment = () => {
         reference: reference || null, memo: memo || null,
       });
       ok++;
+      idsOk.push(p.id);
     }
-    setSaving(false);
+    } catch (e: any) {
+      // SEM este `catch`, uma excecao no laco virava rejeicao nao tratada:
+      // parte dos produtos ja gravada, a grade mostrando o estoque VELHO, e
+      // nenhum sinal para o operador. Numa contagem fisica e o pior desfecho
+      // possivel — a tela mente sobre o estado do banco depois de uma gravacao
+      // parcial.
+      //
+      // `abortou` escolhe o texto do toast e suprime o verde. Quem impede que
+      // linha NAO PROCESSADA seja tratada como salva e o `idsOk` — e so ele.
+      // Registrado assim de proposito: a versao anterior deste comentario dava o
+      // credito a `abortou`, e quem mantivesse isto amanha poderia apagar o
+      // `idsOk` achando que estava coberto — trazendo de volta a perda da
+      // contagem fisica que este bloco existe para impedir.
+      // A mensagem de aborto NAO entra em `failed`. `failed` e a lista de linhas
+      // que o operador digitou e nao entraram — o card fala em nome dela ("a
+      // quantidade que voce digitou continua na tabela"), e o aborto nao e uma
+      // linha digitada.
+      //
+      // As duas versoes anteriores misturaram as duas coisas e tentaram separar
+      // por PREFIXO no texto: primeiro "stopped: ", que colidia com produto de
+      // mesmo nome, depois um caractere de controle, que transformou este arquivo
+      // em binario para o git — justamente o arquivo que mais precisou de
+      // revisao por diff. Variavel separada nao tem string magica para colidir.
+      abortou = true;
+      // `||`, nao `??`: `??` preserva string vazia, e um `Error("")` produzia
+      // "Save stopped:  — 0 product(s)..." sem causa nenhuma no meio.
+      msgAborto = e?.message || String(e);
+    } finally {
+      // `setSaving(false)` PRIMEIRO: se a liberacao lancar (rede caindo, sessao
+      // expirando numa contagem longa), a tela nao pode ficar presa em "Saving".
+      setSaving(false);
+      try {
+        const { error } = await supabase.rpc("set_suppress_stock_notify" as any, { _on: false, _minutos: 0 });
+        if (error) console.error("[inventory] release stock suppression failed:", error.message);
+      } catch (e) {
+        // Nao aborta. Mas NAO e verdade que "a janela expira sozinha": se o `n`
+        // ficar orfao, `ate` vencer nao levanta nada — o gatilho le
+        // `ate > now() OR (n > 0 AND desde > now() - 120min)`. Quem destrava e a
+        // EXPRESSAO DE LEITURA do gatilho (20260826090000), nao a auto-cura do
+        // setter, que so roda na proxima chamada com `_on = true`. Ou seja: o
+        // alerta de estoque pode ficar mudo por ate 2 HORAS, nao pelos minutos
+        // desta janela — inclusive para cruzamento causado por checkout de
+        // cliente. Nao aborta porque nao ha nada a proteger neste ponto, mas o
+        // custo e esse, e nao e pequeno.
+        console.error("[inventory] release stock suppression threw:", e);
+      }
+    }
     if (failed.length) {
       // Antes mostrava so o PRIMEIRO que falhou e limpava a grade inteira: as
       // linhas que nao entraram voltavam ao valor antigo, sem marcacao, e o dono
       // nao tinha como saber quais foram.
+      // No caminho de ABORTO, um unico toast: antes somava o do `catch` a este e
+      // ainda o verde do `ok > 0`, tres avisos ao mesmo tempo, um deles dizendo
+      // sucesso. No caminho normal (linhas reprovadas na validacao) continuam
+      // saindo DOIS — verde do que entrou, vermelho do que nao entrou — e ai
+      // esta certo: o resultado e parcial de verdade.
       setFalhas(failed);
-      toast.error(`${failed.length} line(s) failed — see the list above the table.`);
+      toast.error(abortou
+        ? `Save stopped: ${msgAborto} — ${ok} product(s) were saved before it stopped.`
+        : `${failed.length} line(s) failed — see the list above the table.`);
     } else {
       setFalhas([]);
     }
-    if (ok > 0) {
-      toast.success(`${ok} product(s) adjusted.`);
-      // So limpa o que REALMENTE entrou; o que falhou continua digitado.
-      const idsOk = new Set(changes.filter((c) => !failed.some((f) => f.startsWith(c.p.nome + ":"))).map((c) => c.p.id));
-      setNewQty((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !idsOk.has(id))));
-      if (failed.length === 0) { setReference(""); setMemo(""); }
-      fetchData();
+    // O aborto tem toast proprio quando nenhuma linha falhou por validacao —
+    // senao um erro de rede no primeiro produto sairia sem aviso nenhum.
+    if (abortou && failed.length === 0) {
+      toast.error(`Save stopped: ${msgAborto} — ${ok} product(s) were saved before it stopped.`);
     }
+    setAvisos(avisosLocais);
+    if (ok > 0 && !abortou) {
+      toast.success(`${ok} product(s) adjusted.`);
+    }
+    if (ok > 0) {
+      // So limpa o que REALMENTE entrou no banco — `idsOk` e preenchido linha a
+      // linha, depois do UPDATE. Nunca inferido a partir de `failed`.
+      const entrou = new Set(idsOk);
+      setNewQty((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !entrou.has(id))));
+      // `avisosLocais` tambem segura o Ref/Memo: eles montam o `motivo` do
+      // `estoque_log`, e o card ambar acabou de dizer ao operador que o historico
+      // daquelas linhas NAO foi gravado. Apagar o texto que ele precisa para
+      // refazer a entrada a mao seria tirar a corda de quem esta pendurado. A
+      // condicao ficou presa em `failed` quando a lista foi partida em duas.
+      if (failed.length === 0 && avisosLocais.length === 0 && !abortou) { setReference(""); setMemo(""); }
+    }
+    // INCONDICIONAL. O `update produtos` acontece ANTES do `ok++`, entao uma
+    // excecao no `estoque_log` ou no `log()` deixa o banco JA gravado com
+    // `ok === 0` — e a versao anterior, que so recarregava dentro de
+    // `if (ok > 0)`, deixava a grade mostrando o estoque velho justamente ai.
+    fetchData();
   };
 
   const today = new Date().toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" });
@@ -201,6 +341,16 @@ const InventoryAdjustment = () => {
         </div>
       </Card>
 
+      {avisos.length > 0 && (
+        <Card className="mb-4 border-amber-500/50 p-4">
+          <p className="mb-2 text-sm font-semibold text-amber-600">
+            {avisos.length} line(s): the stock WAS saved, but the history entry failed.
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            {avisos.map((a, i) => <li key={i}>{a}</li>)}
+          </ul>
+        </Card>
+      )}
       {falhas.length > 0 && (
         <Card className="mb-4 border-destructive/50 p-4">
           <p className="mb-2 text-sm font-semibold text-destructive">

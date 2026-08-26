@@ -2416,3 +2416,447 @@ O cetico apontou de passagem que o papel `warehouse` cairia fora dos dois ramos
 da trava de colunas de `clientes`. Fui ver: `is_ops_manager()` cobre admin e
 manager, e a politica de warehouse em `clientes` e **SELECT**. Ele nao tem
 UPDATE, entao nao alcanca o gatilho. Nao e divida.
+
+## 26/ago — religando notificacao, passo a passo
+
+- FEITO — `pausar_envios(true)`: torneira fechada de proposito antes de qualquer religamento.
+- FEITO — conferido que `20260826080000` aplicou (`120 minutes` presente em `fn_order_status_notify`).
+- FEITO — contados 102 produtos ja no/abaixo do limite de estoque baixo. NAO sao risco: o
+  gatilho so dispara na TRAVESSIA para baixo, e esses ja atravessaram.
+- FEITO — provado que a ultima porta esta fechada: `envio_permitido('sms'|'email'|'auth')`
+  retorna `ok:false, motivo:"envio pausado manualmente"` nos tres. A checagem da torneira e a
+  PRIMEIRA linha da funcao, antes do contador, entao a consulta nao consome cota nem escreve.
+- FEITO — `ALTER TABLE public.pedidos ENABLE TRIGGER trg_order_status_notify` (torneira fechada).
+- CONFIRMADO — pedido vindo do B2BWave NUNCA fala com o cliente: `somente_admin: true` em
+  `b2bwave-sync/index.ts:656`. O unico caminho que chega no cliente e mudanca de status.
+- EDITADO — `supabase/migrations/20260826090000_estoque_respeita_silencio.sql`.
+  ATENCAO, esta linha foi REESCRITA: a versao original dela dizia que o sync
+  chamava a trava e o banco a ignorava. Era FALSO — o `sync_products` nunca
+  chamou trava nenhuma, e o cetico derrubou isso na rodada 1. O que a migration
+  faz de verdade: cria a chave `suppress_stock_notify` com RPC propria, e faz
+  `fn_low_stock_notify` ler AS DUAS chaves (estoque e pedido) com `bool_or`.
+  Quem levanta a de estoque sao o `sync_products`, a tela de ajuste de
+  inventario e a importacao de pedidos — os tres passaram a chamar nesta leva.
+- FEITO — cetico aprovou o SQL da migration (rodadas 4 a 8). O que continuou
+  reprovando foram as duas telas React e os documentos; o SQL nao mudou desde a
+  rodada 4.
+
+FALTA (nesta ordem — a ordem NAO e sugestao). Cada passo tem o comando.
+
+**0. BACKUP, antes de tudo.** O rollback da migration DEPENDE deste retorno —
+guarde o texto das tres consultas:
+
+```sql
+SELECT pg_get_functiondef('public.fn_low_stock_notify()'::regprocedure);
+SELECT key, value FROM public.sync_state WHERE key LIKE 'suppress%';
+SELECT tgname, tgenabled FROM pg_trigger
+ WHERE tgrelid = 'public.produtos'::regclass AND tgname = 'trg_low_stock_notify';
+```
+
+A terceira e a que o passo 4 vai inverter: sem o "antes", nao ha como provar que
+estava desligado. Esperado hoje: `D`.
+
+**1.** Rodar a migration `20260826090000_estoque_respeita_silencio.sql` inteira no
+SQL editor do Lovable.
+
+**2. Conferir que aplicou** — as duas VERIFICACOES do rodape da migration.
+A (1) e a inspecao de texto, que tem que voltar `2 | 2 | 1 | 2`. A (2) e a
+contagem de referencia: rode a sequencia INTEIRA (seis comandos) e confirme que
+termina em `{"n": 0, "on": false}`. Parar no meio dela deixa a supressao VIVA, e
+voce seguiria para o passo 4 achando que esta limpo.
+Sem este passo, uma migration que aplicou pela metade passa por aplicada.
+
+**3. SO ENTAO publish E deploy do `b2bwave-sync`.** Sao DUAS coisas.
+
+ORDEM OBRIGATORIA: `InventoryAdjustment` e `ImportOrders` passaram a chamar
+`set_suppress_stock_notify` e ABORTAM se ela nao existir. Publicar antes do SQL
+faz o admin perder as duas telas por inteiro ("Could not pause stock alerts",
+nada grava) e o `sync_products` recusa rodar.
+
+⚠️ **Push no GitHub NAO deploya edge function.** Ja aconteceu neste projeto (deu
+404 com o commit no lugar). Peca o deploy do `b2bwave-sync` no chat do Lovable e
+CONFIRME antes de seguir. Se voce publicar sem deployar, o `sync_products` VELHO
+— sem a trava de estoque — continua rodando no minuto 10 de toda hora. Ate o
+passo 7 nada sai; depois do passo 7 ele roda desprotegido com a torneira aberta,
+e o passo 8 pode nem estar mais olhando.
+
+PARA CONFIRMAR QUE A VERSAO NOVA SUBIU: rode um sync de produtos manual pela tela
+(pagina "B2B Wave Sync", card "Products") e depois:
+
+```sql
+SELECT created_at, samples FROM public.sync_log
+ WHERE action = 'products' ORDER BY created_at DESC LIMIT 1;
+```
+
+Tem que aparecer **`SYNC_VERSION:stock-lock-v1`**. Se aparecer `related-v4`, a
+edge function NAO foi deployada — pare e peca o deploy.
+
+CONFIRA O `created_at` PRIMEIRO: tem que ser do sync que voce acabou de rodar. Se
+for antigo, o sync falhou ANTES de gravar o log (erro da API do B2BWave,
+credencial, timeout) e voce esta lendo a execucao anterior — leia a mensagem de
+erro no card e rode de novo. Sem essa conferencia, um sync que falhou parece
+"deploy nao feito".
+
+(O marcador fica GRAVADO no log, entao da para conferir com calma depois. Nao
+adianta espiar `sync_state` durante o sync: a janela de supressao sobe e desce
+em segundos, e ler fora dela devolve `{"n": 0, "on": false}` nos DOIS casos —
+foi o metodo que este passo trazia antes, e ele produzia falso negativo.)
+
+**4. Religar o gatilho de estoque**, com a torneira ainda FECHADA:
+
+```sql
+ALTER TABLE public.produtos ENABLE TRIGGER trg_low_stock_notify;
+```
+
+(Ele foi desligado em `20260825180000`. Este comando nao existia escrito em lugar
+nenhum, e era o passo que arma a arma — o dono ia improvisar aqui.)
+
+**5. Rodar o teste (a)/(b)** do rodape da migration, incluindo os passos 0 e 0-bis
+dele. O (b) e o que prova que o alerta legitimo ainda SAI; sem ele, uma funcao que
+cala tudo passa por consertada. Leia a lista das CINCO causas de "nada apareceu"
+antes de concluir qualquer coisa — so a quinta condena.
+
+**6. Agendar os crons UM A UM** e conferir que so aparece `failed` no log:
+
+```sql
+SELECT status, event, error, count(*) FROM public.notification_log
+ WHERE created_at > now() - interval '24 hours' GROUP BY 1,2,3 ORDER BY 4 DESC;
+```
+
+**6-bis. O ULTIMO OLHAR, antes do gesto sem desfazer.** Rode o painel inteiro
+`docs/CONSULTA-ESTADO-NOTIFICACAO.sql` e leia as 16 linhas. E aqui que aparece
+contador orfao de supressao (linhas 4 e 4.5), cron que voce nao esperava, e fila
+HTTP pendente. Se a linha 4.5 (`suppress_stock_notify`) disser ATIVA com o
+sistema em repouso, PARE: e contador orfao, e o alerta de estoque esta mudo.
+
+**7. Abrir a torneira** — so aqui sai dinheiro:
+
+```sql
+SELECT public.pausar_envios(false);
+```
+
+**8. O FREIO, nos primeiros 90 MINUTOS.** Este passo nao e opcional: o passo 7 e
+o unico gesto desta lista que nao tem desfazer, e em 25/ago 1.508 mensagens
+sairam em cerca de uma hora.
+
+90 minutos, nao 30, e o motivo e concreto: `sync_products` — o handler que esta
+leva inteira existe para proteger — roda no minuto **10 de cada hora**. Abrindo a
+torneira no minuto 15, ele so roda 55 minutos depois. Uma vigia de 30 minutos
+acaba antes de o principal suspeito sequer rodar uma vez. E os tetos do banco sao
+por HORA, entao 30 minutos nem fecham uma janela de teto. Nao encerre a vigia sem
+ter visto passar um `sync_products` e um `sync_price_lists`.
+
+Rode a cada poucos minutos — o total de `sent` vem pronto, sem somar a mao:
+
+```sql
+SELECT count(*) AS enviados_15min FROM public.notification_log
+ WHERE status = 'sent' AND created_at > now() - interval '15 minutes';
+
+SELECT status, event, count(*) FROM public.notification_log
+ WHERE created_at > now() - interval '15 minutes' GROUP BY 1,2 ORDER BY 3 DESC;
+```
+
+CRITERIO PARA PUXAR O FREIO, decidido ANTES de abrir e nao no susto: mais de
+**20 enviados em 15 minutos**, ou QUALQUER `sent` de um evento que voce nao
+consegue explicar por uma acao que acabou de acontecer na loja.
+
+(20 e gatilho vivo, nao enfeite: os tetos somados do banco dao cerca de 140/hora,
+ou 35 por 15 minutos — o freio dispara ANTES de qualquer teto do sistema.)
+
+Ao puxar:
+
+```sql
+SELECT public.pausar_envios(true);
+```
+
+Fecha na hora e nao perde nada — o que ja saiu, saiu; o que nao saiu, nao sai.
+
+### 26/ago — cetico REPROVOU a primeira versao da migration de estoque
+
+DEFEITO BLOQUEANTE (meu, e do tipo pior): o cabecalho da migration afirmava que o
+`sync_products` chamava a supressao e que o banco a ignorava. FALSO. O
+`sync_products` NUNCA chamou supressao nenhuma — havia ate um comentario em
+`b2bwave-sync/index.ts:1002-1008` dizendo que a ausencia era DELIBERADA. Descrevi
+um chamador cuidadoso traido pelo banco quando o que existia era um chamador que
+nao chamava. Rodar so o SQL nao mudaria nada no risco real.
+
+Mais cinco: consulta de conferencia prometia 1|1 e retornaria 1|2; faltava teste
+de CONTROLE (funcao que suprime SEMPRE passaria por consertada); rastro nao dizia
+QUANTOS alertas foram engolidos; acoplar alerta de produto a chave de PEDIDO
+compra falso positivo (cron_orders mantem a chave levantada e um checkout de
+cliente perderia o alerta); um `o` acentuado trocado quebrava o diff.
+
+CORRIGIDO:
+- `20260826090000` reescrito: chave PROPRIA `suppress_stock_notify` + RPC propria
+  (copia fiel da de pedidos), gatilho le AS DUAS com `bool_or`, rastro com
+  contador, conferencia com numeros contados de verdade, teste (a)/(b).
+- `b2bwave-sync/index.ts`: novo `suprimirEstoque()`, handler `sync_products`
+  envolvido em try/finally, comentario mentiroso removido, e a "REGRA NUMERO UM"
+  do topo passa de "MAIS DE UM PEDIDO" para "MAIS DE UM REGISTRO" — era essa
+  redacao que fazia `sync_products` ler como fora do escopo.
+
+AGUARDANDO — cetico rodada 2.
+
+### 26/ago — cetico rodada 2: REPROVOU de novo, e pelo MESMO defeito de forma
+
+Fechou D1-D6 da rodada 1, mas achou nove novos. Os dois que importam:
+
+- N1: eu escrevi na migration que a tela de ajuste de inventario era chamadora da
+  trava nova — e ela NAO era. TERCEIRA vez no mesmo arquivo que um comentario meu
+  afirma protecao inexistente, e desta vez o comentario servia de JUSTIFICATIVA
+  para abrir `GRANT EXECUTE` a `authenticated`.
+- N2: `ImportOrders.tsx` era o unico caminho de massa do sistema sem NENHUMA das
+  duas chaves. Ele nao grava em `produtos`, entao passava por inofensivo — mas
+  cada `pedido_itens.insert` dispara o gatilho de reserva, que faz UPDATE em
+  `estoque_reservado`, coluna vigiada pelo gatilho de estoque baixo. Planilha de
+  200 linhas = ate 200 alertas.
+- N3/N4: o roteiro que decide se a torneira abre podia dar resultado FALSO por
+  quatro motivos (fila assincrona do pg_net, evento desligado, sem destinatario
+  ativo, produto de teste com reserva alta) e nomeava um. O dono desfaria uma
+  migration correta.
+
+CORRIGIDO:
+- `InventoryAdjustment.tsx` e `ImportOrders.tsx`: supressao de estoque com
+  abort-on-error + try/finally, no padrao ja aprovado do `BulkUpdateOrders.tsx`.
+- Roteiro de teste reescrito: passo 0 (pre-condicoes), passo 0-bis (produto com
+  reserva ZERO), conferencia da fila do pg_net, espera de 1 min, e a lista das
+  quatro leituras possiveis de "nao apareceu nada" — so a quarta condena.
+- Removidas as quatro citacoes `index.ts:NNNN` da migration: os dois arquivos
+  sobem juntos, entao elas viravam ponteiros para a versao anterior no commit.
+- `_quantos` morto removido; regime de lock do rastro documentado; credito da
+  cura do contador orfao corrigido (e a expressao de leitura do gatilho, nao a
+  auto-cura do setter, que so roda na proxima chamada).
+
+Os tres arquivos passam no parse (esbuild). AGUARDANDO — cetico rodada 3.
+
+### 26/ago — cetico rodada 3: reprovou; corrigido A-J
+
+Reincidencia (4a vez): reintroduzi no `InventoryAdjustment.tsx` o MESMO comentario
+errado que eu tinha acabado de consertar nos outros dois arquivos — creditando a
+cura do contador orfao a auto-cura do setter (que so roda na proxima chamada com
+`_on=true`) em vez da expressao de leitura do gatilho. E ainda afirmava que "a
+janela expira sozinha", quando com `n` orfao o silencio dura ate 2 HORAS.
+
+Regressao contra referencia ja aprovada: movi `setResults` para FORA do `finally`
+no `ImportOrders.tsx` — exatamente o defeito que o `BulkUpdateOrders.tsx`
+documenta ter consertado (excecao no laco = tabela vazia, o admin perde o
+registro de quais linhas passaram). Faltava `catch` nas duas telas.
+
+CORRIGIDO:
+- A: comentario corrigido nas duas telas, dizendo o custo real (ate 2h de mudez).
+- B/C: `catch` nas duas telas; `setResults` de volta para dentro do `finally`.
+- D: passo 0 do teste passa a conferir `notification_channels` — com o canal
+  mestre desligado o dispatch nem consulta a torneira, e a frase esperada nao
+  aparece com a migration PERFEITA.
+- E: passo 3 passa a ler `net._http_response` (a fila e drenada em ~1s e some, o
+  SELECT dava 0 quase sempre); virou opcional/pulavel; e entrou a QUINTA leitura
+  do "nada apareceu" — POST saiu e voltou 401 do vault, caso em que nao existe
+  linha no log e a lista antiga mandava desfazer migration correta.
+- F: cabecalho da migration cita os TRES arquivos e declara SQL-antes-do-publish
+  como OBRIGATORIO: publicar antes trava as duas telas por inteiro.
+- G: retirada a afirmacao de que ImportOrders era o "unico" caminho descoberto —
+  eram dois, fechados na mesma leva.
+- H: registrada a lacuna do endpoint REST publico (`supabase/functions/api`), que
+  grava estoque sem levantar chave.
+- I: "engolidos sem rastro" -> "com rastro, sem contagem por produto".
+- J: piso da janela de 10 para 30 min nas duas telas (o `desde` e compartilhado e
+  fica ancorado no primeiro lote da sequencia).
+
+### 26/ago — cetico rodada 4: SQL APROVADO, telas reprovadas
+
+A migration `20260826090000` passou: conferencia 2|2|1|2 bate, nomes de tabela e
+coluna existem, o roteiro de teste ficou honesto. O que reprovou foram as telas —
+e o pior achado nao era notificacao, era PERDA DE TRABALHO DO DONO:
+
+- O `catch` que eu tinha acabado de adicionar no `InventoryAdjustment` fazia a
+  tela APAGAR as quantidades digitadas que nunca chegaram a ser gravadas, e ainda
+  escrever na tela que continuavam la. Numa contagem fisica de 40 itens que
+  morresse no item 3, o operador perdia 37 contagens. Regressao MINHA, da rodada
+  anterior: antes a excecao propagava e nada era apagado.
+- No `ImportOrders` eu pus o `catch` em volta do laco — que usa `await
+  supabase.from(...)` e praticamente nao lanca — e deixei de fora os dois
+  `fetchAllRows`, que LANCAM de verdade. Cobri o improvavel e deixei descoberto o
+  provavel: erro de RLS ali travava a tela em "Importing..." para sempre.
+- `toast.success` fora do `finally`: vermelho e verde na tela ao mesmo tempo. O
+  `BulkUpdateOrders.tsx` documenta ter consertado exatamente isso; eu repeti.
+- `import_logs` gravava `registros_sucesso: rows.length - errOrd` — planilha de
+  200 que abortasse no primeiro grupo registrava 199 sucessos.
+
+CORRIGIDO: `idsOk` preenchido linha a linha depois do UPDATE (nunca inferido de
+`failed`); flags `abortou`/`suprimiu`; `try` do ImportOrders abre antes dos
+`fetchAllRows`; release so acontece se houve raise; `toast.success` dentro do
+`try`; um unico toast por desfecho; `fetchData()` incondicional; `import_logs`
+com numeros verdadeiros.
+
+Tambem: a frase falsa "a supressao expira sozinha" sobrevivia em mais QUATRO
+lugares, incluindo o painel de diagnostico que o dono le (`CONSULTA-ESTADO`) e o
+`BulkUpdateOrders`, que era a referencia aprovada. Com contador orfao o silencio
+dura ate `desde + 120 minutos`, nao ate o fim da janela. Todos corrigidos.
+
+CHECKLIST: ganhou passo 0 (backup, de que o rollback depende), passo 2
+(verificacoes do rodape da migration) e o comando `ALTER TABLE public.produtos
+ENABLE TRIGGER trg_low_stock_notify;` — que nao existia escrito em lugar nenhum,
+e era justamente o passo que arma a arma.
+
+AGUARDANDO — cetico rodada 5.
+
+### 26/ago — cetico rodada 5: reprovou (N1-N16); rodada 6: reprovou (D1-D10)
+
+RODADA 5 — o pior era auditoria que convida a duplicar pedido: `import_logs`
+gravava `failed` mesmo com 30 pedidos ja criados, e a tela de Import Orders NAO
+tem idempotencia (sem UNIQUE, sem checagem por `po_number`). O dono leria
+"falhou", rodaria de novo, e duplicaria os 30. Regressao minha da rodada anterior.
+Tambem: `registros_sucesso` em PEDIDOS enquanto `registros_total` em LINHAS;
+comentario creditando a `abortou` o que `idsOk` faz; a chave nova invisivel no
+painel de diagnostico; e o checklist terminando em `pausar_envios(false)` sem
+freio escrito ao lado.
+
+RODADA 6 — dez, tres bloqueantes, e o padrao ficou explicito: **a correcao de uma
+rodada virou o defeito da seguinte.**
+- D1: consertei o argumento de 20 para 30 minutos e deixei o COMENTARIO e o
+  TEMPLATE da "REGRA NUMERO UM" ensinando 20. Setima vez que um comentario meu
+  afirma o que o codigo nao faz — e desta vez no texto que o proximo autor copia.
+- D2: o `linhasOk` da rodada 5 consertou `registros_sucesso`, que NENHUMA tela
+  renderiza. O campo que o dono ve e `registros_erro`, e ele continuava em
+  pedidos: 200 linhas / 50 grupos todos falhando mostrava "200 Records / 50
+  Errors". A frase do meu proprio comentario, intacta, do outro lado da conta.
+- D3: o `failed.push` do `estoque_log` (correcao N13) fez o card dizer
+  "N line(s) were NOT saved — a quantidade que voce digitou continua na tabela"
+  sobre linha cujo estoque FOI salvo e cuja quantidade FOI limpa. As duas metades
+  falsas. E a correcao N7 arrumou o toast enquanto o comentario dizia ter
+  arrumado o card.
+- D5: vigia de 30 min nao cobre `sync_products`, que roda no minuto 10 de cada
+  hora — a vigia acabaria antes de o principal suspeito rodar uma vez.
+- D6: o painel que o dono le para decidir "sai mensagem?" afirmava que qualquer
+  uma das tres travas bastava. So a torneira e global. E descrevia um estado que
+  esta mesma leva abandonou no mesmo dia.
+- D7: o passo 3 nao avisava que push no GitHub NAO deploya edge function — ja
+  aconteceu neste projeto. Publicar sem deployar deixa o `sync_products` velho,
+  sem trava, rodando desprotegido depois que a torneira abrir.
+
+CORRIGIDO: os tres lugares que ensinavam 20 min; contador `linhasErro` em linhas;
+lista `avisos` separada com card ambar proprio; card de falhas sem a pseudo-linha
+"stopped:"; limpeza dos cards so DEPOIS do confirm; vigia de 90 min com consulta
+que ja devolve o total; painel com a distincao global/por-gatilho e o estado
+esperado por PASSO do checklist; aviso de deploy com consulta de conferencia;
+passo 6-bis mandando ler o painel antes do gesto sem desfazer.
+
+AGUARDANDO — cetico rodada 7.
+
+### 26/ago — cetico rodada 7: reprovou (DN-1..DN-11)
+
+O padrao ficou explicito de novo: **a correcao de uma rodada virou o defeito da
+seguinte**, tres vezes na mesma leva.
+
+- DN-1/DN-3: o contador `linhasErro` da rodada 6 esqueceu o QUARTO erro de grupo
+  ("Product not found") e os grupos que a excecao impediu de tentar. Resultado:
+  uma planilha em que NADA entrou gravava ZERO erros — pior que antes da
+  correcao. E o comentario que justificava tudo dizia que `registros_sucesso`
+  "nao e renderizado em lugar nenhum": e renderizado, em `ExportsLog.tsx`, na
+  mesma celula dos outros dois.
+  CONSERTO DE FORMA, nao de caso: a soma caso a caso ja quebrou DUAS vezes, entao
+  virou SUBTRACAO — `registros_erro = rows.length - linhasOk`. Fecha por
+  construcao e nao ha caso a esquecer.
+- DN-9: a frase "a supressao expira sozinha" sobreviveu em mais TRES lugares,
+  incluindo dentro do `cron_orders` — o handler que roda sozinho a cada 15
+  minutos. Duas rodadas anteriores declararam essa varredura completa.
+- DN-5: o cabecalho do painel parou de dizer "qualquer uma das tres travas
+  basta", mas a CONSULTA continuava imprimindo `**` nas tres, e a unica legenda
+  que explicava o asterisco era a frase apagada. O texto consertado, a saida
+  ensinando o erro.
+- DN-6: o metodo que eu dei para conferir o deploy nao provava nada — a janela de
+  supressao sobe e desce em segundos, entao ler `sync_state` devolve o mesmo nos
+  dois casos. Trocado por marcador de versao (`SYNC_VERSION:stock-lock-v1`), que
+  fica GRAVADO em `sync_log.samples` e da para conferir depois, sem cronometrar.
+- DN-7/DN-8: a limpeza dos cards ainda rodava antes do abort da RPC (violando a
+  regra que o proprio comentario tinha acabado de estabelecer), e o Ref/Memo
+  eram apagados quando havia aviso de historico — justamente o texto que o
+  operador precisa para refazer a entrada a mao.
+
+AGUARDANDO — cetico rodada 8.
+
+### 26/ago — cetico rodada 8: reprovou por DOIS, os dois de forma
+
+- N1: consertando o sentinela do aborto (DN-11), gravei um byte NUL DE VERDADE no
+  arquivo em vez da sequencia de escape. O `git` passou a tratar
+  `InventoryAdjustment.tsx` como BINARIO — `Bin 13897 -> 22300 bytes`, zero
+  linhas de diff — justamente o arquivo que mais reprovou nesta leva, e
+  justamente no dia em que a revisao por diff era o que restava. E Postgres nao
+  aceita 0x00 em coluna `text`, entao o byte podia sumir no caminho do publish e
+  o defeito original voltaria calado.
+  CONSERTO: o sentinela por prefixo saiu DE VEZ. A mensagem de aborto ganhou
+  variavel propria (`msgAborto`) e nao entra mais em `failed`. Duas versoes
+  tentaram separar as duas coisas por prefixo de texto — primeiro `"stopped: "`,
+  que colidia com produto de mesmo nome, depois um caractere de controle. Nao ha
+  string magica quando as duas listas sao duas variaveis.
+- N2: a afirmacao falsa que a migration retirou do proprio cabecalho na rodada 3
+  continuava viva NESTE arquivo, e este e o documento que o dono le com a mao no
+  SQL editor. Reescrita, com a correcao anotada em voz alta.
+- N3: o `SYNC_VERSION` tinha outro leitor documentado (`MUDANCAS-JUL-08-09.md`),
+  e renomear o marcador faria quem seguisse aquele arquivo concluir que a versao
+  sem-wipe sumiu — podendo reimportar relacionados sem motivo. Nota adicionada la.
+- N5/N6: o card se chama "Products", nao "Sync Products"; e sem conferir o
+  `created_at` um sync que falhe ANTES de gravar o log devolve a execucao
+  anterior, e o dono conclui "nao deployou" com o deploy feito.
+
+Verificado depois do conserto: 0 bytes NUL, `git diff` voltou a mostrar 153
+linhas, `tsc` limpo.
+
+AGUARDANDO — cetico rodada 9.
+
+### 26/ago — cetico rodada 9: reprovou; corrigido D-A..D-E
+
+De novo o mesmo padrao, agora DENTRO da propria correcao: a nota que eu
+acrescentei em `MUDANCAS-JUL-08-09.md` para consertar o N3 quebrou a crase de
+fechamento do code span e cortou a frase original ao meio — nenhum `>` virou
+blockquote, o negrito nao pegou, e "Marcador X confirma a versao sem-wipe" ficou
+partido por quatro linhas de outro assunto. Consertar um documento quebrando o
+documento.
+
+Pior: coloquei a nota na ocorrencia DESCRITIVA do marcador e deixei intocada a
+que da uma ORDEM ao dono — a secao PENDENCIAS mandava rodar o sync e conferir
+`SYNC_VERSION:related-v3`, valor que nunca mais vai aparecer. O dono seguiria a
+instrucao, nao acharia, e concluiria "nao deployou" com o deploy feito: o falso
+negativo que o N3 existia para evitar, so que no lugar mais perigoso dos dois.
+
+E a decima reincidencia da classe: `InventoryAdjustment.tsx` dizia que a falha do
+`estoque_log` "aparece na lista de falhas". Aparece no card AMBAR (`avisos`).
+Residuo da versao pre-D3 que sobreviveu as rodadas 6, 7 e 8 — e perigoso porque
+quem lesse aquilo trocaria `avisosLocais.push` por `failed.push` e traria de
+volta a tela dizendo "nao salvo" sobre linha salva.
+
+CORRIGIDO: frase restaurada com a crase no lugar e a nota isolada em blockquote
+proprio, com linha em branco antes e depois; item 1 das PENDENCIAS atualizado
+para `stock-lock-v1` apontando para o passo 3 do checklist; "redeploy v4"
+pendurado resolvido; comentario do `estoque_log` dizendo o card certo e por que a
+distincao importa.
+
+AGUARDANDO — cetico rodada 10.
+
+### 26/ago — cetico rodada 10: APROVADO
+
+Primeira rodada em que fechar um item nao abriu outro. Verificado por ele, com
+contagem propria e nao por confianca: `2|2|1|2` da migration bate; `tsc` limpo;
+zero bytes NUL e nenhum arquivo binario para o git; 7 pares de cercas no
+checklist; as quatro escritas em `produtos` do `sync_products` todas dentro do
+`try` da supressao; nenhuma referencia a `related-v3`/`v4` dando ordem ao leitor.
+
+Resposta dele a pergunta direta — e seguro rodar o SQL, publicar, pedir deploy,
+religar o gatilho, rodar o teste, agendar os crons e abrir a torneira seguindo o
+checklist? **SIM**, com duas travas que nao podem ser puladas: o passo 2 (a
+conferencia `2|2|1|2` mais a sequencia INTEIRA de seis comandos) e o passo 6-bis
+(a linha 4.5 do painel, que expoe contador orfao). E nao encerrar a vigia de 90
+minutos sem ter visto um `sync_products` passar.
+
+Fechados depois da aprovacao, tres residuos que ele marcou como nao-bloqueantes:
+`msgAborto` com `||` em vez de `??` (Error vazio produzia toast sem causa);
+Ref/Memo preservados tambem no aborto; e a linha de julho que dizia "o redeploy
+nao bloqueia producao" — deixou de valer hoje, e ficou anotado no proprio arquivo
+para quem for ler aquilo em vez do checklist.
+
+DEZ RODADAS. Placar do que os agentes derrubaram nesta leva: 1 bloqueante de
+forma (a migration nao fazia o que o cabecalho prometia), 2 perdas de trabalho do
+dono (contagem fisica apagada com a tela dizendo que continuava la; auditoria
+marcando "failed" com pedidos no banco, numa tela sem idempotencia), 1 arquivo
+que virou binario para o git, e onze reincidencias da mesma classe: comentario
+afirmando o que o codigo nao faz.

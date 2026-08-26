@@ -11,8 +11,15 @@
 --   ABERTO     = esta trava NAO esta impedindo (pode ser normal; veja `o_que_e`)
 --   CONFERIR   = valor inesperado, olhe com atencao
 --
--- Enquanto QUALQUER linha marcada (TRAVA MESTRE) estiver MUDO, nada sai por
--- nenhum caminho.
+-- SO UMA trava e global: a #3, a torneira (`envio_pausado`). Ela e lida por
+-- `envio_permitido`, e nao ha caminho de envio que nao passe por la — com ela
+-- fechada, nada sai por nenhum canal.
+--
+-- As #1 e #2 sao POR GATILHO: #1 muda so cala mudanca de status de pedido, e #2
+-- muda so cala alerta de estoque. Uma nao cobre a outra, e nenhuma das duas
+-- cobre os avisos que saem por edge function. Este texto ja afirmou que
+-- "qualquer uma das tres" bastava; era falso, e a diferenca aparece justamente
+-- no dia de religar, quando elas param de estar todas fechadas juntas.
 -- ============================================================================
 
 WITH t AS (
@@ -24,20 +31,28 @@ WITH t AS (
                     WHERE tgrelid = 'public.pedidos'::regclass
                       AND tgname = 'trg_order_status_notify'), 'nao existe') AS valor,
          'manda SMS quando o status de um pedido muda — foi este o gatilho do incidente' AS o_que_e,
-         true AS mestre
+         -- `mestre` = trava GLOBAL, que sozinha impede qualquer envio. So a
+         -- torneira (#3) e. Este gatilho, mudo, nao impede alerta de estoque nem
+         -- nada que saia por edge function — marcar as tres com o mesmo
+         -- asterisco ensinava uma redundancia que nao existe, e o cabecalho
+         -- afirmava isso por escrito ate 26/ago.
+         false AS mestre
   UNION ALL
   SELECT 2, 'gatilho: estoque baixo',
          COALESCE((SELECT CASE tgenabled WHEN 'D' THEN 'desabilitado' ELSE 'HABILITADO' END
                      FROM pg_trigger
                     WHERE tgrelid = 'public.produtos'::regclass
                       AND tgname = 'trg_low_stock_notify'), 'nao existe'),
-         'avisa quando um produto cruza o limite de estoque baixo', true
+         -- Idem: mudo, nao impede notificacao de status de pedido.
+         'avisa quando um produto cruza o limite de estoque baixo', false
 
   -- ---------- Torneira geral ----------
   UNION ALL
   SELECT 3, 'torneira geral (envio_pausado)',
          COALESCE((SELECT CASE WHEN (value->>'on')::boolean THEN 'PAUSADO' ELSE 'liberado' END
                      FROM public.sync_state WHERE key = 'envio_pausado'), 'linha ausente'),
+         -- A UNICA global: `envio_permitido` e consultada por todo caminho de
+         -- envio, um por um, no instante antes de gastar.
          'quando PAUSADO, nenhum canal envia nada — vale para todo caminho', true
 
   -- ---------- Supressao temporaria (a de lote) ----------
@@ -58,7 +73,27 @@ WITH t AS (
                             || ', lotes vivos: ' || COALESCE(value->>'n','?') || ')'
                      ELSE 'inativa' END
                      FROM public.sync_state WHERE key = 'suppress_order_notify'), 'linha ausente'),
-         'ligada por sync/lote enquanto roda; expira sozinha. Inativa e o normal em repouso', false
+         'ligada por sync/lote enquanto roda. Se ficar ATIVA em repouso, e contador orfao: some sozinha 120min apos o `desde`. Inativa e o normal', false
+
+  -- ---------- Supressao de ESTOQUE (a chave nova, 20260826090000) ----------
+  -- Sem esta linha, o painel diria "tudo limpo" com `trg_low_stock_notify` mudo:
+  -- a chave nova tem o MESMO modo de falha (contador orfao, ate 2h de silencio)
+  -- e TRES levantadores novos — `sync_products`, a tela de ajuste de inventario
+  -- e a importacao de pedidos. Nao-envio invisivel na propria coisa que a leva
+  -- de 26/ago introduziu.
+  UNION ALL
+  SELECT 4.5, 'supressao de lote (suppress_stock_notify)',
+         COALESCE((SELECT CASE
+                     WHEN COALESCE((value->>'on')::boolean, false)
+                          AND (COALESCE((value->>'ate')::timestamptz, '-infinity') > now()
+                               OR (COALESCE((value->>'n')::integer, 0) > 0
+                                   AND COALESCE((value->>'desde')::timestamptz, '-infinity')
+                                       > now() - interval '120 minutes'))
+                       THEN 'ATIVA  (ate ' || COALESCE(value->>'ate','?')
+                            || ', lotes vivos: ' || COALESCE(value->>'n','?') || ')'
+                     ELSE 'inativa' END
+                     FROM public.sync_state WHERE key = 'suppress_stock_notify'), 'linha ausente (migration 20260826090000 nao rodou)'),
+         'ligada por sync de produtos / ajuste de inventario / import de pedidos. ATIVA em repouso = contador orfao', false
 
   -- ---------- Tetos por hora ----------
   UNION ALL
@@ -114,6 +149,7 @@ WITH t AS (
 )
 SELECT
   t.ord AS "#",
+  -- `**` marca a UNICA trava global. As outras sao por gatilho e nao se cobrem.
   CASE WHEN t.mestre THEN '** ' || t.trava ELSE '   ' || t.trava END AS trava,
   t.valor,
   CASE
@@ -136,13 +172,21 @@ ORDER BY t.ord;
 -- ============================================================================
 -- LEITURA RAPIDA
 --
--- Para "nada sai de jeito nenhum", basta UMA destas tres marcadas com ** estar
--- MUDO. Hoje, pela migration 20260825180000, as tres deveriam estar:
---   #1 gatilho de status  -> desabilitado
---   #2 gatilho de estoque -> desabilitado
---   #3 torneira geral     -> PAUSADO
+-- Para "nada sai de jeito nenhum", quem responde e a #3, a torneira. As #1 e #2
+-- sao por gatilho e NAO se cobrem: veja a nota do cabecalho.
 --
--- Se alguma aparecer ABERTO e voce nao religou de proposito, PARE e me avise.
+-- O ESTADO ESPERADO MUDA conforme o passo do religamento em que voce esta — o
+-- roteiro e a secao "FALTA (nesta ordem)" do `docs/LOG-TRABALHO.md`. Confira
+-- contra ela, nao contra uma foto fixa; este rodape ja descreveu um estado que a
+-- propria leva de 26/ago abandonou no mesmo dia.
+--
+--   antes do passo 4 : #1 HABILITADO (religado em 26/ago), #2 desabilitado, #3 PAUSADO
+--   depois do passo 4: #1 e #2 HABILITADOS, #3 ainda PAUSADO
+--   depois do passo 7: as tres abertas — e ai vale o passo 8, a vigia
+--
+-- A qualquer momento ANTES do passo 7, a #3 tem que estar PAUSADO. Se ela
+-- aparecer liberada e voce nao abriu de proposito, PARE e me avise: e a unica
+-- das tres cuja abertura gasta dinheiro.
 --
 -- A linha #13 (eventos que avisam o CLIENTE) e a que mais importa no dia em que
 -- as travas forem soltas: e a lista do que chega no telefone do cliente.

@@ -1,11 +1,23 @@
 // ============================================================================
 // REGRA NUMERO UM DESTE ARQUIVO
 //
-// TODA operacao que toca MAIS DE UM PEDIDO precisa DESLIGAR a notificacao antes
-// de comecar:
+// TODA operacao que toca MAIS DE UM REGISTRO precisa DESLIGAR a notificacao
+// antes de comecar. Sao DUAS travas, uma por gatilho, e cada uma tem a sua:
 //
+//     PEDIDOS  (trg_order_status_notify):
 //     await suprimirNotificacao(adminClient, true, 30);
 //     try { ...o lote... } finally { await suprimirNotificacao(adminClient, false); }
+//
+//     ESTOQUE  (trg_low_stock_notify):
+//     await suprimirEstoque(adminClient, true, 30);
+//     try { ...o lote... } finally { await suprimirEstoque(adminClient, false); }
+//
+// A regra dizia "MAIS DE UM PEDIDO" e por isso ninguem viu que `sync_products`
+// estava descoberto: ele nao toca em pedido nenhum, entao lia como fora do
+// escopo. O gatilho de estoque disparava um POST por produto que cruzasse o
+// limite, freado so pelo teto de 10/HORA — que nao e teto de lote. Um cetico
+// achou isso em 26/ago, antes de religar. Se voce escrever handler novo que
+// grave em lote, pergunte QUAL gatilho ele acorda, nao qual tabela ele toca.
 //
 // POR QUE: existe um gatilho no banco (`trg_order_status_notify`) que manda
 // SMS/e-mail A CADA mudanca de status de pedido — e ele NAO distingue "o admin
@@ -22,7 +34,7 @@
 // uma licenca: se voce depender do teto, alguem ja recebeu mensagem errada.
 // ============================================================================
 
-// Deployed b2bwave-sync (SYNC_VERSION:related-v4) — redeploy from main @ 7e3e753
+// Deployed b2bwave-sync (SYNC_VERSION:stock-lock-v1) — redeploy from main
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -771,15 +783,17 @@ async function processOrderSlice(db: any, slice: any[], skipPre2025: boolean, no
   return { created, updated, skipped, errors };
 }
 
-// Grava o status de uma execução em sync_log (persiste; a tela lê daqui).
 // Liga/desliga a supressao de notificacao de status durante operacao em massa.
 //
 // SEM ISTO A TRAVA NAO EXISTE: a funcao no banco existia mas ninguem chamava.
 // Foi o pior achado da revisao — a protecao estava desligada por omissao.
 //
-// O `_minutos` e validade: se esta funcao morrer no meio (timeout da edge,
-// deploy, erro nao tratado), a supressao expira sozinha em vez de deixar o
-// cliente sem aviso para sempre.
+// O `_minutos` e validade — mas NAO e a unica coisa que segura o silencio, e
+// dizer que "expira sozinha" e falso desde 20260826080000. O gatilho le
+// `ate > now() OR (n > 0 AND desde > now() - 120 minutes)`: com o contador `n`
+// orfao (lote que morreu sem decrementar), `ate` vencer NAO levanta nada. O
+// silencio dura ate `desde + 120 minutos`, nao ate `ate`. Quem destrava e a
+// expressao de leitura do gatilho, nao a validade daqui.
 async function suprimirNotificacao(db: any, ligar: boolean, minutos = 30) {
   // `.rpc()` do supabase-js NAO LANCA em erro — resolve com `{ error }`. Um
   // try/catch aqui nunca dispararia, e o sync seguiria achando que esta
@@ -797,11 +811,50 @@ async function suprimirNotificacao(db: any, ligar: boolean, minutos = 30) {
   console.error("[b2bwave-sync] set_suppress_order_notify falhou:", msg);
   // LIGAR que falha ABORTA a operacao: rodar um lote sem supressao e o cenario
   // exato do incidente. Melhor o lote nao rodar do que rodar disparando SMS.
-  // DESLIGAR que falha nao aborta — nao ha nada a proteger, e a supressao expira
-  // sozinha pela validade.
+  // DESLIGAR que falha nao aborta — nao ha nada a proteger neste ponto. O custo,
+  // dito por inteiro: o contador fica orfao e o aviso fica mudo ate
+  // `desde + 120 minutos`, nao ate o fim desta janela.
   if (ligar) throw new Error("supressao de notificacao indisponivel — lote abortado: " + msg);
 }
 
+// ESTOQUE tem chave PROPRIA, `suppress_stock_notify` (20260826090000).
+//
+// Nao reusa `suppress_order_notify` de proposito: `cron_orders` roda a cada 15
+// minutos pedindo janela de 20, entao a chave de pedidos vive levantada — e um
+// checkout de cliente no portal que cruzasse o limite dentro dessa janela
+// perderia o alerta PARA SEMPRE (o gatilho so dispara na TRANSICAO, e ela nao
+// se repete enquanto o produto ficar abaixo). O gatilho le as DUAS com OR, entao
+// lote de pedido continua calando estoque — o que esta certo, porque mudanca de
+// status mexe em estoque.
+async function suprimirEstoque(db: any, ligar: boolean, minutos = 30) {
+  // Mesmo cuidado do `suprimirNotificacao`: `.rpc()` NAO LANCA em erro, resolve
+  // com `{ error }`. Ler so o retorno faria o lote seguir achando que esta
+  // suprimido quando nao esta — a "protecao desligada por omissao" que causou o
+  // incidente de 25/ago.
+  let msg: string | null = null;
+  try {
+    const { error } = await db.rpc("set_suppress_stock_notify", { _on: ligar, _minutos: minutos });
+    if (error) msg = error.message ?? String(error);
+  } catch (e) {
+    msg = String((e as any)?.message ?? e);
+  }
+  if (!msg) return;
+
+  console.error("[b2bwave-sync] set_suppress_stock_notify falhou:", msg);
+  // LIGAR que falha ABORTA o lote. Inclui o caso de a migration 20260826090000
+  // ainda nao ter rodado: sem a funcao no banco, o sync de produtos para em vez
+  // de rodar desprotegido. Por isso a ordem e SQL primeiro, deploy depois.
+  //
+  // BURACO CONHECIDO, herdado do `suprimirNotificacao` e nao consertado aqui de
+  // proposito: se a RPC COMMITAR e so a resposta HTTP falhar, este `throw` roda,
+  // o `try` do chamador nunca abre, o `finally` nunca solta — e `n` fica +1
+  // orfao. Nao ha como distinguir os dois casos do lado do cliente. Quem cobre e
+  // o teto de 120 minutos na leitura do gatilho. Consertar de verdade exigiria
+  // token de lote no banco; nao vale o risco no dia de religar notificacao.
+  if (ligar) throw new Error("supressao de estoque indisponivel — lote abortado: " + msg);
+}
+
+// Grava o status de uma execucao em sync_log (persiste; a tela le daqui).
 async function logRun(db: any, action: string, s: { created?: number; updated?: number; skipped?: number; errors?: number; samples?: string[] }) {
   try {
     await db.from("sync_log").insert({
@@ -1000,13 +1053,35 @@ Deno.serve(async (req) => {
     }
 
     // ========== SYNC PRODUCTS (incremental - compare by SKU) ==========
-    // NOTA sobre notificacao: este handler grava estoque em LOTE, o que aciona
-    // `trg_low_stock_notify`. Nao ha supressao aqui de proposito — `low_stock`
-    // tem dedup natural (so dispara na TRANSICAO acima->abaixo do limite), entao
-    // o caso normal nao repete. O risco real e o catalogo inteiro ir a zero de
-    // uma vez por resposta parcial da API, e contra isso vale o teto de 10/h no
-    // proprio gatilho, mais o teto de canal.
+    // SUPRIME. A versao anterior deste comentario dizia que a ausencia de
+    // supressao era DELIBERADA, com o argumento de que `low_stock` tem dedup
+    // natural (so dispara na TRANSICAO acima->abaixo). O argumento estava errado
+    // no ponto que importa: o dedup natural protege o caso NORMAL, e o caso que
+    // machuca nao e o normal. Este handler grava `estoque_total` em lotes de 50
+    // num unico statement — todo produto que cruzar o limite naquele statement
+    // dispara um POST, e o unico freio era o teto de 10/HORA, que nao e teto de
+    // lote: uma recuperacao de 4 horas libera 40. E se a API devolver resposta
+    // parcial, o `parseInt(... || "0") || 0` abaixo zera o catalogo e TODO
+    // produto acima do limite cruza de uma vez. Chamar isso de "dedup natural" e
+    // o mesmo erro de forma do incidente de 25/ago.
     if (action === "sync_products") {
+      // Janela de 30 min com contagem de referencia. Se este handler morrer no
+      // meio (timeout de edge, deploy), o `finally` nao roda e o contador fica
+      // orfao — quem destrava e a EXPRESSAO DE LEITURA do gatilho
+      // (`desde > now() - interval '120 minutes'`, em 20260826090000), NAO a
+      // auto-cura do `set_suppress_stock_notify`: aquela so roda na proxima
+      // chamada com `_on = true`, e se ninguem chamar, nunca roda.
+      // 30, o mesmo piso das duas telas que levantam a chave de ESTOQUE, e pelo
+      // mesmo motivo: `desde` e COMPARTILHADO e fica ancorado no PRIMEIRO lote da
+      // sequencia, entao herdar um `desde` de 110 minutos atras faria o silencio
+      // morrer em 10, no meio do lote. O SQL limita em 120 de qualquer forma.
+      //
+      // O argumento vale igual para a chave de PEDIDOS, e la os valores continuam
+      // 10/20 — NAO alinhei porque mexer na supressao de pedidos no dia de
+      // religar notificacao troca um risco conhecido por um desconhecido. Fica
+      // como divida registrada, nao como principio que este arquivo segue.
+      await suprimirEstoque(adminClient, true, 30);
+      try {
       const allProducts = await fetchAllPages("products.json", username, apiKey);
       const b2bCategories = await fetchAllPages("categories.json", username, apiKey);
       const categoryNameByB2bId = new Map<number, string>();
@@ -1415,10 +1490,16 @@ Deno.serve(async (req) => {
       // DIAGNÓSTICO (persistido em sync_log.samples p/ consulta via SQL): se não veio
       // nenhum relacionado, registra os campos que a API realmente manda no produto
       // (arrays + qualquer chave "relat/bundle/together") — revela se o dado existe
-      // no payload e com qual nome. O marcador "SYNC_VERSION:related-v4" confirma que
-      // esta versão (sync NÃO toca em produtos_relacionados — não wipa os importados)
-      // está de fato deployada.
-      const diagSamples: string[] = ["SYNC_VERSION:related-v4"];
+      // no payload e com qual nome.
+      //
+      // O marcador "SYNC_VERSION" e a PROVA DE DEPLOY, e por isso muda a cada
+      // versao que altera comportamento: `sync_log.samples` guarda ele, entao da
+      // para conferir DEPOIS, sem cronometrar nada. Foi renomeado de
+      // `related-v4` para `stock-lock-v1` nesta leva porque esta versao e a
+      // primeira que levanta `suppress_stock_notify` — se o log de um sync de
+      // produtos ainda disser `related-v4`, a edge function NAO foi deployada,
+      // e o `sync_products` esta rodando sem a trava de estoque.
+      const diagSamples: string[] = ["SYNC_VERSION:stock-lock-v1"];
       if (relatedRows === 0 && allProducts.length) {
         const s = allProducts[0] as Record<string, any>;
         const arrays = Object.keys(s).filter((k) => Array.isArray(s[k]));
@@ -1432,6 +1513,12 @@ Deno.serve(async (req) => {
         samples: errorSamples,
         message: `${synced} updated/created, ${skipped} unchanged, ${desativados} deactivated (gone from origin), ${priceRows} prices, ${precosObsoletos} stale prices detected, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${deleted} stale deleted${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
       }), { headers: jsonHeaders });
+      } finally {
+        // `finally`, nao depois do `return`: o handler tem saida por `return` e
+        // por `throw`, e solta a supressao nos dois. Deixar o contador preso
+        // calaria o alerta de estoque ate o teto de 120 minutos.
+        await suprimirEstoque(adminClient, false);
+      }
     }
 
     // ========== SYNC PRICE LISTS (incremental) ==========
@@ -2832,7 +2919,9 @@ Deno.serve(async (req) => {
 
       } finally {
         // `finally`: libera mesmo se o laco lancar. Se o processo morrer antes
-        // disto, a validade de 30 min desliga sozinha.
+        // disto, o contador fica orfao — e NAO e a validade de 30 min que
+        // resolve: o gatilho le `ate > now() OR (n > 0 AND desde > now() - 120
+        // minutes)`, entao o silencio dura ate `desde + 120 minutos`.
         await suprimirNotificacao(adminClient, false);
       }
     }
@@ -2911,8 +3000,11 @@ Deno.serve(async (req) => {
 
       // ORCAMENTO DE TEMPO. Sem ele, uma pagina de 500 pedidos que precisem de
       // escrita pode estourar o tempo da Edge Function — e ai o cursor nao
-      // avanca e o `finally` da supressao pode nao rodar, deixando o sistema
-      // mudo ate a validade de 20 min expirar. Melhor terminar menos paginas.
+      // avanca e o `finally` da supressao pode nao rodar. O custo real disso NAO
+      // e "mudo ate a validade de 20 min": com o contador orfao, o gatilho fica
+      // mudo ate `desde + 120 MINUTOS`, e este handler roda a cada 15 — entao um
+      // estouro aqui cala aviso de status de pedido por duas horas. Melhor
+      // terminar menos paginas.
       const INICIO_TICK = Date.now();
       const ORCAMENTO_TICK_MS = 60_000;
 

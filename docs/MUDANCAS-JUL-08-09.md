@@ -114,8 +114,19 @@ O passo de related do sync (adicionado por engano) DELETAVA os relacionados de t
 produtos b2b e reinseria só o que a API trouxesse — como a API do B2BWave NÃO traz related
 (confirmado: arrays sem campo related; único "relish"=is_bundle, uma flag), rodar o sync de
 produtos **apagava os 96 links importados manualmente**. Correção: o sync **não toca mais** em
-`produtos_relacionados` (related é 100% via tela Import). Marcador `SYNC_VERSION:related-v4`
-confirma a versão sem-wipe. **Reimportar os relacionados SÓ DEPOIS do redeploy v4.**
+`produtos_relacionados` (related é 100% via tela Import). Marcador
+`SYNC_VERSION:related-v4` confirma a versão sem-wipe.
+
+> **NOTA (26/ago) — o marcador foi RENOMEADO para `SYNC_VERSION:stock-lock-v1`.**
+> Ele é prova de DEPLOY, não de funcionalidade, então muda a cada versão que
+> altera comportamento. Qualquer valor a partir de `stock-lock-v1` já inclui a
+> versão sem-wipe descrita acima. Se o log disser `stock-lock-v1`, esta
+> conferência está satisfeita: NÃO reimporte os relacionados e NÃO peça redeploy
+> por causa dela. O "redeploy v4" citado abaixo está superado — o que vale hoje é
+> o deploy da leva de 26/ago (ver `docs/LOG-TRABALHO.md`, seção "FALTA").
+
+**Reimportar os relacionados SÓ DEPOIS de o marcador aparecer no log** — hoje isso
+significa `stock-lock-v1`, não `v4`.
 
 ## BACKLOG / PRÓXIMOS UPDATES (não urgente)
 - **Opt-out de notificação por cliente** (pedido do dono, 2026-07-09): cada cliente poder
@@ -174,9 +185,18 @@ Templates — nada regrava templates automaticamente; NÃO rodar aquele SQL de n
 
 ## PENDÊNCIAS
 1. **Redeploy da edge function `b2bwave-sync`** (passo 1): há melhoria no repo não deployada
-   (`d5e43fc`, related em lote) + marcador `SYNC_VERSION:related-v3`. Não bloqueia produção
-   (related vem pela tela de import; sync de produtos funciona na versão atual). Só realinha
-   repo↔servidor. Confirmar por: rodar Products→Sync Now e checar `sync_log.samples` conter
-   `SYNC_VERSION:related-v3`.
+   (`d5e43fc`, related em lote). Não bloqueia produção (related vem pela tela de import; sync
+   de produtos funciona na versão atual). Só realinha repo↔servidor.
+
+   ⚠️ **ESTE JUÍZO DEIXOU DE VALER em 26/ago:** a partir da leva de hoje o deploy passou a
+   ser obrigatório, não cosmético. Sem ele, o `sync_products` VELHO — sem a trava de estoque
+   — roda no minuto 10 de toda hora, e depois que a torneira abrir ele dispara alerta por
+   produto que cruzar o limite. Não pule o passo 3 do checklist com base nesta linha.
+
+   ⚠️ **ATUALIZADO em 26/ago:** este item mandava conferir `SYNC_VERSION:related-v3`, e esse
+   valor NÃO vai mais aparecer — o marcador foi renomeado. Confirmar por: rodar
+   Products → Sync Now e checar que `sync_log.samples` contém **`SYNC_VERSION:stock-lock-v1`**
+   (ou valor mais novo). Ver `docs/LOG-TRABALHO.md`, passo 3 da seção "FALTA", que traz a
+   consulta pronta e a conferência do `created_at`.
 2. **Pré-desligamento do B2BWave** (semana que vem): sync diferencial final + limpar dados de teste.
    Fazer com cuidado, junto.

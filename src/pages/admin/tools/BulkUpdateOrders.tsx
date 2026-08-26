@@ -148,7 +148,8 @@ const BulkUpdateOrders = () => {
         const { error } = await supabase.rpc("set_suppress_order_notify" as any, { _on: false, _minutos: 0 });
         if (error) console.error("[bulk] release suppression failed:", error.message);
       } catch (e) {
-        // Nao aborta: a janela de supressao expira sozinha.
+        // Nao aborta. Mas nao e "expira sozinha": com o contador orfao, o
+        // gatilho segue mudo ate `desde + 120 minutos`.
         console.error("[bulk] release suppression threw:", e);
       }
     }

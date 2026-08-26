@@ -39,12 +39,47 @@ const ImportOrders = () => {
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
-    const text = await file.text();
-    const rows = parseCSV(text);
+    let rows: Record<string, string>[];
+    try {
+      // Arquivo corrompido ou ilegivel lancava aqui sem toast nenhum — o usuario
+      // soltava o CSV e nao acontecia nada, sem explicacao.
+      rows = parseCSV(await file.text());
+    } catch (e: any) {
+      toast.error("Could not read this file: " + (e?.message ?? String(e)));
+      return;
+    }
     if (rows.length === 0) { toast.error("No data rows found"); return; }
 
     setImporting(true);
     const res: Result[] = [];
+    // `suprimiu`: o `finally` so pode SOLTAR o que foi levantado. A supressao e
+    // contada por referencia no banco — soltar sem ter levantado decrementa o
+    // contador de OUTRO lote e derruba a protecao dele.
+    let suprimiu = false;
+    let abortou = false;
+    // LINHAS de CSV que ENTRARAM. Um contador so, e o de erro sai por
+    // SUBTRACAO (`rows.length - linhasOk`) no `finally`.
+    //
+    // A soma caso a caso ja quebrou DUAS vezes aqui: primeiro contando pedidos
+    // onde o total conta linhas, depois esquecendo um dos quatro erros de grupo
+    // ("Product not found") e os grupos nao processados apos uma excecao. Nos
+    // dois casos a tela de Imports (`ExportsLog.tsx`, que renderiza
+    // `{total} ({sucesso} ok / {erro} err)` na mesma celula) mostrou numeros que
+    // nao fecham — e a segunda versao mostrava ZERO erros numa importacao em que
+    // nada entrou.
+    //
+    // Por subtracao nao ha caso a esquecer: tudo que nao entrou conta como nao
+    // entrado, seja erro de linha, erro de grupo ou grupo que a excecao impediu
+    // de tentar. E o que o dono precisa saber ao abrir o registro: de N linhas do
+    // arquivo, quantas estao no banco.
+    let linhasOk = 0;
+    // O `try` abre AQUI, nao depois da supressao. Os dois `fetchAllRows` abaixo
+    // LANCAM de verdade (`fetchAllRows.ts` faz `throw` em erro de RLS ou rede) e
+    // ficavam fora de qualquer protecao: a tela travava em "Importing..." para
+    // sempre, sem toast, sem tabela. A versao anterior protegeu o laco — que usa
+    // `await supabase.from(...)` e praticamente nao lanca — e deixou descoberto
+    // justamente o ponto que lanca.
+    try {
 
     // Fetch clientes emailâ†’id map
     // PAGINADO: sem isto, do milesimo cliente em diante o pedido historico era
@@ -114,6 +149,39 @@ const ImportOrders = () => {
 
     // Push row-level errors first
     res.push(...groupRowErrors);
+
+    // REGRA NUMERO UM (a mesma do topo de `b2bwave-sync/index.ts`): operacao em
+    // MASSA suprime notificacao ANTES de comecar — e a pergunta e QUAL GATILHO
+    // ela acorda, nao qual tabela ela toca.
+    //
+    // Esta tela nao grava em `produtos`, entao passava por inofensiva. Nao e:
+    // cada `pedido_itens.insert` abaixo dispara o gatilho de reserva, que faz
+    // `UPDATE produtos SET estoque_reservado = estoque_reservado + qtd` — e
+    // `estoque_reservado` e coluna vigiada por `trg_low_stock_notify`. Uma
+    // planilha de 200 linhas reserva estoque de ate 200 produtos, e cada
+    // cruzamento do limite vira um alerta. Este e a tela de ajuste de inventario
+    // eram os dois caminhos de massa sem NENHUMA das duas chaves; os dois foram
+    // fechados na mesma leva.
+    //
+    // Piso de 30 min, nao 10: `desde` e COMPARTILHADO e fica ancorado no PRIMEIRO
+    // lote da sequencia. Se um sync orfao abriu a sequencia ha 110 minutos, esta
+    // chamada herda aquele `desde` e o silencio morre em 10 — no meio da
+    // importacao. O SQL ja limita em 120, entao pedir mais nao custa nada.
+    const minutosSup = Math.max(30, Math.ceil(Object.keys(groups).length / 100) * 5);
+    const { error: supErr } = await supabase.rpc("set_suppress_stock_notify" as any, {
+      _on: true, _minutos: minutosSup,
+    });
+    if (supErr) {
+      // Falhar aqui ABORTA antes de criar qualquer pedido. Melhor a planilha nao
+      // subir do que subir disparando alerta por produto. O `finally` cuida do
+      // `setImporting(false)`, e `suprimiu` continua false — nada a soltar.
+      // `abortou` para que o `import_logs` registre `failed`, e nao `partial`:
+      // nenhum pedido foi criado, e o registro de auditoria tem que dizer isso.
+      abortou = true;
+      toast.error("Could not pause stock alerts — nothing was imported. " + supErr.message);
+      return;
+    }
+    suprimiu = true;
 
     // Process each group (one pedido per group)
     for (const groupKey of Object.keys(groups)) {
@@ -191,15 +259,74 @@ const ImportOrders = () => {
         res.push({ row: group.rows[0].rowNum, key, status: "error", message: `Order created but items failed: ${amigavel}` });
       } else {
         res.push({ row: group.rows[0].rowNum, key, status: "ok", message: `Order created (${items.length} item${items.length !== 1 ? "s" : ""}, total R$ ${total.toFixed(2)})` });
+        linhasOk += group.rows.length;
       }
     }
 
-    setResults(res);
-    setImporting(false);
-    const okOrd = res.filter((r) => r.status === "ok").length;
-    const errOrd = res.filter((r) => r.status === "error").length;
-    toast.success(`Imported ${okOrd} orders`);
-    supabase.from("import_logs").insert({ tipo: "orders", arquivo_nome: file.name, registros_total: rows.length, registros_erro: errOrd, registros_sucesso: rows.length - errOrd, status: errOrd === 0 ? "success" : "partial" } as any).then(() => {});
+    // O toast de sucesso mora DENTRO do `try`. Fora dele, uma excecao mostrava o
+    // vermelho "Import stopped" e, logo em seguida, um verde "Imported 0 orders"
+    // — os dois na tela ao mesmo tempo. E o defeito que o `BulkUpdateOrders.tsx`
+    // ja documenta ter consertado, e que eu repeti aqui.
+    toast.success(`Imported ${res.filter((r) => r.status === "ok").length} orders`);
+
+    } catch (e: any) {
+      // Sem `catch`, uma excecao virava rejeicao nao tratada: nenhum toast, e o
+      // admin sem ideia de que a importacao parou no meio.
+      abortou = true;
+      // `row: 0` e sentinela: o CSV e base-1, entao zero nunca aponta para uma
+      // linha do arquivo. O tipo `Result` exige numero, por isso nao da para
+      // usar travessao aqui como no resto da tela.
+      res.push({ row: 0, key: "—", status: "error", message: `Import stopped: ${e?.message ?? String(e)}` });
+      toast.error("Import stopped: " + (e?.message ?? String(e)));
+    } finally {
+      // `setResults` no `finally`, nao depois dele: numa excecao ele nunca
+      // rodava e a tabela ficava VAZIA — o admin perdia justamente o registro de
+      // quais linhas tinham passado antes da falha. E o mesmo conserto que o
+      // `BulkUpdateOrders.tsx` ja documenta ter feito; eu o desfiz aqui sem
+      // perceber ao mover a linha para fora.
+      setResults(res);
+      // `setImporting(false)` antes da liberacao: se ela lancar (rede caindo,
+      // sessao expirando numa planilha longa), a tela nao pode ficar presa em
+      // "Importing".
+      setImporting(false);
+      if (suprimiu) {
+        try {
+          const { error } = await supabase.rpc("set_suppress_stock_notify" as any, { _on: false, _minutos: 0 });
+          if (error) console.error("[import-orders] release stock suppression failed:", error.message);
+        } catch (e) {
+          // Nao aborta. Mas NAO e "a janela expira sozinha": com `n` orfao, o
+          // gatilho continua mudo ate `desde + 120 minutos` — quem destrava e a
+          // expressao de leitura do gatilho (20260826090000), nao a auto-cura do
+          // setter, que so roda na proxima chamada com `_on = true`.
+          console.error("[import-orders] release stock suppression threw:", e);
+        }
+      }
+
+      // O registro de auditoria tambem mora no `finally`, e conta o que
+      // REALMENTE entrou. Antes usava `rows.length - errOrd`: uma planilha de
+      // 200 linhas que abortasse no primeiro grupo gravava
+      // `registros_sucesso: 199`, porque a linha-fantasma do `catch` conta como
+      // UM erro. O registro que o dono usa para auditar importacao mentia por
+      // 199 — e mentia so no caso em que ele mais precisaria dele.
+      const okOrd = res.filter((r) => r.status === "ok").length;
+      const errOrd = res.filter((r) => r.status === "error").length;
+      supabase.from("import_logs").insert({
+        tipo: "orders", arquivo_nome: file.name,
+        // `total = sucesso + erro` fecha por construcao: erro e o que sobra.
+        // `errOrd` (numero de linhas do relatorio `res`) fica so para decidir o
+        // status — ele conta ITENS DE RELATORIO, nao linhas de CSV, e misturar as
+        // duas unidades foi o defeito das duas versoes anteriores.
+        registros_total: rows.length,
+        registros_erro: rows.length - linhasOk,
+        registros_sucesso: linhasOk,
+        // `failed` SO quando nada entrou. Marcar `failed` com 30 pedidos vivos
+        // no banco e perigoso de um jeito especifico: esta tela NAO tem
+        // idempotencia — nao ha UNIQUE nem checagem por `po_number` — entao o
+        // dono le "falhou", roda de novo, e duplica os 30. `partial` e a verdade
+        // e e o que faz ele conferir antes de repetir.
+        status: (abortou && okOrd === 0) ? "failed" : errOrd === 0 ? "success" : "partial",
+      } as any).then(() => {}, () => {});
+    }
   };
 
   return (
@@ -212,11 +339,16 @@ const ImportOrders = () => {
         <Card className="p-6">
           <h3 className="text-lg font-semibold">Upload CSV</h3>
           <p className="mt-2 text-sm text-muted-foreground">Columns: <code className="text-xs bg-muted px-1 rounded">{TEMPLATE_HEADERS.join(", ")}</code></p>
+          {/* `importing` trava a AREA inteira, nao so o botao. Antes so o
+              `<Button>` interno estava desabilitado: clicar na moldura ou soltar
+              um segundo arquivo disparava um `handleFile` concorrente, e os dois
+              `setResults` corriam entre si — o admin veria o resultado de uma
+              importacao e nao da outra. */}
           <div
-            className="mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 cursor-pointer hover:border-primary/50"
-            onClick={() => inputRef.current?.click()}
+            className={`mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 ${importing ? "opacity-60 cursor-not-allowed" : "cursor-pointer hover:border-primary/50"}`}
+            onClick={() => { if (!importing) inputRef.current?.click(); }}
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+            onDrop={(e) => { e.preventDefault(); if (importing) return; const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
           >
             <div className="text-center">
               <Upload className="mx-auto h-10 w-10 text-muted-foreground" />
@@ -236,7 +368,7 @@ const ImportOrders = () => {
           </Button>
           <div className="mt-4 rounded border p-3 text-xs text-muted-foreground space-y-1">
             <p><strong>Required:</strong> customer_email, product_sku, quantity, price</p>
-            <p><strong>Optional:</strong> status (default: recebido), po_number, delivery_date</p>
+            <p><strong>Optional:</strong> status (default: submitted), po_number, delivery_date</p>
             <p><strong>Grouping:</strong> Rows with the same customer_email + po_number become one order with multiple items.</p>
           </div>
         </Card>
