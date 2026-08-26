@@ -1442,3 +1442,28 @@ Veredito: SEGURO COM RESSALVA nas duas. As ressalvas eram reais.
 - **LIMITACAO DECLARADA** - nao consigo conferir estas duas telas no navegador:
   sao de admin e exigem login, e criar/usar login esta fora do que eu faco.
   Conferi por typecheck e build. A checagem visual fica com o dono.
+
+### 25/08 (noite, cont. 28) - LEVA B: cupom e re-order
+
+- **JA ESTAVA CORRIGIDO** - o fuso do cupom. A tela grava `data_fim` como
+  `T23:59:59`, com comentario explicando que antes matava o cupom na virada do
+  dia anterior. Nao mexi.
+- **CONFIRMADO E CORRIGIDO — a tela e o banco DISCORDAVAM sobre "maximo de usos =
+  0".** O front usava `uso_maximo || null` ao salvar e `if (data.uso_maximo &&
+  ...)` ao validar: com 0, os dois PULAVAM — ou seja, 0 virava "ilimitado", em
+  silencio (o admin digitava 0 e o campo limpava). O BANCO trata 0 como esgotado
+  (`uso_atual < uso_maximo` e falso com 0). Resultado: a tela aplicava o desconto
+  e o servidor recusava — o que, depois do conserto do cupom, faz a guarda de
+  preco barrar o pedido com uma mensagem que nao explica nada.
+  Agora os dois concordam: vazio = ilimitado, 0 = nao pode usar. Com texto na
+  tela dizendo isso, e a lista mostrando `0 / 0` em vez de esconder.
+- **CONFIRMADO E CORRIGIDO (B9)** - o re-order colocava no carrinho o PRECO BASE
+  (`prod.preco ?? item.preco_unitario`), nao o preco da tabela do cliente. Quem
+  tem tabela de preco ou desconto por volume via um valor MAIOR do que ia pagar
+  — o servidor recalcula no fechamento, entao nao cobrava errado, mas MOSTRAVA
+  errado. "O carrinho mente" e o que faz o cliente desistir ou ligar reclamando.
+  Agora usa `getProductPrice`, a mesma funcao do catalogo. Falha na busca NAO
+  impede o re-order: cai no preco base, que e o comportamento de antes.
+- **DE BRINDE** - o re-order tambem passou a descontar o `estoque_reservado` da
+  variante, igual ao carrinho e ao checkout. Sem isso ele ofereceria uma
+  quantidade que a trava nova do banco recusaria.

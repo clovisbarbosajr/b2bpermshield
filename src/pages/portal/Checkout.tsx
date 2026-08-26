@@ -361,7 +361,9 @@ const Checkout = () => {
       setCouponError("Coupon expired");
       setCoupon(null); setDiscount(0); setCouponApplying(false); return;
     }
-    if (data.uso_maximo && (data.uso_atual ?? 0) >= data.uso_maximo) {
+    // `!= null`, e nao truthy: com `uso_maximo = 0` a checagem era PULADA e a
+    // tela aplicava um cupom que o servidor recusa. Zero significa zero usos.
+    if (data.uso_maximo != null && (data.uso_atual ?? 0) >= data.uso_maximo) {
       setCouponError("Coupon usage limit reached");
       setCoupon(null); setDiscount(0); setCouponApplying(false); return;
     }

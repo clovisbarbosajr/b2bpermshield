@@ -33,7 +33,12 @@ const Coupons = () => {
     // matavam o cupom na VIRADA do dia 10 — um dia inteiro antes do que o admin
     // configurou. Grava o fim do dia. `data_inicio` continua 00:00, que e o certo.
     const fimDoDia = form.data_fim ? `${form.data_fim}T23:59:59` : null;
-    const payload = { ...form, valor: Number(form.valor), uso_maximo: form.uso_maximo || null, data_inicio: form.data_inicio || null, data_fim: fimDoDia };
+    const payload = { ...form, valor: Number(form.valor), // `|| null` transformava ZERO em "ilimitado", em silencio: o admin digitava 0,
+    // o campo limpava, e o cupom virava sem limite. E o BANCO trata 0 como
+    // esgotado (`uso_atual < uso_maximo` com 0 e falso), entao os dois
+    // DISCORDAVAM — a tela aplicava o desconto e o servidor recusava, o que hoje
+    // faz a guarda de preco barrar o pedido com uma mensagem que nao explica.
+    uso_maximo: form.uso_maximo ?? null, data_inicio: form.data_inicio || null, data_fim: fimDoDia };
     const { error } = editing
       ? await supabase.from("coupons").update(payload).eq("id", editing.id)
       : await supabase.from("coupons").insert(payload);
@@ -51,13 +56,24 @@ const Coupons = () => {
       </div>
       {loading ? <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div> : (
         <Card><Table><TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Type</TableHead><TableHead>Value</TableHead><TableHead>Usage</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader>
-          <TableBody>{items.map(r => (<TableRow key={r.id}><TableCell className="font-mono font-medium">{r.codigo}</TableCell><TableCell>{r.tipo === "percentual" ? "%" : "$"}</TableCell><TableCell>{r.tipo === "percentual" ? `${r.valor}%` : `$${Number(r.valor).toFixed(2)}`}</TableCell><TableCell>{r.uso_atual ?? 0}{r.uso_maximo ? ` / ${r.uso_maximo}` : ""}</TableCell><TableCell><Badge variant={r.ativo ? "default" : "secondary"}>{r.ativo ? "Active" : "Inactive"}</Badge></TableCell><TableCell className="text-right space-x-1"><Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={async () => { if (!confirm(`Delete coupon "${r.codigo}"?`)) return; const { error } = await supabase.from("coupons").delete().eq("id", r.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchData(); }}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></Card>
+          <TableBody>{items.map(r => (<TableRow key={r.id}><TableCell className="font-mono font-medium">{r.codigo}</TableCell><TableCell>{r.tipo === "percentual" ? "%" : "$"}</TableCell><TableCell>{r.tipo === "percentual" ? `${r.valor}%` : `$${Number(r.valor).toFixed(2)}`}</TableCell><TableCell>{r.uso_atual ?? 0}{r.uso_maximo != null ? ` / ${r.uso_maximo}` : ""}</TableCell><TableCell><Badge variant={r.ativo ? "default" : "secondary"}>{r.ativo ? "Active" : "Inactive"}</Badge></TableCell><TableCell className="text-right space-x-1"><Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={async () => { if (!confirm(`Delete coupon "${r.codigo}"?`)) return; const { error } = await supabase.from("coupons").delete().eq("id", r.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchData(); }}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></Card>
       )}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent><DialogHeader><DialogTitle>{editing ? "Edit Coupon" : "New Coupon"}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div><Label>Code</Label><Input value={form.codigo} onChange={e => setForm({ ...form, codigo: e.target.value.toUpperCase() })} /></div>
           <div className="grid grid-cols-2 gap-3"><div><Label>Type</Label><Select value={form.tipo} onValueChange={v => setForm({ ...form, tipo: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentual">Percentage</SelectItem><SelectItem value="fixo">Fixed</SelectItem></SelectContent></Select></div><div><Label>Value</Label><Input type="number" step="0.01" value={form.valor} onChange={e => setForm({ ...form, valor: parseFloat(e.target.value) || 0 })} /></div></div>
-          <div><Label>Max Uses</Label><Input type="number" value={form.uso_maximo ?? ""} onChange={e => setForm({ ...form, uso_maximo: parseInt(e.target.value) || null })} /></div>
+          <div>
+            <Label>Max Uses</Label>
+            <Input type="number" min={0} value={form.uso_maximo ?? ""} onChange={e => {
+              // Campo vazio = sem limite. ZERO = zero usos, e e o que o banco ja
+              // entende. `parseInt(x) || null` trocava um pelo outro.
+              const bruto = e.target.value.trim();
+              if (bruto === "") { setForm({ ...form, uso_maximo: null }); return; }
+              const n = Number(bruto);
+              setForm({ ...form, uso_maximo: Number.isInteger(n) && n >= 0 ? n : form.uso_maximo });
+            }} />
+            <p className="text-xs text-muted-foreground mt-1">Leave empty for unlimited. <strong>0 means the coupon cannot be used.</strong></p>
+          </div>
           <div className="grid grid-cols-2 gap-3"><div><Label>Start</Label><Input type="date" value={form.data_inicio} onChange={e => setForm({ ...form, data_inicio: e.target.value })} /></div><div><Label>End</Label><Input type="date" value={form.data_fim} onChange={e => setForm({ ...form, data_fim: e.target.value })} /></div></div>
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ativo} onChange={e => setForm({ ...form, ativo: e.target.checked })} /> Active</label>
           <Button onClick={handleSave} disabled={saving} className="w-full">{saving ? "Saving..." : "Save"}</Button>

@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { ORDER_STATUSES, statusLabel, statusBadge as statusBadgeClass } from "@/lib/orderStatuses";
 import { formatOpcao } from "@/lib/variants";
 
+import { getProductPrice } from "@/lib/pricing";
 const STATUS_OPTIONS = [{ value: "", label: "Please select..." }, ...ORDER_STATUSES];
 
 const statusBadge = (status: string) => (
@@ -146,7 +147,7 @@ const Pedidos = () => {
       .in("id", lote));
     const vars = variantIds.length
       ? await emLotes<any>(variantIds, (lote) => supabase.from("produto_variantes")
-          .select("id, produto_id, codigo, quantidade, imagem_url, valores_opcao, ativo").in("id", lote))
+          .select("id, produto_id, codigo, quantidade, estoque_reservado, imagem_url, valores_opcao, ativo").in("id", lote))
       : [];
     if (prods === null || vars === null) {
       toast.error("Could not load the products. Please try again.");
@@ -190,14 +191,40 @@ const Pedidos = () => {
         perdidos.push(item.nome_produto); continue;
       }
       const dispProduto = (prod.estoque_total ?? 0) - (prod.estoque_reservado ?? 0);
-      const disponivel = v ? Math.min(dispProduto, v.quantidade ?? 0) : dispProduto;
+      // Desconta o reservado da VARIANTE tambem — mesma razao do carrinho e do
+      // checkout (ver `src/lib/stock.ts`): o banco decide por
+      // `quantidade - estoque_reservado`.
+      const dispVariante = v ? (v.quantidade ?? 0) - ((v as any).estoque_reservado ?? 0) : 0;
+      const disponivel = v ? Math.min(dispProduto, dispVariante) : dispProduto;
+
+      // PRECO DA TABELA DO CLIENTE, e nao o preco de balcao.
+      //
+      // Estava `prod.preco ?? item.preco_unitario` — o preco BASE. Quem tem
+      // tabela de preco ou desconto por volume via no carrinho um valor MAIOR do
+      // que vai pagar (o servidor recalcula no fechamento). Nao cobrava errado,
+      // mas mostrava errado — e "o carrinho mente" e exatamente o que faz o
+      // cliente desistir ou ligar reclamando.
+      //
+      // Falha aqui NAO impede o re-order: cai no preco base, que e o
+      // comportamento de antes. O valor cobrado continua sendo o do servidor.
+      let precoCliente = prod.preco ?? item.preco_unitario;
+      try {
+        const r = await getProductPrice({
+          productId: item.produto_id,
+          customerId: clienteId!,
+          quantity: item.quantidade,
+        });
+        if (r?.price != null) precoCliente = r.price;
+      } catch (e) {
+        console.error("[re-order] preco do cliente falhou, usando o preco base", item.produto_id, e);
+      }
       addItem({
         produto_id: item.produto_id,
         variante_id: item.variante_id ?? null,
         variante_label: v ? formatOpcao(v.valores_opcao) || v.codigo : null,
         nome: item.nome_produto,
         sku: v?.codigo || item.sku || "",
-        preco: prod.preco ?? item.preco_unitario,
+        preco: precoCliente,
         quantidade: Math.min(item.quantidade, Math.max(disponivel, prod.quantidade_minima ?? 1)),
         unidade_venda: prod.unidade_venda ?? "UN",
         quantidade_minima: prod.quantidade_minima ?? 1,
