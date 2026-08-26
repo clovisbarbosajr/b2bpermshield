@@ -8,7 +8,7 @@
 --
 -- POR QUE AINDA NAO FOI CONSERTADO: apagar automaticamente e chute enquanto nao
 -- der para saber quem criou a linha. O `sync_products` roda de hora em hora,
--- sozinho, sem ninguem na frente (confira o estado do cron — PRE-REQUISITO 4), e o cetico
+-- sozinho, sem ninguem na frente (confira o estado do cron — PRE-REQUISITO 8), e o cetico
 -- derrubou as tres travas que pareciam suficientes:
 --
 --   (a) preco que o ADMIN definiu aqui e indistinguivel de "a origem removeu".
@@ -54,12 +54,47 @@
 -- Ou seja: sem rastrear o que mudou, nao ha carimbo correto. E pre-requisito, nao
 -- refinamento.
 --
+-- SAO OITO, E A ORDEM IMPORTA:
+--   * o 4 (regerar os tipos) e pre-condicao de COMPILACAO dos itens 1, 2, 5, 6 e 7
+--     — sem ele nada que mande `origem` compila. O 3 nao pede mudanca de codigo
+--     e o 8 e so agendar cron, entao esses dois nao dependem dele;
+--   * entre as mudancas de COMPORTAMENTO, o 1 vem PRIMEIRO;
+--   * o 5 e o 6 sobem JUNTOS — o 6 sozinho apaga o carimbo humano a cada ciclo,
+--     e o 5 sozinho nao carimba nada. Enquanto o `ProductEdit`
+-- continuar apagando e reinserindo, todo save de produto zera a `origem` de
+-- todas as linhas de preco daquele produto (as recriadas nascem no default
+-- `desconhecido`). Se o carimbo do sync subir antes, cada save converte
+-- `b2bwave` e `local` em `desconhecido` e infla a lista de triagem em silencio.
+--
 -- 1. `ProductEdit.tsx` PRECISA parar de apagar e reinserir. Hoje ele faz
 --    `delete().eq("produto_id", ...)` seguido de `insert(...)`: salvar um
---    produto no admin DESTROI e recria todas as linhas de preco dele. Tem que
---    virar upsert por `(tabela_preco_id, produto_id)`, e precisa passar a saber
---    QUAIS campos de preco o usuario editou — carimbando `local` so nesses e
---    deixando os demais como estao.
+--    produto no admin DESTROI e recria todas as linhas de preco dele.
+--
+--    SAO DUAS METADES, e omitir a segunda e pior que o problema original:
+--      (i)  upsert por `(tabela_preco_id, produto_id)` das linhas presentes;
+--      (ii) DELETE EXPLICITO dos pares que sumiram da tela.
+--    Hoje quem faz a lixeira funcionar e justamente o DELETE geral: o botao tira
+--    a linha do estado e o delete a apaga do banco. Trocando so por upsert, a
+--    lixeira para de apagar — o preco fica vivo para sempre e a tela mostra que
+--    sumiu. Numa tabela de dinheiro, o admin acreditando que tirou um preco que
+--    continua valendo e pior que o defeito que estamos consertando.
+--    (`TabelasPreco.saveAllPrices` ja faz as duas metades, com `removes`.)
+--
+--    E o carimbo tem que separar os lotes: `.upsert([...])` manda UM array, e o
+--    PostgREST exige as MESMAS chaves em todos os objetos — nao da para mandar
+--    `origem` em algumas linhas e omitir nas outras no mesmo lote. Ou grava so
+--    as linhas SUJAS (e nao toca nas limpas), ou manda dois lotes.
+--
+--    NAO use `{ defaultToNull: false }` (o `Prefer: missing=default`) para
+--    contornar isso. Ele aceita chaves diferentes no mesmo array, sim — e no
+--    caminho `DO UPDATE` preenche a chave AUSENTE com o DEFAULT da coluna, ou
+--    seja grava `'desconhecido'` por cima do valor real. Parece a saida e e a
+--    armadilha.
+--
+--    A informacao para saber o que ficou sujo EXISTE: `fetchProduct` ja carrega
+--    os precos do banco; basta guardar o snapshot e diffar, como o
+--    `TabelasPreco` faz com `origPrices`/`dirtyIds`.
+--
 --    Efeito colateral que ja existe hoje: o `created_at` daquelas linhas e
 --    resetado a cada save, entao ele NAO serve para julgar "isto e antigo".
 --
@@ -69,17 +104,119 @@
 --    continua `b2bwave`. Precisa mandar `origem: 'local'` explicitamente.
 --
 -- 3. `TabelasPreco.tsx` -> `handleDuplicate` copia precos com `insert`. A copia
---    deve HERDAR a origem da linha copiada: duplicar uma regua nao e ato de
---    precificacao, e nascer em `desconhecido` criaria triagem manual a cada
---    duplicacao.
+--    nasce `desconhecido` — ou seja, o DEFAULT: nao mande `origem` no insert.
 --
--- 4. O cron `b2bwave-cron-products` precisa estar AGENDADO — toda a autocura
+--    NAO herde a origem — uma versao anterior deste item mandava herdar, e era o
+--    unico caso em que `b2bwave` e comprovadamente FALSO: a copia vai para uma
+--    regua chamada "<nome> (copy)", que o B2BWave nao conhece. O sync casa regua
+--    por NOME minusculo; um nome que nao existe la nunca casa. Carimbar
+--    `b2bwave` ali seria afirmar que a origem escreveu uma linha que ela nunca
+--    viu, e a seguranca disso dependeria inteiramente da trava (b) continuar
+--    existindo — ela para de proteger no minuto em que alguem renomear a copia
+--    para bater com uma regua da origem.
+--    Mas `local` TAMBEM esta errado, e pela regra de abertura deste bloco:
+--    duplicar copia TODAS as linhas de uma vez, e ninguem "mexeu" em nenhuma —
+--    sao copias mecanicas de precos do B2BWave. Carimbar `local` nelas e
+--    exatamente "toda linha que a tela gravou", que e o que a regra proibe.
+--    E com o trigger do 5 instalado, uma regua duplicada de 900 linhas vira uma
+--    zona PERMANENTE de isencao de limpeza, criada com dois cliques.
+--
+--    ENTAO: `desconhecido`. E o unico valor verdadeiro — ninguem sabe quem
+--    escreveu aquele preco.
+--
+--    O CUSTO, dito sem maquiagem: nao e "uma triagem unica". Regua duplicada tem
+--    nome "(copy)", que o sync nunca casa, entao aquelas linhas ficam em
+--    `desconhecido` PARA SEMPRE e reaparecem em TODA consulta de candidatos,
+--    indefinidamente. E residuo permanente, nao fila que esvazia.
+--
+--    Aceitamos assim mesmo porque a alternativa e pior: com `local` e o trigger
+--    do 5, a regua duplicada vira zona de isencao ABSORVENTE — as linhas nao so
+--    reaparecem, elas se tornam inapagaveis, e continuam assim mesmo se alguem
+--    renomear a copia para casar com uma regua da origem. Residuo visivel e
+--    melhor que imunidade invisivel.
+--
+-- 4. REGERAR `src/integrations/supabase/types.ts` depois de rodar este SQL. O
+--    arquivo e gerado e nao conhece `origem`; mandar `origem: 'local'` sem
+--    regerar nao compila. (O `ImportProductDiscounts` hoje contorna isso com um
+--    `as any` — e e exatamente assim que aquele bug passou despercebido. Nao
+--    repita o truque.)
+--
+--    E QUANDO AQUELE BUG FOR CONSERTADO, o importador vira um terceiro escritor
+--    desta tabela e precisa carimbar tambem — senao a linha nasce `desconhecido`
+--    e some na triagem. Importar desconto e ato humano: carimba `local`.
+--
+-- 5. O SYNC PRECISA DE UMA GUARDA PARA NAO RECARIMBAR — e este e o mais dificil
+--    dos oito. O upsert do sync e cego; sem guarda, ele devolve `b2bwave` a
+--    toda linha `local` cujo par a origem precifica, a cada ciclo. O PostgREST
+--    nao expressa `DO UPDATE ... WHERE`, entao so ha dois caminhos:
+--      (i)  trigger `BEFORE UPDATE` em `tabela_preco_itens` que preserve
+--           `origem` quando o valor antigo for `local` (o `preco` continua sendo
+--           atualizado — a regra do espelho vale para o VALOR);
+--      (ii) trocar o upsert do sync por uma RPC `SECURITY DEFINER`.
+--
+--    RECOMENDADO: o (ii). Ele resolve o 5 e o 6 no MESMO passo —
+--    `INSERT INTO public.tabela_preco_itens AS t (...) ... ON CONFLICT
+--     (tabela_preco_id, produto_id) DO UPDATE SET preco = EXCLUDED.preco,
+--     origem = CASE WHEN t.origem = 'local' THEN 'local' ELSE 'b2bwave' END`
+--    carimba e protege junto. O (i) sozinho nao carimba nada.
+--
+--    O `AS t` NAO e opcional: sem apelidar o alvo, `t.origem` da
+--    "missing FROM-clause entry for table t". E o `CASE` so roda no caminho
+--    `DO UPDATE` — LINHA NOVA precisa que o payload traga `origem: 'b2bwave'`,
+--    senao nasce no DEFAULT `desconhecido`. Ou seja: a RPC dispensa a GUARDA do
+--    5, nao dispensa o CARIMBO do 6.
+--
+--    ⚠ DECISAO DO DONO, se for de trigger: o (i) torna `local` um estado
+--    ABSORVENTE. Duas consequencias que ele precisa saber ANTES:
+--      * nao ha volta. `UPDATE ... SET origem = 'b2bwave'` numa linha `local`
+--        vira no-op SILENCIOSO — responde "UPDATE 1" e nao muda nada. Marcar uma
+--        linha como `local` por engano na triagem so se desfaz com DELETE ou
+--        desligando o trigger;
+--      * par tocado por humano NUNCA mais e limpo automaticamente, nem quando a
+--        origem o remover. Ou seja: para essas linhas, o mecanismo reintroduz
+--        exatamente o problema das 29 obsoletas que motivou tudo isto. E
+--        defensavel pelo custo assimetrico do topo deste arquivo, mas e escolha,
+--        nao consequencia tecnica.
+--
+--    Terceira opcao, listada para ser descartada com olhos abertos: o sync ja tem
+--    `adminClient` e ja le esta tabela no mesmo bloco — poderia ler o `origem`
+--    atual e mandar DOIS lotes (os `local` com `origem:'local'`, o resto com
+--    `'b2bwave'`). Zero objeto novo no banco, zero estado absorvente. Mas e racy
+--    e nao protege escritor futuro — que e o argumento honesto a favor do trigger.
+--
+-- 6. O SYNC PRECISA CARIMBAR. Sem isto, NADA disto serve para nada: as telas
+--    carimbariam `local`, o sync nao carimbaria coisa nenhuma, e todo o resto
+--    ficaria preso em `desconhecido` PARA SEMPRE — a autocura prometida neste
+--    arquivo nunca aconteceria, e a lista de triagem continuaria sendo a tabela
+--    inteira. Uma versao anterior desta lista simplesmente NAO TINHA este item, e
+--    ainda por cima descrevia o carimbo do sync como se ja existisse.
+--
+--    O ponto exato: o `tpItens.push({ produto_id, tabela_preco_id, preco })` do
+--    `b2bwave-sync` passa a mandar `origem: 'b2bwave'`.
+--
+--    SOBE JUNTO COM O 5, nunca antes: sozinho, ele apaga o carimbo humano a cada
+--    ciclo. Se escolher a opcao (ii) do 5 (RPC), os dois viram um so — a RPC faz
+--    `origem = CASE WHEN t.origem = 'local' THEN 'local' ELSE 'b2bwave' END`, que
+--    carimba e protege no mesmo passo. E o caminho recomendado.
+--
+-- 7. O CONTADOR DE PRECOS OBSOLETOS PRECISA FILTRAR POR ORIGEM. O bloco
+--    `precosObsoletos` do `b2bwave-sync` le `select("produto_id,
+--    tabela_preco_id")` — sem `origem` — e conta TODO par que a origem nao tem
+--    mais. Depois da triagem, a linha legitima e marcada `origem = 'local'` e
+--    CONTINUA valendo (nao e apagada), entao ela continua sendo contada: o numero
+--    gravado a cada rodada NUNCA cai, mesmo com a triagem 100% feita. E a unica
+--    metrica que o dono tem para saber se o problema acabou — travada em cima do
+--    valor errado. O filtro precisa virar `... AND origem = 'b2bwave'`.
+--
+-- 8. O cron `b2bwave-cron-products` precisa estar AGENDADO — toda a autocura
 --    descrita abaixo depende de um ciclo de sync acontecer. CONFIRA, nao suponha:
 --    o repositorio o agenda em `20260618000002` (`'10 * * * *'`), mas ele pode
 --    ter sido desagendado a mao (foi, em 26/ago, por precaucao).
 --
 --      SELECT jobname, schedule, active FROM cron.job
 --       WHERE jobname = 'b2bwave-cron-products';
+--      -- ATENCAO: desagendado devolve ZERO LINHAS, nao `active = false`.
+--      -- "Nao voltou nada" significa DESAGENDADO, nao "nao sei".
 --
 -- ---------------------------------------------------------------------------
 -- POR QUE `desconhecido` NO BACKFILL, E NAO `b2bwave`
@@ -100,7 +237,31 @@
 --
 -- CONTRATO A CUMPRIR PELO CODIGO — NAO EXISTE AINDA, nada disto esta ligado:
 --   * so `b2bwave` PODERA ser apagado automaticamente;
---   * `local` e `desconhecido` nunca serao tocados pelo sync.
+--   * `local` e `desconhecido` nunca serao APAGADOS pelo sync.
+--
+-- CUIDADO COM A PALAVRA "TOCADOS": uma versao anterior deste bloco dizia que
+-- `local` "nunca sera tocado pelo sync", e isso CONTRADIZ a frase acima de que o
+-- sync carimba `b2bwave` no que ele escreve.
+--
+-- ESTADO DE HOJE, para nao haver duvida: o sync NAO carimba nada. O payload dele
+-- (`b2bwave-sync`, o `tpItens.push({ produto_id, tabela_preco_id, preco })`) nao
+-- tem `origem`, e em `ON CONFLICT DO UPDATE` o PostgREST so escreve as colunas
+-- enviadas — entao ele deixa `origem` como estava. Ver PRE-REQUISITO 6.
+--
+-- DEPOIS que o 6 subir, ai sim: o upsert e CEGO, sem `WHERE`. No par que a origem
+-- precifica E o admin editou — o caso principal, o admin sobrescrevendo um preco
+-- do B2BWave — o ciclo seguinte regravaria `origem = 'b2bwave'` por cima do
+-- `local`, e o carimbo humano duraria no maximo uma hora. E por isso que o 5 e o
+-- 6 sobem JUNTOS, nunca o 6 sozinho.
+--
+-- E o `.upsert()` do PostgREST NAO consegue expressar
+-- `DO UPDATE ... WHERE origem <> 'local'`. Ver PRE-REQUISITO 5.
+--
+-- A PROMESSA HONESTA, entao, e mais estreita do que parecia:
+--   `local` protege de verdade o par que a origem NAO precifica. No par que ela
+--   precifica, o preco de la vence a cada ciclo — que e a regra do espelho, e
+--   esta certo. O que NAO pode acontecer e a linha ser APAGADA.
+--
 -- Enquanto o codigo nao subir, esta coluna e so uma coluna.
 --
 -- ---------------------------------------------------------------------------
@@ -126,6 +287,57 @@
 --   ALTER TABLE public.backup_tpi_20260826 ENABLE ROW LEVEL SECURITY;
 --   REVOKE ALL ON public.backup_tpi_20260826 FROM anon, authenticated;
 --   SELECT count(*) FROM public.backup_tpi_20260826;
+--
+-- COMO VOLTAR. Backup sem caminho de volta testado nao e backup, e o caminho
+-- intuitivo FALHA aqui: a copia e tirada ANTES do `ADD COLUMN`, entao ela tem 5
+-- colunas e a tabela viva passa a ter 6 — um `INSERT ... SELECT *` da erro de
+-- contagem de colunas. Restaure nomeando as colunas:
+--
+--   INSERT INTO public.tabela_preco_itens (id, tabela_preco_id, produto_id, preco, created_at)
+--   SELECT b.id, b.tabela_preco_id, b.produto_id, b.preco, b.created_at
+--     FROM public.backup_tpi_20260826 b
+--    WHERE NOT EXISTS (
+--            SELECT 1 FROM public.tabela_preco_itens i
+--             WHERE i.tabela_preco_id = b.tabela_preco_id AND i.produto_id = b.produto_id)
+--      AND EXISTS (SELECT 1 FROM public.tabelas_preco t WHERE t.id = b.tabela_preco_id)
+--      AND EXISTS (SELECT 1 FROM public.produtos    p WHERE p.id = b.produto_id)
+--   ON CONFLICT DO NOTHING;
+--
+--   O `NOT EXISTS` e PELO PAR, nao pelo `id`. Uma versao anterior comparava `id` e
+--   justificava dizendo "a linha pode ter sido recriada" — que e exatamente o caso
+--   que o `id` NAO pega: linha recriada ganha `id` novo (`DEFAULT
+--   gen_random_uuid()`), o guard passa, e o INSERT bate no
+--   `UNIQUE(tabela_preco_id, produto_id)` com `23505`.
+--
+--   Os dois `EXISTS` sao por causa das FKs (`ON DELETE CASCADE` para regua e
+--   produto): se a regua ou o produto foi apagado no meio-tempo, a linha leva
+--   `23503`.
+--
+--   E os tres guards importam porque `INSERT ... SELECT` e TUDO OU NADA: UMA
+--   linha ruim aborta o restore INTEIRO e nada volta — no exato momento em que se
+--   precisa dele. O `ON CONFLICT DO NOTHING` fecha a colisao de chave primaria
+--   que sobraria.
+--
+--   O RESTORE E PARCIAL DE PROPOSITO, e por isso CONFIRA QUANTAS VOLTARAM. Os
+--   tres guards impedem o abort, mas o preco e que ele PULA linha sem avisar: o
+--   comando responde `INSERT 0 N` e "voltaram 400 de 959" e "voltaram 959 de 959"
+--   sao indistinguiveis. Meca antes:
+--
+--     SELECT count(*) AS deve_voltar FROM public.backup_tpi_20260826 b
+--      WHERE NOT EXISTS (SELECT 1 FROM public.tabela_preco_itens i
+--                         WHERE i.tabela_preco_id = b.tabela_preco_id
+--                           AND i.produto_id = b.produto_id)
+--        AND EXISTS (SELECT 1 FROM public.tabelas_preco t WHERE t.id = b.tabela_preco_id)
+--        AND EXISTS (SELECT 1 FROM public.produtos    p WHERE p.id = b.produto_id);
+--
+--   O `N` do INSERT tem que bater com esse numero.
+--
+--   E DESAGENDE O CRON antes de restaurar. Os `EXISTS` sao avaliados no SELECT:
+--   se o sync apagar a regua ou o produto entre a avaliacao e a gravacao, a linha
+--   leva `23503` e o restore INTEIRO aborta. Probabilidade baixa, custo alto.
+--
+--   A linha restaurada volta em `desconhecido` — que e o certo: ninguem sabe quem
+--   a escreveu.
 --
 -- E APAGUE quando a triagem terminar — backup esquecido e dado de preco vivo
 -- fora do controle de acesso:
@@ -185,8 +397,10 @@ ALTER TABLE public.tabela_preco_itens
 --
 -- Parcial porque `b2bwave` sera ~97% das linhas: num indice cheio o planner
 -- ignoraria e preferiria seq scan. Assim ele cobre exatamente a consulta que
--- importa — achar o que NAO e do sync — e cresce junto com o problema, nao com a
--- tabela.
+-- importa — achar o que NAO e do sync. HOJE ele cobre a tabela INTEIRA, porque
+-- tudo esta em `desconhecido`; so encolhe depois do deploy do codigo e de um
+-- ciclo de sync. Com 959 linhas isso e irrelevante, mas dizer que "cresce junto
+-- com o problema" seria overclaim enquanto o carimbo nao existir.
 CREATE INDEX IF NOT EXISTS idx_tpi_origem_nao_sync
   ON public.tabela_preco_itens (origem)
   WHERE origem <> 'b2bwave';
@@ -202,7 +416,21 @@ NOTIFY pgrst, 'reload schema';
 -- ---------------------------------------------------------------------------
 -- VERIFICACAO
 --
--- (1) A coluna existe, e o formato e o esperado:
+-- (1) A coluna existe COM O FORMATO CERTO. Sao duas consultas: a primeira prova
+--     o formato (a segunda so mostra a distribuicao — agrupar por valor NAO prova
+--     `NOT NULL`, nem o default, nem que a CHECK entrou):
+--
+--   SELECT column_name, is_nullable, column_default
+--     FROM information_schema.columns
+--    WHERE table_schema='public' AND table_name='tabela_preco_itens'
+--      AND column_name='origem';
+--   -- ESPERADO: is_nullable = NO, column_default = 'desconhecido'::text
+--
+--   SELECT conname, contype, convalidated FROM pg_constraint
+--    WHERE conrelid = 'public.tabela_preco_itens'::regclass
+--      AND conname = 'tabela_preco_itens_origem_valida';
+--   -- ESPERADO: uma linha, contype = c, convalidated = true.
+--   -- (So o nome nao prova que e CHECK nem que foi validada.)
 --
 --   SELECT origem, count(*) FROM public.tabela_preco_itens GROUP BY 1;
 --   -- ESPERADO: uma linha, `desconhecido`, com o total da tabela.
@@ -222,7 +450,7 @@ NOTIFY pgrst, 'reload schema';
 --   -- Confira antes que (1) devolveu contagem maior que zero.
 --
 -- (3) A LISTA DE CANDIDATOS — *** so faz sentido DEPOIS do deploy do codigo de
---     carimbo E de um ciclo completo de sync *** (cron agendado, PRE-REQUISITO 4).
+--     carimbo E de um ciclo completo de sync *** (cron agendado, PRE-REQUISITO 8).
 --
 --     Rodada HOJE, recem-aplicada a migration, a consulta abaixo devolve a
 --     TABELA INTEIRA — porque ainda nao ha codigo carimbando nada, e tudo esta em
