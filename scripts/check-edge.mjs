@@ -6,13 +6,18 @@
 // e o Deno nao esta instalado nesta maquina.
 //
 // Roda `tsc` com `--noResolve` (nao tenta baixar os imports remotos do Deno) e
-// recusa qualquer TS2304/TS2552 — "nome nao encontrado" — exceto os globais do
-// proprio Deno, esperados porque nao temos os tipos aqui.
+// recusa "nome nao encontrado" (TS2304/TS2552) e tambem uso ANTES da declaracao
+// (TS2448/TS2454) — que e ReferenceError em producao pela mesma razao, e estava
+// de fora na primeira versao. Os globais do proprio Deno sao esperados, porque
+// nao temos os tipos aqui.
 //
-// A PRIMEIRA versao deste portao PASSOU o mutante: o `tsc` nem chegava a rodar,
-// o `catch` engolia a falha de spawn, a saida ficava vazia e isso era lido como
-// "nenhum erro". Portao que falha em silencio e pior que portao nenhum — da
-// confianca sem dar cobertura. Agora a execucao do `tsc` e verificada.
+// Este portao ja falhou em silencio DUAS vezes, e as duas viraram conserto aqui:
+//   1. o `tsc` nem chegava a rodar (spawn de `.cmd` recusado pelo Node), o
+//      `catch` engolia e a saida vazia era lida como "nenhum erro";
+//   2. um erro de FLAG fazia o `tsc` recusar rodar, nenhuma linha casava o
+//      filtro, e ele imprimia "OK" sem ter olhado nada.
+// Por isso agora ele verifica a execucao E exige que todo codigo de erro visto
+// seja conhecido. Portao que falha em silencio da confianca sem dar cobertura.
 //
 // NAO substitui `deno check`: nao valida tipos dos imports remotos nem a API do
 // Deno. Pega a classe de erro que eu cometi, e so.
@@ -81,17 +86,46 @@ if (r.status === null) {
 
 const saida = (r.stdout ?? "") + (r.stderr ?? "");
 
-// `tsc` sem erro nenhum sai 0 e nao imprime nada. Se saiu != 0 tem que HAVER
-// diagnostico — senao alguma coisa deu errado que este portao nao entende, e
-// engolir isso e exatamente o defeito que ele tinha.
-if (r.status !== 0 && saida.trim() === "") {
+// DIAGNOSTICO DESCONHECIDO = PORTAO NAO PODE RODAR.
+//
+// A guarda anterior era `status != 0 && saida vazia` — e nunca disparava: com
+// `--noResolve` todo import remoto vira TS2307, entao o `tsc` SEMPRE sai != 0
+// com saida cheia. Resultado: um erro de FLAG (`--targett` em vez de `--target`,
+// TS5025) fazia o tsc recusar rodar, nenhuma linha casava o filtro, e o portao
+// imprimia "OK". Passar sem ter olhado nada e o defeito que este arquivo existe
+// para nao ter.
+//
+// Agora: todo codigo de erro que aparecer tem que ser CONHECIDO. Os que o portao
+// espera sao TS2307 (import remoto que `--noResolve` nao resolve, normal aqui) e
+// os que ele procura. Qualquer outro significa que o tsc esta falando de algo que
+// este portao nao entende — e isso e motivo para parar, nao para seguir.
+const CODIGOS_PROCURADOS = new Set(["2304", "2448", "2454", "2552"]);
+// TS2307: import remoto que `--noResolve` nao resolve — normal aqui.
+// TS5097: import terminando em `.ts`, que e o estilo do Deno e o `tsc` so aceita
+//         com `allowImportingTsExtensions`. Tambem normal neste projeto.
+const CODIGOS_ESPERADOS = new Set(["2307", "5097"]);
+
+const codigosVistos = new Set(
+  [...saida.matchAll(/error TS(\d+):/g)].map((m) => m[1]),
+);
+const desconhecidos = [...codigosVistos].filter(
+  (c) => !CODIGOS_PROCURADOS.has(c) && !CODIGOS_ESPERADOS.has(c),
+);
+if (desconhecidos.length > 0) {
+  console.error(`\nPORTAO NAO PODE RODAR: o tsc devolveu diagnostico que este portao nao conhece (TS${desconhecidos.join(", TS")}).`);
+  console.error("Saida do tsc:\n" + saida.trim().split("\n").slice(0, 12).map((l) => "  " + l).join("\n") + "\n");
+  process.exit(1);
+}
+
+// E se saiu != 0 sem diagnostico nenhum, tambem para.
+if (r.status !== 0 && codigosVistos.size === 0) {
   console.error(`\nPORTAO NAO PODE RODAR: tsc saiu com codigo ${r.status} e sem diagnostico.\n`);
   process.exit(1);
 }
 
 const erros = saida
   .split("\n")
-  .filter((l) => /error TS(2304|2552):/.test(l))
+  .filter((l) => /error TS(2304|2448|2454|2552):/.test(l))
   .filter((l) => {
     const m = l.match(/Cannot find name '([^']+)'/);
     return !(m && GLOBAIS_ESPERADOS.has(m[1]));

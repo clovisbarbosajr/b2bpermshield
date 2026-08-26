@@ -1073,3 +1073,56 @@ A3 sequestro de ficha, A4 oraculo+amplificador, A5 equipe, A6 satelites (SQL
 pronto desde antes), A7 stripe, A8 PDF alheio, A9 reset de senha, A10
 enumeracao. Falta so o que depende do PAINEL do dono: "Confirm email" e
 "Secure password change".
+
+### 25/08 (noite, cont. 17) - Cetico em A3/A10: o que ele derrubou
+
+- **DERRUBOU A MINHA PROPRIA TESE** - a checagem de `email_confirmed_at` NAO
+  fecha o A3 em nenhuma das duas configuracoes do toggle: com ele OFF o Supabase
+  confirma no ato e a checagem passa; com ele ON o GoTrue nem entrega sessao a
+  nao-confirmado, entao a funcao nunca e alcancada por um. Ela vale como defesa
+  em profundidade (OAuth/convite/fluxo custom futuro), nao como conserto.
+  Texto do arquivo reescrito para dizer isso sem enfeite. QUEM FECHA O A3 E O
+  TOGGLE.
+- **CORRIGIDO, ERA FURO REAL** - eu matava a senha da conta nao confirmada ANTES
+  de gerar o link e ANTES do teto de envio. Qualquer falha depois disso (teto
+  estourado, SMTP fora, generateLink com erro) deixava a pessoa SEM SENHA e SEM
+  LINK — e o gatilho e ANONIMO, entao dava para varrer a base e apagar a senha de
+  quem estivesse na janela "cadastrei, ainda nao confirmei". Agora so MARCA, e a
+  senha morre depois de o e-mail SAIR.
+- **CORRIGIDO** - o `error` da RPC `auth_user_id_by_email` era ignorado.
+  `supabase-js` nao levanta, devolve `{data:null,error}` — se a funcao sumisse do
+  banco, a protecao desapareceria calada. Mesmo defeito que o portao de edge
+  denuncia, repetido por mim.
+- **CORRIGIDO** - afirmacao falsa "nao ha o que comparar" na enumeracao. Ha: o
+  TEMPO de resposta. E-mail inexistente responde apos duas consultas; cliente
+  ativo passa por RPC, geracao de link e ENVIO SINCRONO. Fechar exige responder
+  antes de enviar (fila) — anotado, nao feito.
+- **CORRIGIDAS 7 afirmacoes falsas** na migration: "100% das fichas migradas
+  chegam ativo" (o sync mapeia approved=false e is_active=false), "conta ativa
+  fecha pedido" (disable_ordering barra), a contradicao sobre o toggle, o bloco
+  "EFEITO COLATERAL" inteiro (descrevia estado INALCANCAVEL), "mesclar na tela de
+  clientes" (nao existe funcao de mesclar), e "roda em TODO login" (so para papel
+  cliente/nulo).
+
+**PORTAO DE EDGE FALHOU EM SILENCIO PELA SEGUNDA VEZ, e o cetico provou:**
+com `--noResolve` todo import remoto vira TS2307, entao o tsc SEMPRE sai != 0 com
+saida cheia — a guarda "status != 0 e saida vazia" nunca disparava. Um erro de
+FLAG (`--targett`) fazia o tsc RECUSAR rodar e o portao imprimia "OK". E TS2448
+(uso antes da declaracao), que e ReferenceError de verdade, nao estava no filtro.
+- **CORRIGIDO** - todo codigo de erro visto tem que ser CONHECIDO: os procurados
+  (2304/2448/2454/2552) ou os esperados deste projeto (2307 import remoto, 5097
+  import terminando em `.ts`, estilo Deno). Qualquer outro para o portao.
+- **PROVADO POR 3 MUTANTES** - flag errada acende; uso antes da declaracao
+  acende; nome inexistente acende. Controle limpo.
+
+### 25/08 (noite, cont. 18) - LEVA H: cabecalhos de seguranca
+
+- **FEITO** - `vercel.json` com CSP, `X-Frame-Options: DENY`, `nosniff`,
+  `Referrer-Policy`, `Permissions-Policy`, `COOP`, `no-store` no index.html e
+  cache imutavel nos assets com hash.
+- **TESTADO DE VERDADE, NAO SO ESCRITO** - servi o `dist/` com os MESMOS
+  cabecalhos e abri no navegador. A primeira versao QUEBRAVA AS FONTES do site
+  (o CSS do build faz `@import` do Google Fonts, e `style-src` nao liberava).
+  Corrigido com `fonts.googleapis.com` em `style-src` e `fonts.gstatic.com` em
+  `font-src`. Reteste: 54 fontes carregadas, Inter e Space Grotesk presentes,
+  tela renderiza. Se eu tivesse so escrito o arquivo, o site subiria sem fonte.

@@ -23,6 +23,11 @@ import { PDFDocument, StandardFonts, rgb, PDFFont } from "npm:pdf-lib@1.17.1";
 // diferentes da funcao.
 const AUTENTICACAO = new Set(["password_reset", "magic_link", "request_magic_link", "set_password"]);
 
+// Conta nao confirmada cuja senha sera invalidada — mas SO depois de o e-mail
+// sair. Ver o bloco "SQUAT DE PRE-REGISTRO" mais abaixo.
+let squatParaInvalidar: { uid: string; email: string } | null = null;
+
+
 interface PdfOrderItem { sku: string; name: string; qty: number; price: number; total: number; }
 interface PdfOrderData {
   orderNumber: string; orderDate: string; poNumber?: string; deliveryDate?: string;
@@ -1324,23 +1329,26 @@ Deno.serve(async (req) => {
       // SQUAT DE PRE-REGISTRO (A3, segundo caminho) — identico ao do
       // request_magic_link. Conta NAO CONFIRMADA com este e-mail pode ter sido
       // criada por outra pessoa; a senha dela morre antes de o link sair.
+      //
+      // Aqui so MARCA — a senha morre depois de o e-mail sair. Ver o comentario
+      // equivalente no `request_magic_link`.
+      //
+      // O CUSTO REAL mora NESTE fluxo, e nao la: o `request_magic_link` so chega
+      // nesse ponto para cliente `ativo`, e auto-cadastro nasce `pendente`.
+      // Aqui nao ha esse filtro, entao e aqui que um cliente que se cadastrou com
+      // senha e ainda nao confirmou pode perder a senha que escolheu. Ele entra
+      // pelo link e define outra.
       try {
-        const { data: uidExistente } = await (adminClient as any)
+        const { data: uidExistente, error: rpcErr } = await (adminClient as any)
           .rpc("auth_user_id_by_email", { _email: resetEmailNorm });
-        if (uidExistente) {
-          const { data: u } = await adminClient.auth.admin.getUserById(String(uidExistente));
-          if (u?.user && !u.user.email_confirmed_at) {
-            const senhaMorta = crypto.randomUUID() + crypto.randomUUID();
-            const { error: pwErr } = await adminClient.auth.admin.updateUserById(
-              String(uidExistente), { password: senhaMorta },
-            );
-            // Falha aqui NAO impede o envio: impedir daria ao atacante uma forma
-            // de negar acesso a vitima. Registra e segue.
-            if (pwErr) {
-              console.error(`[send-email] password_reset: nao consegui invalidar senha de conta nao confirmada (${resetEmailNorm}): ${pwErr.message}`);
-            } else {
-              console.log(`[send-email] password_reset: conta nao confirmada teve a senha invalidada antes do link (${resetEmailNorm})`);
-            }
+        if (rpcErr) {
+          console.error(`[send-email] password_reset: auth_user_id_by_email falhou (${resetEmailNorm}): ${rpcErr.message}`);
+        } else if (uidExistente) {
+          const { data: u, error: uErr } = await adminClient.auth.admin.getUserById(String(uidExistente));
+          if (uErr) {
+            console.error(`[send-email] password_reset: getUserById falhou (${resetEmailNorm}): ${uErr.message}`);
+          } else if (u?.user && !u.user.email_confirmed_at) {
+            squatParaInvalidar = { uid: String(uidExistente), email: resetEmailNorm };
           }
         }
       } catch (e) {
@@ -1412,7 +1420,14 @@ Deno.serve(async (req) => {
       // entrava no log, o contador nunca subia, e o oraculo nao se desgastava.
       //
       // Agora o limite e cobrado ANTES de olhar o cadastro, e o excesso responde
-      // exatamente igual ao caso "nao existe". Nao ha o que comparar.
+      // exatamente igual ao caso "nao existe".
+      //
+      // ISTO NAO FECHA A ENUMERACAO POR COMPLETO, e nao adianta fingir que sim:
+      // o TEMPO de resposta ainda entrega. E-mail inexistente responde depois de
+      // duas consultas; e-mail de cliente ativo passa por RPC, geracao de link e
+      // ENVIO SINCRONO antes de responder — diferenca de centenas de milissegundos,
+      // medivel de fora. Fechar isso exige responder antes de enviar (fila), que e
+      // mudanca de arquitetura. Anotado na fila.
       {
         const { count } = await adminClient
           .from("notification_log")
@@ -1461,24 +1476,27 @@ Deno.serve(async (req) => {
       // Custo aceito: um cliente que se cadastrou com senha, ainda nao
       // confirmou, e pede este link PERDE a senha que tinha escolhido. Ele entra
       // pelo link e define outra. Preferivel a entregar a conta dele.
+      //
+      // ORDEM IMPORTA: aqui so MARCA. A senha so morre depois de o e-mail SAIR.
+      // Eu tinha matado a senha aqui em cima, antes de gerar o link e antes do
+      // teto de envio — entao qualquer falha posterior (teto estourado, SMTP
+      // fora, generateLink com erro) deixava a pessoa SEM SENHA e SEM LINK. E o
+      // gatilho e anonimo: dava para varrer a base e apagar a senha de quem
+      // estivesse na janela "cadastrei, ainda nao confirmei".
       try {
-        const { data: uidExistente } = await (adminClient as any)
+        const { data: uidExistente, error: rpcErr } = await (adminClient as any)
           .rpc("auth_user_id_by_email", { _email: emailReq });
-        if (uidExistente) {
-          const { data: u } = await adminClient.auth.admin.getUserById(String(uidExistente));
-          if (u?.user && !u.user.email_confirmed_at) {
-            const senhaMorta = crypto.randomUUID() + crypto.randomUUID();
-            const { error: pwErr } = await adminClient.auth.admin.updateUserById(
-              String(uidExistente), { password: senhaMorta },
-            );
-            // Falhar aqui NAO pode virar "nao manda o link": isso daria ao
-            // atacante uma forma de negar acesso a vitima. Registra e segue —
-            // o pior caso volta a ser o de hoje, nao fica pior.
-            if (pwErr) {
-              console.error(`[send-email] request_magic_link: nao consegui invalidar senha de conta nao confirmada (${emailReq}): ${pwErr.message}`);
-            } else {
-              console.log(`[send-email] request_magic_link: conta nao confirmada teve a senha invalidada antes do link (${emailReq})`);
-            }
+        // Ler o `error`: `supabase-js` NAO levanta, devolve `{data:null,error}`.
+        // Sem isto, se a RPC sumir do banco a protecao desaparece calada — o
+        // mesmo defeito que o portao de edge function existe para denunciar.
+        if (rpcErr) {
+          console.error(`[send-email] request_magic_link: auth_user_id_by_email falhou (${emailReq}): ${rpcErr.message}`);
+        } else if (uidExistente) {
+          const { data: u, error: uErr } = await adminClient.auth.admin.getUserById(String(uidExistente));
+          if (uErr) {
+            console.error(`[send-email] request_magic_link: getUserById falhou (${emailReq}): ${uErr.message}`);
+          } else if (u?.user && !u.user.email_confirmed_at) {
+            squatParaInvalidar = { uid: String(uidExistente), email: emailReq };
           }
         }
       } catch (e) {
@@ -1697,6 +1715,25 @@ Deno.serve(async (req) => {
       orderPdfAttachment ? [orderPdfAttachment] : undefined,
     );
     const toDisplay = Array.isArray(to) ? to.join(", ") : to;
+
+    // AGORA sim: o link saiu, entao a senha do squat pode morrer. Falhar aqui NAO
+    // vira erro para o chamador — impedir o envio daria ao atacante uma forma de
+    // negar acesso a vitima, e o e-mail ja foi.
+    if (squatParaInvalidar && result.ok) {
+      try {
+        const senhaMorta = crypto.randomUUID() + crypto.randomUUID();
+        const { error: pwErr } = await adminClient.auth.admin.updateUserById(
+          squatParaInvalidar.uid, { password: senhaMorta },
+        );
+        if (pwErr) {
+          console.error(`[send-email] nao consegui invalidar a senha da conta nao confirmada (${squatParaInvalidar.email}): ${pwErr.message}`);
+        } else {
+          console.log(`[send-email] senha de conta nao confirmada invalidada apos o envio (${squatParaInvalidar.email})`);
+        }
+      } catch (e) {
+        console.error(`[send-email] falha ao invalidar senha de squat (${squatParaInvalidar.email}): ${String(e)}`);
+      }
+    }
 
     // Registra TODO envio (sucesso / fallback / falha) no notification_log — nada silencioso.
     await adminClient.from("notification_log").insert({
