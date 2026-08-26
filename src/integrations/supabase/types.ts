@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.4"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -3074,6 +3074,19 @@ export type Database = {
       }
       conta_liberada_de: { Args: { _cli_id: string }; Returns: boolean }
       create_view_as_token: { Args: { _customer_id: string }; Returns: string }
+      cupom_por_codigo: {
+        Args: { _codigo: string }
+        Returns: {
+          codigo: string
+          data_fim: string
+          data_inicio: string
+          id: string
+          tipo: string
+          uso_atual: number
+          uso_maximo: number
+          valor: number
+        }[]
+      }
       ensure_my_cliente_record: {
         Args: { _empresa?: string; _nome?: string }
         Returns: string
