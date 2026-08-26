@@ -205,6 +205,57 @@ const B2BWaveSync = () => {
     stopRef.current = true;
   };
 
+  // HISTORICO COMPLETO — a acao `sync_orders_all`, que traz TODO pedido do
+  // B2BWave, inclusive os anteriores a 2025, e nao notifica ninguem
+  // (`skipPre2025 = false`, `notify = false` no servidor).
+  //
+  // Existe separada da sincronizacao de rotina porque varre a base inteira e
+  // demora. A comparacao de 26/ago achou 1.639 pedidos que existiam la e nao
+  // aqui — todos de 2024 ou antes. Este botao e o que fecha esse buraco.
+  const importarHistoricoCompleto = async () => {
+    if (!confirm(
+      "Bring EVERY order from B2BWave, including orders from 2024 and earlier?\n\n" +
+      "This reads the whole history and can take several minutes.\n" +
+      "No email or SMS is sent — this action never notifies."
+    )) return;
+    setOrderSyncing(true);
+    stopRef.current = false;
+    setOrderProgress("Importando histórico completo… isto varre a base inteira.");
+    // A acao trabalha em PAGINA + DESLOCAMENTO (50 pedidos por chamada) e
+    // devolve `nextPage`/`nextOffset`. Seguir so a pagina pularia 50 de cada
+    // 500 — a importacao pareceria completa e nao seria.
+    let pagina = 1, desloc = 0, criados = 0, atualizados = 0, erros = 0, chamadas = 0;
+    try {
+      while (!stopRef.current) {
+        const { data, error } = await supabase.functions.invoke("b2bwave-sync", {
+          body: { action: "sync_orders_all", page: pagina, offset: desloc },
+        });
+        if (error) throw error;
+        // O servidor devolve `synced` (nao `created`) nesta acao.
+        criados += data?.synced ?? 0;
+        atualizados += data?.updated ?? 0;
+        erros += data?.errors ?? 0;
+        chamadas++;
+        setOrderProgress(
+          `Histórico: página ${pagina} — ${criados} novos, ${atualizados} atualizados, ${erros} erros`
+        );
+        if (!data?.hasMore) break;
+        pagina = data?.nextPage ?? pagina + 1;
+        desloc = data?.nextOffset ?? 0;
+        // Trava de seguranca: se o servidor devolver sempre o mesmo cursor, o
+        // laco giraria para sempre queimando chamada. 400 cobre ~20 mil pedidos.
+        if (chamadas > 400) { setOrderProgress("⚠ Parei em 400 chamadas — me avise."); break; }
+      }
+      toast.success(`Histórico importado: ${criados} novos, ${atualizados} atualizados`);
+      setOrderProgress(`✅ Histórico completo: ${criados} novos, ${atualizados} atualizados, ${erros} erros`);
+    } catch (err: any) {
+      toast.error("Falhou: " + (err?.message ?? String(err)));
+      setOrderProgress("❌ " + (err?.message ?? String(err)));
+    }
+    setOrderSyncing(false);
+    fetchLastRuns();
+  };
+
   const syncAll = async () => {
     for (const item of syncItems) {
       await runSync(item);
@@ -425,6 +476,16 @@ const B2BWaveSync = () => {
               >
                 {orderSyncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                 {orderSyncing ? "Syncing..." : "Sync All Orders"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                disabled={orderSyncing}
+                onClick={importarHistoricoCompleto}
+                title="Traz TODO pedido do B2BWave, inclusive os de 2024 e antes. Não envia e-mail nem SMS."
+              >
+                <RefreshCw className="h-3 w-3" /> Importar histórico completo
               </Button>
               {orderSyncing && (
                 <Button variant="destructive" size="sm" className="gap-1" onClick={stopOrderSync}>

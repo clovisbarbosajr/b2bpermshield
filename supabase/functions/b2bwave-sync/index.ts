@@ -395,9 +395,33 @@ async function upsertOrder(
     const _dtNova  = submittedAt ? new Date(submittedAt).getTime() : null;
     const podeGravarData = _dtNova !== null && Number.isFinite(_dtNova)
       && (_dtAtual === null || !Number.isFinite(_dtAtual) || _dtNova < _dtAtual);
-    const changed = ex.status !== status || Number(ex.total) !== total ||
-      Number(ex.subtotal) !== subtotal || (ex.quantidade_total ?? 0) !== quantidade;
-    if (!changed && !precisaReparar) return "skipped";
+    // DINHEIRO EM CENTAVOS INTEIROS. A comparacao crua reescrevia 449 pedidos a
+    // CADA ciclo — medido na comparacao de 26/ago — porque o B2BWave manda
+    // `723.7266` e a coluna aqui e NUMERIC(12,2), que guarda `723.73`. A
+    // diferenca nunca some, entao o `changed` dava true para sempre: escrita
+    // inutil sem fim, e o relatorio de comparacao vermelho eternamente.
+    //
+    // `Math.round(x * 100)` compara o que o banco de fato guarda.
+    const cent = (x: number) => Math.round((Number(x) || 0) * 100);
+    const changed = ex.status !== status
+      || cent(ex.total) !== cent(total)
+      || cent(ex.subtotal) !== cent(subtotal)
+      || (ex.quantidade_total ?? 0) !== quantidade;
+
+    // PEDIDO SEM NENHUMA LINHA. A comparacao de 26/ago achou 16 — todos
+    // "complete", com itens no B2BWave e ZERO aqui.
+    //
+    // Eles nao se curavam porque `changed` so olha status/total/subtotal/qtd:
+    // com tudo batendo, o ciclo devolvia "skipped" e as linhas nunca voltavam.
+    // O cliente que abrisse um desses via um pedido vazio.
+    //
+    // Agora a ausencia de linha, tendo linha na origem, e motivo suficiente para
+    // reescrever. `itemRows.length > 0` evita o caso legitimo do pedido que
+    // tambem nao tem item la.
+    const semLinhasAqui = (ex.quantidade_total ?? 0) === 0 && itemsQty > 0;
+    const precisaItens = itemRows.length > 0 && semLinhasAqui;
+
+    if (!changed && !precisaReparar && !precisaItens) return "skipped";
     const pago = pickPago(o);
     const upd = await db.from("pedidos").update({
       status, subtotal, total, quantidade_total: quantidade,
@@ -418,19 +442,18 @@ async function upsertOrder(
       //   - e apagava o kill-switch manual: admin calava um pedido, o proximo
       //     tick do sync ressuscitava. O COMMENT da coluna promete o contrario.
       // Descer para false continua incondicional: sem data, nao fala.
+      // O SYNC NUNCA DA VOZ A UM PEDIDO. So tira.
+      //
+      // Ate aqui o reparo (preencher a `data_origem` que faltava) tambem gravava
+      // `notificavel: true`. A comparacao de 26/ago mostrou o tamanho disso: 32
+      // pedidos ganhariam voz no proximo ciclo, sem ninguem ter pedido —
+      // sincronizacao de DADO virando permissao de FALAR.
+      //
+      // Agora o reparo grava so a data. Quem devolve a voz a um pedido e uma
+      // acao humana, nunca um efeito colateral do sync. Descer para `false`
+      // (sem data, nao fala) continua incondicional.
       ...(submittedAt
-        ? (podeGravarData
-            // `notificavel` sobe SO no REPARO (`_dtAtual === null`): pedido que
-            // nunca teve data, e portanto nunca teve voz. Com a data andando
-            // para TRAS dentro dos 7 dias, `recenteDeVerdade` tambem fica true —
-            // e religar ali apagaria o kill-switch do admin num pedido velho.
-            // Fechar so a direcao comum e deixar a rara aberta seria pior que
-            // nao fechar: da confianca sem dar protecao.
-            ? { data_origem: submittedAt,
-                ...(_dtAtual === null && recenteDeVerdade ? { notificavel: true } : {}) }
-            // Data igual ou mais nova: nao mexe. Nem na data, nem em
-            // `notificavel` — este ramo e a trava descrita acima.
-            : {})
+        ? (podeGravarData ? { data_origem: submittedAt } : {})
         : { notificavel: false }),
       // So entra no patch quando o B2BWave realmente informou — ver pickPago.
       ...(pago === undefined ? {} : { is_paid: pago }),
@@ -445,7 +468,7 @@ async function upsertOrder(
     // itens de uma vez — 3 chamadas HTTP cada, num tick sem orcamento de tempo —
     // e cada pedido ficaria momentaneamente SEM ITENS, multiplicando por 1150 a
     // exposicao ao buraco que o comentario abaixo descreve. De graca.
-    if (changed && itemRows.length > 0) {
+    if ((changed || precisaItens) && itemRows.length > 0) {
       // delete + insert sao DUAS chamadas HTTP, ou seja, duas transacoes: nao ha
       // rollback. Se o insert falhar e o erro for descartado, o pedido fica com
       // ZERO itens e a funcao ainda retorna "updated".
@@ -1108,6 +1131,56 @@ Deno.serve(async (req) => {
         if (!error) priceRows += chunk.length;
       }
 
+      // ----- PRECO QUE SAIU DA REGUA LA, SAI DAQUI TAMBEM -----
+      //
+      // Ate 26/ago esta tabela so recebia `upsert`, NUNCA `delete`. Preco
+      // retirado de uma regua no B2BWave continuava valendo aqui para sempre, e
+      // o cliente comprava pelo valor antigo. A comparacao daquele dia mediu:
+      // 29 linhas obsoletas, algumas de 4 a 6 mil.
+      //
+      // TRES TRAVAS, porque apagar preco e destrutivo:
+      //
+      // 1. So mexe se a leitura da origem veio inteira. `pricesByProduct` vazio
+      //    significa `product_prices.json` fora do ar — apagar ali zeraria a
+      //    regua de todo mundo de uma vez. E o mesmo cuidado que as variantes
+      //    ja tinham ("falha na leitura: NAO mexe").
+      // 2. So apaga linha de produto que VEIO no feed agora. Produto ausente
+      //    pode estar fora por filtro, nao por exclusao.
+      // 3. So apaga par (produto, tabela) que a origem NAO tem mais. Par que ela
+      //    tem foi reescrito no upsert acima.
+      let precosObsoletos = 0;
+      if (pricesByProduct.size > 0 && tpItens.length > 0) {
+        // Pares que a origem afirma existir, no formato "produtoLocal|tabelaLocal".
+        const paresDaOrigem = new Set(tpItens.map((r: any) => `${r.produto_id}|${r.tabela_preco_id}`));
+        // So os produtos que vieram no feed E casaram com uma linha local.
+        const produtosNoFeed = [...pricesByProduct.keys()]
+          .map((id) => b2bIdToProdId.get(String(id)))
+          .filter(Boolean) as string[];
+
+        for (let i = 0; i < produtosNoFeed.length; i += 100) {
+          const lote = produtosNoFeed.slice(i, i + 100);
+          const { data: atuais, error: errLer } = await adminClient
+            .from("tabela_preco_itens")
+            .select("produto_id, tabela_preco_id")
+            .in("produto_id", lote);
+          // Erro de LEITURA nao pode virar exclusao: sem saber o que existe, o
+          // seguro e nao apagar nada deste lote.
+          if (errLer || !atuais) continue;
+
+          const sobrando = atuais.filter(
+            (r: any) => !paresDaOrigem.has(`${r.produto_id}|${r.tabela_preco_id}`)
+          );
+          for (const r of sobrando) {
+            const { error: errDel } = await adminClient
+              .from("tabela_preco_itens")
+              .delete()
+              .eq("produto_id", (r as any).produto_id)
+              .eq("tabela_preco_id", (r as any).tabela_preco_id);
+            if (!errDel) precosObsoletos++;
+          }
+        }
+      }
+
       // ----- Variantes / opções de produto (Size/Color etc.) -----
       // B2BWave: product.product_variants[] = { code, option_values }.
       //
@@ -1220,7 +1293,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         success: true,
         samples: errorSamples,
-        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${deleted} stale deleted${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
+        message: `${synced} updated/created, ${skipped} unchanged, ${priceRows} prices, ${precosObsoletos} stale prices removed, ${variantRows} variants, ${relatedRows} related, ${errors} errors, ${deleted} stale deleted${relDiag}${errors && errorSamples.length ? ` | ex: ${errorSamples.join(' ; ')}` : ''}`,
       }), { headers: jsonHeaders });
     }
 
@@ -2472,7 +2545,16 @@ Deno.serve(async (req) => {
           return s && new Date(s).getFullYear() < 2025;
         });
         if (!allPre2025) {
-          const r = await processOrderSlice(adminClient, data, true, true);
+          // `skipPre2025 = false`: o dono quer CLONE PERFEITO — todo pedido,
+          // inclusive os de 2024 e antes, e toda EDICAO feita neles la.
+          // Com `true`, uma correcao num pedido antigo nunca chegava aqui, e o
+          // clone ficava congelado naquele pedido para sempre.
+          //
+          // Trazer o antigo NAO da voz a ele: completude de DADO e permissao de
+          // FALAR sao coisas separadas neste sistema. Pedido velho entra com
+          // `notificavel: recenteDeVerdade` = false (a data e antiga), e o aviso
+          // de pedido novo exige menos de 48h. Ele entra mudo, por construcao.
+          const r = await processOrderSlice(adminClient, data, false, true);
           created += r.created; updated += r.updated; skipped += r.skipped; errors += r.errors;
         } else {
           skipped += data.length;

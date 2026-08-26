@@ -2,22 +2,33 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import adminBg from "@/assets/admin-bg.svg";
-import BackgroundGradient from "@/components/ui/background-gradient-snippet";
+import { usePortalTheme, usePortalMotion } from "@/hooks/usePortalTheme";
 
 const AdminLogin = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [verSenha, setVerSenha] = useState(false);
+  const [aviso, setAviso] = useState<{ tipo: "erro" | "ok"; texto: string } | null>(null);
 
+  usePortalTheme(["auth-page", "auth-page--admin"]);
+  usePortalMotion();
+
+  // ATENCAO: daqui para baixo, ate o `navigate`, NADA foi alterado na migracao
+  // do desenho novo (26/ago). E a autenticacao inteira desta tela — login,
+  // conferencia de papel e a expulsao de quem nao e staff. O desenho estatico
+  // que o dono entregou tinha `action="#"` e nao autenticava ninguem; trocar
+  // isto por aquilo teria virado uma tela bonita que nao deixa ninguem entrar.
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAviso(null);
     setLoading(true);
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setLoading(false);
     if (error) {
       toast.error(error.message);
+      setAviso({ tipo: "erro", texto: error.message });
       return;
     }
     if (data.user) {
@@ -29,6 +40,7 @@ const AdminLogin = () => {
       if (roleData?.role !== "admin" && (roleData?.role as string) !== "warehouse" && (roleData?.role as string) !== "manager") {
         await supabase.auth.signOut();
         toast.error("This account does not have administrator access.");
+        setAviso({ tipo: "erro", texto: "This account does not have administrator access." });
         return;
       }
     }
@@ -36,78 +48,109 @@ const AdminLogin = () => {
   };
 
   return (
-    <div className="relative min-h-screen min-h-[100dvh] w-full overflow-hidden bg-[#0a0f1e]">
-      <div className="absolute inset-0 hidden sm:block">
-        <img
-          src={adminBg}
-          alt=""
-          aria-hidden
-          loading="eager"
-          fetchPriority="high"
-          decoding="async"
-          className="absolute inset-0 h-full w-full object-cover object-center pointer-events-none select-none"
-        />
-        <div className="absolute inset-0 bg-[#0a0f1e]/30 pointer-events-none" />
-      </div>
+    <>
+      <div className="cursor-glow" aria-hidden="true" />
 
-      {/* Mobile: gradient background */}
-      <div className="absolute inset-0 sm:hidden">
-        <BackgroundGradient />
-      </div>
+      <header className="topbar topbar--auth">
+        <Link className="brand" to="/">
+          <img src="/paginas/assets/permshield-logo.png" alt="PermShield Luxury Vinyl Flooring" />
+        </Link>
+        <div className="topbar__meta">
+          <span className="live-dot" /> ADMINISTRATION / AUTHORIZED PERSONNEL
+        </div>
+        <Link className="back-top" to="/">← Back to portal</Link>
+      </header>
 
-      {/* Form */}
-      <div className="relative z-10 flex min-h-screen min-h-[100dvh] items-center justify-center px-4">
-        <form
-          onSubmit={handleLogin}
-          className="mx-auto flex w-full max-w-[360px] flex-col items-center gap-3 rounded-xl border border-white/15 bg-[#0b1628]/95 p-5 shadow-xl shadow-black/40 sm:translate-y-[10vh] md:translate-y-[8vh] lg:translate-y-[7vh]"
-        >
-          <div className="relative w-full">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#4fc3f7] opacity-70">
-              <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" />
-              </svg>
-            </span>
-            <input
-              type="text"
-              placeholder="USERNAME"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-9 pr-4 text-sm font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/80 transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
-            />
+      <main className="auth-layout">
+        <section className="auth-story auth-story--admin" data-parallax>
+          <div className="story-grid" aria-hidden="true" />
+          <div className="shield-system" aria-hidden="true">
+            <svg viewBox="0 0 500 560">
+              <path className="shield-ring ring-a" d="M250 22 445 92v151c0 142-87 231-195 285C142 474 55 385 55 243V92l195-70Z" />
+              <path className="shield-ring ring-b" d="M250 90 378 136v99c0 93-57 152-128 187-71-35-128-94-128-187v-99l128-46Z" />
+              <path className="shield-check" d="m176 249 49 51 105-123" />
+            </svg>
+            <div className="orbit-label label-a">ACCESS</div>
+            <div className="orbit-label label-b">CONTROL</div>
+            <div className="orbit-label label-c">VERIFIED</div>
           </div>
-
-          <div className="relative w-full">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#4fc3f7] opacity-70">
-              <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M18 8h-1V6A5 5 0 0 0 7 6v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2zm-6 9a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm3.1-9H8.9V6a3.1 3.1 0 0 1 6.2 0v2z" />
-              </svg>
-            </span>
-            <input
-              type="password"
-              placeholder="PASSWORD"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded border border-white/20 bg-white/10 py-3 pl-9 pr-4 text-sm font-semibold tracking-widest text-white placeholder:uppercase placeholder-white/80 transition-all focus:bg-white/15 focus:border-[#4fc3f7]/60 focus:outline-none"
-            />
+          <div className="story-copy">
+            <p className="overline">OPERATIONS CONTROL / 02</p>
+            <h1>Command the<br /><em>whole floor.</em></h1>
+            <p>One secure entry point for the people coordinating inventory, customers, and every order in motion.</p>
+            <div className="system-status">
+              <span><i /> SYSTEMS OPERATIONAL</span><b>256-BIT SESSION</b>
+            </div>
           </div>
+        </section>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded bg-[#1a7fbd] py-3 text-sm font-bold uppercase tracking-widest text-white shadow-lg shadow-[#1a7fbd]/30 transition-all hover:bg-[#1a9fdd] active:bg-[#1580c0] disabled:opacity-50"
-          >
-            {loading ? "..." : "LOGIN"}
-          </button>
+        <section className="auth-panel">
+          <div className="auth-card">
+            <div className="auth-card__head"><span>ADMIN ACCESS</span><b>02</b></div>
+            <div className="auth-intro">
+              <small>SECURE WORKSPACE</small>
+              <h2>Welcome back.</h2>
+              <p>Sign in with your authorized PermShield credentials.</p>
+            </div>
 
-          <Link
-            to="/"
-            className="mt-1 py-2 text-xs tracking-wide text-white/80 transition-colors hover:text-white"
-          >
-            ← Back
-          </Link>
-        </form>
-      </div>
-    </div>
+            <form className="auth-form" onSubmit={handleLogin} noValidate>
+              {/* `email`, nao `username`: o desenho estatico rotulava "Username",
+                  mas quem autentica e `signInWithPassword({ email })`. Rotulo
+                  que nao corresponde ao campo faz o cliente digitar a coisa
+                  errada e culpar a senha. */}
+              <label htmlFor="admin-user">E-mail</label>
+              <div className="auth-field">
+                <span className="field-icon">⌁</span>
+                <input
+                  id="admin-user"
+                  name="email"
+                  type="email"
+                  autoComplete="username"
+                  placeholder="Enter your e-mail"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+
+              <label htmlFor="admin-password">Password</label>
+              <div className="auth-field">
+                <span className="field-icon">◆</span>
+                <input
+                  id="admin-password"
+                  name="password"
+                  type={verSenha ? "text" : "password"}
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  className="password-toggle"
+                  type="button"
+                  onClick={() => setVerSenha((v) => !v)}
+                  aria-label={verSenha ? "Hide password" : "Show password"}
+                >
+                  {verSenha ? "HIDE" : "SHOW"}
+                </button>
+              </div>
+
+              <button className="primary-button" type="submit" disabled={loading}>
+                <span>{loading ? "Signing in…" : "Enter control center"}</span><b>↗</b>
+              </button>
+
+              <p className={`form-status${aviso ? (aviso.tipo === "erro" ? " is-error" : " is-success") : ""}`} aria-live="polite">
+                {aviso?.texto ?? ""}
+              </p>
+            </form>
+
+            <Link className="back-link" to="/">← Back to login selection</Link>
+          </div>
+          <p className="security-note"><i /> Protected access · Activity may be monitored</p>
+        </section>
+      </main>
+    </>
   );
 };
 
