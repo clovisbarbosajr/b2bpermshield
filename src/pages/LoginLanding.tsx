@@ -31,7 +31,7 @@ const LoginLanding = () => {
 
       <header className="topbar">
         <Link className="brand" to="/" aria-label="PermShield B2B home">
-          <img src="/paginas/assets/permshield-logo.png" alt="PermShield Luxury Vinyl Flooring" />
+          <img src="/portal-tema/assets/permshield-logo.png" alt="PermShield Luxury Vinyl Flooring" />
         </Link>
         <div className="topbar__meta">
           <span className="live-dot" /> BUSINESS NETWORK <b>/</b> SECURE ACCESS

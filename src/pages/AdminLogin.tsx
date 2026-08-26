@@ -53,7 +53,7 @@ const AdminLogin = () => {
 
       <header className="topbar topbar--auth">
         <Link className="brand" to="/">
-          <img src="/paginas/assets/permshield-logo.png" alt="PermShield Luxury Vinyl Flooring" />
+          <img src="/portal-tema/assets/permshield-logo.png" alt="PermShield Luxury Vinyl Flooring" />
         </Link>
         <div className="topbar__meta">
           <span className="live-dot" /> ADMINISTRATION / AUTHORIZED PERSONNEL
