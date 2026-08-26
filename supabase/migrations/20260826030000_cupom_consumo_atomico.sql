@@ -56,7 +56,29 @@ BEGIN
     IF NEW.coupon_id IS NULL THEN
       NEW.desconto := 0;
     ELSE
-      IF TG_OP = 'INSERT' THEN
+      IF TG_OP = 'INSERT' AND NEW.status::text IN ('cancelado','cancelled') THEN
+        -- PEDIDO QUE JA NASCE CANCELADO NAO CONSOME.
+        --
+        -- Guarda herdada de 20260825380000:72-75. Eu a tinha PERDIDO ao trocar
+        -- o ramo do INSERT, e o efeito era pior do que o defeito original:
+        -- `fn_cupom_devolve_status` e AFTER UPDATE **OF status**, e num pedido
+        -- que ja nasce cancelado nunca houve mudanca de status — a devolucao
+        -- nunca dispararia. O uso ficaria queimado ate alguem APAGAR o pedido.
+        -- Em cupom de uso unico, um pedido desses mataria a promocao inteira.
+        --
+        -- Aqui so VALIDA (para nao deixar cupom invalido pendurado), sem
+        -- consumir e sem marcar.
+        SELECT CASE WHEN cp.tipo = 'percentual'
+                    THEN round(COALESCE(NEW.subtotal,0) * cp.valor/100.0, 2)
+                    ELSE LEAST(cp.valor, COALESCE(NEW.subtotal,0)) END
+          INTO _d FROM public.coupons cp
+          WHERE cp.id = NEW.coupon_id AND cp.ativo IS TRUE
+            AND (cp.data_inicio IS NULL OR cp.data_inicio <= now())
+            AND (cp.data_fim    IS NULL OR cp.data_fim    >= now());
+        IF _d IS NULL THEN
+          NEW.coupon_id := NULL;
+        END IF;
+      ELSIF TG_OP = 'INSERT' THEN
         -- CONSUMO ATOMICO. Antes eram duas etapas: este SELECT so CONFERIA a
         -- elegibilidade, e quem incrementava era `fn_cupom_consome` (AFTER
         -- INSERT, 20260825380000) — que, se falhasse, NAO derrubava o pedido.
@@ -212,6 +234,17 @@ COMMIT;
 --
 -- NAO limita cupom por CLIENTE — `coupons` nao tem esse conceito. Limite e
 -- global, como sempre foi.
+--
+-- MUDA UMA POLITICA, e vale dizer alto: 20260825380000 (linhas 180-183)
+-- prometia ABSORVER o uso a mais quando o cupom esgotasse na corrida — "derrubar
+-- o pedido por um caso de corrida seria pior para o cliente". Com o consumo
+-- atomico isso deixa de existir: quem chegar depois do limite entra SEM
+-- desconto, e ve na tela um total diferente do que viu no carrinho.
+--
+-- A troca e deliberada: absorver "um uso a mais" era aceitavel quando a corrida
+-- era acidental, e virou porta de saque quando alguem dispara N pedidos de
+-- proposito. Aquela secao de 20260825380000 esta desatualizada por causa desta
+-- migration.
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------

@@ -631,9 +631,15 @@ export default function Notificacoes() {
 
   const alternarPausa = async (pausar: boolean) => {
     setPausando(true);
-    // Vai pela RPC, nao por UPDATE direto: e ela que confere o papel de admin
-    // (a partir de 20260826010000, DESpausar exige admin de verdade — nem a
-    // service key abre).
+    // Vai pela RPC, nao por UPDATE direto: e ela que confere o papel
+    // (20260825180000:128) — admin logado, OU chamada com service key / editor
+    // de SQL, onde `auth.uid()` e nulo.
+    //
+    // (Este comentario ja afirmou que "nem a service key abre". Era falso:
+    //  20260826010000 DESISTIU dessa mudanca de proposito, porque ela trancaria
+    //  o dono do lado de fora — ele acessa o banco pelo editor do Lovable, sem
+    //  sessao. Comentario que promete protecao inexistente engana o proximo
+    //  leitor pior do que a ausencia do comentario.)
     const { error } = await sb.rpc('pausar_envios', { _pausar: pausar });
     if (error) {
       toast.error(pausar ? 'Could not pause sending' : 'Could not resume sending', { description: error.message });

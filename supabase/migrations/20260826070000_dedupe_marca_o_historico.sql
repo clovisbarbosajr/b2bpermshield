@@ -90,10 +90,15 @@ COMMIT;
 --                        AND payload ? 'origem')              AS deve_ser_0
 --   FROM public.notification_log WHERE event = 'new_order';
 --
--- 2) CONTROLE — o indice esta sendo usado (senao o reimport fica lento e
---    ninguem percebe ate a hora ruim):
---   EXPLAIN SELECT id FROM public.notification_log
---    WHERE event = 'new_order' AND payload->>'order_numero' = '1';
---   -- ESPERADO: aparece `notification_log_dedupe_idx` no plano. Se aparecer
---   -- `Seq Scan`, o indice nao pegou — me avise.
+-- 2) CONTROLE — o indice existe:
+--   SELECT indexname FROM pg_indexes
+--    WHERE tablename = 'notification_log'
+--      AND indexname = 'notification_log_dedupe_idx';
+--   -- ESPERADO: uma linha.
+--
+--   (Aqui NAO se usa `EXPLAIN`: em tabela pequena o planejador escolhe
+--    `Seq Scan` porque e mais barato, com o indice existindo e funcionando
+--    perfeitamente. Eu ia pedir para voce me avisar de um "problema" que nao e
+--    problema — e a proxima vez que um aviso desses aparecesse de verdade,
+--    voce ja o ignoraria.)
 -- ---------------------------------------------------------------------------

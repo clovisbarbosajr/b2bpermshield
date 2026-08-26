@@ -125,9 +125,21 @@ BEGIN
     --
     -- `desde` marca o PRIMEIRO incremento da sequencia. Nenhum tick posterior
     -- o empurra, entao o teto de 2 horas vale de verdade.
+    -- SO o teto absoluto reseta. A versao anterior tinha `WHEN _ate <= now()`
+    -- como primeiro ramo, e isso nao cobria so o caso orfao: disparava sempre
+    -- que a maior janela pedida tivesse vencido, INCLUSIVE com lote vivo. Um
+    -- lote que pede 10 minutos (b2bwave-sync usa 10 em dois pontos) e demora 14
+    -- perdia a protecao no minuto 12, quando outro lote entrasse e zerasse o
+    -- contador — o defeito que esta migration existe para consertar, voltando
+    -- pela porta da janela curta.
+    --
+    -- Nao cria mudez permanente: `n = 0` sempre vem com `desde` nulo (o ramo
+    -- ELSE zera os dois juntos), e contador orfao e pego pelo teto de 2 horas.
+    -- O efeito colateral e a supressao poder viver alem de `ate` — que e o
+    -- comportamento CERTO enquanto houver lote vivo.
     _novo := CASE
-               WHEN _ate <= now() THEN 1
-               WHEN _desde IS NOT NULL AND now() - _desde > interval '120 minutes' THEN 1
+               WHEN _desde IS NULL THEN 1                            -- linha legada, ou nenhum lote vivo
+               WHEN now() - _desde > interval '120 minutes' THEN 1   -- auto-cura
                ELSE _n + 1
              END;
 

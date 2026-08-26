@@ -124,6 +124,12 @@ const BulkUpdateOrders = () => {
     }
 
     setResults(res);
+    } catch (e: any) {
+      // Sem isto, uma excecao no laco destravava a tela SEM mensagem nenhuma e
+      // sem o toast final: importacao parcial, silenciosa. O laco so usa
+      // `await supabase.from(...)`, que nao lanca — mas "estreito" nao e
+      // "impossivel", e o custo de saber e uma linha.
+      toast.error("Bulk update stopped: " + (e?.message ?? String(e)));
     } finally {
       // `setImporting(false)` PRIMEIRO. Na versao anterior ele vinha depois do
       // `await`, e um `.then()` sem tratamento de rejeicao (rede caindo, sessao

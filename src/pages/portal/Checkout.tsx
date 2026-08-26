@@ -341,8 +341,19 @@ const Checkout = () => {
     // (`USING (ativo = true)`) deixava qualquer conta baixar a lista inteira de
     // cupons com um GET sem filtro — e o cadastro aqui e aberto. Ver
     // 20260826050000_cupom_nao_e_catalogo_publico.sql.
-    const { data: achados } = await supabase
+    const { data: achados, error: rpcErr } = await supabase
       .rpc("cupom_por_codigo" as any, { _codigo: couponCode.trim() });
+    // Ler o `error` NAO e detalhe: sem isto, RPC ausente (front publicado antes
+    // do SQL) ou sem permissao viraria "Coupon not found or inactive" — a
+    // promocao inteira morreria em silencio, com uma mensagem mentindo sobre a
+    // causa. Foi o mesmo descuido corrigido em outros tres pontos desta leva.
+    if (rpcErr) {
+      setCouponError("Could not check the coupon right now — please try again.");
+      setCoupon(null);
+      setDiscount(0);
+      setCouponApplying(false);
+      return;
+    }
     const data = Array.isArray(achados) ? (achados[0] ?? null) : (achados ?? null);
 
     if (!data) {
