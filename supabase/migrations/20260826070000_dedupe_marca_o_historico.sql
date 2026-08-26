@@ -12,6 +12,23 @@
 -- Resultado sem este backfill: um pedido sincronizado ontem, reimportado hoje,
 -- RE-NOTIFICA. O dedupe nao cobriria a janela para a qual foi construido.
 --
+-- RESULTADO REAL NO BANCO DO DONO (26/ago): marcou ZERO de 811 linhas.
+--
+-- Nao foi defeito do filtro. `order_numero` so passou a ser gravado no payload
+-- em 25/ago (commit 3e46fdd), e as edge functions so foram publicadas em 26/ago.
+-- As 811 linhas vao de 17/jun a 25/ago — todas anteriores ao campo existir. Para
+-- ELAS o discriminador que decide nao e a ausencia de `items` (so 35 tem), e a
+-- ausencia de `order_numero`, que torna este backfill inerte sobre o historico.
+--
+-- CONSEQUENCIA, dita de frente: o dedupe protege de 26/ago em diante, nao para
+-- tras. Uma reimportacao dos pedidos anunciados antes disso dispara o aviso de
+-- novo — SO PARA O ADMIN, porque tirar o cliente da lista e outro conserto
+-- (`somente_admin`) e nao depende deste. Nao ha como recuperar do log um campo
+-- que nunca foi gravado.
+--
+-- O texto abaixo descreve o criterio para as linhas NOVAS, e continua correto
+-- para elas.
+--
 -- COMO DISTINGUIR o que veio do sync do que veio do portal, olhando so o log:
 -- `order_numero` nao serve — o Checkout (`Checkout.tsx:884`) e a tela do admin
 -- (`OrderDetail.tsx:447`) tambem gravam esse campo. O discriminador e `items`:
