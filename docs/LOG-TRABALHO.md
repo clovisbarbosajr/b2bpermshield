@@ -3077,3 +3077,37 @@ PENDENTE desta auditoria (pre-existente, nao entrou):
 
 NAO consegui rodar `tsc` nem `esbuild` nesta leva: o `node_modules` deste
 checkout esta VAZIO. A revisao foi por leitura.
+
+## 27/08 — FEITO: CustomerEdit para de apagar lista que nao conseguiu ler (72a1c37)
+
+Fecha o item 1 da lista pendente acima. Mesma classe do `ProductEdit`, so que
+pior: em `CustomerEdit` o `error` das tres leituras nem era destruturado.
+
+- `cliente_privacy_groups`, `cliente_payment_options` e `cliente_shipping_options`
+  agora leem o `error`. As tres sao exatamente as que o save APAGA E REESCREVE a
+  partir do estado da tela;
+- trava `falhouCarregar`: Save desabilitado, `handleSave` recusa ANTES do UPDATE,
+  e faixa fixa fora das abas (o toast some, as abas continuam mostrando lista
+  vazia como se o cliente nao tivesse opcao nenhuma);
+- so dentro do `if (c)`: cliente NOVO nao tem lista a perder;
+- RESSALVA registrada no codigo: RLS negando SELECT devolve [] com HTTP 200 e sem
+  `error`. A guarda cobre rede, timeout e 5xx — nao cobre RLS;
+- `setLoading(true)` no inicio de `loadData` e de `fetchProduct`. Os dois so
+  nasciam `true`: trocando de ficha sem remontar, a tela ficava interativa com o
+  id novo e as listas do registro anterior;
+- `key="new"` na rota `/admin/customers/new`.
+
+Correcao de rota anterior: o comentario que eu tinha escrito nessa rota afirmava
+que `/customers/new` era servida por `/customers/:id`. E falso — o router pontua
+segmento estatico acima de dinamico, entao a rota estatica vence e `useParams().id`
+e `undefined` ali. O que faz o React reaproveitar a instancia e as duas rotas
+renderizarem o MESMO componente na mesma posicao. Comentario cortado para tres
+linhas apontando para o irmao da rota de produtos.
+
+Achado sem acao (nao toquei): `CustomerEdit.tsx:386` tem `id !== "new"` numa
+guarda — condicao morta, `id` nunca vale "new" nessa tela. Inofensivo.
+
+Verificacao: leitura + balanco de chaves/parenteses identico ao HEAD nos tres
+arquivos. `node_modules` continua VAZIO, sem `tsc`.
+
+ORDEM: nada de SQL nesta leva. So **Publish** no Lovable (front-end).
