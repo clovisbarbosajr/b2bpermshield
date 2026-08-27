@@ -1139,10 +1139,28 @@ Deno.serve(async (req) => {
 
       const productPrices = await fetchAllPaginated("product_prices.json", username, apiKey).catch(() => []);
       const pricesByProduct = new Map<number, Map<number, number>>();
+      let precosEmBrancoNaOrigem = 0;
       for (const pp of productPrices) {
         const pid = Number(pp.product_id), plid = Number(pp.pricelist_id);
         const val = parseFloat(pp.price ?? "0") || 0;
         if (!pid || !plid) continue;
+        // PRECO EM BRANCO NA ORIGEM NAO VIRA ZERO AQUI.
+        //
+        // O `|| 0` acima transforma preco ausente, vazio ou invalido em 0 — e
+        // zero NAO e ignorado pelo portal: `lib/pricing.ts` devolve
+        // `Number(plItem.preco)` sempre que a linha existe, entao o cliente
+        // daquela tabela compraria por R$ 0. Medido em 27/ago: 347 linhas
+        // zeradas, 58 delas em produto ativo com preco base > 0, 65 clientes
+        // expostos.
+        //
+        // Nao gravar e o certo, nao gravar zero: sem linha na tabela de preco, o
+        // portal cai no preco BASE do produto, que e o comportamento desejado
+        // para "esta tabela nao precifica este item".
+        //
+        // A tela de tabelas de preco ja trata `<= 0` como "remover o preco" —
+        // ou seja, zero nunca foi um valor que uma pessoa consegue salvar. So o
+        // sync criava.
+        if (!(val > 0)) { precosEmBrancoNaOrigem++; continue; }
         if (!pricesByProduct.has(pid)) pricesByProduct.set(pid, new Map());
         pricesByProduct.get(pid)!.set(plid, val);
       }
@@ -1332,6 +1350,14 @@ Deno.serve(async (req) => {
           priceRows += Number(data) || 0;
         }
       }
+      if (precosEmBrancoNaOrigem > 0) {
+        await adminClient.from("notification_log").insert({
+          event: "preco_em_branco_na_origem", channel: "-", recipient: "-", status: "failed",
+          error: `${precosEmBrancoNaOrigem} par(es) (produto, tabela) vieram SEM preco do B2BWave — nao gravei, o portal usa o preco base`,
+          payload: { quantidade: precosEmBrancoNaOrigem, fonte: "b2bwave-sync" },
+        }).then(() => {}, () => {});
+      }
+
       if (precoErros > 0) {
         // Soma LINHAS, nao lotes: `errors` no resto deste handler conta linhas, e
         // "11 errors" para 11 lotes significaria ate 1015 precos nao gravados.
