@@ -83,6 +83,78 @@ export type Database = {
         }
         Relationships: []
       }
+      backup_categorias_20260827: {
+        Row: {
+          ativo: boolean | null
+          b2bwave_id: number | null
+          created_at: string | null
+          desconto: number | null
+          descricao: string | null
+          id: string | null
+          imagem_url: string | null
+          is_private: boolean | null
+          nome: string | null
+          ordem: number | null
+          parent_id: string | null
+          subcategorias_herdam: boolean | null
+          updated_at: string | null
+        }
+        Insert: {
+          ativo?: boolean | null
+          b2bwave_id?: number | null
+          created_at?: string | null
+          desconto?: number | null
+          descricao?: string | null
+          id?: string | null
+          imagem_url?: string | null
+          is_private?: boolean | null
+          nome?: string | null
+          ordem?: number | null
+          parent_id?: string | null
+          subcategorias_herdam?: boolean | null
+          updated_at?: string | null
+        }
+        Update: {
+          ativo?: boolean | null
+          b2bwave_id?: number | null
+          created_at?: string | null
+          desconto?: number | null
+          descricao?: string | null
+          id?: string | null
+          imagem_url?: string | null
+          is_private?: boolean | null
+          nome?: string | null
+          ordem?: number | null
+          parent_id?: string | null
+          subcategorias_herdam?: boolean | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      backup_tpi_20260826: {
+        Row: {
+          created_at: string | null
+          id: string | null
+          preco: number | null
+          produto_id: string | null
+          tabela_preco_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string | null
+          preco?: number | null
+          produto_id?: string | null
+          tabela_preco_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string | null
+          preco?: number | null
+          produto_id?: string | null
+          tabela_preco_id?: string | null
+        }
+        Relationships: []
+      }
       banners: {
         Row: {
           ativo: boolean
