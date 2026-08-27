@@ -3240,3 +3240,35 @@ Os quatro consumidores de `grupo_nome` ja tratavam nulo antes desta mudanca:
 `ProductEdit:237-238` (comparacao), `Produtos.tsx:86` (`row.grupo_nome ? ... : null`),
 `portal/ProdutoDetalhe:156` (`.filter(Boolean)`) e `ProductExport:94` (interpola o
 nome do GRUPO, nao o da linha). Nada a ajustar.
+
+## 27/08 — REGRA DO DONO: ciclo até limpar + teste de estresse
+
+Registrada em `~/.claude/rules/revisao-adversarial.md` (global, vale para todo
+projeto). Substitui a versão anterior, que mandava fazer UMA rodada de revisão por
+conjunto de mudanças.
+
+O ciclo: implementa -> verificação do projeto -> caçador -> cético -> se achou
+erro, corrige e VOLTA. Para só quando não voltar mais erro no que foi mexido.
+
+E validar código não basta: toda função mexida precisa de TESTE DE ESTRESSE, com
+concorrência de verdade. Palavras do dono: mexeu no carrinho, simular ~50 clientes
+ao mesmo tempo incluindo, deletando e finalizando compra.
+
+Estresse contra banco real exige OK explícito do dono, marcação do dado de teste e
+comando de limpeza pronto ANTES de começar.
+
+### Estado desta leva quanto à regra nova
+
+O ciclo caçador/cético foi cumprido (3 rodadas, zero achados confirmados contra o
+diff na última). A verificação do projeto foi cumprida DEPOIS, e é o que faltava:
+
+- `npm install` — `node_modules` estava vazio; `node` e `npm` sempre estiveram
+  instalados. Eu vinha dizendo "não dá para rodar tsc" sem ter tentado;
+- `npm run typecheck` — **passou limpo**;
+- `npm run build` — **passou** (2461 módulos, 6.75s);
+- `npx eslint` nos arquivos tocados — 107 erros e 2 avisos, TODOS pré-existentes e
+  de estilo: `@typescript-eslint/no-explicit-any` (o arquivo usa `any` em toda
+  parte) e dois `react-hooks/exhaustive-deps` que já existiam. Nada introduzido.
+
+FALTA: o teste de estresse. Não rodei porque escrita concorrente aqui bate no banco
+real do Lovable Cloud, e a regra nova exige OK do dono antes. Pendente.
