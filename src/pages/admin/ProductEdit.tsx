@@ -93,6 +93,13 @@ const ProductEdit = () => {
   // marcar `local` em tudo que a tela grava mataria a auto-cura da coluna
   // `origem`, porque esta tela reescreve TODAS as linhas do produto a cada save.
   const [origPriceLists, setOrigPriceLists] = useState<Record<string, number>>({});
+  // `false` quando alguma leitura de sub-dado falhou no carregamento. Bloqueia o
+  // save, porque o save apaga e reescreve essas tabelas a partir do estado da
+  // tela — e o estado esta incompleto.
+  // Nomes das leituras de sub-dado que FALHARAM no carregamento. Lista, e nao
+  // booleano, porque o banner precisa dizer QUAL tabela nao veio — "parte dos
+  // dados falhou" nao ajuda ninguem a decidir o que fazer.
+  const [falhouCarregar, setFalhouCarregar] = useState<string[]>([]);
 
   useEffect(() => {
     fetchLookups();
@@ -165,6 +172,40 @@ const ProductEdit = () => {
       (supabase as any).from("produto_cliente_acesso").select("cliente_id, tipo").eq("produto_id", id),
       supabase.from("privacy_groups").select("id, nome"),
     ]);
+    // SE ALGUMA LEITURA FALHOU, A TELA RECUSA SALVAR.
+    //
+    // NOVE destas tabelas o save apaga e reescreve a partir do estado da tela.
+    // Uma leitura que falha cai em ?? [], o estado fica VAZIO, e o save apaga os
+    // dados de verdade — com "Product saved" na tela. Perda total e silenciosa, e
+    // o dono nao tem como saber que perdeu.
+    //
+    // As outras tres entram na trava por motivo PROPRIO — dizer que as doze
+    // funcionam igual seria falso:
+    //   * produto_variantes apaga o que SUMIU da tela; com o estado vazio isso e
+    //     TODAS, e leva o vinculo dos pedidos junto;
+    //   * tabela_preco_itens faz diff por snapshot, entao vazio nao apaga nada —
+    //     mas mostraria "sem preco" para um produto que TEM preco;
+    //   * privacy_groups nunca e escrita; ela resolve o nome do grupo em
+    //     produto_acesso, e ESSA e apagada e reescrita.
+    //
+    // RESSALVA: negacao de RLS num SELECT devolve [] com HTTP 200 e SEM `error`.
+    // Esta guarda cobre rede, timeout e 5xx — nao cobre RLS.
+    //
+    // Uma trava para as doze, e nao doze tratamentos: a falha e rara, e recusar
+    // salvar e a resposta certa para todas. Tratar cada tabela separadamente
+    // seria mais codigo para o mesmo resultado.
+    const falhas = [
+      ["images", imgs.error], ["files", fls.error], ["discounts", disc.error],
+      ["customer prices", cp.error], ["related products", rel.error],
+      ["options", opts.error], ["variants", vars.error], ["status rules", sr.error],
+      ["access", acc.error], ["price lists", pl.error],
+      ["customer access", (cliAcc as any).error], ["privacy groups", pgRes.error],
+    ].filter(([, e]) => e) as [string, { message: string }][];
+    setFalhouCarregar(falhas.map(([n]) => n));
+    if (falhas.length > 0) {
+      toast.error(`Could not load: ${falhas.map(([n]) => n).join(", ")}. Saving is blocked — reload the page.`);
+    }
+
     setGalleryImages(imgs.data ?? []);
     setFiles(fls.data ?? []);
     setDiscounts(disc.data ?? []);
@@ -185,10 +226,6 @@ const ProductEdit = () => {
     setAccGroups(groupIds);
     setAccGrant(((cliAcc.data ?? []) as any[]).filter((r) => r.tipo === "grant").map((r) => r.cliente_id));
     setAccExclude(((cliAcc.data ?? []) as any[]).filter((r) => r.tipo === "exclude").map((r) => r.cliente_id));
-    // O erro E lido: com o codigo novo, snapshot vazio nao apaga nada (o
-    // `removidos` fica vazio), mas a tela mostraria "nenhum preco" para um produto
-    // que TEM preco — e o admin poderia digitar por cima achando que estava vazio.
-    if (pl.error) toast.error("Could not load this product's price lists: " + pl.error.message);
     const precosDoBanco = (pl.data ?? []).map((p: any) => ({ tabela_preco_id: p.tabela_preco_id, preco: Number(p.preco) }));
     setPriceLists(precosDoBanco);
     setOrigPriceLists(Object.fromEntries(precosDoBanco.map((p) => [p.tabela_preco_id, p.preco])));
@@ -232,6 +269,33 @@ const ProductEdit = () => {
     // Code (sku) é OPCIONAL — igual ao B2BWave original. Vazio vira NULL no banco
     // (string vazia colidiria na UNIQUE a partir do 2º produto sem código).
     if (!form.nome) { toast.error("Name is required"); return; }
+    // VARIANTE COM O CODE APAGADO NAO E EXCLUSAO.
+    //
+    // O save trata variante sem `codigo` como "sumiu da tela" e a DELETA — junto
+    // com os precos dela (cascata) e o vinculo dos pedidos que a usaram. A linha
+    // continua visivel na tela e o toast diz "Product saved". Alcancavel sem
+    // acidente: variante sincronizada com codigo so-de-espacos ja nasce vazia,
+    // e basta abrir o produto e salvar.
+    //
+    // `v.id &&`: linha NOVA sem codigo continua sendo ignorada em silencio, que e
+    // o comportamento documentado do bloco de variantes. So a que JA EXISTE no
+    // banco vira erro — porque so nela apagar destroi alguma coisa.
+    const semCodigo = variants
+      .map((v: any, i: number) => ({ v, linha: i + 1 }))
+      .filter(({ v }) => v.id && !(v.codigo ?? "").trim())
+      .map(({ linha }) => linha);
+    if (semCodigo.length > 0) {
+      toast.error(`Variants: row ${semCodigo.join(", ")} has no Code. Type the Code back, or use the trash button to delete the variant.`);
+      return;
+    }
+    // BLOQUEIO. O save apaga e reescreve as tabelas de sub-dado a partir do
+    // estado da tela; com o estado incompleto, ele apagaria o que nao carregou.
+    // Recarregar e a saida — nao ha como salvar "so a parte que carregou" sem
+    // saber qual parte e.
+    if (falhouCarregar.length > 0) {
+      toast.error(`Nothing was saved: ${falhouCarregar.join(", ")} failed to load. Reload the page and try again.`);
+      return;
+    }
     setSaving(true);
 
     const payload: any = {
@@ -578,17 +642,35 @@ const ProductEdit = () => {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => navigate("/admin/products")}>Cancel</Button>
-          <Button onClick={() => handleSave(true)} disabled={saving} className="gap-1">
+          <Button onClick={() => handleSave(true)} disabled={saving || falhouCarregar.length > 0} className="gap-1">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save
           </Button>
           {!isNew && (
-            <Button variant="secondary" onClick={() => handleSave(false)} disabled={saving}>
+            <Button variant="secondary" onClick={() => handleSave(false)} disabled={saving || falhouCarregar.length > 0}>
               Save and stay on page
             </Button>
           )}
         </div>
       </div>
+
+      {/* BANNER FIXO, fora das abas. O toast some em segundos e depois nao sobra
+          sinal nenhum: as abas afirmam em prosa "No gallery images" / "uses the
+          default wholesale price", e o admin trabalha vinte minutos antes de
+          descobrir no Save. Aqui ele ve antes de comecar. Sem botao de "tentar de
+          novo" de proposito: recarregar os dados reescreve o formulario inteiro e
+          jogaria fora o que ele digitou — F5 e a mesma coisa, e ele decide. */}
+      {falhouCarregar.length > 0 && (
+        <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+          <p className="text-sm font-semibold text-destructive">
+            Saving is blocked — this product's data did not load completely.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Failed to load: {falhouCarregar.join(", ")}. What you see below is incomplete,
+            and saving would erase the parts that are missing. Reload the page.
+          </p>
+        </div>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex flex-wrap h-auto gap-1 mb-4">

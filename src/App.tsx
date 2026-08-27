@@ -170,7 +170,13 @@ const App = () => (
               <Route path="/admin/customers" element={<AW><AdminClientes /></AW>} />
               <Route path="/admin/customers/:id" element={<AW><CustomerEdit /></AW>} />
               <Route path="/admin/products" element={<AW><AdminProdutos /></AW>} />
-              <Route path="/admin/products/new" element={<AW><ProductEdit /></AW>} />
+              {/* `key`: sem ela o React reaproveita a instancia entre
+                  /products/:id e /products/new, e o bloqueio de carregamento de
+                  um produto que falhou seguia para a tela de produto novo, que
+                  nunca mais destravava. Zerar o flag no efeito seria pior —
+                  destravaria o save com as variantes ainda carregando os ids do
+                  produto anterior. */}
+              <Route path="/admin/products/new" element={<AW key="new"><ProductEdit /></AW>} />
               <Route path="/admin/products/:id" element={<AW><ProductEdit /></AW>} />
               <Route path="/admin/price-lists" element={<A><AdminTabelasPreco /></A>} />
               <Route path="/admin/options" element={<A><AdminOptions /></A>} />

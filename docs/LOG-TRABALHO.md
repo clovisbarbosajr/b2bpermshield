@@ -3013,3 +3013,67 @@ codigo.
 **PROXIMO PASSO EXATO ao retomar:** rodar `20260826110000` no SQL, depois publish
 + pedir deploy da edge function, depois conferir `SYNC_VERSION:preco-rpc-v1` no
 `sync_log`, e so entao a triagem dos `desconhecido`.
+
+### 27/ago — ProductEdit: perda silenciosa de dado + a duplicacao de categorias
+
+**A DUPLICACAO DE CATEGORIAS FOI MINHA.** `sync_categories` casa por `b2bwave_id`;
+o banco devolve `integer` (numero JS), a API manda texto, e `map.get("11")` nao
+acha `map.set(11)`. Nenhum match, toda rodada reinseria o catalogo inteiro. Ficou
+visivel porque EU agendei o cron de categorias em 26/ago — antes so rodava a mao.
+Medido: 177 linhas para 48 categorias reais. Consertado com `String()` nos dois
+lados (o `sync_products` ja fazia isso, por isso produto nunca duplicou) e com um
+indice UNICO parcial, que e o que torna a classe impossivel. As referencias foram
+repontadas descobrindo as FKs no catalogo, nao por lista escrita a mao.
+
+O mesmo defeito fazia produto cair na categoria errada: o encaixe por id nunca
+funcionava e sobrava o fallback por NOME, que com as copias pegava uma qualquer.
+
+**PRECO ZERO.** `parseFloat(pp.price ?? "0") || 0` transformava preco em branco da
+origem em ZERO — e zero nao e ignorado pelo portal, `lib/pricing.ts` devolve o
+valor sempre que a linha existe. 347 linhas zeradas, 58 em produto ativo com preco
+base > 0, 65 clientes nas tabelas afetadas. Nao virou venda porque o sistema NAO
+esta em uso — o dono precisou me lembrar disso, com razao. Conserto: nao gravar,
+em vez de gravar zero; sem linha, o portal cai no preco base. As 347 existentes
+ficam como estao — decisao do dono: o que vem de la nao se edita.
+
+**PRODUCTEDIT.** `fetchProduct` carrega 12 sub-tabelas e nenhuma tinha o erro
+lido (`?? []`); o save faz delete+insert a partir do estado da tela. Leitura que
+falhava = estado vazio = save APAGAVA os dados, com "Product saved" na tela.
+Trava unica: se qualquer leitura falhar, a tela recusa salvar e diz QUAL falhou.
+
+Workflow com 6 cacadores + cetico adversarial (31 agentes): 24 achados, 12
+sobreviveram, 9 depois de fundir duplicatas. Veredito: PODE DEPLOYAR — 7 dos 9
+sao pre-existentes, e os 2 que a mudanca introduz falham para o lado seguro.
+
+FEITOS nesta leva, alem da trava:
+- variante com o Code apagado era DELETADA em silencio, levando os precos dela
+  (cascata) e o vinculo dos pedidos. Agora vira erro, e so para variante que JA
+  existe no banco;
+- o bloqueio ficou VISIVEL: banner fixo fora das abas e botoes de Save
+  desabilitados. So o toast nao bastava — ele some e as abas passam a afirmar
+  "No gallery images" para um produto que tem;
+- `key="new"` na rota de produto novo: sem ela o React preservava o estado entre
+  /products/:id e /products/new, e o bloqueio ia junto, travando a criacao para
+  sempre;
+- o comentario que dizia "delete tudo + insert" para as 12 tabelas era falso para
+  tres. Reescrito, com a ressalva de que RLS negado devolve [] com HTTP 200 e sem
+  `error` — a guarda cobre rede/timeout/5xx, nao RLS.
+
+PENDENTE desta auditoria (pre-existente, nao entrou):
+1. `CustomerEdit.tsx` tem o MESMO apaga-tudo sem guarda nenhuma — la o erro nem e
+   destruturado. Leitura de `cliente_payment_options` falha -> lista vazia ->
+   apaga tudo -> "Customer saved", e o servidor recusa o pedido depois com
+   PAYMENT_OPTION_NOT_ALLOWED.
+2. Produto NOVO: o INSERT em `produtos` acontece ANTES da validacao de sub-dado.
+   A mensagem diz "Nothing was saved" e mente — e cada retry cria outro produto
+   ativo no catalogo, sem teto.
+3. `grupo_nome: null` num insert que roda depois de um DELETE commitado
+   (`produto_acesso`). A raiz e de banco: `20260407000000` pretendia deixar a
+   coluna nullable e nunca rodou.
+4. `origPriceLists` nao acompanha save que falha DEPOIS do bloco de precos.
+5. Leitura truncada em 1000 linhas passa pela trava (`error` e null) —
+   `produto_precos_cliente` e `produto_cliente_acesso` escalam com nº de clientes.
+6. `:544` faz `update(...).eq("id", v.id)` sem `.eq("produto_id", pid)`.
+
+NAO consegui rodar `tsc` nem `esbuild` nesta leva: o `node_modules` deste
+checkout esta VAZIO. A revisao foi por leitura.
