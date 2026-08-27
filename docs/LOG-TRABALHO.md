@@ -3229,3 +3229,14 @@ diff: zero confirmados. Balanco de delimitadores igual ao HEAD nos dois arquivos
 
 ORDEM: **1º SQL** (`20260827020000`), **2º Publish**. A mudanca no `b2bwave-sync`
 nao muda comportamento nenhum, entao NAO exige deploy da edge function.
+
+### SQL 20260827020000 RODADO (27/08) — retorno `YES`
+
+`produto_acesso.grupo_nome` aceita nulo. `types.ts` acertado a mao para acompanhar
+(`Row: string | null`, `Insert`/`Update` opcionais e nullable), como ja tinha sido
+feito com `tabela_preco_itens.origem`.
+
+Os quatro consumidores de `grupo_nome` ja tratavam nulo antes desta mudanca:
+`ProductEdit:237-238` (comparacao), `Produtos.tsx:86` (`row.grupo_nome ? ... : null`),
+`portal/ProdutoDetalhe:156` (`.filter(Boolean)`) e `ProductExport:94` (interpola o
+nome do GRUPO, nao o da linha). Nada a ajustar.

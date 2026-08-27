@@ -1983,21 +1983,21 @@ export type Database = {
       produto_acesso: {
         Row: {
           created_at: string | null
-          grupo_nome: string
+          grupo_nome: string | null
           id: string
           privacy_group_id: string | null
           produto_id: string
         }
         Insert: {
           created_at?: string | null
-          grupo_nome: string
+          grupo_nome?: string | null
           id?: string
           privacy_group_id?: string | null
           produto_id: string
         }
         Update: {
           created_at?: string | null
-          grupo_nome?: string
+          grupo_nome?: string | null
           id?: string
           privacy_group_id?: string | null
           produto_id?: string
