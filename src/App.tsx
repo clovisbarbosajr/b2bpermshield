@@ -168,6 +168,10 @@ const App = () => (
               <Route path="/admin/orders" element={<AW><AdminPedidos /></AW>} />
               <Route path="/admin/orders/:id" element={<AW><OrderDetail /></AW>} />
               <Route path="/admin/customers" element={<AW><AdminClientes /></AW>} />
+              {/* `key`: mesmo motivo da rota de produtos abaixo — sem ela o
+                  React reaproveita a instancia entre /customers/:id e
+                  /customers/new. */}
+              <Route path="/admin/customers/new" element={<AW key="new"><CustomerEdit /></AW>} />
               <Route path="/admin/customers/:id" element={<AW><CustomerEdit /></AW>} />
               <Route path="/admin/products" element={<AW><AdminProdutos /></AW>} />
               {/* `key`: sem ela o React reaproveita a instancia entre

@@ -24,6 +24,10 @@ const CustomerEdit = () => {
   const { log } = useActivityLog();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Nomes das listas que FALHARAM ao carregar. Vazio = tudo ok, e por isso comeca
+  // vazio: cliente NOVO nunca passa pelo bloco que preenche isto, e nascer travado
+  // seria pior que o defeito.
+  const [falhouCarregar, setFalhouCarregar] = useState<string[]>([]);
   const [cliente, setCliente] = useState<any>(null);
   const [enderecos, setEnderecos] = useState<any[]>([]);
   const [tabelasPreco, setTabelasPreco] = useState<any[]>([]);
@@ -55,6 +59,18 @@ const CustomerEdit = () => {
   useEffect(() => { loadData(); }, [id]);
 
   const loadData = async () => {
+    // `loading` de volta a true a CADA carregamento, nao so na montagem.
+    //
+    // Ele so nascia true e so virava false — entao, trocando de ficha SEM
+    // remontar (o historico do navegador consegue pular de uma para outra), a
+    // tela ficava interativa durante as idas ao servidor com o id JA do novo
+    // registro e as listas ainda do anterior. Um Save nesse intervalo gravava as
+    // listas de um em cima do outro, dizendo "saved".
+    //
+    // Isto NAO e o `falhouCarregar`: a trava de carregamento fica
+    // intacta. So o spinner volta, e ele cobre a troca inteira.
+    setLoading(true);
+
     const [
       { data: c },
       { data: tp },
@@ -103,7 +119,7 @@ const CustomerEdit = () => {
       });
 
       // Load privacy groups
-      const { data: cpg } = await supabase.from("cliente_privacy_groups").select("privacy_group_id").eq("cliente_id", id!);
+      const { data: cpg, error: errCpg } = await supabase.from("cliente_privacy_groups").select("privacy_group_id").eq("cliente_id", id!);
       setClientePrivacyGroups((cpg ?? []).map((x: any) => x.privacy_group_id));
 
       // Load addresses
@@ -111,12 +127,38 @@ const CustomerEdit = () => {
       setEnderecos(addrs ?? []);
 
       // Load selected payment/shipping options for this customer
-      const [{ data: cpo }, { data: cso }] = await Promise.all([
+      const [{ data: cpo, error: errCpo }, { data: cso, error: errCso }] = await Promise.all([
         supabase.from("cliente_payment_options").select("payment_option_id").eq("cliente_id", id!),
         supabase.from("cliente_shipping_options").select("shipping_option_id").eq("cliente_id", id!),
       ]);
       setSelectedPaymentOptions((cpo ?? []).map((x: any) => x.payment_option_id));
       setSelectedShippingOptions((cso ?? []).map((x: any) => x.shipping_option_id));
+
+      // SE ALGUMA DESTAS TRES FALHOU, A TELA RECUSA SALVAR.
+      //
+      // Sao exatamente as tres listas que o `regravaLista` APAGA E REESCREVE a
+      // partir do estado da tela. O erro nem chegava a ser destruturado: a leitura
+      // falhava, a lista ficava vazia, o save apagava tudo e dizia "Customer
+      // saved".
+      //
+      // E o estrago e SILENCIOSO ate o fim: a opcao privada some do seletor do
+      // checkout (`Checkout.tsx` filtra o que o cliente nao pode ver) e o produto
+      // privado some do portal. NAO conte com `PAYMENT_OPTION_NOT_ALLOWED` no log
+      // para descobrir — o gatilho do banco so recusa quando o cliente MANDA o id
+      // proibido, o que exige uma aba de checkout aberta ANTES do apagamento.
+      //
+      // So dentro do `if (c)`: cliente NOVO nao tem lista nenhuma para perder, e
+      // travar a criacao por causa disso seria pior que o defeito.
+      //
+      // RESSALVA: RLS negando um SELECT devolve [] com HTTP 200 e SEM `error`.
+      // Esta guarda cobre rede, timeout e 5xx — nao cobre RLS.
+      const falhas = [
+        ["privacy groups", errCpg], ["payment options", errCpo], ["shipping options", errCso],
+      ].filter(([, e]) => e) as [string, { message: string }][];
+      setFalhouCarregar(falhas.map(([n]) => n));
+      if (falhas.length > 0) {
+        toast.error(`Could not load: ${falhas.map(([n]) => n).join(", ")}. Saving is blocked — reload the page.`);
+      }
 
       // Load sub-users (modelo B2BWave: clientes filhos com parent_customer_id)
       const { data: cts } = await supabase.from("clientes")
@@ -197,6 +239,14 @@ const CustomerEdit = () => {
       toast.success("Customer created with login access");
       log("created", "customer", newCliente.id, form.empresa || form.nome);
       navigate(`/admin/customers/${newCliente.id}`);
+      return;
+    }
+
+    // Bloqueio: as tres listas abaixo sao apagadas e reescritas a partir do
+    // estado da tela, e o estado esta incompleto.
+    if (falhouCarregar.length > 0) {
+      setSaving(false);
+      toast.error(`Nothing was saved: ${falhouCarregar.join(", ")} failed to load. Reload the page and try again.`);
       return;
     }
 
@@ -363,6 +413,21 @@ const CustomerEdit = () => {
           </Button>
         )}
       </div>
+
+      {/* Faixa fixa, fora das abas: o toast some e depois nao sobra sinal
+          nenhum — as abas passam a mostrar as listas VAZIAS como se o cliente
+          nao tivesse nenhuma opcao selecionada. */}
+      {falhouCarregar.length > 0 && (
+        <div className="mb-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+          <p className="text-sm font-semibold text-destructive">
+            Saving is blocked — this customer's data did not load completely.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Failed to load: {falhouCarregar.join(", ")}. The lists below are incomplete,
+            and saving would erase them. Reload the page.
+          </p>
+        </div>
+      )}
 
       <Tabs defaultValue="details" className="space-y-6">
         <TabsList className="flex-wrap">
@@ -1004,10 +1069,10 @@ const CustomerEdit = () => {
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => navigate("/admin/customers")}>Back</Button>
-          <Button size="sm" className="bg-primary" onClick={() => handleSave(true)} disabled={saving}>
+          <Button size="sm" className="bg-primary" onClick={() => handleSave(true)} disabled={saving || falhouCarregar.length > 0}>
             {saving ? "Saving..." : "Save"}
           </Button>
-          <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => handleSave(false)} disabled={saving}>
+          <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => handleSave(false)} disabled={saving || falhouCarregar.length > 0}>
             Save and stay on page
           </Button>
         </div>

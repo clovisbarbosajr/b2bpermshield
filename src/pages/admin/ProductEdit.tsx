@@ -131,6 +131,18 @@ const ProductEdit = () => {
   };
 
   const fetchProduct = async () => {
+    // `loading` de volta a true a CADA carregamento, nao so na montagem.
+    //
+    // Ele so nascia true e so virava false — entao, trocando de ficha SEM
+    // remontar (o historico do navegador consegue pular de uma para outra), a
+    // tela ficava interativa durante as idas ao servidor com o id JA do novo
+    // registro e as listas ainda do anterior. Um Save nesse intervalo gravava as
+    // listas de um em cima do outro, dizendo "saved".
+    //
+    // Isto NAO e o `falhouCarregar`: a trava de carregamento fica
+    // intacta. So o spinner volta, e ele cobre a troca inteira.
+    setLoading(true);
+
     const { data, error } = await supabase.from("produtos").select("*").eq("id", id).single();
     if (error || !data) { toast.error("Product not found"); navigate("/admin/products"); return; }
 
