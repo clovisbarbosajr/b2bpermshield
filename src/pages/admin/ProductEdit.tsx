@@ -15,6 +15,24 @@ import { toast } from "sonner";
 import { ArrowLeft, Save, Upload, Plus, Trash2, Image as ImageIcon, FileText, Loader2, Lock, X } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { categoryTreeOptions } from "@/lib/categoryTree";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+
+// O PostgREST corta em 1000 linhas SEM erro. Este wrapper pagina e devolve o
+// mesmo formato `{ data, error }` das outras leituras, para caber no `Promise.all`
+// e na trava de carregamento — inclusive o erro, que e o que a trava le.
+//
+// `.range(f, t)` exige ORDEM ESTAVEL, senao a pagina 2 repete ou pula linha. Por
+// isso quem chama ordena por `id`, e quem precisa de ordem alfabetica reordena em
+// memoria depois.
+const tudo = <T,>(
+  q: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
+) => fetchAllRows<T>(q).then(
+  (data) => ({ data, error: null as any }),
+  (error) => ({ data: null as T[] | null, error }),
+);
+
+const porNome = <T extends { nome?: string | null }>(rows: T[]) =>
+  [...rows].sort((a, b) => (a.nome ?? "").localeCompare(b.nome ?? ""));
 
 type Categoria = { id: string; nome: string; parent_id: string | null; ordem?: number | null };
 type Brand = { id: string; nome: string };
@@ -114,18 +132,29 @@ const ProductEdit = () => {
       supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("nome"),
       supabase.from("brands").select("id, nome").order("nome"),
       supabase.from("tabelas_preco").select("id, nome").order("nome"),
-      supabase.from("clientes").select("id, nome, empresa").order("nome"),
+      // DUAS LISTAS PASSAM DE 1000 LINHAS E VINHAM CORTADAS.
+      //
+      // `clientes` e `produtos` crescem com o cadastro; as outras cinco sao
+      // limitadas por configuracao (categorias, marcas, tabelas de preco, opcoes,
+      // grupos de privacidade). Cortadas, o estrago e de tela, nao de dado: o chip
+      // de acesso do cliente 1001 aparecia como UUID cru em vez do nome da empresa
+      // (o `|| cid` do badge), e nem ele nem o produto 1001 apareciam nos seletores
+      // — nao havia como conceder acesso nem relacionar produto a partir dali.
+      //
+      // A ordem alfabetica que a UI usa vem do `porNome` em memoria: paginar exige
+      // ordenar por `id`, e as duas coisas nao cabem na mesma query.
+      tudo<any>((f, t) => supabase.from("clientes").select("id, nome, empresa").order("id", { ascending: true }).range(f, t) as any),
       supabase.from("product_options").select("id, nome, tipo").order("nome"),
       supabase.from("privacy_groups").select("id, nome").eq("ativo", true).order("nome"),
-      supabase.from("produtos").select("id, nome, sku").eq("ativo", true).order("nome"),
+      tudo<any>((f, t) => supabase.from("produtos").select("id, nome, sku").eq("ativo", true).order("id", { ascending: true }).range(f, t) as any),
     ]);
     setCategorias(c.data ?? []);
     setBrands(b.data ?? []);
     setTabelasPreco(tp.data ?? []);
-    setClientes(cl.data ?? []);
+    setClientes(porNome(cl.data ?? []));
     setProductOptions(po.data ?? []);
     setPrivacyGroups(pg.data ?? []);
-    setAllProducts((allp.data as any[]) ?? []);
+    setAllProducts(porNome((allp.data as any[]) ?? []));
   };
 
   const prodName = (pid: string) => {
@@ -172,20 +201,37 @@ const ProductEdit = () => {
 
     setMeta({ created_at: (data as any).created_at, updated_at: (data as any).updated_at });
 
+    // TRES DESTAS LEITURAS ESCALAM COM O NUMERO DE CLIENTES, E O PostgREST CORTA
+    // EM 1000 LINHAS SEM ERRO NENHUM.
+    //
+    // A trava de carregamento nao pega isso: `error` vem null, a lista chega
+    // incompleta e o save — que apaga e reescreve a partir da tela — descarta a
+    // linha 1001 em diante. O cliente perde o preco especial ou o acesso ao
+    // produto privado, e nada na tela indica que faltou algo.
+    //
+    // As outras nove sao por produto e limitadas pelo conteudo (imagens,
+    // arquivos, variantes, tabelas de preco). So estas tres crescem com o
+    // cadastro de clientes:
+    //   * `produto_precos_cliente` — uma linha por cliente com preco especial;
+    //   * `produto_cliente_acesso` — um grant/exclude por cliente;
+    //   * `privacy_groups` — leitura sem filtro de produto, a unica ilimitada.
+    //
+    // O `tudo` esta no topo do arquivo: o `fetchLookups` usa o mesmo helper.
+
     // Fetch sub-data in parallel
     const [imgs, fls, disc, cp, rel, opts, vars, sr, acc, pl, cliAcc, pgRes] = await Promise.all([
       supabase.from("produto_imagens").select("*").eq("produto_id", id).order("ordem"),
       supabase.from("produto_arquivos").select("*").eq("produto_id", id),
       supabase.from("produto_descontos").select("*").eq("produto_id", id),
-      supabase.from("produto_precos_cliente").select("*").eq("produto_id", id),
+      tudo<any>((f, t) => supabase.from("produto_precos_cliente").select("*").eq("produto_id", id).order("id", { ascending: true }).range(f, t) as any),
       supabase.from("produtos_relacionados").select("*").eq("produto_id", id),
       supabase.from("produto_opcoes").select("*").eq("produto_id", id),
       supabase.from("produto_variantes").select("*").eq("produto_id", id),
       supabase.from("produto_status_regras").select("*").eq("produto_id", id),
       supabase.from("produto_acesso").select("*").eq("produto_id", id),
       supabase.from("tabela_preco_itens").select("*").eq("produto_id", id),
-      (supabase as any).from("produto_cliente_acesso").select("cliente_id, tipo").eq("produto_id", id),
-      supabase.from("privacy_groups").select("id, nome"),
+      tudo<any>((f, t) => (supabase as any).from("produto_cliente_acesso").select("cliente_id, tipo").eq("produto_id", id).order("id", { ascending: true }).range(f, t)),
+      tudo<any>((f, t) => supabase.from("privacy_groups").select("id, nome").order("id", { ascending: true }).range(f, t) as any),
     ]);
     // SE ALGUMA LEITURA FALHOU, A TELA RECUSA SALVAR.
     //
@@ -435,23 +481,8 @@ const ProductEdit = () => {
     }
 
     setSaving(false);
-    // O SNAPSHOT TEM QUE ACOMPANHAR O QUE FOI GRAVADO.
-    //
-    // Sem esta linha, `origPriceLists` congela no que veio do banco no carregamento
-    // e a pagina fica aberta com um retrato velho. A sequencia que perde dinheiro,
-    // sem erro nenhum na tela: o admin apaga a linha da tabela X e salva (DELETE
-    // ok, mas o snapshot AINDA tem X); percebe o engano, re-adiciona X com o mesmo
-    // preco e salva de novo — agora `removidos` esta vazio E `sujos` tambem, porque
-    // o preco bate com o snapshot velho. Nada e gravado, a tela diz "Product saved"
-    // e mostra X, e o banco nao tem X. O cliente daquela tabela passa a pagar o
-    // preco base.
-    //
-    // O `TabelasPreco` ja fazia isso (`setOrigPrices({ ...editingPrices })`); foi
-    // aqui que eu esqueci.
-    setOrigPriceLists(Object.fromEntries(
-      priceLists.filter((p) => p.tabela_preco_id).map((p) => [p.tabela_preco_id, p.preco]),
-    ));
-
+    // O snapshot de precos NAO e atualizado aqui: ele acompanha a gravacao, dentro
+    // do `saveSubData`, logo depois do bloco de precos. Ver o comentario la.
     toast.success(isNew ? "Product created" : "Product saved");
     log(isNew ? "created" : "updated", "product", productId!, form.nome as string);
     if (goBack) { navigate("/admin/products"); return; }
@@ -551,6 +582,24 @@ const ProductEdit = () => {
           { onConflict: "tabela_preco_id,produto_id" },
         ), "price lists");
       }
+
+      // O SNAPSHOT ACOMPANHA A GRAVACAO, NAO O FIM DO SAVE.
+      //
+      // Esta linha ficava no fim do `handleSave`, ou seja: so rodava se TODO o
+      // resto tambem desse certo. Bastava o bloco seguinte falhar (status rules,
+      // acesso, o que for) para o preco JA estar gravado e o snapshot continuar
+      // velho.
+      //
+      // A sequencia que apaga preco em silencio: o admin apaga a linha da tabela
+      // X e salva; o DELETE de X passa, um bloco posterior falha. Ele corrige o
+      // outro problema mas re-adiciona X com o mesmo preco antes de salvar de
+      // novo. Agora `removidos` esta vazio (X esta na tela) E `sujos` esta vazio
+      // (o preco bate com o snapshot velho, que ainda tem X). Nada e gravado, a
+      // tela diz "Product saved" e mostra X, e o banco nao tem X — o cliente
+      // daquela tabela passa a pagar o preco base.
+      setOrigPriceLists(Object.fromEntries(
+        priceLists.filter((p) => p.tabela_preco_id).map((p) => [p.tabela_preco_id, p.preco]),
+      ));
     }
 
     // Status rules
@@ -618,7 +667,13 @@ const ProductEdit = () => {
     try {
       for (const v of variantesValidas) {
         if (v.id) {
-          const { error } = await supabase.from("produto_variantes").update(campos(v)).eq("id", v.id);
+          // `.eq("produto_id", pid)` junto do id: o UPDATE por id sozinho alcanca
+          // QUALQUER variante do banco. `v.id` vem do state, e state que nao
+          // corresponde mais ao produto da tela grava estoque e preco no produto
+          // errado — sem erro nenhum, porque a linha existe. Com o par, um id
+          // estranho ao produto atualiza zero linhas em vez da linha errada.
+          const { error } = await supabase.from("produto_variantes")
+            .update(campos(v)).eq("id", v.id).eq("produto_id", pid);
           if (error) throw new Error("Failed to save variants: " + error.message);
         } else {
           const { data, error } = await supabase.from("produto_variantes")

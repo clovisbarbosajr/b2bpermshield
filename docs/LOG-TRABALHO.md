@@ -3164,3 +3164,68 @@ uma coluna nova em `produtos`, ou o caminho deixa de existir e o CSV passa a exi
 `price_list_name`? NAO mexi.
 
 ORDEM: nada de SQL nesta leva. So **Publish** no Lovable (front-end).
+
+## 27/08 — FEITO: leituras cortadas em 1000, snapshot de preco, guarda de variante, SQL do grupo_nome
+
+Fecha os itens 3, 4, 5 e 6 da lista pendente. Uma leva, quatro coisas + um SQL.
+
+**Paginacao (item 5).** O PostgREST corta em 1000 linhas SEM erro — a trava de
+carregamento nao pega, porque `error` vem null. Cinco leituras passaram a usar o
+helper `fetchAllRows` que ja existia, via um wrapper `tudo()` no topo do arquivo
+que devolve `{ data, error }` para caber no `Promise.all` e na trava:
+- `produto_precos_cliente`, `produto_cliente_acesso` — o save apaga e reescreve a
+  partir do que leu, entao a linha 1001 em diante era descartada em silencio;
+- `privacy_groups`, `clientes`, `produtos` — sem perda de dado, mas com estrago de
+  tela: o chip de acesso do cliente 1001 saia como UUID cru (o `|| cid` do badge)
+  e nem ele nem o produto 1001 apareciam nos seletores. `produtos` ja passa de 1000
+  hoje.
+- `.order("id")` porque paginar exige ordem estavel; a ordem alfabetica que a UI
+  usa virou `porNome()` em memoria.
+
+**Snapshot de preco (item 4).** `setOrigPriceLists` saiu do fim do `handleSave` e
+foi para dentro do `saveSubData`, logo depois do bloco de precos. No lugar antigo
+ele so rodava se TODO o resto desse certo. A sequencia que apaga preco calado: o
+admin apaga a linha da tabela X e salva; o DELETE passa, um bloco POSTERIOR falha;
+ele corrige o outro problema e re-adiciona X com o mesmo preco antes de salvar de
+novo — agora `removidos` esta vazio E `sujos` tambem, nada e gravado, a tela diz
+"Product saved" e mostra X, e o banco nao tem X.
+
+**Guarda de variante (item 6).** `update(...).eq("id", v.id)` ganhou
+`.eq("produto_id", pid)`. O update por id sozinho alcanca qualquer variante do
+banco; com o par, id estranho ao produto atualiza zero linhas em vez da linha errada.
+
+**SQL (item 3).** `supabase/migrations/20260827020000_produto_acesso_grupo_nome_nullable.sql`
+— `DROP NOT NULL` em `produto_acesso.grupo_nome`. `ProductEdit` grava `null` ali
+(`privacyGroups.find(...)?.nome ?? null`) e a coluna e NOT NULL no banco vivo:
+o INSERT estoura 23502 DEPOIS de o DELETE de `produto_acesso` ter sido commitado,
+e o produto privado fica sem grupo de acesso nenhum. `20260407000000:51` ja tinha
+esse mesmo DROP NOT NULL escrito e nunca rodou aqui — os types gerados do banco
+vivo ainda dizem `grupo_nome: string` obrigatorio no Insert, que e a prova.
+
+### ERRO MEU NESTA LEVA, registrado
+
+Eu disse ao dono que tinha consertado um furo de relatorio no `b2bwave-sync`: que
+o `BLOQUEIO_DESATIVACAO`/`BLOQUEIO_PRECO` so aparecia na mensagem quando
+`relatedRows === 0`. **Era falso.** `relatedRows` e a constante literal `0`
+(`index.ts:1572`, desde que o sync parou de gerenciar relacionados), entao a
+condicao sempre foi verdadeira e o bloqueio SEMPRE apareceu. O ramo alternativo
+que escrevi era codigo morto por construcao.
+
+O cacador apontou isso e o CETICO DERRUBOU — errado. Conferi na mao e o cacador
+estava certo. Ficou registrado aqui porque a licao nao e sobre o sync: cetico que
+derruba nao encerra o assunto quando a checagem custa um grep.
+
+O que ficou no lugar: a condicao morta foi DELETADA (`if (allProducts.length)` e
+`relDiag` incondicional). Zero mudanca de comportamento. Corrigido tambem o
+comentario do `SYNC_VERSION`, que afirmava um nome (`stock-lock-v1`) diferente do
+valor real da constante (`preco-rpc-v1`).
+
+Os outros dois residuais do batch do catalogo (`samples[0]`, mensagem de catalogo
+pequeno) ja estavam resolvidos no codigo — conferido, nada a fazer.
+
+Verificacao: duas rodadas de cacador (3 recortes cada) + cetico. Achados contra o
+diff: zero confirmados. Balanco de delimitadores igual ao HEAD nos dois arquivos.
+`node_modules` VAZIO — sem `tsc`, sem `deno`.
+
+ORDEM: **1º SQL** (`20260827020000`), **2º Publish**. A mudanca no `b2bwave-sync`
+nao muda comportamento nenhum, entao NAO exige deploy da edge function.

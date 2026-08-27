@@ -1770,29 +1770,33 @@ Deno.serve(async (req) => {
       //
       // O marcador "SYNC_VERSION" e a PROVA DE DEPLOY, e por isso muda a cada
       // versao que altera comportamento: `sync_log.samples` guarda ele, entao da
-      // para conferir DEPOIS, sem cronometrar nada. Foi renomeado de
-      // `related-v4` para `stock-lock-v1` nesta leva porque esta versao e a
-      // primeira que levanta `suppress_stock_notify` — se o log de um sync de
-      // produtos ainda disser `related-v4`, a edge function NAO foi deployada,
-      // e o `sync_products` esta rodando sem a trava de estoque.
+      // para conferir DEPOIS, sem cronometrar nada. O valor de agora e
+      // `preco-rpc-v1` — se o log de um sync de produtos disser qualquer coisa
+      // anterior, a edge function NAO foi deployada.
       const diagSamples: string[] = ["SYNC_VERSION:preco-rpc-v1"];
-      // O BLOQUEIO PRECISA APARECER NA TELA DO SYNC, e nao so no log de
-      // notificacoes. A tela B2B Wave Sync le `sync_log`; `notification_log` mora
-      // em outra tela. Sem esta linha, "bloqueei 40 desativacoes" e "nao havia
-      // nada a desativar" continuavam sendo a MESMA mensagem para o operador —
-      // que e exatamente o que a trava #3 diz existir para impedir.
-      // `push`, e nao concatenar no `message` tambem: `relDiag` ja despeja o
-      // `diagSamples` inteiro na mensagem, entao somar os dois imprimia o
-      // bloqueio duas vezes no card.
+
       if (bloqueio) diagSamples.push(bloqueio);
       if (bloqueioPreco) diagSamples.push(bloqueioPreco);
-      if (relatedRows === 0 && allProducts.length) {
+
+      // A CONDICAO `relatedRows === 0` QUE ESTAVA AQUI ERA SEMPRE VERDADEIRA.
+      //
+      // `relatedRows` e a constante literal `0` (ver a declaracao acima): o sync
+      // parou de gerenciar relacionados e o contador so continua existindo para
+      // manter o formato da mensagem. Entao o `if` e o ternario que dependiam dela
+      // nunca tomaram o outro ramo — o diagnostico e o bloqueio SEMPRE sairam na
+      // mensagem, que e o comportamento certo.
+      //
+      // Registro porque eu quase "consertei" isto: cheguei a escrever um ramo
+      // alternativo para o caso `relatedRows > 0`, que e codigo morto por
+      // construcao. Deletar a condicao e o conserto — ela nao protegia nada e
+      // sugeria uma variacao de comportamento que nao existe.
+      if (allProducts.length) {
         const s = allProducts[0] as Record<string, any>;
         const arrays = Object.keys(s).filter((k) => Array.isArray(s[k]));
         const relish = Object.keys(s).filter((k) => /relat|bundle|together/i.test(k));
         diagSamples.push(`arrays=[${arrays.join(",")}]`, `relish=[${relish.join(",") || "none"}]`);
       }
-      const relDiag = relatedRows === 0 ? ` | ${diagSamples.join(" ")}` : "";
+      const relDiag = ` | ${diagSamples.join(" ")}`;
       await logRun(adminClient, "products", { created: synced, errors, samples: [...diagSamples, ...errorSamples] });
       return new Response(JSON.stringify({
         success: true,
