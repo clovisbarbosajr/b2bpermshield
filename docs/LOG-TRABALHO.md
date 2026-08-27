@@ -3111,3 +3111,56 @@ Verificacao: leitura + balanco de chaves/parenteses identico ao HEAD nos tres
 arquivos. `node_modules` continua VAZIO, sem `tsc`.
 
 ORDEM: nada de SQL nesta leva. So **Publish** no Lovable (front-end).
+
+## 27/08 — FEITO: produto novo para de nascer antes de ser validado
+
+Fecha o item 2 da lista pendente. Em `ProductEdit.handleSave`, o INSERT em
+`produtos` acontecia ANTES de duas validacoes que so leem a tela.
+
+O estrago: erro de digitacao no estoque de uma variante (ou uma linha de "Add"
+sem escolher a tabela de preco) deixava o produto CRIADO e ATIVO no catalogo, sem
+sub-dado nenhum, enquanto a tela dizia "Nothing was saved" — e cada nova tentativa
+criava mais um. Sem teto.
+
+- `variantesRuins` e o bloco `faltando` (extraido do `saveSubData` para
+  `problemasDeFormulario()`) rodam agora ANTES de gravar. Nenhuma das duas toca o
+  servidor;
+- `criadoIdRef` (useRef): se o INSERT passar e o `saveSubData` falhar por motivo
+  de SERVIDOR (RLS, rede, constraint), o Save de novo vira UPDATE do mesmo
+  produto em vez de um segundo INSERT. `useRef` e nao `useState` porque o valor
+  precisa valer ja na linha seguinte do mesmo handler;
+- `let productId = criadoIdRef.current ?? (isNew ? null : id)`: o `isNew` no meio
+  e de proposito — `isNew` tambem e true quando `id` vale a string "new", e testar
+  so a verdade de `id` mandaria esse caso para `.eq("id", "new")`.
+
+Teto conhecido e ACEITO: o `criadoIdRef` morre com a instancia da tela. Se o admin
+abandonar um produto meio-criado e voltar depois, o fantasma continua ativo e o
+proximo save cria outro. Persistir o ref alem da instancia seria PIOR — abandonar
+o produto A e cadastrar o produto B faria o save de B virar UPDATE de A,
+sobrescrevendo A e nunca criando B.
+
+Verificacao: cacador (3 recortes: fluxo, estado, extracao) + cetico. Um achado
+levantado, derrubado — era comportamento pre-existente do HEAD, e o diff melhora
+em todos os caminhos. Balanco de chaves e parenteses fechado (462/462, 853/853).
+`node_modules` VAZIO, sem `tsc`.
+
+### Achado NOVO, parado esperando decisao: importador de descontos
+
+`src/pages/admin/tools/ImportProductDiscounts.tsx` esta quebrado nos DOIS caminhos:
+- `:90` grava `desconto` em `tabela_preco_itens` — essa coluna nao existe
+  (`id, produto_id, tabela_preco_id, preco, origem, created_at`);
+- `:101` grava `desconto` em `produtos` — tambem nao existe.
+
+Toda linha volta `PGRST204`. O erro aparece por linha, entao ele nao mente: importa
+0 de N, sempre.
+
+O desconto real mora em `produto_descontos` (`percentual`, `produto_id`,
+`tabela_preco_id`). O primeiro caminho tem conserto direto. O SEGUNDO nao tem
+destino: `produto_descontos.tabela_preco_id` e NOT NULL e nao ha coluna de
+desconto-base em `produtos`. Linha de CSV sem `price_list_name` nao tem para onde ir.
+
+DECISAO DO DONO, nao minha: desconto-base vira uma linha por tabela de preco,
+uma coluna nova em `produtos`, ou o caminho deixa de existir e o CSV passa a exigir
+`price_list_name`? NAO mexi.
+
+ORDEM: nada de SQL nesta leva. So **Publish** no Lovable (front-end).

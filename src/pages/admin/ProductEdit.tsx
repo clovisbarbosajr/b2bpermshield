@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
@@ -45,6 +45,9 @@ const ProductEdit = () => {
 
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+  // Id do produto que ESTE save criou. Ver o comentario no `handleSave`: existe
+  // para a segunda tentativa nao criar um segundo produto.
+  const criadoIdRef = useRef<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState("product");
   const [meta, setMeta] = useState<{ created_at?: string; updated_at?: string }>({});
@@ -277,6 +280,43 @@ const ProductEdit = () => {
     toast.success("File uploaded");
   };
 
+  // ── VALIDACAO DE FORMULARIO, SEM TOCAR NO SERVIDOR ──────────────────────────
+  // Isto vivia dentro do `saveSubData`, ou seja: rodava DEPOIS do INSERT em
+  // `produtos`. Continua sendo a mesma checagem, so que agora antes de gravar.
+  //
+  // O padrao do `saveSubData` e DELETE + INSERT sem transacao: se o INSERT falha,
+  // os dados JA foram apagados. O `orFail` avisa e o formulario segue em memoria,
+  // mas um F5 consolida a perda. A falha MAIS provavel e previsivel: os botoes
+  // "Add" criam a linha com o campo-chave vazio (`tabela_preco_id: ""`,
+  // `cliente_id: ""`, `status_nome: ""`) e "" nao e uuid valido nem passa no NOT
+  // NULL. Basta clicar Add e salvar sem escolher.
+  const problemasDeFormulario = (): string[] => {
+    const faltando: string[] = [];
+    if (discounts.some((d: any) => !String(d.tabela_preco_id ?? "").trim()))
+      faltando.push('Discounts: pick a price list on every row');
+    if (customerPrices.some((cp: any) => !String(cp.cliente_id ?? "").trim()))
+      faltando.push('Customer prices: pick a customer on every row');
+    // Repetida quebra de dois jeitos: `21000 cardinality_violation` no upsert
+    // (DEPOIS de o DELETE ja ter sido commitado), ou — pior, silencioso — trocar a
+    // linha A para a tabela B que ja esta na tela com o mesmo preco: nenhuma das
+    // duas fica "suja", nada e gravado, e o preco de A e apagado sem erro nenhum.
+    {
+      const ids = priceLists.map((pl: any) => String(pl.tabela_preco_id ?? "").trim()).filter(Boolean);
+      if (new Set(ids).size !== ids.length) faltando.push("Price lists: the same price list is used twice");
+    }
+    if (priceLists.some((pl: any) => !String(pl.tabela_preco_id ?? "").trim()))
+      faltando.push('Price lists: pick a price list on every row');
+    if (statusRules.some((sr: any) => !String(sr.status_nome ?? "").trim()))
+      faltando.push('Status rules: pick a status on every row');
+    if (assignedOptions.some((o: any) => !String(o.option_id ?? "").trim()))
+      faltando.push('Options: pick an option on every row');
+    if (galleryImages.some((g: any) => !String(g.imagem_url ?? "").trim()))
+      faltando.push('Gallery: an image row has no file');
+    if (files.some((f: any) => !String(f.arquivo_url ?? "").trim()))
+      faltando.push('Files: a file row has no file');
+    return faltando;
+  };
+
   const handleSave = async (goBack = false) => {
     // Code (sku) é OPCIONAL — igual ao B2BWave original. Vazio vira NULL no banco
     // (string vazia colidiria na UNIQUE a partir do 2º produto sem código).
@@ -308,6 +348,33 @@ const ProductEdit = () => {
       toast.error(`Nothing was saved: ${falhouCarregar.join(", ")} failed to load. Reload the page and try again.`);
       return;
     }
+    // TODA VALIDACAO DE FORMULARIO ACONTECE AQUI, ANTES DE GRAVAR QUALQUER COISA.
+    //
+    // As duas checagens abaixo rodavam DEPOIS do INSERT em `produtos`. Num produto
+    // novo isso significava: linha criada e ATIVA no catalogo, sub-dado nenhum, e a
+    // tela dizendo "Nothing was saved" — mentira. E cada nova tentativa criava mais
+    // um produto ativo, sem teto: um erro de digitacao no estoque de uma variante
+    // rendia cinco produtos-fantasma no catalogo do cliente.
+    //
+    // Nenhuma das duas toca o servidor — sao leituras do estado da tela. Nao havia
+    // motivo para rodarem depois.
+    const variantesRuins = variants
+      .filter((v: any) => (v.codigo ?? "").trim())
+      .filter((v: any) => {
+        const n = Number(String(v.quantidade ?? "").trim());
+        return !Number.isFinite(n) || n < 0;
+      })
+      .map((v: any) => String(v.codigo).trim());
+    if (variantesRuins.length > 0) {
+      toast.error(`Invalid stock quantity on: ${variantesRuins.join(", ")}. Use a whole number of 0 or more.`);
+      return;
+    }
+    const faltando = problemasDeFormulario();
+    if (faltando.length > 0) {
+      toast.error(`Nothing was saved — fix these first:\n• ${faltando.join('\n• ')}`);
+      return;
+    }
+
     setSaving(true);
 
     const payload: any = {
@@ -329,33 +396,36 @@ const ProductEdit = () => {
       is_private: form.is_private,
     };
 
-    let productId = id;
+    // `criadoIdRef`: SEGUNDA tentativa nao cria SEGUNDO produto.
+    //
+    // A validacao acima cobre o que da para checar na tela. O que sobra falha no
+    // servidor — RLS, rede, constraint — e a falha vem DEPOIS do INSERT, ja com o
+    // produto criado. Sem esta memoria, o Save de novo (que e exatamente o que a
+    // mensagem manda fazer) inseria outro. Guardando o id, a repeticao vira UPDATE
+    // do mesmo produto.
+    //
+    // `useRef` e nao `useState` de proposito: o valor precisa valer JA na proxima
+    // linha deste mesmo handler, e `setState` so aparece no render seguinte.
+    // Ele mora na instancia da tela — a `key` da rota derruba a instancia junto com
+    // o ref quando o admin sai para criar outro produto, que e o comportamento certo.
+    // `isNew ? null : id` e nao `id` puro: `isNew` tambem e verdadeiro quando `id`
+    // vale a string "new". Testar so a verdade de `id` mandaria esse caso para o
+    // UPDATE com `.eq("id", "new")` — uuid invalido. Mantem a decisao de ramo
+    // exatamente onde ela ja estava.
+    let productId = criadoIdRef.current ?? (isNew ? null : id);
 
-    if (isNew) {
+    if (!productId) {
       const { data, error } = await supabase.from("produtos").insert(payload).select("id").single();
       if (error) { toast.error(error.message); setSaving(false); return; }
       productId = data.id;
+      criadoIdRef.current = data.id;
     } else {
-      const { error } = await supabase.from("produtos").update(payload).eq("id", id);
+      const { error } = await supabase.from("produtos").update(payload).eq("id", productId);
       if (error) { toast.error(error.message); setSaving(false); return; }
     }
 
     // Save sub-data — se um insert de privacidade/preço falhar, avisa e NÃO declara
     // sucesso (o estado segue em memória, é só reenviar).
-    // Estoque de variante invalido PARA o save, em vez de virar 0.
-    const variantesRuins = variants
-      .filter((v: any) => (v.codigo ?? "").trim())
-      .filter((v: any) => {
-        const n = Number(String(v.quantidade ?? "").trim());
-        return !Number.isFinite(n) || n < 0;
-      })
-      .map((v: any) => String(v.codigo).trim());
-    if (variantesRuins.length > 0) {
-      setSaving(false);
-      toast.error(`Invalid stock quantity on: ${variantesRuins.join(", ")}. Use a whole number of 0 or more.`);
-      return;
-    }
-
     try {
       await saveSubData(productId!);
     } catch (e: any) {
@@ -397,41 +467,6 @@ const ProductEdit = () => {
     const orFail = ({ error }: { error: any }, what: string) => {
       if (error) throw new Error(`Failed to save ${what}: ${error.message}`);
     };
-
-    // ── VALIDAÇÃO ANTES DE QUALQUER DELETE ────────────────────────────────────
-    // O padrão daqui é DELETE + INSERT sem transação: se o INSERT falha, os dados
-    // JÁ foram apagados. O `orFail` avisa e o formulário segue em memória, mas um
-    // F5 consolida a perda. A falha MAIS provável é previsível: os botões "Add"
-    // criam a linha com o campo-chave vazio (`tabela_preco_id: ""`,
-    // `cliente_id: ""`, `status_nome: ""`) e "" não é uuid válido nem passa no
-    // NOT NULL. Basta clicar Add e salvar sem escolher.
-    // Checando ANTES, o erro mais comum nunca chega a destruir nada.
-    const faltando: string[] = [];
-    if (discounts.some((d: any) => !String(d.tabela_preco_id ?? "").trim()))
-      faltando.push('Discounts: pick a price list on every row');
-    if (customerPrices.some((cp: any) => !String(cp.cliente_id ?? "").trim()))
-      faltando.push('Customer prices: pick a customer on every row');
-    // Repetida quebra de dois jeitos: `21000 cardinality_violation` no upsert
-    // (DEPOIS de o DELETE ja ter sido commitado), ou — pior, silencioso — trocar a
-    // linha A para a tabela B que ja esta na tela com o mesmo preco: nenhuma das
-    // duas fica "suja", nada e gravado, e o preco de A e apagado sem erro nenhum.
-    {
-      const ids = priceLists.map((pl: any) => String(pl.tabela_preco_id ?? "").trim()).filter(Boolean);
-      if (new Set(ids).size !== ids.length) faltando.push("Price lists: the same price list is used twice");
-    }
-    if (priceLists.some((pl: any) => !String(pl.tabela_preco_id ?? "").trim()))
-      faltando.push('Price lists: pick a price list on every row');
-    if (statusRules.some((sr: any) => !String(sr.status_nome ?? "").trim()))
-      faltando.push('Status rules: pick a status on every row');
-    if (assignedOptions.some((o: any) => !String(o.option_id ?? "").trim()))
-      faltando.push('Options: pick an option on every row');
-    if (galleryImages.some((g: any) => !String(g.imagem_url ?? "").trim()))
-      faltando.push('Gallery: an image row has no file');
-    if (files.some((f: any) => !String(f.arquivo_url ?? "").trim()))
-      faltando.push('Files: a file row has no file');
-    if (faltando.length > 0) {
-      throw new Error(`Nothing was saved — fix these first:\n• ${faltando.join('\n• ')}`);
-    }
 
     // DELETE também é checado: um delete que falha (RLS) passava em silêncio e o
     // INSERT seguinte batia em chave duplicada (ex.: tabela_preco_itens tem
