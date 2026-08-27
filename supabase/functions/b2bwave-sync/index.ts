@@ -972,15 +972,35 @@ Deno.serve(async (req) => {
     // ========== SYNC CATEGORIES (incremental by b2bwave_id) ==========
     if (action === "sync_categories") {
       const data = await fetchAllPages("categories.json", username, apiKey);
-      const { data: existingCats } = await adminClient.from("categorias").select("id, b2bwave_id, nome, descricao, ativo, imagem_url, desconto, ordem");
-      const existingMap = new Map<number, any>();
-      for (const c of existingCats || []) if (c.b2bwave_id) existingMap.set(c.b2bwave_id, c);
+      const { data: existingCats, error: errCats } = await adminClient.from("categorias")
+        .select("id, b2bwave_id, nome, descricao, ativo, imagem_url, desconto, ordem");
+      // FALHA FECHADO. Sem esta guarda, um erro de leitura deixava `existingCats`
+      // nulo, o mapa vazio, e o laco abaixo reinseria o catalogo inteiro — o mesmo
+      // estrago da chave errada, por outro caminho.
+      if (errCats) {
+        return new Response(JSON.stringify({
+          success: false, abortado: true,
+          motivo: "nao consegui ler as categorias locais: " + errCats.message + " — NAO inseri nada",
+        }), { headers: jsonHeaders });
+      }
+      // CHAVE COMO STRING NOS DOIS LADOS.
+      //
+      // O banco devolve `b2bwave_id` como NUMERO (`integer`) e a API manda `id`
+      // como TEXTO. `map.get("11")` nao acha `map.set(11)` — nenhum match, e TODA
+      // rodada reinseria o catalogo inteiro. Foi assim que 30 categorias viraram
+      // 4 copias cada. O handler de produtos deste mesmo arquivo ja normalizava
+      // com `String()`; este nao.
+      //
+      // A trava de verdade e o indice UNICO em `b2bwave_id` (20260827010000) —
+      // isto aqui so evita o erro; aquilo torna a classe impossivel.
+      const existingMap = new Map<string, any>();
+      for (const c of existingCats || []) if (c.b2bwave_id) existingMap.set(String(c.b2bwave_id), c);
 
-      const b2bIdToLocalId = new Map<number, string>();
+      const b2bIdToLocalId = new Map<string, string>();
       let synced = 0, skipped = 0;
       for (const item of data) {
         const c = item.category || item;
-        const b2bId = c.id;
+        const b2bId = String(c.id);
         const row: Record<string, any> = {
           nome: c.name || "Unnamed",
           descricao: c.description || null,
@@ -1020,9 +1040,9 @@ Deno.serve(async (req) => {
       for (const item of data) {
         const c = item.category || item;
         const parentB2bId = c.parent_id || c.parent_category_id;
-        const localId = b2bIdToLocalId.get(c.id);
-        if (localId && parentB2bId && b2bIdToLocalId.has(parentB2bId)) {
-          await adminClient.from("categorias").update({ parent_id: b2bIdToLocalId.get(parentB2bId) }).eq("id", localId);
+        const localId = b2bIdToLocalId.get(String(c.id));
+        if (localId && parentB2bId && b2bIdToLocalId.has(String(parentB2bId))) {
+          await adminClient.from("categorias").update({ parent_id: b2bIdToLocalId.get(String(parentB2bId)) }).eq("id", localId);
         } else if (localId && !parentB2bId) {
           await adminClient.from("categorias").update({ parent_id: null }).eq("id", localId);
         }
@@ -1084,15 +1104,20 @@ Deno.serve(async (req) => {
       try {
       const allProducts = await fetchAllPages("products.json", username, apiKey);
       const b2bCategories = await fetchAllPages("categories.json", username, apiKey);
-      const categoryNameByB2bId = new Map<number, string>();
-      for (const c of b2bCategories) categoryNameByB2bId.set(c.id, c.name);
+      // MESMA normalizacao do `sync_categories`: chave como string dos dois lados.
+      // Aqui o sintoma era outro — o `catB2bIdToId` (chave do BANCO, numero) contra
+      // `p.category_id` (chave da API) nunca casava, e o produto so achava categoria
+      // pelo fallback de NOME. Com as categorias duplicadas, esse fallback pegava
+      // uma copia arbitraria: e por isso que produto aparecia na categoria errada.
+      const categoryNameByB2bId = new Map<string, string>();
+      for (const c of b2bCategories) categoryNameByB2bId.set(String(c.id), c.name);
       const { data: localCategories } = await adminClient
         .from("categorias")
         .select("id, nome, ativo, b2bwave_id");
-      const catB2bIdToId = new Map<number, string>();
+      const catB2bIdToId = new Map<string, string>();
       const activeCatNameToId = new Map<string, string>();
       for (const c of localCategories || []) {
-        if (c.b2bwave_id) catB2bIdToId.set(c.b2bwave_id, c.id);
+        if (c.b2bwave_id) catB2bIdToId.set(String(c.b2bwave_id), c.id);
         if (c.ativo) activeCatNameToId.set(c.nome.toLowerCase(), c.id);
       }
 
@@ -1192,8 +1217,8 @@ Deno.serve(async (req) => {
         if (p.created_at) row.created_at = p.created_at;
         if (p.scheduled_at) row.data_disponibilidade = p.scheduled_at;
         if (p.category_id) {
-          const localIdByApi = catB2bIdToId.get(p.category_id);
-          const fallbackName = categoryNameByB2bId.get(p.category_id);
+          const localIdByApi = catB2bIdToId.get(String(p.category_id));
+          const fallbackName = categoryNameByB2bId.get(String(p.category_id));
           const localIdByName = fallbackName ? activeCatNameToId.get(fallbackName.toLowerCase()) : null;
           const resolvedCategoryId = localIdByApi || localIdByName;
           if (resolvedCategoryId) row.categoria_id = resolvedCategoryId;
