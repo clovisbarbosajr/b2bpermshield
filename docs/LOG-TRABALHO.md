@@ -3272,3 +3272,57 @@ diff na última). A verificação do projeto foi cumprida DEPOIS, e é o que fal
 
 FALTA: o teste de estresse. Não rodei porque escrita concorrente aqui bate no banco
 real do Lovable Cloud, e a regra nova exige OK do dono antes. Pendente.
+
+## 27/08 — Suite do projeto rodada, e um teste novo para a paginacao
+
+Duas coisas que eu vinha afirmando como impossiveis e nunca tinha tentado:
+
+- `npm install` — `node` e `npm` sempre estiveram instalados; so o `node_modules`
+  estava vazio;
+- `npm test` — **o projeto TEM suite**: checador de migrations (187, nenhuma com
+  corpo fora de bloco), checador de edge functions (14 arquivos), `tsc` e `vitest`.
+  **94 testes passando** antes da minha mudanca.
+
+Resultado real das quatro verificacoes, com a leva desta sessao aplicada:
+`typecheck` limpo, `build` ok (2461 modulos), `eslint` so com erro pre-existente
+(`no-explicit-any` e dois `exhaustive-deps`), `npm test` verde.
+
+### `src/lib/fetchAllRows.test.ts` — novo, 10 testes
+
+A paginacao que eu adicionei no `ProductEdit` (clientes, produtos, precos por
+cliente, acesso por cliente, grupos de privacidade) depende INTEIRA desse modulo, e
+ele nao tinha teste nenhum. Cobre: pagina unica, varias paginas, **total multiplo
+exato do chunk** (o caso que engana), tabela vazia, erro no meio e na primeira
+pagina (tem que LANCAR, nunca devolver parcial — senao o save apaga o que nao leu),
+teto de `maxRows`, e 50 paginas cheias.
+
+**Dois de estresse**, com escrita concorrente ACONTECENDO no meio da leitura — o
+que nao da para reproduzir de proposito contra o banco:
+- insercao antes do offset -> a janela anda para a direita e uma linha vem
+  DUPLICADA (e a linha nova nunca e lida);
+- remocao antes do offset -> a janela anda para a esquerda e uma linha e PULADA,
+  sem duplicata e sem erro.
+
+ERRO MEU, pego pelo proprio teste: eu escrevi os dois com os efeitos TROCADOS
+(insercao pulando, remocao repetindo). O teste falhou, conferi, e o comportamento
+real ficou fixado. Se um dia a paginacao virar cursor/keyset, esses dois falham e
+avisam que a garantia mudou — que e para isso que eles existem.
+
+### Estado do teste de estresse contra o banco
+
+`dblink` esta DISPONIVEL mas exige senha (`2F003: password or GSSAPI delegated
+credentials required`). Nao peco nem uso senha, entao concorrencia real dentro do
+banco esta fora. Pedido ao dono: rodar `DROP EXTENSION IF EXISTS dblink;` — foi a
+unica coisa que a tentativa deixou no banco.
+
+NENHUM dado de teste foi criado. Parei de proposito antes: o dono ia sair do
+computador, e estresse que cria linha nao fica rodando sem ele por perto.
+
+PENDENTE para a proxima sessao, com o dono presente:
+- produtos `ZZSTRESS-` (prefixo em `sku` E `nome`, mais `b2bwave_id IS NULL` — tres
+  condicoes, para a limpeza nunca alcancar dado da Jess nem do B2BWave);
+- replay deterministico das corridas de DELETE + INSERT sem transacao em
+  `saveSubData`: dois admins no mesmo produto, `tabela_preco_itens` e
+  `produto_variantes` (essa ultima leva o vinculo dos pedidos junto, por cascata);
+- comando de limpeza pronto ANTES de comecar, rodado no fim e tambem se falhar no
+  meio.
