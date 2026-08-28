@@ -60,7 +60,12 @@ const isGroup = (entry: NavEntry): entry is NavGroup => "children" in entry;
 //   Tools → Exports Log             (/admin/tools/exports-log)
 //   Products → Import               (/admin/products/import)
 //   Products → Export               (/admin/products/export)
-// MANTIDOS visíveis: Tools → PDF Catalog, Import Product Discounts.
+// MANTIDOS visíveis: Tools → PDF Catalog.
+// REMOVIDO em 28/ago/2026: Import Product Discounts. A ferramenta gravava
+// `desconto` em `tabela_preco_itens` e em `produtos`, coluna que nao existe em
+// nenhuma das duas — toda linha voltava PGRST204 e ela NUNCA importou um
+// desconto sequer. E a Jess confirmou que o recurso de desconto esta sendo
+// desativado no B2BWave, entao consertar seria consertar para ninguem usar.
 // ============================================================================
 const adminNavEntries: NavEntry[] = [
   { to: "/admin", icon: Home, label: "Dashboard" },
@@ -107,7 +112,6 @@ const adminNavEntries: NavEntry[] = [
       // `supabase/functions/generate-pdf/index.ts`, que hoje so sabe montar PDF
       // de um pedido. Sem as duas pontas, volta a ser um botao que so erra.
       // { to: "/admin/tools/pdf-catalog", icon: FileDown, label: "PDF Catalog" },
-      { to: "/admin/tools/import-product-discounts", icon: Percent, label: "Import Product Discounts" },
       { to: "/admin/tools/import-related-products", icon: Package, label: "Import Related Products" },
       // OCULTOS (rotas/telas intactas — ver MENU_OCULTO.md):
       // { to: "/admin/tools/import-customer-prices", icon: DollarSign, label: "Import Customer Prices" },

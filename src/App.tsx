@@ -61,7 +61,6 @@ import AdminBanners from "./pages/admin/Banners";
 import ImportCustomerPrices from "./pages/admin/tools/ImportCustomerPrices";
 import ImportCustomers from "./pages/admin/tools/ImportCustomers";
 import ImportAddresses from "./pages/admin/tools/ImportAddresses";
-import ImportProductDiscounts from "./pages/admin/tools/ImportProductDiscounts";
 import ImportRelatedProducts from "./pages/admin/tools/ImportRelatedProducts";
 import ImportProductVariants from "./pages/admin/tools/ImportProductVariants";
 import ImportCategories from "./pages/admin/tools/ImportCategories";
@@ -206,7 +205,6 @@ const App = () => (
               <Route path="/admin/tools/import-customer-prices" element={<A><ImportCustomerPrices /></A>} />
               <Route path="/admin/tools/import-customers" element={<A><ImportCustomers /></A>} />
               <Route path="/admin/tools/import-addresses" element={<A><ImportAddresses /></A>} />
-              <Route path="/admin/tools/import-product-discounts" element={<A><ImportProductDiscounts /></A>} />
               <Route path="/admin/tools/import-related-products" element={<A><ImportRelatedProducts /></A>} />
               <Route path="/admin/tools/import-product-variants" element={<A><ImportProductVariants /></A>} />
               <Route path="/admin/tools/import-categories" element={<A><ImportCategories /></A>} />
