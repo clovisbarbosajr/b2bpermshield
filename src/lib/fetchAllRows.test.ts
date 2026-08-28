@@ -143,7 +143,7 @@ describe("fetchAllRows", () => {
   });
 
   // Sem escrita concorrente, muitas paginas seguidas tem que sair exatas — e o
-  // caso real do `produtos` (passa de 1000 hoje) e do `clientes`.
+  // caso real do `pedidos`, que tem 2784 linhas (medido em 27/ago/2026).
   it("50 paginas cheias saem completas e sem duplicata", async () => {
     const t = tabelaFalsa(linhas(50_000));
     const out = await fetchAllRows<{ id: string }>(t.servir, { chunk: 1000 });

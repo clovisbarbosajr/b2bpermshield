@@ -3177,7 +3177,7 @@ que devolve `{ data, error }` para caber no `Promise.all` e na trava:
   partir do que leu, entao a linha 1001 em diante era descartada em silencio;
 - `privacy_groups`, `clientes`, `produtos` — sem perda de dado, mas com estrago de
   tela: o chip de acesso do cliente 1001 saia como UUID cru (o `|| cid` do badge)
-  e nem ele nem o produto 1001 apareciam nos seletores. `produtos` ja passa de 1000
+  e nem ele nem o produto 1001 apareciam nos seletores. NOTA: medido depois, `produtos`
   hoje.
 - `.order("id")` porque paginar exige ordem estavel; a ordem alfabetica que a UI
   usa virou `porNome()` em memoria.
@@ -3442,3 +3442,66 @@ permissao. Para isso continua valendo o bloco de VERIFICACAO no rodape de cada
 migration.
 
 `npm test` agora: migrations + SQL parseavel + edge + tsc + 104 testes.
+
+## 27/08 — RESULTADO DO TESTE DE ESTRESSE (rodado pelo dono no banco real)
+
+Script: `docs/ESTRESSE-SAVE-PRODUTO.sql`, dentro de `BEGIN ... ROLLBACK`. Nada
+gravado.
+
+### Volume medido — e onde eu tinha chutado errado
+
+| tabela | linhas | |
+|---|---|---|
+| pedidos | **2784** | JA ESTOURA |
+| tabela_preco_itens | **1015** | JA ESTOURA |
+| produtos ativos | 278 | folgado |
+| cliente_privacy_groups | 115 | folgado |
+| clientes | 70 | folgado |
+| produto_cliente_acesso | 0 | folgado |
+| produto_precos_cliente | 0 | folgado |
+
+CORRECAO DO QUE EU AFIRMEI: eu escrevi no log e no commit que `produtos` ja
+passava de 1000. **Nao passa — sao 278 ativos.** Era chute apresentado como fato.
+Corrigido no comentario do `ProductEdit`, no `fetchAllRows.test.ts` e aqui.
+
+Das cinco leituras que paginei no `ProductEdit` e das quatro do `Clientes`/
+`OrderDetail`, **UMA estava quebrada hoje**: `pedidos` em `Clientes.tsx`, com 2784
+linhas contra o corte de 1000. As outras sao seguro para crescimento, nao conserto
+de defeito ativo — e eu deveria ter medido ANTES de descrever como estrago em
+curso. O `tabela_preco_itens` com 1015 e o total da tabela; no `ProductEdit` ela e
+lida filtrada por produto, entao la nunca foi problema.
+
+O impacto real do `pedidos`: com 70 clientes e 2784 pedidos, os 1000 mais recentes
+provavelmente cobrem quem comprou ha pouco. Quem some da coluna "Last Order" e
+quem esta INATIVO ha mais tempo — exatamente o cliente que o admin classificaria
+errado. Defeito real, alcance menor do que eu deixei entender.
+
+### As tres corridas: TODAS CONFIRMADAS
+
+1. GALERIA — A sobe 3 imagens e salva; B salva com a tela carregada antes.
+   Sobraram 2 imagens, NENHUMA de A. Os dois viram "Product saved".
+2. PRECO — A remove a linha da tabela e salva; B altera o preco da mesma linha.
+   Linha VIVA a 80.00 enquanto a tela de A mostra o produto sem preco ali.
+3. VARIANTE — A cria a variante; B salva sem nunca te-la visto. Sobraram 0.
+
+Nenhuma das tres foi introduzida por mim. E o `saveSubData` fazendo DELETE + INSERT
+sem transacao, com o estado da tela como fonte da verdade. Leitura de codigo nao
+acharia: exige a SEQUENCIA de duas sessoes.
+
+### As duas correcoes desta sessao que o teste conseguiu verificar: PASSARAM
+
+4. Guarda `.eq("produto_id", pid)` no UPDATE de variante — 0 linhas atingidas com
+   id de outro produto. Sem ela, gravaria no produto vizinho.
+5. Variante do produto vizinho intacta (quantidade 50).
+6. Regra do espelho da RPC de preco — preco 55.55 (origem venceu) com
+   `origem = 'local'` preservado. REGRA OK.
+
+### PARADO ESPERANDO DECISAO DO DONO
+
+Como resolver a perda por escrita concorrente no save de produto. E decisao de
+produto, nao correcao obvia:
+ (a) bloqueio otimista — o save leva o `updated_at` que a tela carregou e recusa
+     se o produto mudou desde entao ("alguem salvou antes de voce, recarregue");
+ (b) aceitar "ultimo salva vence" e documentar;
+ (c) transacao no servidor (RPC unica para o save inteiro) — resolve a atomicidade
+     mas NAO a sobrescrita, que e o problema aqui.

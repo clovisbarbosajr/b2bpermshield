@@ -143,6 +143,13 @@ const ProductEdit = () => {
       //
       // A ordem alfabetica que a UI usa vem do `porNome` em memoria: paginar exige
       // ordenar por `id`, e as duas coisas nao cabem na mesma query.
+      //
+      // MEDIDO EM 27/ago/2026, contra o banco: 70 clientes e 278 produtos ativos.
+      // Nenhuma das duas estoura HOJE — isto e seguro para o crescimento, nao
+      // conserto de defeito ativo. Eu tinha escrito que `produtos` ja passava de
+      // 1000; era chute, e o numero desmentiu. As que realmente estouram sao
+      // `pedidos` (2784) e `tabela_preco_itens` (1015), e nenhuma das duas e lida
+      // aqui sem filtro de produto.
       tudo<any>((f, t) => supabase.from("clientes").select("id, nome, empresa").order("id", { ascending: true }).range(f, t) as any),
       supabase.from("product_options").select("id, nome, tipo").order("nome"),
       supabase.from("privacy_groups").select("id, nome").eq("ativo", true).order("nome"),
