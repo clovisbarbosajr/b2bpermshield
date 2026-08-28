@@ -22,8 +22,13 @@
 --
 -- O mesmo vale para `is_active` e `status`: suspender a empresa nao impede o
 -- INSERT do pedido do funcionario. Os itens depois sao recusados um a um por
--- `fn_item_produto_valido`, entao o que sobra e um PEDIDO VAZIO na fila do admin —
--- repetivel em laco.
+-- `fn_item_produto_valido`, e ai o Checkout chama `pedido_rollback_checkout`, que
+-- APAGA pedido sem item (`20260825250000:153-159`). Entao nao sobra lixo na fila
+-- do admin — sobra um par INSERT+DELETE repetivel e uma mensagem errada na tela do
+-- funcionario, que nao entende por que nao consegue comprar.
+--
+-- (Uma versao anterior deste cabecalho dizia que o pedido vazio FICAVA na fila.
+-- Nao fica.)
 --
 -- ---------------------------------------------------------------------------
 -- DUAS FUNCOES, O MESMO DEFEITO EM SENTIDOS OPOSTOS — as duas corrigidas aqui
@@ -310,32 +315,61 @@ COMMIT;
 -- 3) A OUTRA FUNCAO — `conta_liberada_de`, a da leitura. Os blocos (1) e (2) so
 --    exercitam a de escrita, e esta e a que falha calada.
 --
+--    CINCO FICHAS, e cada uma isola UM ramo. As duas primeiras versoes deste bloco
+--    tinham so tres, e passavam em funcoes ERRADAS:
+--      * com o demitido nascendo `is_active=false` E `status='inativo'` juntos, a
+--        funcao retornava no `IF _inativo` e a denylist sobre o status do FILHO
+--        nunca era alcancada — uma versao sem esse `OR` passava;
+--      * com o titular sempre saudavel, o lado `dono.*` nunca decidia nada — uma
+--        versao SEM o `LEFT JOIN` tambem passava.
+--    Cada linha abaixo existe para reprovar uma dessas.
+--
 --   BEGIN;
 --     CREATE TEMP TABLE zzl AS
---     WITH pai AS (
+--     WITH pai_ok AS (
 --       INSERT INTO public.clientes (user_id, nome, email, status, is_active)
---       VALUES (gen_random_uuid(), 'ZZVERIF-l-titular', 'zzverif-l1@example.invalid', 'ativo', true)
+--       VALUES (gen_random_uuid(), 'ZZVERIF-l-pai-ok', 'zzverif-l1@example.invalid', 'ativo', true)
 --       RETURNING id
---     ), ativo AS (
---       INSERT INTO public.clientes (user_id, nome, email, status, is_active, parent_customer_id)
---       SELECT gen_random_uuid(), 'ZZVERIF-l-ativo', 'zzverif-l2@example.invalid', 'ativo', true, pai.id FROM pai
+--     ), pai_ruim AS (
+--       INSERT INTO public.clientes (user_id, nome, email, status, is_active)
+--       VALUES (gen_random_uuid(), 'ZZVERIF-l-pai-ruim', 'zzverif-l2@example.invalid', 'inativo', false)
 --       RETURNING id
---     ), demitido AS (
+--     ), filho_ok AS (
 --       INSERT INTO public.clientes (user_id, nome, email, status, is_active, parent_customer_id)
---       SELECT gen_random_uuid(), 'ZZVERIF-l-demitido', 'zzverif-l3@example.invalid', 'inativo', false, pai.id FROM pai
+--       SELECT gen_random_uuid(), 'ZZVERIF-l-filho-ok', 'zzverif-l3@example.invalid', 'ativo', true, pai_ok.id FROM pai_ok
+--       RETURNING id
+--     ), filho_pendente AS (
+--       -- `pendente` com `is_active` TRUE: a unica combinacao que isola a denylist
+--       -- sobre o status do FILHO. E nao e teorica — o sync grava exatamente isso
+--       -- (`b2bwave-sync/index.ts:1917` com `:1942`) para cliente nao aprovado.
+--       INSERT INTO public.clientes (user_id, nome, email, status, is_active, parent_customer_id)
+--       SELECT gen_random_uuid(), 'ZZVERIF-l-filho-pend', 'zzverif-l4@example.invalid', 'pendente', true, pai_ok.id FROM pai_ok
+--       RETURNING id
+--     ), filho_de_pai_ruim AS (
+--       INSERT INTO public.clientes (user_id, nome, email, status, is_active, parent_customer_id)
+--       SELECT gen_random_uuid(), 'ZZVERIF-l-filho-orfao', 'zzverif-l5@example.invalid', 'ativo', true, pai_ruim.id FROM pai_ruim
 --       RETURNING id
 --     )
---     SELECT (SELECT id FROM pai) AS pai_id,
---            (SELECT id FROM ativo) AS ativo_id,
---            (SELECT id FROM demitido) AS demitido_id;
+--     SELECT (SELECT id FROM pai_ok)           AS pai_ok_id,
+--            (SELECT id FROM filho_ok)         AS filho_ok_id,
+--            (SELECT id FROM filho_pendente)   AS filho_pend_id,
+--            (SELECT id FROM filho_de_pai_ruim) AS filho_orfao_id;
 --
---     SELECT public.conta_liberada_de((SELECT ativo_id    FROM zzl)) AS ativo_ve,
---            public.conta_liberada_de((SELECT demitido_id FROM zzl)) AS demitido_ve,
---            public.conta_liberada_de((SELECT pai_id      FROM zzl)) AS titular_ve;
---     -- ESPERADO: true, false, true.
---     -- `demitido_ve = true` significa que a migration NAO entrou (era o
---     -- comportamento antigo). `ativo_ve = false` seria pior: a funcao passou a
---     -- barrar quem tem direito, e o catalogo esvazia sem erro nenhum.
+--     SELECT public.conta_liberada_de((SELECT pai_ok_id      FROM zzl)) AS titular_ve,
+--            public.conta_liberada_de((SELECT filho_ok_id    FROM zzl)) AS filho_ok_ve,
+--            public.conta_liberada_de((SELECT filho_pend_id  FROM zzl)) AS filho_pendente_ve,
+--            public.conta_liberada_de((SELECT filho_orfao_id FROM zzl)) AS filho_de_pai_suspenso_ve;
+--     -- ESPERADO: true, true, false, false.
+--     --
+--     -- O que cada um pega:
+--     --   titular_ve         controle. `false` aqui = o LEFT JOIN virou JOIN e
+--     --                      quem nao tem pai foi eliminado da consulta;
+--     --   filho_ok_ve        controle. `false` = a funcao passou a barrar quem tem
+--     --                      direito, e o catalogo esvazia SEM erro nenhum;
+--     --   filho_pendente_ve  a metade NOVA. `true` = a denylist sobre o status do
+--     --                      FILHO nao entrou (a versao antiga devolve `true` aqui);
+--     --   filho_de_pai_...   a metade ANTIGA, que precisa sobreviver. `true` = a
+--     --                      funcao parou de olhar o titular.
 --   ROLLBACK;
 --
 --   SELECT count(*) AS sobrou FROM public.clientes WHERE nome LIKE 'ZZVERIF%';
