@@ -104,7 +104,6 @@ const ProductEdit = () => {
   // Sub-tab data
   const [galleryImages, setGalleryImages] = useState<{ id?: string; imagem_url: string; ordem: number }[]>([]);
   const [files, setFiles] = useState<{ id?: string; titulo: string; arquivo_url: string }[]>([]);
-  const [discounts, setDiscounts] = useState<any[]>([]);
   const [customerPrices, setCustomerPrices] = useState<any[]>([]);
   const [relatedProducts, setRelatedProducts] = useState<any[]>([]);
   // Busca de produtos p/ vincular relacionados (por NOME, não por ID cru).
@@ -244,10 +243,9 @@ const ProductEdit = () => {
     // O `tudo` esta no topo do arquivo: o `fetchLookups` usa o mesmo helper.
 
     // Fetch sub-data in parallel
-    const [imgs, fls, disc, cp, rel, opts, vars, sr, acc, pl, cliAcc, pgRes] = await Promise.all([
+    const [imgs, fls, cp, rel, opts, vars, sr, acc, pl, cliAcc, pgRes] = await Promise.all([
       supabase.from("produto_imagens").select("*").eq("produto_id", id).order("ordem"),
       supabase.from("produto_arquivos").select("*").eq("produto_id", id),
-      supabase.from("produto_descontos").select("*").eq("produto_id", id),
       tudo<any>((f, t) => supabase.from("produto_precos_cliente").select("*").eq("produto_id", id).order("id", { ascending: true }).range(f, t) as any),
       supabase.from("produtos_relacionados").select("*").eq("produto_id", id),
       supabase.from("produto_opcoes").select("*").eq("produto_id", id),
@@ -281,7 +279,7 @@ const ProductEdit = () => {
     // salvar e a resposta certa para todas. Tratar cada tabela separadamente
     // seria mais codigo para o mesmo resultado.
     const falhas = [
-      ["images", imgs.error], ["files", fls.error], ["discounts", disc.error],
+      ["images", imgs.error], ["files", fls.error],
       ["customer prices", cp.error], ["related products", rel.error],
       ["options", opts.error], ["variants", vars.error], ["status rules", sr.error],
       ["access", acc.error], ["price lists", pl.error],
@@ -294,7 +292,6 @@ const ProductEdit = () => {
 
     setGalleryImages(imgs.data ?? []);
     setFiles(fls.data ?? []);
-    setDiscounts(disc.data ?? []);
     setCustomerPrices(cp.data ?? []);
     setRelatedProducts(rel.data ?? []);
     setAssignedOptions(opts.data ?? []);
@@ -363,8 +360,6 @@ const ProductEdit = () => {
   // NULL. Basta clicar Add e salvar sem escolher.
   const problemasDeFormulario = (): string[] => {
     const faltando: string[] = [];
-    if (discounts.some((d: any) => !String(d.tabela_preco_id ?? "").trim()))
-      faltando.push('Discounts: pick a price list on every row');
     if (customerPrices.some((cp: any) => !String(cp.cliente_id ?? "").trim()))
       faltando.push('Customer prices: pick a customer on every row');
     // Repetida quebra de dois jeitos: `21000 cardinality_violation` no upsert
@@ -647,11 +642,15 @@ const ProductEdit = () => {
       }))), "files");
     }
 
-    // Discounts
-    await delOrFail("produto_descontos", "discounts");
-    if (discounts.length > 0) {
-      orFail(await supabase.from("produto_descontos").insert(discounts.map(d => ({ ...d, produto_id: pid, id: undefined }))), "discounts");
-    }
+    // O DESCONTO SAIU DAQUI, e a remocao do DELETE e a parte que importa.
+    //
+    // Este bloco fazia `delOrFail("produto_descontos")` seguido de insert do
+    // estado da tela. Com a aba removida, o estado e sempre vazio — entao deixar o
+    // DELETE de pe faria QUALQUER save de produto apagar as regras de desconto que
+    // ainda estao no banco. A decisao (28/ago/2026) foi parar de APLICAR desconto,
+    // nao destruir o cadastro: as linhas ficam intactas, e religar e recolocar duas
+    // chamadas no `preco_autoritativo` e no `pricing.ts`.
+    // Ver `supabase/migrations/20260828040000_desconto_sai_do_preco.sql`.
 
     // Customer prices
     await delOrFail("produto_precos_cliente", "customer prices");
@@ -901,7 +900,6 @@ const ProductEdit = () => {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex flex-wrap h-auto gap-1 mb-4">
           <TabsTrigger value="product">Product</TabsTrigger>
-          <TabsTrigger value="discounts">Discounts</TabsTrigger>
           <TabsTrigger value="customer-prices">Customer Prices</TabsTrigger>
           <TabsTrigger value="related">Related Products</TabsTrigger>
           <TabsTrigger value="options">Product Options</TabsTrigger>
@@ -1072,53 +1070,6 @@ const ProductEdit = () => {
         </TabsContent>
 
         {/* ========== DISCOUNTS TAB ========== */}
-        <TabsContent value="discounts">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-base">Product Discounts</CardTitle>
-              <Button size="sm" onClick={() => setDiscounts([...discounts, { tabela_preco_id: "", percentual: 0, preco_final: null, quantidade_minima: 0, data_inicio: null, data_fim: null }])}>
-                <Plus className="h-3 w-3 mr-1" /> Add Discount
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {discounts.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">No discounts configured. Click "Add Discount" to create one.</p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      {/* Obrigatório: desconto por quantidade é SEMPRE por tabela de
-                          preço (decisão do cliente, 03/ago). Não existe "vale pra todas". */}
-                      <TableHead>Price List *</TableHead><TableHead>From Qty</TableHead>
-                      <TableHead>Percentage (%)</TableHead><TableHead>Date From</TableHead>
-                      <TableHead>Date To</TableHead><TableHead>Final Price</TableHead><TableHead />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {discounts.map((d, i) => (
-                      <TableRow key={i}>
-                        <TableCell>
-                          <Select value={d.tabela_preco_id} onValueChange={v => { const nd = [...discounts]; nd[i].tabela_preco_id = v; setDiscounts(nd); }}>
-                            <SelectTrigger className={`w-40 ${d.tabela_preco_id ? "" : "border-destructive"}`}>
-                              <SelectValue placeholder="Select" />
-                            </SelectTrigger>
-                            <SelectContent>{tabelasPreco.map(tp => <SelectItem key={tp.id} value={tp.id}>{tp.nome}</SelectItem>)}</SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell><Input type="number" className="w-20" value={d.quantidade_minima} onChange={e => { const nd = [...discounts]; nd[i].quantidade_minima = parseInt(e.target.value) || 0; setDiscounts(nd); }} /></TableCell>
-                        <TableCell><Input type="number" step="0.01" className="w-20" value={d.percentual} onChange={e => { const nd = [...discounts]; nd[i].percentual = parseFloat(e.target.value) || 0; setDiscounts(nd); }} /></TableCell>
-                        <TableCell><Input type="date" className="w-36" value={d.data_inicio?.split("T")[0] ?? ""} onChange={e => { const nd = [...discounts]; nd[i].data_inicio = e.target.value || null; setDiscounts(nd); }} /></TableCell>
-                        <TableCell><Input type="date" className="w-36" value={d.data_fim?.split("T")[0] ?? ""} onChange={e => { const nd = [...discounts]; nd[i].data_fim = e.target.value || null; setDiscounts(nd); }} /></TableCell>
-                        <TableCell><Input type="number" step="0.01" className="w-24" value={d.preco_final ?? ""} onChange={e => { const nd = [...discounts]; nd[i].preco_final = parseFloat(e.target.value) || null; setDiscounts(nd); }} /></TableCell>
-                        <TableCell><Button variant="ghost" size="icon" onClick={() => setDiscounts(discounts.filter((_, idx) => idx !== i))}><Trash2 className="h-3 w-3 text-destructive" /></Button></TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         {/* ========== CUSTOMER PRICES TAB ========== */}
         <TabsContent value="customer-prices">
@@ -1134,7 +1085,7 @@ const ProductEdit = () => {
                 <p className="text-sm text-muted-foreground py-8 text-center">No customer-specific prices. Click "Add" to create one.</p>
               ) : (
                 <Table>
-                  <TableHeader><TableRow><TableHead>Customer</TableHead><TableHead>Price</TableHead><TableHead>Apply Extra Discounts</TableHead><TableHead /></TableRow></TableHeader>
+                  <TableHeader><TableRow><TableHead>Customer</TableHead><TableHead>Price</TableHead><TableHead /></TableRow></TableHeader>
                   <TableBody>
                     {customerPrices.map((cp, i) => (
                       <TableRow key={i}>
@@ -1145,9 +1096,11 @@ const ProductEdit = () => {
                           </Select>
                         </TableCell>
                         <TableCell><Input type="number" step="0.01" className="w-28" value={cp.preco} onChange={e => { const n = [...customerPrices]; n[i].preco = parseFloat(e.target.value) || 0; setCustomerPrices(n); }} /></TableCell>
-                        <TableCell>
-                          <Checkbox checked={cp.aplicar_descontos_extras} onCheckedChange={v => { const n = [...customerPrices]; n[i].aplicar_descontos_extras = !!v; setCustomerPrices(n); }} />
-                        </TableCell>
+                        {/* A coluna "Apply Extra Discounts" saiu com o desconto:
+                            ela mandava aplicar desconto POR CIMA do preco
+                            combinado, e nada mais le esse campo. A COLUNA
+                            `aplicar_descontos_extras` continua no banco, para o
+                            rollback nao precisar de backfill. */}
                         <TableCell><Button variant="ghost" size="icon" onClick={() => setCustomerPrices(customerPrices.filter((_, idx) => idx !== i))}><Trash2 className="h-3 w-3 text-destructive" /></Button></TableCell>
                       </TableRow>
                     ))}

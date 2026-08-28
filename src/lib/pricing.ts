@@ -36,7 +36,7 @@ export async function getProductPrice({
       : supabase.from("clientes").select("tabela_preco_id").eq("id", accountId).maybeSingle(),
     supabase
       .from("produto_precos_cliente")
-      .select("preco, aplicar_descontos_extras")
+      .select("preco")
       .eq("produto_id", productId)
       .eq("cliente_id", accountId)
       .maybeSingle(),
@@ -59,17 +59,14 @@ export async function getProductPrice({
     ?? (accountRes.data as any)?.tabela_preco_id
     ?? null;
   const customerPrice = customerPriceRes.data;
-  const aplicarDescontosExtras = customerPrice?.aplicar_descontos_extras === true;
 
   // 1) produto_precos_cliente — highest priority
+  //
+  // O ramo `aplicar_descontos_extras`, que aplicava desconto POR CIMA do preco
+  // combinado, saiu em 28/ago/2026 junto com o desconto por quantidade. Ver
+  // `supabase/migrations/20260828040000_desconto_sai_do_preco.sql`. A coluna
+  // continua na tabela e volta a valer sozinha se o rollback for aplicado.
   if (customerPrice && customerPrice.preco != null) {
-    // If aplicar_descontos_extras, check discounts on top of customer price
-    if (aplicarDescontosExtras) {
-      const discountResult = await resolveDiscount(productId, tabelaPrecoId, quantity, Number(customerPrice.preco));
-      if (discountResult) {
-        return discountResult;
-      }
-    }
     return { price: Number(customerPrice.preco), source: "customer" };
   }
 
@@ -89,68 +86,25 @@ export async function getProductPrice({
     }
   }
 
-  // 3) produto_descontos — SEMPRE amarrado a uma tabela de preço (decisão do cliente)
-  const discountResult = await resolveDiscount(productId, tabelaPrecoId, quantity, basePrice);
-  if (discountResult) {
-    return discountResult;
-  }
+  // 3) O desconto por quantidade ficava AQUI. Removido em 28/ago/2026 (decisao da
+  //    Jess: "todo tipo de desconto" sai, "preco do cliente vai pela tabela de
+  //    preco"), junto com o lado do servidor.
+  //
+  //    ESTE ARQUIVO E O `preco_autoritativo` DO BANCO TEM QUE CONCORDAR. O banco e
+  //    quem cobra; este aqui e o que a vitrine mostra. Se um aplicar desconto e o
+  //    outro nao, o produto com desconto diverge — e a guarda do checkout so pega
+  //    a divergencia em UMA direcao (quando o banco cobra MAIS). Mexer aqui sem
+  //    mexer la vende mais barato em silencio.
 
   // 4) Fallback: produtos.preco
   return { price: basePrice, source: "base" };
 }
 
-async function resolveDiscount(
-  productId: string,
-  tabelaPrecoId: string | null,
-  quantity: number,
-  referencePrice: number,
-): Promise<PriceResult | null> {
-  // Sem os milissegundos: o `.` é separador na sintaxe `col.op.valor` do filtro
-  // `or` do PostgREST, e "…:00.000Z" quebraria o parse do valor.
-  const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  // Datas filtradas NO BANCO (era em JS, DEPOIS do .limit(50): 50 faixas expiradas
-  // do mesmo produto escondiam a válida e o cliente perdia o desconto). O servidor
-  // (`_resolve_desconto`) sempre filtrou em SQL — este é o lado que divergia, e o
-  // servidor é quem grava o preço no pedido.
-  let query = supabase
-    .from("produto_descontos")
-    .select("percentual, preco_final, quantidade_minima, data_inicio, data_fim, tabela_preco_id")
-    .eq("produto_id", productId)
-    .lte("quantidade_minima", quantity)
-    .or(`data_inicio.is.null,data_inicio.lte.${nowIso}`)
-    .or(`data_fim.is.null,data_fim.gte.${nowIso}`)
-    .order("quantidade_minima", { ascending: false })
-    .limit(50);
-
-  // DECISÃO DO CLIENTE (03/ago/2026): desconto por quantidade é SEMPRE amarrado a
-  // uma tabela de preço. Não existe desconto "global, vale pra todas as tabelas".
-  //
-  // Antes havia aqui uma perna `tabela_preco_id.is.null` (o "global"), que nunca
-  // casava — a coluna é NOT NULL (20260318202244:57, confirmado no schema vivo em
-  // types.ts:1970). Era código morto que dava a entender que a opção existia.
-  //
-  // Consequência assumida: cliente SEM tabela de preço não recebe desconto por
-  // quantidade. É o comportamento pedido, não uma falha.
-  if (!tabelaPrecoId) return null;
-  query = query.eq("tabela_preco_id", tabelaPrecoId);
-
-  const { data: descontos, error } = await query;
-
-  if (error) throw new Error(`Erro ao buscar descontos: ${error.message}`);
-
-  if (!descontos || descontos.length === 0) return null;
-
-  // Já vem ordenado por `quantidade_minima` desc: a primeira é a melhor faixa que
-  // a quantidade alcança.
-  const best = descontos[0];
-
-  if (best.preco_final != null && Number(best.preco_final) > 0) {
-    return { price: Number(best.preco_final), source: "discount" };
-  }
-  if (best.percentual != null && Number(best.percentual) > 0) {
-    const discounted = referencePrice * (1 - Number(best.percentual) / 100);
-    return { price: Math.round(discounted * 100) / 100, source: "discount" };
-  }
-
-  return null;
-}
+// A funcao `resolveDiscount` ficava AQUI, e foi removida em 28/ago/2026 junto com
+// as duas chamadas dela. O corpo da regra continua no banco, em
+// `_resolve_desconto`, sem chamador — e de la que se religa, se a decisao voltar
+// atras, sem precisar reescrever nada.
+//
+// `PriceSource` mantem o valor "discount" de proposito: `produto_precos_cliente`
+// e `pedido_itens` gravados antes de hoje podem carregar esse rotulo, e tirar o
+// tipo faria o `tsc` reclamar de dado que existe.
