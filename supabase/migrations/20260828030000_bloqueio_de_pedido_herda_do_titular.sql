@@ -315,61 +315,83 @@ COMMIT;
 -- 3) A OUTRA FUNCAO — `conta_liberada_de`, a da leitura. Os blocos (1) e (2) so
 --    exercitam a de escrita, e esta e a que falha calada.
 --
---    CINCO FICHAS, e cada uma isola UM ramo. As duas primeiras versoes deste bloco
---    tinham so tres, e passavam em funcoes ERRADAS:
---      * com o demitido nascendo `is_active=false` E `status='inativo'` juntos, a
---        funcao retornava no `IF _inativo` e a denylist sobre o status do FILHO
---        nunca era alcancada — uma versao sem esse `OR` passava;
---      * com o titular sempre saudavel, o lado `dono.*` nunca decidia nada — uma
---        versao SEM o `LEFT JOIN` tambem passava.
---    Cada linha abaixo existe para reprovar uma dessas.
+--    UMA FICHA POR RAMO, e o motivo e uma licao aprendida duas vezes neste mesmo
+--    bloco: ficha que traz DOIS defeitos ao mesmo tempo nao prova nada, porque um
+--    mascara o outro. As duas versoes anteriores tinham esse erro —
+--    a primeira no filho (`is_active=false` E `status='inativo'` juntos), a
+--    segunda no titular, exatamente o defeito que a primeira dizia ter corrigido.
+--
+--    A funcao tem QUATRO ramos que podem barrar. Cada um so e testado se for o
+--    UNICO defeito da ficha:
+--      `me.is_active IS FALSE`        -> filho_flag_ruim
+--      `dono.is_active IS FALSE`      -> filho_de_pai_flag_ruim
+--      denylist sobre `_st_me`        -> filho_status_ruim
+--      denylist sobre `_st_dono`      -> filho_de_pai_status_ruim
+--    Mais dois controles, que precisam continuar passando.
+--
+--    `status='pendente'` com `is_active=true` nao e combinacao artificial: sao os
+--    proprios defaults das colunas (`status ... NOT NULL DEFAULT 'pendente'` em
+--    `20260317043654:73` e `is_active boolean DEFAULT true` em `20260319192534`),
+--    entao qualquer INSERT que omita as duas nasce assim.
 --
 --   BEGIN;
 --     CREATE TEMP TABLE zzl AS
 --     WITH pai_ok AS (
 --       INSERT INTO public.clientes (user_id, nome, email, status, is_active)
---       VALUES (gen_random_uuid(), 'ZZVERIF-l-pai-ok', 'zzverif-l1@example.invalid', 'ativo', true)
+--       VALUES (gen_random_uuid(), 'ZZVERIF-pai-ok', 'zzv1@example.invalid', 'ativo', true)
 --       RETURNING id
---     ), pai_ruim AS (
+--     ), pai_status_ruim AS (
 --       INSERT INTO public.clientes (user_id, nome, email, status, is_active)
---       VALUES (gen_random_uuid(), 'ZZVERIF-l-pai-ruim', 'zzverif-l2@example.invalid', 'inativo', false)
+--       VALUES (gen_random_uuid(), 'ZZVERIF-pai-status', 'zzv2@example.invalid', 'inativo', true)
+--       RETURNING id
+--     ), pai_flag_ruim AS (
+--       INSERT INTO public.clientes (user_id, nome, email, status, is_active)
+--       VALUES (gen_random_uuid(), 'ZZVERIF-pai-flag', 'zzv3@example.invalid', 'ativo', false)
 --       RETURNING id
 --     ), filho_ok AS (
 --       INSERT INTO public.clientes (user_id, nome, email, status, is_active, parent_customer_id)
---       SELECT gen_random_uuid(), 'ZZVERIF-l-filho-ok', 'zzverif-l3@example.invalid', 'ativo', true, pai_ok.id FROM pai_ok
+--       SELECT gen_random_uuid(), 'ZZVERIF-filho-ok', 'zzv4@example.invalid', 'ativo', true, pai_ok.id FROM pai_ok
 --       RETURNING id
---     ), filho_pendente AS (
---       -- `pendente` com `is_active` TRUE: a unica combinacao que isola a denylist
---       -- sobre o status do FILHO. E nao e teorica — o sync grava exatamente isso
---       -- (`b2bwave-sync/index.ts:1917` com `:1942`) para cliente nao aprovado.
+--     ), filho_status_ruim AS (
 --       INSERT INTO public.clientes (user_id, nome, email, status, is_active, parent_customer_id)
---       SELECT gen_random_uuid(), 'ZZVERIF-l-filho-pend', 'zzverif-l4@example.invalid', 'pendente', true, pai_ok.id FROM pai_ok
+--       SELECT gen_random_uuid(), 'ZZVERIF-filho-status', 'zzv5@example.invalid', 'pendente', true, pai_ok.id FROM pai_ok
 --       RETURNING id
---     ), filho_de_pai_ruim AS (
+--     ), filho_flag_ruim AS (
 --       INSERT INTO public.clientes (user_id, nome, email, status, is_active, parent_customer_id)
---       SELECT gen_random_uuid(), 'ZZVERIF-l-filho-orfao', 'zzverif-l5@example.invalid', 'ativo', true, pai_ruim.id FROM pai_ruim
+--       SELECT gen_random_uuid(), 'ZZVERIF-filho-flag', 'zzv6@example.invalid', 'ativo', false, pai_ok.id FROM pai_ok
+--       RETURNING id
+--     ), filho_de_pai_status AS (
+--       INSERT INTO public.clientes (user_id, nome, email, status, is_active, parent_customer_id)
+--       SELECT gen_random_uuid(), 'ZZVERIF-filho-ps', 'zzv7@example.invalid', 'ativo', true, pai_status_ruim.id FROM pai_status_ruim
+--       RETURNING id
+--     ), filho_de_pai_flag AS (
+--       INSERT INTO public.clientes (user_id, nome, email, status, is_active, parent_customer_id)
+--       SELECT gen_random_uuid(), 'ZZVERIF-filho-pf', 'zzv8@example.invalid', 'ativo', true, pai_flag_ruim.id FROM pai_flag_ruim
 --       RETURNING id
 --     )
---     SELECT (SELECT id FROM pai_ok)           AS pai_ok_id,
---            (SELECT id FROM filho_ok)         AS filho_ok_id,
---            (SELECT id FROM filho_pendente)   AS filho_pend_id,
---            (SELECT id FROM filho_de_pai_ruim) AS filho_orfao_id;
+--     SELECT (SELECT id FROM pai_ok)              AS pai_ok_id,
+--            (SELECT id FROM filho_ok)            AS filho_ok_id,
+--            (SELECT id FROM filho_status_ruim)   AS filho_status_id,
+--            (SELECT id FROM filho_flag_ruim)     AS filho_flag_id,
+--            (SELECT id FROM filho_de_pai_status) AS filho_ps_id,
+--            (SELECT id FROM filho_de_pai_flag)   AS filho_pf_id;
 --
---     SELECT public.conta_liberada_de((SELECT pai_ok_id      FROM zzl)) AS titular_ve,
---            public.conta_liberada_de((SELECT filho_ok_id    FROM zzl)) AS filho_ok_ve,
---            public.conta_liberada_de((SELECT filho_pend_id  FROM zzl)) AS filho_pendente_ve,
---            public.conta_liberada_de((SELECT filho_orfao_id FROM zzl)) AS filho_de_pai_suspenso_ve;
---     -- ESPERADO: true, true, false, false.
+--     SELECT public.conta_liberada_de((SELECT pai_ok_id        FROM zzl)) AS c1_titular_ve,
+--            public.conta_liberada_de((SELECT filho_ok_id      FROM zzl)) AS c2_filho_ok_ve,
+--            public.conta_liberada_de((SELECT filho_status_id  FROM zzl)) AS r1_status_do_filho,
+--            public.conta_liberada_de((SELECT filho_flag_id    FROM zzl)) AS r2_flag_do_filho,
+--            public.conta_liberada_de((SELECT filho_ps_id      FROM zzl)) AS r3_status_do_pai,
+--            public.conta_liberada_de((SELECT filho_pf_id      FROM zzl)) AS r4_flag_do_pai;
+--     -- ESPERADO: true, true, false, false, false, false.
 --     --
---     -- O que cada um pega:
---     --   titular_ve         controle. `false` aqui = o LEFT JOIN virou JOIN e
---     --                      quem nao tem pai foi eliminado da consulta;
---     --   filho_ok_ve        controle. `false` = a funcao passou a barrar quem tem
---     --                      direito, e o catalogo esvazia SEM erro nenhum;
---     --   filho_pendente_ve  a metade NOVA. `true` = a denylist sobre o status do
---     --                      FILHO nao entrou (a versao antiga devolve `true` aqui);
---     --   filho_de_pai_...   a metade ANTIGA, que precisa sobreviver. `true` = a
---     --                      funcao parou de olhar o titular.
+--     -- `c1` e `c2` sao CONTROLES: `false` neles significa que a funcao passou a
+--     -- barrar quem tem direito, e o catalogo esvazia SEM erro nenhum — a pior
+--     -- regressao possivel aqui. `c1` pega tambem o `LEFT JOIN` virar `JOIN`.
+--     --
+--     -- `r1` a `r4` sao os quatro ramos, um por ficha. `true` em qualquer um
+--     -- significa que AQUELE ramo especifico nao entrou. `r1` e `r3` sao a metade
+--     -- NOVA (a denylist nos dois status); `r3` e `r4` sao a heranca do titular,
+--     -- que ja existia e precisa sobreviver.
 --   ROLLBACK;
 --
 --   SELECT count(*) AS sobrou FROM public.clientes WHERE nome LIKE 'ZZVERIF%';
