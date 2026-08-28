@@ -22,19 +22,42 @@ const statusBadge = (status: string) => (
   </span>
 );
 
+// `true` = pode deixar a RLS escopar sozinha; `false` = a tela TEM que filtrar
+// por `cliente_id`.
+//
+// So uma conta de CLIENTE pode confiar na RLS. Staff (admin/manager/warehouse) le
+// TODOS os pedidos por `Admins can manage` / `Managers manage` / `Warehouse read`,
+// e as rotas do portal nao exigem papel nenhum (`/portal/pedidos` em App.tsx e so
+// `<ProtectedRoute>`). No "view as" o `AuthContext` finge `role = "cliente"`
+// (`applyViewAsSession`) mas a sessao HTTP continua sendo a do ADMIN — por isso o
+// segundo termo. Falha fechado: papel desconhecido -> filtra.
+export const escoparPelaRls = (role: string | null | undefined, impersonatedId?: string | null) =>
+  role === "cliente" && !impersonatedId;
+
+// Limite do dia LOCAL, em ISO. `pedidos.created_at` e timestamptz e a tela exibe
+// em hora LOCAL; um literal sem offset ("2026-08-28") e resolvido no fuso da
+// SESSAO (UTC). A lista e o export TEM que usar a mesma conversao — enquanto
+// divergiram, o CSV omitia pedidos que estavam visiveis na tela.
+export const limiteDataISO = (dia: string, borda: "inicio" | "fim") =>
+  new Date(`${dia}T${borda === "inicio" ? "00:00:00" : "23:59:59.999"}`).toISOString();
+
 const PAGE_SIZE = 10;
 // Teto do PostgREST (`db-max-rows`) no Supabase. Serve pra saber se o export
 // veio truncado e avisar o cliente.
 const EXPORT_CAP = 1000;
 
 const Pedidos = () => {
-  const { user, impersonatedCustomer } = useAuth();
+  const { user, role, impersonatedCustomer } = useAuth();
   const { addItem } = useCart();
   const navigate = useNavigate();
+  const rlsEscopa = escoparPelaRls(role, impersonatedCustomer?.id);
   const [clienteId, setClienteId] = useState<string | null>(null);
   const [pedidos, setPedidos] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  // Leitura FALHOU (rede/RLS/token) — diferente de "nao tem pedido". Sem isso a
+  // tela AFIRMA "No orders found" e o cliente conclui que o historico dele sumiu.
+  const [erroLeitura, setErroLeitura] = useState(false);
   const [page, setPage] = useState(1);
   const [reordering, setReordering] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -64,7 +87,12 @@ const Pedidos = () => {
       const q = impersonatedCustomer?.id
         ? supabase.from("clientes").select("id").eq("id", impersonatedCustomer.id).maybeSingle()
         : supabase.from("clientes").select("id").eq("user_id", user!.id).maybeSingle();
-      const { data } = await q;
+      const { data, error } = await q;
+      // Falha aqui deixava `clienteId` nulo, o efeito abaixo nem consultava, e a
+      // tela dizia "No orders found" — afirmacao sobre o cadastro do cliente
+      // feita por causa de um erro de rede.
+      if (error) { console.error(error); setErroLeitura(true); setLoading(false); return; }
+      setErroLeitura(false);
       setClienteId(data?.id ?? null);
     };
     fetch();
@@ -76,29 +104,47 @@ const Pedidos = () => {
     const fetchOrders = async () => {
       setLoading(true);
       let q = supabase.from("pedidos").select("*", { count: "exact" })
-        .eq("cliente_id", clienteId)
         // Desempate unico: OFFSET sem ordem estavel repete/pula linha entre
         // paginas — o cliente veria o mesmo pedido duas vezes, ou nenhuma.
         .order("created_at", { ascending: false })
         .order("id", { ascending: true })
         .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
+      // QUAIS pedidos aparecem e decisao da RLS, nao desta tela. As policies
+      // vivas em `pedidos` ja entregam: o pedido proprio (`Clients can read own`),
+      // o do PAI quando `can_view_full_history` esta ligado (`Sub-customer reads
+      // parent history`) e o do sub-usuario para o dono da conta (`Parent reads
+      // sub-customer orders`). Fixar `cliente_id = o meu` aqui anulava as duas
+      // ultimas — as flags do admin nao mudavam nada no portal.
+      //
+      // Fora da conta de cliente (impersonacao, staff) o filtro fica: ver
+      // `escoparPelaRls`.
+      if (!rlsEscopa) q = q.eq("cliente_id", clienteId);
+
       // `created_at` e timestamptz e a tela exibe em hora LOCAL; literal sem
       // offset e resolvido no fuso da sessao (UTC). Converter o limite do dia
       // local para ISO alinha filtro e exibicao — senao o cliente filtra "ate
       // hoje" e nao ve o pedido que acabou de fazer.
-      if (applied.fromDate) q = q.gte("created_at", new Date(`${applied.fromDate}T00:00:00`).toISOString());
-      if (applied.toDate) q = q.lte("created_at", new Date(`${applied.toDate}T23:59:59.999`).toISOString());
+      if (applied.fromDate) q = q.gte("created_at", limiteDataISO(applied.fromDate, "inicio"));
+      if (applied.toDate) q = q.lte("created_at", limiteDataISO(applied.toDate, "fim"));
       if (applied.status && applied.status !== "_all") q = q.eq("status", applied.status as any);
       if (applied.reference) q = q.ilike("po_number", `%${applied.reference}%`);
 
-      const { data, count } = await q;
+      const { data, count, error } = await q;
+      // Erro nao pode virar lista vazia: "No orders found" e uma AFIRMACAO.
+      if (error) {
+        console.error(error);
+        setErroLeitura(true);
+        setPedidos([]); setTotal(0); setLoading(false);
+        return;
+      }
+      setErroLeitura(false);
       setPedidos(data ?? []);
       setTotal(count ?? 0);
       setLoading(false);
     };
     fetchOrders();
-  }, [clienteId, page, applied]);
+  }, [clienteId, page, applied, rlsEscopa]);
 
   const handleSearch = () => {
     setPage(1);
@@ -257,11 +303,17 @@ const Pedidos = () => {
       // os pedidos que casam com os filtros aplicados.
       let q = supabase.from("pedidos")
         .select("numero, created_at, delivery_date, total, quantidade_total, status")
-        .eq("cliente_id", clienteId)
         .order("created_at", { ascending: false });
 
-      if (applied.fromDate) q = q.gte("created_at", applied.fromDate);
-      if (applied.toDate) q = q.lte("created_at", applied.toDate + "T23:59:59");
+      // MESMO escopo da lista — senao o arquivo sai diferente do que esta na tela.
+      if (!rlsEscopa) q = q.eq("cliente_id", clienteId);
+
+      // MESMA conversao de fuso da lista. Literal sem offset (`2026-08-28`) e
+      // resolvido em UTC; a tela exibe em hora LOCAL. Sem converter, o export
+      // cortava pedidos que estao visiveis na tela — o cliente baixa o arquivo e
+      // falta a ultima compra do dia.
+      if (applied.fromDate) q = q.gte("created_at", limiteDataISO(applied.fromDate, "inicio"));
+      if (applied.toDate) q = q.lte("created_at", limiteDataISO(applied.toDate, "fim"));
       if (applied.status && applied.status !== "_all") q = q.eq("status", applied.status as any);
       if (applied.reference) q = q.ilike("po_number", `%${applied.reference}%`);
 
@@ -379,7 +431,14 @@ const Pedidos = () => {
       ) : pedidos.length === 0 ? (
         <div className="flex flex-col items-center py-16">
           <ClipboardList className="mb-4 h-12 w-12 text-muted-foreground/30" />
-          <p className="text-muted-foreground">No orders found.</p>
+          {erroLeitura ? (
+            <>
+              <p className="text-destructive">Could not load your orders. Please try again.</p>
+              <Button size="sm" variant="outline" className="mt-3" onClick={() => window.location.reload()}>RETRY</Button>
+            </>
+          ) : (
+            <p className="text-muted-foreground">No orders found.</p>
+          )}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border bg-card">

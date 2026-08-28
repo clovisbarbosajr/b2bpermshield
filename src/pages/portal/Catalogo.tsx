@@ -17,8 +17,10 @@ import { getProductPrice, PriceResult } from "@/lib/pricing";
 import { catalogCategoryButtons, descendantIds, ancestorChain } from "@/lib/categoryTree";
 
 import { fetchAllRows } from "@/lib/fetchAllRows";
+// Espelha EXATAMENTE as colunas do `select` abaixo. `descricao` saiu junto: o
+// catalogo nunca a renderizou (so a ficha do produto renderiza).
 type Produto = {
-  id: string; nome: string; descricao: string | null; preco: number; sku: string;
+  id: string; nome: string; preco: number; sku: string;
   imagem_url: string | null; estoque_total: number; estoque_reservado: number;
   unidade_venda: string; quantidade_minima: number; categoria_id: string | null;
   status_produto: string | null;
@@ -48,6 +50,9 @@ const Catalogo = () => {
 
   // Calculated prices map: productId -> PriceResult
   const [prices, setPrices] = useState<Record<string, PriceResult>>({});
+  // Algum preco caiu no fallback por ERRO (nao por regra de negocio). A tela nao
+  // pode exibir o preco de tabela como se fosse o preco do cliente sem dizer.
+  const [precoIncerto, setPrecoIncerto] = useState(false);
   const [clienteId, setClienteId] = useState<string | null>(null);
   const [statusMap, setStatusMap] = useState<Record<string, ProductStatus>>({});
 
@@ -83,8 +88,17 @@ const Catalogo = () => {
       // LIMIT/OFFSET, e sem ordem por coluna UNICA o Postgres pode repetir uma
       // linha numa pagina e perder outra. A ordenacao por nome, que e a que o
       // cliente ve, e feita depois, em memoria.
+      //
+      // COLUNAS EXPLICITAS, nunca `select("*")`. A RLS do Postgres filtra LINHA,
+      // nao COLUNA: `*` entregava a linha inteira de `produtos` — inclusive
+      // `custo` — na resposta de rede de TODO cliente logado. Num portal de
+      // revendedores isso e a margem da casa saindo no DevTools. Colunas novas
+      // no banco nao entram aqui sozinhas; quem precisar de uma adiciona no
+      // `Produto` acima e nesta lista.
       const prodPromise = fetchAllRows<any>((from, to) =>
-        supabase.from("produtos").select("*").eq("ativo", true)
+        supabase.from("produtos").select(
+          "id, nome, preco, sku, imagem_url, estoque_total, estoque_reservado, unidade_venda, quantidade_minima, categoria_id, status_produto",
+        ).eq("ativo", true)
           .order("id", { ascending: true }).range(from, to))
         .then((data) => ({ data, error: null }))
         .catch((e) => ({ data: null, error: e }));
@@ -127,12 +141,21 @@ const Catalogo = () => {
       const comVariante = new Set<string>();
       let erroVariantes: any = null;
       for (let i = 0; i < idsVisiveis.length; i += LOTE) {
-        const { data, error } = await supabase
-          .from("produto_variantes").select("produto_id")
-          .eq("ativo", true)
-          .in("produto_id", idsVisiveis.slice(i, i + LOTE));
-        if (error) { erroVariantes = error; break; }
-        (data ?? []).forEach((r: any) => comVariante.add(r.produto_id));
+        // Cada LOTE tambem PAGINA. O lote limita o tamanho da URL (100 UUIDs),
+        // nao o tamanho da RESPOSTA: o PostgREST corta em 1000 linhas SEM erro,
+        // e 100 produtos de vestuario (tamanho x cor) passam disso com folga.
+        // Truncado, o produto cujas variantes cairam depois da milesima linha
+        // era lido como "produto sem variante": o grid mostrava o botao de
+        // adicionar e o item ia pro carrinho SEM tamanho/cor e com o preco do
+        // pai — exatamente o pedido errado que este bloco existe para impedir.
+        try {
+          const linhas = await fetchAllRows<{ produto_id: string }>((from, to) =>
+            supabase.from("produto_variantes").select("produto_id")
+              .eq("ativo", true)
+              .in("produto_id", idsVisiveis.slice(i, i + LOTE))
+              .order("id", { ascending: true }).range(from, to));
+          linhas.forEach((r) => comVariante.add(r.produto_id));
+        } catch (e) { erroVariantes = e; break; }
       }
       // FALHA ALTO. Degradar para "nenhum produto tem variante" e deixar o
       // cliente adicionar direto do grid produz PEDIDO ERRADO em silencio — item
@@ -231,9 +254,15 @@ const Catalogo = () => {
       try {
         const results = await Promise.all(
           produtos.map((p) =>
-            getProductPrice({ productId: p.id, customerId: clienteId })
-              .then((r) => ({ id: p.id, result: r }))
-              .catch(() => ({ id: p.id, result: { price: p.preco, source: "base" as const } }))
+            // QUANTIDADE = o minimo do produto, que e a quantidade que o proprio
+            // campo do catalogo ja vem preenchido e a mesma que a ficha do
+            // produto usa (`setQuantidade(quantidade_minima)`). Com o `1`
+            // implicito de antes, um produto com minimo 10 e faixa de desconto a
+            // partir de 10 aparecia no catalogo por um preco e na ficha por
+            // outro — para uma quantidade que o cliente nem podia pedir.
+            getProductPrice({ productId: p.id, customerId: clienteId, quantity: Math.max(p.quantidade_minima || 1, 1) })
+              .then((r) => ({ id: p.id, result: r, falhou: false }))
+              .catch(() => ({ id: p.id, result: { price: p.preco, source: "base" as const }, falhou: true }))
           )
         );
         const map: Record<string, PriceResult> = {};
@@ -241,6 +270,10 @@ const Catalogo = () => {
           map[r.id] = r.result;
         }
         setPrices(map);
+        // O fallback continua (preco na tela e melhor que tela sem preco), mas
+        // agora ele APARECE. Sem isto o cliente lia o preco de tabela achando
+        // que era o dele, e so descobria a diferenca na fatura.
+        setPrecoIncerto(results.some((r) => r.falhou));
       } catch {
         // fallback: keep base prices
       }
@@ -666,6 +699,11 @@ const Catalogo = () => {
             </TableBody>
           </Table>
         </Card>
+      )}
+      {precoIncerto && (
+        <p className="mt-4 text-xs text-destructive">
+          Some prices could not be loaded and are showing the list price — your agreed price may be different.
+        </p>
       )}
       <p className="mt-4 text-xs text-muted-foreground">
         {sorted.length} product{sorted.length !== 1 ? "s" : ""} found

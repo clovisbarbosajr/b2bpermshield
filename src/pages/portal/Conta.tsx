@@ -10,11 +10,49 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { toast } from "sonner";
 import { Plus, MapPin, Trash2 } from "lucide-react";
 
+// Endereco pertence a conta da EMPRESA: sub-login LE e GRAVA sob o id do PAI.
+// Mesma regra do Checkout (`addressClienteId`, Checkout.tsx:147/:154). Enquanto
+// os dois discordavam, o endereco salvo aqui simplesmente nao aparecia la.
+export const enderecoOwnerId = (cliente: any): string =>
+  cliente?.parent_customer_id ?? cliente?.id;
+
+// Sem isto, "Save Address" gravava endereco EM BRANCO, que virava opcao
+// selecionavel no checkout. Mesmos obrigatorios do Checkout (`saveNewAddress`).
+export const enderecoIncompleto = (e: { logradouro: string; cidade: string; estado: string; cep: string }) =>
+  !e.logradouro.trim() || !e.cidade.trim() || !e.estado.trim() || !e.cep.trim();
+
+// As duas escritas ficam FORA do componente para poderem ser exercitadas sob
+// concorrencia (Conta.enderecos.test.ts). Os handlers abaixo so traduzem o
+// resultado em toast.
+export async function adicionarEndereco(
+  db: typeof supabase,
+  cliente: any,
+  novo: { logradouro: string; numero: string; complemento: string; bairro: string; cidade: string; estado: string; cep: string },
+) {
+  if (enderecoIncompleto(novo)) return { ok: false as const, motivo: "incompleto" as const };
+  const { error } = await db.from("enderecos").insert({ ...novo, cliente_id: enderecoOwnerId(cliente) });
+  if (error) return { ok: false as const, motivo: "erro" as const, mensagem: error.message };
+  return { ok: true as const };
+}
+
+export async function removerEndereco(db: typeof supabase, id: string) {
+  // `.select()` para saber se ALGUMA linha saiu: o supabase-js nao levanta erro
+  // quando a RLS filtra tudo (afeta zero linhas e volta sem `error`), e o
+  // sub-login so tem SELECT/INSERT nos enderecos do pai, nunca DELETE
+  // (20260801120000). Sem isto a tela dizia "Address removed" sem remover nada —
+  // e o mesmo vale para duas abas apagando o mesmo endereco ao mesmo tempo.
+  const { data, error } = await db.from("enderecos").delete().eq("id", id).select("id");
+  if (error) return { ok: false as const, motivo: "erro" as const, mensagem: error.message };
+  if (!data?.length) return { ok: false as const, motivo: "nada" as const };
+  return { ok: true as const };
+}
+
 const Conta = () => {
   const { user, impersonatedCustomer } = useAuth();
   const [profile, setProfile] = useState<any>(null);
   const [cliente, setCliente] = useState<any>(null);
   const [enderecos, setEnderecos] = useState<any[]>([]);
+  const [enderecosErro, setEnderecosErro] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -34,6 +72,9 @@ const Conta = () => {
         : Promise.resolve({ data: null, error: null } as any);
 
     const [profRes, cliRes] = await Promise.all([profileQuery, clienteQuery]);
+    // Falha aqui deixava a tela inteira vazia em silencio, com o botao Save
+    // virando no-op (`if (!profile || !cliente) return`).
+    if (cliRes.error) toast.error("Could not load your account details: " + cliRes.error.message);
     const nextCliente = cliRes.data;
     const nextProfile = profRes.data ?? (nextCliente ? {
       nome: nextCliente.nome ?? "",
@@ -45,9 +86,14 @@ const Conta = () => {
     setCliente(nextCliente);
 
     if (nextCliente) {
-      const { data } = await supabase.from("enderecos").select("*").eq("cliente_id", nextCliente.id).order("principal", { ascending: false });
+      const { data, error } = await supabase.from("enderecos").select("*")
+        .eq("cliente_id", enderecoOwnerId(nextCliente)).order("principal", { ascending: false });
+      // Sem checar o `error`, falha de leitura virava "No addresses registered."
+      // — a tela AFIRMANDO que nao ha endereco quando ela nao sabe.
+      setEnderecosErro(!!error);
       setEnderecos(data ?? []);
     } else {
+      setEnderecosErro(false);
       setEnderecos([]);
     }
 
@@ -92,9 +138,9 @@ const Conta = () => {
 
   const handleAddEndereco = async () => {
     if (!cliente) return;
-    const { error } = await supabase.from("enderecos").insert({ ...newEnd, cliente_id: cliente.id });
-    if (error) {
-      toast.error(error.message);
+    const r = await adicionarEndereco(supabase, cliente, newEnd);
+    if (!r.ok) {
+      toast.error(r.motivo === "incompleto" ? "Fill in street, city, state and ZIP." : r.mensagem);
       return;
     }
     setAddOpen(false);
@@ -104,11 +150,16 @@ const Conta = () => {
   };
 
   const handleDeleteEndereco = async (id: string) => {
-    const { error } = await supabase.from("enderecos").delete().eq("id", id);
-    if (error) {
+    const r = await removerEndereco(supabase, id);
+    if (!r.ok) {
       // O endereco continuava na lista depois do F5 e o cliente nao entendia
       // por que. Pior: podia acabar usando o endereco antigo num pedido.
-      toast.error("Could not remove the address: " + error.message);
+      toast.error(r.motivo === "erro"
+        ? "Could not remove the address: " + r.mensagem
+        : "The address was not removed. You may not have permission to remove it, or it no longer exists.");
+      // Zero linhas: alguem ja removeu, ou a RLS barrou. Reler poe a lista de
+      // acordo com o banco em vez de deixar a tela discordando dele.
+      if (r.motivo === "nada") fetchData();
       return;
     }
     toast.success("Address removed");
@@ -168,11 +219,17 @@ const Conta = () => {
               const hasPrimary = !!(c.endereco || c.cidade || c.estado || c.cep);
               const line2 = [c.cidade, c.estado].filter(Boolean).join(", ");
               const line3 = [c.pais, c.cep].filter(Boolean).join(" ");
-              if (!hasPrimary && enderecos.length === 0) {
+              // O aviso de falha vale mesmo quando existe endereco principal:
+              // a lista sairia INCOMPLETA e o cliente concluiria que os
+              // enderecos salvos sumiram.
+              if (!hasPrimary && enderecos.length === 0 && !enderecosErro) {
                 return <p className="text-sm text-muted-foreground">No addresses registered.</p>;
               }
               return (
                 <div className="space-y-3">
+                  {enderecosErro && (
+                    <p className="text-sm text-destructive">Could not load your saved addresses. Please refresh the page.</p>
+                  )}
                   {hasPrimary && (
                     <div className="flex items-start justify-between rounded-md border border-border/70 bg-background/40 p-3">
                       <div className="flex gap-2">

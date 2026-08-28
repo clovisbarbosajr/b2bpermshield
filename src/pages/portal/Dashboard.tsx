@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { canonicalStatus, statusLabel, statusBadge } from "@/lib/orderStatuses";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+// Uma definicao so para as tres telas do historico. Duplicar a condicao foi o que
+// deixou lista, detalhe e resumo discordando entre si. (App.tsx importa todas as
+// paginas do portal estaticamente — nao ha custo de bundle em cruzar o import.)
+import { escoparPelaRls } from "./Pedidos";
 import { useAuth } from "@/contexts/AuthContext";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,13 +22,17 @@ type RecentOrder = {
 };
 
 const PortalDashboard = () => {
-  const { user, impersonatedCustomer } = useAuth();
+  const { user, role, impersonatedCustomer } = useAuth();
+  const rlsEscopa = escoparPelaRls(role, impersonatedCustomer?.id);
   const [clienteNome, setClienteNome] = useState("");
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [totalSpent, setTotalSpent] = useState(0);
   const [totalOrders, setTotalOrders] = useState(0);
   const [openOrders, setOpenOrders] = useState(0);
   const [loading, setLoading] = useState(true);
+  // Leitura FALHOU — diferente de "nao comprou nada". Sem isso os cartoes
+  // mostravam $0.00 / 0 pedidos, afirmando o que o codigo nao sabe.
+  const [erro, setErro] = useState(false);
 
   useEffect(() => {
     const fetch = async () => {
@@ -33,19 +42,42 @@ const PortalDashboard = () => {
         ? supabase.from("clientes").select("id, nome, empresa").eq("id", impersonatedCustomer.id).maybeSingle()
         : supabase.from("clientes").select("id, nome, empresa").eq("user_id", user!.id).maybeSingle();
 
-      const { data: cliente } = await clienteQuery;
+      const { data: cliente, error: clienteErr } = await clienteQuery;
+      if (clienteErr) { console.error(clienteErr); setErro(true); setLoading(false); return; }
       if (!cliente) { setLoading(false); return; }
 
       setClienteNome(cliente.empresa || cliente.nome || "");
 
-      const { data: pedidos } = await supabase
-        .from("pedidos")
-        .select("id, numero, created_at, total, status")
-        .eq("cliente_id", cliente.id)
-        .order("created_at", { ascending: false });
+      let all: RecentOrder[];
+      try {
+        // PAGINADO. Sem isso o PostgREST cortava em 1000 linhas SEM erro e o
+        // "Total Spent" saia plausivel e errado. E `fetchAllRows` LANCA em erro:
+        // melhor a tela dizer que nao sabe do que exibir $0.00.
+        //
+        // Escopo: a RLS decide (pedido proprio + do pai com
+        // `can_view_full_history` + do sub-usuario para o dono da conta), igual a
+        // tela de historico. Na impersonacao o filtro fica, porque staff le tudo.
+        all = await fetchAllRows<RecentOrder>((from, to) => {
+          let q = supabase.from("pedidos")
+            .select("id, numero, created_at, total, status")
+            // `order` por coluna UNICA e exigencia do paginador: OFFSET sem ordem
+            // estavel repete/pula linha entre paginas.
+            .order("id", { ascending: true })
+            .range(from, to);
+          if (!rlsEscopa) q = q.eq("cliente_id", cliente.id);
+          return q;
+        });
+      } catch (e) {
+        console.error(e);
+        setErro(true);
+        setLoading(false);
+        return;
+      }
+      setErro(false);
 
-      const all = pedidos ?? [];
-      setRecentOrders(all.slice(0, 5));
+      // A ordem que a TELA usa e por data — o `order("id")` acima serve so ao
+      // paginador.
+      setRecentOrders([...all].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 5));
       setTotalOrders(all.length);
       // Total Spent = só do ANO corrente (pedido do dono) e SEM cancelados
       // (pedido cancelado não é dinheiro gasto).
@@ -58,7 +90,7 @@ const PortalDashboard = () => {
       setLoading(false);
     };
     fetch();
-  }, [user, impersonatedCustomer]);
+  }, [user, impersonatedCustomer, rlsEscopa]);
 
   return (
     <PortalLayout>
@@ -74,6 +106,11 @@ const PortalDashboard = () => {
       </div>
 
       {/* Stats */}
+      {erro && (
+        <p className="mb-4 text-sm text-destructive">
+          Could not load your account summary. Please refresh the page.
+        </p>
+      )}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 mb-6">
         <Card>
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
@@ -81,7 +118,7 @@ const PortalDashboard = () => {
             <TrendingUp className="h-4 w-4 text-accent" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">${totalSpent.toFixed(2)}</p>
+            <p className="text-2xl font-bold">{erro ? "—" : `$${totalSpent.toFixed(2)}`}</p>
           </CardContent>
         </Card>
         <Card>
@@ -90,7 +127,7 @@ const PortalDashboard = () => {
             <ClipboardList className="h-4 w-4 text-accent" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{totalOrders}</p>
+            <p className="text-2xl font-bold">{erro ? "—" : totalOrders}</p>
           </CardContent>
         </Card>
         <Card>
@@ -99,7 +136,7 @@ const PortalDashboard = () => {
             <Clock className="h-4 w-4 text-amber-400" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{openOrders}</p>
+            <p className="text-2xl font-bold">{erro ? "—" : openOrders}</p>
           </CardContent>
         </Card>
       </div>

@@ -10,11 +10,13 @@ import { Download } from "lucide-react";
 import { toast } from "sonner";
 import { statusLabel, statusBadge } from "@/lib/orderStatuses";
 import { formatOpcao } from "@/lib/variants";
+// Uma definicao so para as tres telas do historico — ver `Pedidos.tsx`.
+import { escoparPelaRls } from "./Pedidos";
 
 const PedidoDetalhe = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user, impersonatedCustomer } = useAuth();
+  const { user, role, impersonatedCustomer } = useAuth();
   const { addItem } = useCart();
   const [pedido, setPedido] = useState<any>(null);
   const [itens, setItens] = useState<any[]>([]);
@@ -44,12 +46,35 @@ const PedidoDetalhe = () => {
       const clienteQuery = impersonatedCustomer?.id
         ? supabase.from("clientes").select("*").eq("id", impersonatedCustomer.id).maybeSingle()
         : supabase.from("clientes").select("*").eq("user_id", user!.id).maybeSingle();
-      const { data: clienteData } = await clienteQuery;
+      const { data: clienteData, error: clienteErr } = await clienteQuery;
+      if (clienteErr) {
+        console.error(clienteErr);
+        toast.error("Could not load your account. Please try again.");
+        navigate("/portal/pedidos");
+        return;
+      }
       setCliente(clienteData);
 
-      // Load order — ensure it belongs to this customer
-      const { data: p } = await supabase.from("pedidos").select("*").eq("id", id).maybeSingle();
-      if (!p || (clienteData && p.cliente_id !== clienteData.id)) {
+      // Quem pode LER este pedido e a RLS que decide. `Sub-customer reads parent
+      // history` e `Parent reads sub-customer orders` ja entregam o pedido do pai
+      // e o do funcionario; comparar `p.cliente_id` com a MINHA ficha derrubava
+      // exatamente esses dois casos, e ainda se desligava sozinha quando
+      // `clienteData` vinha nulo (`clienteData &&` na guarda antiga).
+      const { data: p, error: pedidoErr } = await supabase.from("pedidos").select("*").eq("id", id).maybeSingle();
+      // Falha de rede virava "Order not found" — dizia que o pedido nao existe
+      // sem saber disso.
+      if (pedidoErr) {
+        console.error(pedidoErr);
+        toast.error("Could not load the order. Please try again.");
+        navigate("/portal/pedidos");
+        return;
+      }
+      // FORA da conta de cliente comum a comparacao continua sendo a unica cerca:
+      // staff (admin/manager/warehouse) le TODOS os pedidos, e `/portal/pedidos/:id`
+      // nao exige papel nenhum em App.tsx. Falha fechado — papel desconhecido, ou
+      // ficha do cliente ausente, dao `""`, que nao casa com nenhum `cliente_id`.
+      const donoEsperado = impersonatedCustomer?.id ?? clienteData?.id ?? "";
+      if (!p || (!escoparPelaRls(role, impersonatedCustomer?.id) && p.cliente_id !== donoEsperado)) {
         toast.error("Order not found");
         navigate("/portal/pedidos");
         return;
@@ -76,7 +101,7 @@ const PedidoDetalhe = () => {
       setLoading(false);
     };
     fetch();
-  }, [id, user, impersonatedCustomer]);
+  }, [id, user, role, impersonatedCustomer]);
 
   const handleAddToOrder = async (item: any) => {
     // Mesma regra do re-order da lista: a variante vem de `pedido_itens.variante_id`.
@@ -165,6 +190,15 @@ const PedidoDetalhe = () => {
 
   const hasTax = Number(pedido.sales_tax ?? 0) > 0;
 
+  // O bloco de endereco caia para o cadastro de QUEM ESTA OLHANDO quando o
+  // pedido nao trazia `endereco_entrega_id` (pedido importado do B2BWave, por
+  // exemplo). Enquanto esta tela so abria o pedido do proprio cliente isso era um
+  // palpite plausivel. Agora que o pai abre o pedido do funcionario — e o
+  // sub-usuario com `can_view_full_history` abre o do pai — o mesmo palpite
+  // carimbaria o endereco, o telefone e o e-mail do LEITOR no pedido do outro.
+  // Fora do pedido proprio, so o que veio do pedido.
+  const perfil = cliente && pedido.cliente_id === cliente.id ? cliente : null;
+
   return (
     <PortalLayout>
       {/* Breadcrumb */}
@@ -185,13 +219,13 @@ const PedidoDetalhe = () => {
         {/* Address section */}
         <div className="bg-card rounded-lg border p-5">
           <div className="grid grid-cols-3 gap-4">
-            <Field label="Address" value={endereco?.logradouro ?? cliente?.endereco} />
-            <Field label="City" value={endereco?.cidade ?? cliente?.cidade} />
-            <Field label="Phone" value={cliente?.telefone} />
+            <Field label="Address" value={endereco?.logradouro ?? perfil?.endereco} />
+            <Field label="City" value={endereco?.cidade ?? perfil?.cidade} />
+            <Field label="Phone" value={perfil?.telefone} />
             <Field label="Address 2" value={endereco?.complemento} />
-            <Field label="Email" value={cliente?.email} />
+            <Field label="Email" value={perfil?.email} />
             <Field label="Last Update" value={fmtDate(pedido.updated_at ?? pedido.created_at)} />
-            <Field label="Postal Code" value={endereco?.cep ?? cliente?.cep} />
+            <Field label="Postal Code" value={endereco?.cep ?? perfil?.cep} />
             <Field label="Country" value="US" />
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Sales Tax</p>

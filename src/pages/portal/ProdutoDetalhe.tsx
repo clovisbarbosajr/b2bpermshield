@@ -79,7 +79,13 @@ const ProdutoDetalhe = () => {
     setLoading(true);
     const fetchData = async () => {
       const [prodRes, catsRes, statusesRes] = await Promise.all([
-        supabase.from("produtos").select("*").eq("id", id).single(),
+        // COLUNAS EXPLICITAS, nunca `select("*")`. A RLS do Postgres filtra
+        // LINHA, nao COLUNA: `*` devolvia a linha inteira de `produtos` —
+        // inclusive `custo` — para qualquer cliente que abrisse a ficha. Espelha
+        // o type `Produto` acima; coluna nova so entra aqui se a tela usar.
+        supabase.from("produtos").select(
+          "id, nome, descricao, preco, sku, imagem_url, estoque_total, estoque_reservado, unidade_venda, quantidade_minima, categoria_id, status_produto",
+        ).eq("id", id).single(),
         supabase.from("categorias").select("id, nome, parent_id"),
         supabase.from("product_statuses").select("nome, permite_comprar"),
       ]);
@@ -139,29 +145,32 @@ const ProdutoDetalhe = () => {
       });
   }, [id]);
 
-  // Checa acesso por privacy group (fecha o vazamento via URL direta /portal/produto/:id).
-  // Se o produto é restrito a grupos e o cliente não pertence a nenhum, bloqueia.
+  // Privacidade do cliente logado: quem impõe é a RLS de `produtos`
+  // (`cliente_pode_ver_produto`, policy "Read produtos scoped" em
+  // 20260802150000). Produto restrito NÃO volta no `select` acima, o `produto`
+  // fica nulo e a tela já mostra "Product not available" — a URL direta está
+  // fechada no banco, que é onde tem que estar.
+  //
+  // A guarda que existia aqui não fechava nada: lia `produto_acesso.grupo_nome`
+  // (NOME) e comparava com `cliente_privacy_groups.privacy_group_id` (UUID). Nas
+  // linhas novas, que gravam só o uuid, `grupo_nome` é NULL, a lista de exigidos
+  // saía vazia e ela LIBERAVA tudo; nas linhas antigas, com nome preenchido, o
+  // nome nunca casava com o uuid e ela BLOQUEAVA o cliente do grupo certo. Errava
+  // nos dois sentidos parecendo uma trava — pior que não existir.
+  //
+  // Sobra o caso real: impersonação ("view as"). A sessão é do ADMIN, a RLS não
+  // escopa, então quem decide é a RPC staff-gated (a mesma do catálogo), que
+  // cobre categoria privada, grant/exclude e herança sub-user→pai. Sem resposta
+  // dela, nega — falhar fechado é o lado seguro aqui.
   useEffect(() => {
     if (!produto) return;
+    if (!impersonatedCustomer?.id) { setAccessDenied(false); return; }
     const checkAccess = async () => {
-      // Impersonação ("view as"): a sessão é do admin, então a RLS não escopa. Decide pela
-      // RPC staff-gated (mesma do catálogo), que cobre TODA a lógica de privacidade
-      // (categoria privada, grant/exclude, herança sub-user→pai) — fecha a URL direta.
-      if (impersonatedCustomer?.id) {
-        const { data: visIds } = await (supabase as any).rpc("produtos_visiveis_cliente", { _cli_id: impersonatedCustomer.id });
-        setAccessDenied(!(Array.isArray(visIds) && visIds.includes(produto.id)));
-        return;
-      }
-      const { data: acessos } = await supabase.from("produto_acesso").select("grupo_nome").eq("produto_id", produto.id);
-      const required = (acessos ?? []).map((a: any) => a.grupo_nome).filter(Boolean);
-      if (required.length === 0) { setAccessDenied(false); return; } // sem restrição → liberado
-      if (!clienteId) { setAccessDenied(true); return; }             // restrito e sem cliente → bloqueia
-      const { data: cpg } = await supabase.from("cliente_privacy_groups").select("privacy_group_id").eq("cliente_id", clienteId);
-      const myGroups = new Set((cpg ?? []).map((r: any) => r.privacy_group_id));
-      setAccessDenied(!required.some((g: string) => myGroups.has(g)));
+      const { data: visIds } = await (supabase as any).rpc("produtos_visiveis_cliente", { _cli_id: impersonatedCustomer.id });
+      setAccessDenied(!(Array.isArray(visIds) && visIds.includes(produto.id)));
     };
     checkAccess();
-  }, [produto, clienteId, impersonatedCustomer]);
+  }, [produto, impersonatedCustomer]);
 
   // Fetch calculated price
   useEffect(() => {

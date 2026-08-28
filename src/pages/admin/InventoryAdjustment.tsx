@@ -196,8 +196,25 @@ const InventoryAdjustment = () => {
         failed.push(`${p.nome}: ${atual.estoque_reservado} unit(s) reserved by open orders`);
         continue;
       }
-      const { error } = await supabase.from("produtos").update({ estoque_total: q }).eq("id", p.id);
+      // O filtro `.eq("estoque_total", ...)` fecha a janela que a releitura acima
+      // apenas ESTREITA. A releitura compara com o retrato do mount, mas entre o
+      // SELECT e este UPDATE ainda cabe a baixa de um pedido concluido — e o
+      // update ABSOLUTO a desfazia em silencio, devolvendo o estoque ao numero que
+      // o admin viu na tela. Mesmo molde de `src/lib/gravarProdutoComToken.ts`:
+      // filtro e escrita no MESMO statement, porque separar em dois reabre a
+      // corrida no meio.
+      // A coluna "New Quantity" e a quantidade CONTADA, valor absoluto — por isso
+      // nao da para trocar por `estoque_total = estoque_total + N`, que resolveria
+      // a corrida sem filtro se a tela pedisse um delta.
+      const { data: gravado, error } = await supabase.from("produtos")
+        .update({ estoque_total: q }).eq("id", p.id).eq("estoque_total", p.estoque_total)
+        .select("id").maybeSingle();
       if (error) { failed.push(`${p.nome}: ${error.message}`); continue; }
+      // Sem erro e sem linha = o `id` casou (veio da propria grade) e o
+      // `estoque_total` nao. Nada foi escrito nesta linha, entao ela vai para
+      // `failed` — o card diz que a quantidade digitada continua na tabela, e aqui
+      // isso e verdade.
+      if (!gravado) { failed.push(`${p.nome}: stock changed while saving — this line was not written`); continue; }
       // Histórico de estoque (mesma tabela que o ajuste unitário da tela Inventory usa).
       //
       // O `error` e LIDO. Sem isto, RLS negando `estoque_log` fazia a tela dizer

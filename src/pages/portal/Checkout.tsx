@@ -888,11 +888,38 @@ const Checkout = () => {
       }
 
       if (paymentIntent?.status === "succeeded") {
-        // Mark as paid
-        await supabase
-          .from("pedidos")
-          .update({ is_paid: true, payment_intent_id: paymentIntent.id } as any)
-          .eq("id", pedido.id);
+        // QUEM CARIMBA `is_paid` E O SERVIDOR, NAO O NAVEGADOR.
+        //
+        // Aqui havia um `supabase.from("pedidos").update({ is_paid: true, ... })`
+        // direto da tela do cliente. Ele NUNCA funcionou: as policies de `pedidos`
+        // dao ao cliente SELECT e INSERT — UPDATE so existe para Warehouse e
+        // Manager. A RLS filtra a linha, o comando atinge ZERO linhas e o
+        // supabase-js devolve 204 SEM `error`. O retorno nem era capturado.
+        //
+        // O estrago: o cartao JA foi cobrado, e o pedido ficava `is_paid = false`
+        // com `payment_intent_id` NULO — sem nem o id da cobranca para reconciliar
+        // depois. So o webhook `payment_intent.succeeded` salvaria, e ele depende
+        // do segredo estar cadastrado e e assincrono.
+        //
+        // A acao `confirm_payment` da edge function ja existia e faz exatamente
+        // isto, do jeito certo: busca a intencao no Stripe (nao confia no que o
+        // navegador diz), confere a POSSE do pedido antes de carimbar, grava com
+        // service role e e idempotente (`.eq("is_paid", false)`). Nunca era chamada.
+        const { data: confData, error: confError } = await supabase.functions.invoke(
+          "stripe-checkout",
+          { body: { action: "confirm_payment", payment_intent_id: paymentIntent.id } },
+        );
+        if (confError || confData?.status !== "succeeded") {
+          // NAO desfaz o pedido: o dinheiro entrou. Desfazer aqui deixaria o
+          // cliente cobrado e sem pedido — o pior desfecho possivel. O pedido fica
+          // de pe, e o admin reconcilia pelo `payment_intent_id`, que o cliente ve
+          // na mensagem.
+          toast.error(
+            `Your card was charged, but we could not confirm the payment on the order. ` +
+            `Do NOT pay again. Save this reference and contact us: ${paymentIntent.id}`,
+          );
+          console.error("[checkout] confirm_payment falhou", pedido.id, paymentIntent.id, confError ?? confData);
+        }
         // Notificações em BACKGROUND (keepalive) — o cliente NÃO espera os emails.
         const emailCustomer = { id: clienteId, email: customerEmail, nome: customerName, empresa: customerCompany };
         const emailItems = recalculated.map(i => ({ sku: i.sku ?? "", nome_produto: i.nome, preco_unitario: i.preco, quantidade: i.quantidade, subtotal: i.preco * i.quantidade }));

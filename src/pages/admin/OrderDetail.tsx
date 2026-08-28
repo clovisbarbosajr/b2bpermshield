@@ -23,6 +23,11 @@ import { ORDER_STATUSES, statusLabel, canonicalStatus } from "@/lib/orderStatuse
 // Os 7 status do B2BWave (fonte única em lib/orderStatuses).
 const statusOptions = ORDER_STATUSES;
 
+// Status em que o banco NÃO devolve reserva de estoque (ver `itemsLocked`).
+// `canonicalStatus` cobre os valores legados em PT ('concluido'/'cancelado'),
+// que são exatamente os que os gatilhos comparam.
+const isClosedStatus = (s?: string | null) => ["complete", "cancelled"].includes(canonicalStatus(s));
+
 const OrderDetail = () => {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
@@ -31,6 +36,8 @@ const OrderDetail = () => {
   const { role } = useAuth();
   const [order, setOrder] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
+  // A leitura dos itens falhou: a lista na tela nao vale, e o Resend nao pode sair.
+  const [itemsError, setItemsError] = useState(false);
   const [cliente, setCliente] = useState<any>(null);
   const [rep, setRep] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -67,6 +74,32 @@ const OrderDetail = () => {
   const [categorias, setCategorias] = useState<any[]>([]);
 
   const isNew = id === "new";
+  // Pedido Complete/Cancelled NAO aceita mais mexer nos itens.
+  // Inserir item dispara `trg_reserve_stock_on_order_item` (20260825320000), que
+  // reserva o estoque na hora sem olhar o status do pedido. A devolucao
+  // (`fn_release_stock_on_item_delete`) so roda para status que ainda reservam —
+  // entao em pedido fechado a reserva fica presa para sempre, nem apagando o item,
+  // e bloqueia a venda daquela peca para outro cliente.
+  // A trava fica AQUI, na tela, e nao no banco: este e o unico caminho que insere
+  // item em pedido ja existente (Checkout e ImportOrders criam o pedido junto), e
+  // ImportOrders importa pedido historico JA como complete/cancelled — um gatilho
+  // recusando o insert quebraria a importacao.
+  const itemsLocked = !isNew && !!order && isClosedStatus(order.status);
+
+  // A aba pode estar aberta há meia hora: `itemsLocked` só sabe o status que
+  // chegou na última leitura. Confere o status AGORA, na ida ao servidor, antes de
+  // inserir/apagar item. Não é atômico (só um gatilho seria), mas fecha a janela
+  // de minutos para milissegundos.
+  const canEditItemsNow = async (): Promise<boolean> => {
+    const { data: fresh, error } = await supabase.from("pedidos").select("status").eq("id", order.id).maybeSingle();
+    if (error || !fresh) { toast.error("Could not check the order status. Please try again."); return false; }
+    if (isClosedStatus(fresh.status)) {
+      setOrder((o: any) => ({ ...o, status: fresh.status }));
+      toast.error(`This order is ${statusLabel(fresh.status)} — items can't be changed. Change the status back first (that also puts the stock back).`);
+      return false;
+    }
+    return true;
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -149,8 +182,17 @@ const OrderDetail = () => {
       is_paid: data.is_paid ?? false,
     });
 
-    const { data: orderItems } = await supabase.from("pedido_itens").select("*").eq("pedido_id", data.id).order("created_at");
-    setItems(orderItems ?? []);
+    // CHECA O ERRO: sem isto, uma leitura recusada (RLS/rede) virava pedido "sem
+    // itens" na tela E e-mail de confirmacao VAZIO no Resend. Falha nao apaga a
+    // ultima lista boa — so marca, para o Resend recusar e a tela nao mentir.
+    const { data: orderItems, error: itemsErr } = await supabase.from("pedido_itens").select("*").eq("pedido_id", data.id).order("created_at");
+    if (itemsErr) {
+      setItemsError(true);
+      toast.error("Could not load the order items: " + itemsErr.message);
+    } else {
+      setItemsError(false);
+      setItems(orderItems ?? []);
+    }
     setLoading(false);
   };
 
@@ -188,6 +230,10 @@ const OrderDetail = () => {
     }
     if (!resend.customer && !resend.admin && !resend.other) {
       toast.error("Select at least one recipient."); return;
+    }
+    // Sem os itens o e-mail sai VAZIO para o cliente. Melhor nao mandar nada.
+    if (itemsError) {
+      toast.error("The order items could not be loaded — reload the page before re-sending."); return;
     }
     setResending(true);
     const emailCustomer = cliente
@@ -254,23 +300,33 @@ const OrderDetail = () => {
       dOnly(update.delivery_date) !== dOnly((order as any).delivery_date) ||
       (update.delivery_mode || "") !== (((order as any).delivery_mode) || "");
 
-    const { error } = await supabase.from("pedidos").update(update).eq("id", order.id);
+    // `.select().single()` porque o total NAO e nosso: `fn_pedido_total_appside`
+    // (BEFORE UPDATE) recalcula desconto/imposto/frete/total — e reescreve
+    // `shipping_costs` a partir da opcao de envio quando a opcao muda. Mesclar
+    // `update` na memoria mostrava frete novo com total velho, e o frete digitado
+    // "sumia" no proximo reload. Le-se de volta o que o banco decidiu.
+    // Bonus: um UPDATE recusado pela RLS (0 linhas) agora vira erro, em vez de
+    // "Order saved" por cima de nada.
+    const { data: saved, error } = await supabase.from("pedidos").update(update).eq("id", order.id).select().single();
     setSaving(false);
-    if (error) { toast.error("Error saving"); return; }
+    if (error || !saved) { toast.error("Error saving" + (error ? ": " + error.message : "")); return; }
     toast.success("Order saved");
     log("updated", "order", order.id, `Order #${order.numero || order.id}`);
-    setOrder({ ...order, ...update });
+    // Espalha sobre `order` (e nao substitui): `saved` traz so as colunas de
+    // `pedidos`, e o `order` do loadOrder carrega junto o join `clientes(...)`.
+    setOrder({ ...order, ...(saved as any) });
+    setForm((f) => ({ ...f, shipping_costs: (saved as any).shipping_costs ? String((saved as any).shipping_costs) : "" }));
 
     if (notifiable) {
-      const updated = { ...order, ...update };
+      const updated: any = saved;
       if (cliente?.email) {
         supabase.functions.invoke("send-email", {
-          body: { type: "order_status_change", order: updated, customer: cliente, newStatus: (order as any).status },
+          body: { type: "order_status_change", order: updated, customer: cliente, newStatus: updated.status },
         }).catch(() => {});
       }
       supabase.functions.invoke("notify-dispatch", { body: { event: "order_status", vars: {
-        order_id: order.id, order_numero: (order as any).numero, status: (order as any).status ?? "",
-        total: (order as any).total ?? "",
+        order_id: order.id, order_numero: updated.numero, status: updated.status ?? "",
+        total: updated.total ?? "",
         customer_name: cliente?.nome ?? "", customer_company: cliente?.empresa ?? "",
         customer_email: cliente?.email ?? "", customer_phone: (cliente as any)?.telefone ?? "",
       }, customer: { email: cliente?.email, phone: (cliente as any)?.telefone, whatsapp: (cliente as any)?.telefone } } }).catch(() => {});
@@ -293,6 +349,7 @@ const OrderDetail = () => {
 
   const handleAddProduct = async (product: any) => {
     if (!order) return;
+    if (!(await canEditItemsNow())) return;
     // Produto com opcao (tamanho/cor) nao pode entrar como produto-PAI: o
     // pedido sairia com o item errado e o preco do pai. Mesma regra do portal,
     // que aqui faltava — e agora tambem existe como gatilho no banco
@@ -327,7 +384,11 @@ const OrderDetail = () => {
   };
 
   const handleDeleteItem = async (itemId: string, _itemSubtotal?: number) => {
-    if (!order || !confirm("Remove this item?")) return;
+    if (!order) return;
+    if (!confirm("Remove this item?")) return;
+    // Apagar item de pedido fechado tambem nao devolve estoque (mesmo gatilho), e
+    // some com a linha de um pedido ja faturado/cancelado.
+    if (!(await canEditItemsNow())) return;
     const { error } = await supabase.from("pedido_itens").delete().eq("id", itemId);
     if (error) { toast.error("Error removing item"); return; }
     // Triggers recomputam subtotal/total e devolvem a reserva de estoque; recarrega.
@@ -928,9 +989,19 @@ const OrderDetail = () => {
       <Card className="mb-6 p-0 overflow-hidden bg-card/80 backdrop-blur-sm">
         <div className="bg-muted/30 px-5 py-3 border-b border-border flex items-center justify-between">
           <h3 className="font-semibold text-sm">Products</h3>
-          <Button variant="default" size="sm" className="gap-1" onClick={() => setAddProductOpen(true)}>
-            <Plus className="h-4 w-4" /> Add product to order
-          </Button>
+          <div className="flex items-center gap-3">
+            {/* Botao `disabled` tem `pointer-events-none` (button.tsx), entao
+                `title` nunca aparece — o motivo precisa estar escrito na tela. */}
+            {itemsLocked && (
+              <span className="text-xs text-muted-foreground">
+                Order is {statusLabel(order?.status)} — items are locked. Change the status back to edit them.
+              </span>
+            )}
+            <Button variant="default" size="sm" className="gap-1" disabled={itemsLocked}
+              onClick={() => setAddProductOpen(true)}>
+              <Plus className="h-4 w-4" /> Add product to order
+            </Button>
+          </div>
         </div>
         <Table>
           <TableHeader>
@@ -1025,6 +1096,7 @@ const OrderDetail = () => {
                       variant="ghost"
                       size="icon"
                       className="h-7 w-7 text-destructive"
+                      disabled={itemsLocked}
                       onClick={() => handleDeleteItem(item.id, item.subtotal)}
                     >
                       <Trash2 className="h-3 w-3" />
@@ -1035,7 +1107,9 @@ const OrderDetail = () => {
             ))}
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">No items</TableCell>
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
+                  {itemsError ? "Items could not be loaded — reload the page." : "No items"}
+                </TableCell>
               </TableRow>
             )}
           </TableBody>

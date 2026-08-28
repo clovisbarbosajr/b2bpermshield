@@ -90,11 +90,28 @@ const AdminEstoque = () => {
     // O UPDATE vem PRIMEIRO e é checado: antes, o estoque_log e o activity log
     // eram gravados mesmo quando o update falhava (RLS/rede) e a tela dizia
     // "Stock updated" — o histórico registrava um ajuste que nunca aconteceu.
-    const { error: updErr } = await supabase.from("produtos")
-      .update({ estoque_total: novaQtd }).eq("id", selected.id);
+    // O filtro pelo valor lido vai no MESMO statement do update. A releitura acima
+    // so ESTREITA a janela: entre o SELECT e o UPDATE ainda cabe a baixa de um
+    // pedido concluido, e o update ABSOLUTO a desfazia em silencio. Molde de
+    // `src/lib/gravarProdutoComToken.ts`.
+    // O dialogo pede a quantidade nova ABSOLUTA, entao `estoque_total + N` — que
+    // dispensaria o filtro — nao serve aqui.
+    const { data: gravado, error: updErr } = await supabase.from("produtos")
+      .update({ estoque_total: novaQtd }).eq("id", selected.id).eq("estoque_total", selected.estoque_total)
+      .select("id").maybeSingle();
     if (updErr) {
       setSaving(false);
       toast.error("Failed to update stock: " + updErr.message);
+      return;
+    }
+    // Sem erro e sem linha: o `id` casou e o `estoque_total` nao. NADA foi escrito,
+    // e nada abaixo pode rodar — o estoque_log e o activity log registrariam um
+    // ajuste que nunca aconteceu, e a tela diria "Stock updated".
+    if (!gravado) {
+      setSaving(false);
+      toast.error("Stock changed while saving — nothing was saved. Reopen the adjustment.");
+      setSelected(null);
+      fetchData();
       return;
     }
     // O histórico também é checado: sem isso, um insert barrado deixava o ajuste
