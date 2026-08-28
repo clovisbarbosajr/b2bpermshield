@@ -9,10 +9,10 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node scripts/check-migrations.mjs && node scripts/check-edge.mjs && tsc -p tsconfig.app.json --noEmit && vitest run",
+    "test": "node scripts/check-migrations.mjs && node scripts/check-sql.mjs && node scripts/check-edge.mjs && tsc -p tsconfig.app.json --noEmit && vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
-    "check:sql": "node scripts/check-migrations.mjs",
+    "check:sql": "node scripts/check-sql.mjs",
     "check:edge": "node scripts/check-edge.mjs"
   },
   "dependencies": {
@@ -85,6 +85,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
     "jsdom": "^20.0.3",
+    "libpg-query": "^17.7.4",
     "lovable-tagger": "^1.1.13",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",

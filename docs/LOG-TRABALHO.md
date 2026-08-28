@@ -3408,3 +3408,37 @@ Verificacao do projeto a cada rodada: `typecheck` limpo, `vitest` 104/104,
 
 NAO entrou (decisao do dono): o desconto-base do `ImportProductDiscounts`, que nao
 tem destino no schema.
+
+## 27/08 — Mandei SQL quebrado para o dono. Portao novo no `npm test`.
+
+O script de estresse voltou do editor do Lovable com
+`42601: syntax error at or near "INTO"`, na linha do primeiro INSERT.
+
+CAUSA: eu escrevi
+
+    INSERT INTO zz_ids SELECT 'produto', id FROM (
+      INSERT INTO public.produtos (...) RETURNING id
+    ) x;
+
+Postgres nao aceita statement que modifica dado em subquery do FROM — so em CTE:
+`WITH novo AS (INSERT ... RETURNING id) INSERT INTO zz_ids SELECT ... FROM novo`.
+Quatro ocorrencias, todas corrigidas.
+
+O QUE FALHOU NO MEU PROCESSO: eu conferi o schema coluna a coluna, conferi os
+triggers de notificacao um a um, conferi as colunas NOT NULL — e nao PARSEEI. Nada
+disso pega sintaxe. Quem pagou foi o dono, que colou e levou o erro na cara.
+
+CONSERTO NA RAIZ: `scripts/check-sql.mjs`, no `npm test`.
+- usa `libpg-query`, que e o parser REAL do Postgres compilado para Node, nao
+  regex. O que ele recusa, o servidor tambem recusa;
+- varre `supabase/migrations/` e `docs/`;
+- PROVADO POR MUTANTE: o trecho errado acima devolve exatamente a mesma mensagem
+  que o editor devolveu; os 190 arquivos .sql do repositorio passam;
+- se `libpg-query` nao instalar (binario nativo), avisa alto e sai 0 — perder o
+  portao e melhor que derrubar a suite inteira.
+
+Limite: parser nao resolve catalogo. Nao valida nome de tabela, de coluna nem
+permissao. Para isso continua valendo o bloco de VERIFICACAO no rodape de cada
+migration.
+
+`npm test` agora: migrations + SQL parseavel + edge + tsc + 104 testes.

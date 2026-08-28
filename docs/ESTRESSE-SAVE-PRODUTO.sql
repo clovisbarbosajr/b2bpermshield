@@ -64,24 +64,24 @@ SELECT 0, 'volume: ' || t, '< 1000 = ainda folgado', n::text,
 -- ---------------------------------------------------------------------------
 CREATE TEMP TABLE zz_ids (chave text PRIMARY KEY, id uuid) ON COMMIT DROP;
 
-INSERT INTO zz_ids
-SELECT 'produto', id FROM (
+WITH novo AS (
   INSERT INTO public.produtos (nome, sku, preco, ativo, estoque_total, quantidade_minima)
   VALUES ('ZZSTRESS-produto-corrida', 'ZZSTRESS-SKU-1', 10.00, false, 0, 1)
   RETURNING id
-) x;
+)
+INSERT INTO zz_ids SELECT 'produto', id FROM novo;
 
-INSERT INTO zz_ids
-SELECT 'tabelaA', id FROM (
+WITH novo AS (
   INSERT INTO public.tabelas_preco (nome, ativo, is_default)
   VALUES ('ZZSTRESS-tabela-A', false, false) RETURNING id
-) x;
+)
+INSERT INTO zz_ids SELECT 'tabelaA', id FROM novo;
 
-INSERT INTO zz_ids
-SELECT 'tabelaB', id FROM (
+WITH novo AS (
   INSERT INTO public.tabelas_preco (nome, ativo, is_default)
   VALUES ('ZZSTRESS-tabela-B', false, false) RETURNING id
-) x;
+)
+INSERT INTO zz_ids SELECT 'tabelaB', id FROM novo;
 
 -- ---------------------------------------------------------------------------
 -- TESTE 1 — GALERIA: dois admins salvam o mesmo produto.
@@ -165,12 +165,12 @@ SELECT 2, 'preco: A remove a linha, B altera o preco da mesma linha',
 --   (b) a guarda nova — um UPDATE com id de variante de OUTRO produto tem que
 --       atingir ZERO linhas em vez de gravar no produto errado.
 -- ---------------------------------------------------------------------------
-INSERT INTO zz_ids
-SELECT 'produto2', id FROM (
+WITH novo AS (
   INSERT INTO public.produtos (nome, sku, preco, ativo, estoque_total, quantidade_minima)
   VALUES ('ZZSTRESS-produto-vizinho', 'ZZSTRESS-SKU-2', 20.00, false, 0, 1)
   RETURNING id
-) x;
+)
+INSERT INTO zz_ids SELECT 'produto2', id FROM novo;
 
 DO $$
 DECLARE p  uuid := (SELECT id FROM zz_ids WHERE chave = 'produto');
