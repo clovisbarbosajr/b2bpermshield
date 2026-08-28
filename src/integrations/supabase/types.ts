@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -459,9 +459,9 @@ export type Database = {
       }
       clientes: {
         Row: {
-          admin_rev: number
           activity: string | null
           admin_comments: string | null
+          admin_rev: number
           billing_same_as_contact: boolean | null
           can_confirm_order: boolean
           can_view_full_history: boolean
@@ -494,9 +494,9 @@ export type Database = {
           website: string | null
         }
         Insert: {
-          admin_rev?: number
           activity?: string | null
           admin_comments?: string | null
+          admin_rev?: number
           billing_same_as_contact?: boolean | null
           can_confirm_order?: boolean
           can_view_full_history?: boolean
@@ -529,9 +529,9 @@ export type Database = {
           website?: string | null
         }
         Update: {
-          admin_rev?: number
           activity?: string | null
           admin_comments?: string | null
+          admin_rev?: number
           billing_same_as_contact?: boolean | null
           can_confirm_order?: boolean
           can_view_full_history?: boolean
@@ -3226,6 +3226,7 @@ export type Database = {
         Args: { _categoria_ids: string[]; _user_id: string }
         Returns: number
       }
+      sync_upsert_precos: { Args: { _itens: Json }; Returns: number }
       user_can_see_produto: { Args: { _produto_id: string }; Returns: boolean }
     }
     Enums: {
