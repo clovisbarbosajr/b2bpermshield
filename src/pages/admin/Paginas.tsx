@@ -14,14 +14,21 @@ import { Plus, Pencil, Trash2, FileText } from "lucide-react";
 const AdminPaginas = () => {
   const [paginas, setPaginas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ titulo: "", slug: "", conteudo: "", ativo: true });
   const [saving, setSaving] = useState(false);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("paginas").select("*").order("titulo");
-    setPaginas(data ?? []);
+    const { data, error } = await supabase.from("paginas").select("*").order("titulo");
+    if (error) {
+      setLoadError(error.message);
+      toast.error("Could not load pages: " + error.message);
+    } else {
+      setLoadError(null);
+      setPaginas(data ?? []);
+    }
     setLoading(false);
   };
 
@@ -66,6 +73,12 @@ const AdminPaginas = () => {
       </div>
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>
+      ) : loadError ? (
+        <Card className="flex flex-col items-center justify-center py-16 text-center">
+          <h3 className="text-lg font-semibold">Could not load pages</h3>
+          <p className="text-muted-foreground mb-4">{loadError}</p>
+          <Button variant="outline" onClick={() => { setLoading(true); fetchData(); }}>Try again</Button>
+        </Card>
       ) : paginas.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-16 text-center">
           <FileText className="h-12 w-12 text-muted-foreground mb-3" />

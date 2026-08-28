@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { descendantIds } from "@/lib/categoryTree";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Check, Monitor, Lock, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -32,8 +33,11 @@ type PrivacyGroup = { id: string; nome: string };
 type Customer = { id: string; nome: string; empresa: string | null };
 
 // Acesso (privacidade) de uma categoria — espelha a aba "Access" do B2BWave.
-type Access = { isPrivate: boolean; herdam: boolean; groups: Set<string>; grant: string[]; exclude: string[] };
-const emptyAccess = (): Access => ({ isPrivate: false, herdam: true, groups: new Set(), grant: [], exclude: [] });
+// `loaded` = as ligacoes de acesso desta categoria FORAM lidas do banco. Ver o
+// fail-closed em handleSave: `saveAccess` apaga-e-reescreve, entao salvar com um
+// snapshot que nunca chegou apagaria grupos e clientes que a tela nunca viu.
+type Access = { isPrivate: boolean; herdam: boolean; groups: Set<string>; grant: string[]; exclude: string[]; loaded: boolean };
+const emptyAccess = (): Access => ({ isPrivate: false, herdam: true, groups: new Set(), grant: [], exclude: [], loaded: true });
 
 // Picker reutilizável: escolhe clientes de um dropdown e mostra como chips removíveis.
 const CustomerPicker = ({ label, options, selected, onChange }: {
@@ -78,18 +82,26 @@ const AdminCategorias = () => {
   const [pgList, setPgList] = useState<PrivacyGroup[]>([]);
   const [custList, setCustList] = useState<Customer[]>([]);
   const [saving, setSaving] = useState(false);
+  // Categoria cuja leitura de acesso e a valida agora. Abrir B (ou "New") enquanto
+  // a leitura de A ainda volta fazia o snapshot de A cair em cima de B, e o Save
+  // gravava o acesso de A na categoria B.
+  const acessoReq = useRef<string | null>(null);
   const navigate = useNavigate();
 
   const fetchData = async () => {
     // Mostrar também categorias inativas no admin (antes o filtro ativo=true
     // escondia permanentemente uma categoria desativada — bug D6).
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("categorias")
       .select("*")
       .order("ordem")
       .order("nome");
-    setCategorias((data as Categoria[]) ?? []);
     setLoading(false);
+    // Sem isto a tela dizia "No categories yet" quando a LEITURA falhou, e a lista
+    // vazia ainda desarmava a guarda de ciclo (`parentesProibidos`). Mantem o que
+    // ja estava na tela e avisa.
+    if (error) { toast.error("Could not load categories: " + error.message); return; }
+    setCategorias((data as Categoria[]) ?? []);
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -97,16 +109,25 @@ const AdminCategorias = () => {
   // Grupos de privacidade + clientes (só donos de conta — subs herdam o pai) para os pickers.
   useEffect(() => {
     (async () => {
-      const [{ data: pg }, { data: cu }] = await Promise.all([
-        supabase.from("privacy_groups").select("id, nome").order("nome"),
-        supabase.from("clientes").select("id, nome, empresa").is("parent_customer_id", null).order("empresa"),
-      ]);
-      setPgList((pg as PrivacyGroup[]) ?? []);
-      setCustList((cu as Customer[]) ?? []);
+      const { data: pg, error: pgErr } = await supabase.from("privacy_groups").select("id, nome").order("nome");
+      if (pgErr) toast.error("Could not load privacy groups: " + pgErr.message);
+      else setPgList((pg as PrivacyGroup[]) ?? []);
+      try {
+        // `clientes` cresce sem limite (uma linha por cliente cadastrado) e o
+        // PostgREST corta em 1000 SEM erro: sem paginar, o cliente 1001 nunca
+        // aparecia no picker e nao dava pra liberar/excluir o acesso dele.
+        const cu = await fetchAllRows<Customer>((from, to) =>
+          supabase.from("clientes").select("id, nome, empresa").is("parent_customer_id", null)
+            .order("empresa").order("id", { ascending: true }).range(from, to));
+        setCustList(cu);
+      } catch (e: any) {
+        toast.error("Could not load customers: " + (e?.message ?? String(e)));
+      }
     })();
   }, []);
 
   const openNew = () => {
+    acessoReq.current = null;
     setEditing(null);
     setForm({ nome: "", descricao: "", parent_id: "", ativo: true, ordem: 0, desconto: 0 });
     setAcc(emptyAccess());
@@ -114,6 +135,7 @@ const AdminCategorias = () => {
   };
 
   const openEdit = async (c: Categoria) => {
+    acessoReq.current = c.id;
     setEditing(c);
     setForm({
       nome: c.nome,
@@ -123,42 +145,65 @@ const AdminCategorias = () => {
       ordem: c.ordem ?? 0,
       desconto: c.desconto ?? 0,
     });
+    // `loaded: false` ate a leitura voltar. O dialogo abre ANTES do await, entao
+    // este e tambem o estado de quem clica Save no primeiro segundo.
     setAcc({
       isPrivate: c.is_private ?? false,
       herdam: c.subcategorias_herdam ?? true,
-      groups: new Set(), grant: [], exclude: [],
+      groups: new Set(), grant: [], exclude: [], loaded: false,
     });
     setDialogOpen(true);
     // Carrega as ligações de acesso da categoria.
-    const [{ data: ca }, { data: cca }] = await Promise.all([
-      (supabase as any).from("categoria_acesso").select("privacy_group_id").eq("categoria_id", c.id),
-      (supabase as any).from("categoria_cliente_acesso").select("cliente_id, tipo").eq("categoria_id", c.id),
+    const [{ data: ca, error: caErr }, { data: cca, error: ccaErr }] = await Promise.all([
+      supabase.from("categoria_acesso").select("privacy_group_id").eq("categoria_id", c.id),
+      supabase.from("categoria_cliente_acesso").select("cliente_id, tipo").eq("categoria_id", c.id),
     ]);
+    if (acessoReq.current !== c.id) return; // outra categoria foi aberta no meio
+    // Leitura falhou -> NAO marca `loaded`. Antes nao se olhava o erro: a tela
+    // mostrava "sem grupo, sem cliente" e o Save seguinte apagava as ligacoes
+    // reais (saveAccess e DELETE + INSERT), com "Category updated" na tela.
+    if (caErr || ccaErr) {
+      toast.error("Could not load this category's access settings: " + (caErr ?? ccaErr)!.message);
+      return;
+    }
     setAcc({
       isPrivate: c.is_private ?? false,
       herdam: c.subcategorias_herdam ?? true,
-      groups: new Set(((ca ?? []) as any[]).map((r) => r.privacy_group_id)),
-      grant: ((cca ?? []) as any[]).filter((r) => r.tipo === "grant").map((r) => r.cliente_id),
-      exclude: ((cca ?? []) as any[]).filter((r) => r.tipo === "exclude").map((r) => r.cliente_id),
+      groups: new Set((ca ?? []).map((r) => r.privacy_group_id)),
+      grant: (cca ?? []).filter((r) => r.tipo === "grant").map((r) => r.cliente_id),
+      exclude: (cca ?? []).filter((r) => r.tipo === "exclude").map((r) => r.cliente_id),
+      loaded: true,
     });
   };
 
   // Persiste as 3 ligações de acesso (grupos, grant, exclude) de uma categoria.
-  const saveAccess = async (categoriaId: string) => {
-    await (supabase as any).from("categoria_acesso").delete().eq("categoria_id", categoriaId);
+  // Devolve a mensagem de erro da PRIMEIRA operacao que falhar, ou null.
+  //
+  // E apaga-e-reescreve sem transacao: se o insert falhar depois do delete, o que
+  // existia ja se foi. Por isso o erro sobe e a tela conta o que aconteceu — dizer
+  // "Category updated" por cima disso e que era o estrago.
+  const saveAccess = async (categoriaId: string): Promise<string | null> => {
+    const delG = await supabase.from("categoria_acesso").delete().eq("categoria_id", categoriaId);
+    if (delG.error) return delG.error.message;
     if (acc.isPrivate && acc.groups.size > 0) {
-      await (supabase as any).from("categoria_acesso").insert(
-        [...acc.groups].map((g) => ({ categoria_id: categoriaId, privacy_group_id: g })) as any,
+      const insG = await supabase.from("categoria_acesso").insert(
+        [...acc.groups].map((g) => ({ categoria_id: categoriaId, privacy_group_id: g })),
       );
+      if (insG.error) return insG.error.message;
     }
-    await (supabase as any).from("categoria_cliente_acesso").delete().eq("categoria_id", categoriaId);
+    const delC = await supabase.from("categoria_cliente_acesso").delete().eq("categoria_id", categoriaId);
+    if (delC.error) return delC.error.message;
     const rows = acc.isPrivate
       ? [
           ...acc.grant.map((cid) => ({ categoria_id: categoriaId, cliente_id: cid, tipo: "grant" })),
           ...acc.exclude.map((cid) => ({ categoria_id: categoriaId, cliente_id: cid, tipo: "exclude" })),
         ]
       : [];
-    if (rows.length > 0) await (supabase as any).from("categoria_cliente_acesso").insert(rows as any);
+    if (rows.length > 0) {
+      const insC = await supabase.from("categoria_cliente_acesso").insert(rows);
+      if (insC.error) return insC.error.message;
+    }
+    return null;
   };
 
   // Categorias que NÃO podem ser pai da que está sendo editada: ela mesma e todos
@@ -172,6 +217,12 @@ const AdminCategorias = () => {
     // derruba o catálogo do cliente (tela branca) e trava o RLS recursivo.
     if (form.parent_id && parentesProibidos.has(form.parent_id)) {
       toast.error("A category cannot be placed inside itself or one of its own sub-categories.");
+      return;
+    }
+    // FAIL CLOSED: sem o snapshot de acesso lido, `saveAccess` apagaria grupos e
+    // clientes que esta tela nunca chegou a ver.
+    if (editing && !acc.loaded) {
+      toast.error("Access settings have not loaded for this category — close and reopen it before saving, otherwise its privacy settings would be erased.");
       return;
     }
     setSaving(true);
@@ -194,11 +245,15 @@ const AdminCategorias = () => {
       if (error) { toast.error(error.message); setSaving(false); return; }
       categoriaId = (data as any).id;
     }
-    if (categoriaId) await saveAccess(categoriaId);
-    toast.success(editing ? "Category updated" : "Category created");
+    const accErr = categoriaId ? await saveAccess(categoriaId) : null;
     setSaving(false);
     setDialogOpen(false);
     fetchData();
+    if (accErr) {
+      toast.error("Category saved, but the access settings were NOT written (the previous ones may already have been removed): " + accErr);
+      return;
+    }
+    toast.success(editing ? "Category updated" : "Category created");
   };
 
   const handleDelete = async (id: string) => {
@@ -218,11 +273,15 @@ const AdminCategorias = () => {
     const swapIdx = direction === "up" ? idx - 1 : idx + 1;
     const swapCat = siblings[swapIdx];
 
-    await Promise.all([
+    const [a, b] = await Promise.all([
       supabase.from("categorias").update({ ordem: swapCat.ordem } as any).eq("id", cat.id),
       supabase.from("categorias").update({ ordem: cat.ordem } as any).eq("id", swapCat.id),
     ]);
     fetchData();
+    // Sao DUAS escritas: se so uma passar, as duas categorias ficam com a mesma
+    // `ordem` e a lista embaralha na proxima carga. Antes isso acontecia calado.
+    const err = a.error ?? b.error;
+    if (err) toast.error("Could not swap the order — the list may be out of order, refresh and try again: " + err.message);
   };
 
   const sortAlphabetically = async () => {
@@ -253,14 +312,22 @@ const AdminCategorias = () => {
   };
 
   // Count products per category
-  const [productCounts, setProductCounts] = useState<Record<string, number>>({});
+  // `null` = ainda nao sei contar (carregando ou falhou) — a badge mostra "—" em
+  // vez de "0", que afirmaria que a categoria esta vazia.
+  const [productCounts, setProductCounts] = useState<Record<string, number> | null>(null);
   useEffect(() => {
     const fetchCounts = async () => {
-      const { data } = await supabase.from("produtos").select("categoria_id").eq("ativo", true);
-      if (data) {
+      try {
+        // `produtos` cresce sem limite com o catalogo e o PostgREST corta em 1000
+        // linhas SEM erro: uma leitura so ja subcontava as categorias do fim.
+        const rows = await fetchAllRows<{ categoria_id: string | null }>((from, to) =>
+          supabase.from("produtos").select("categoria_id").eq("ativo", true)
+            .order("id", { ascending: true }).range(from, to));
         const counts: Record<string, number> = {};
-        data.forEach((p: any) => { if (p.categoria_id) counts[p.categoria_id] = (counts[p.categoria_id] || 0) + 1; });
+        rows.forEach((p) => { if (p.categoria_id) counts[p.categoria_id] = (counts[p.categoria_id] || 0) + 1; });
         setProductCounts(counts);
+      } catch (e: any) {
+        toast.error("Could not count products per category: " + (e?.message ?? String(e)));
       }
     };
     fetchCounts();
@@ -327,7 +394,7 @@ const AdminCategorias = () => {
                         <span className="font-medium text-primary">{cat.nome}</span>
                         {cat.is_private && <Lock className="h-3 w-3 text-amber-500" aria-label="Private" />}
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground border-muted-foreground/30">
-                          {productCounts[cat.id] || 0}
+                          {productCounts ? productCounts[cat.id] || 0 : "—"}
                         </Badge>
                       </span>
                     </TableCell>

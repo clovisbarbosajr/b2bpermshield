@@ -459,6 +459,7 @@ export type Database = {
       }
       clientes: {
         Row: {
+          admin_rev: number
           activity: string | null
           admin_comments: string | null
           billing_same_as_contact: boolean | null
@@ -493,6 +494,7 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          admin_rev?: number
           activity?: string | null
           admin_comments?: string | null
           billing_same_as_contact?: boolean | null
@@ -527,6 +529,7 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          admin_rev?: number
           activity?: string | null
           admin_comments?: string | null
           billing_same_as_contact?: boolean | null

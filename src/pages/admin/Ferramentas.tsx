@@ -1,5 +1,8 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { parseCSV } from "@/lib/csv";
+import { exportToCSV } from "@/lib/export-csv";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,44 +13,47 @@ const AdminFerramentas = () => {
   const [exporting, setExporting] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
 
-  const downloadCsv = (data: any[], filename: string) => {
-    if (data.length === 0) { toast.error("No data to export"); return; }
-    const headers = Object.keys(data[0]);
-    const csv = [headers.join(","), ...data.map((row) => headers.map((h) => {
-      const val = row[h] ?? "";
-      return typeof val === "string" && val.includes(",") ? `"${val}"` : val;
-    }).join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const handleExport = async (table: string, filename: string) => {
     setExporting(table);
-    const { data, error } = await supabase.from(table as any).select("*");
-    if (error) { toast.error(error.message); setExporting(null); return; }
-    downloadCsv(data ?? [], filename);
-    toast.success(`${filename} exported`);
-    setExporting(null);
+    try {
+      // PAGINADO. Um `.select("*")` sem `.range()` volta com no MÁXIMO 1000
+      // linhas e `error: null` — o CSV saía truncado com "exported" na tela.
+      // `produtos` e `clientes` crescem sem teto (catálogo e base de clientes),
+      // e o pior é o uso normal desta tela: exportar, editar no Excel,
+      // reimportar. Com o corte, a volta reinsere só o pedaço lido.
+      // `.order("id")`: `fetchAllRows` pagina com LIMIT/OFFSET, que sem ORDER BY
+      // por coluna única pode repetir ou pular linha entre uma página e outra.
+      const rows = await fetchAllRows<Record<string, any>>((from, to) =>
+        supabase.from(table as any).select("*").order("id", { ascending: true }).range(from, to) as any);
+      if (rows.length === 0) { toast.error("No data to export"); return; }
+      exportToCSV(rows, filename);
+      toast.success(`${rows.length} rows exported`);
+    } catch (err: any) {
+      // `fetchAllRows` LANÇA em erro. Sem este catch a tela ficava travada em
+      // "Exporting..." sem dizer o que houve.
+      toast.error("Export failed: " + (err?.message ?? String(err)));
+    } finally {
+      setExporting(null);
+    }
   };
 
   const handleImportCsv = async (table: string, file: File) => {
     setImporting(true);
     try {
-      const text = await file.text();
-      const lines = text.split("\n").filter((l) => l.trim());
-      if (lines.length < 2) { toast.error("CSV file is empty or has no data rows"); setImporting(false); return; }
-      const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
-      const rows = lines.slice(1).map((line) => {
-        const values = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+      // `parseCSV` compartilhado, no lugar do `split(",")` que estava aqui.
+      // O antigo quebrava a linha na vírgula sem entender aspas, e é o próprio
+      // Export desta tela que produz campos com vírgula dentro de aspas
+      // (`"Rua A, 100"`, `"Acme, Inc"`). O resultado não era erro na tela: era
+      // TODA coluna seguinte deslocada uma casa — preço lendo SKU — gravado
+      // como se estivesse certo. Campo vazio (`a,,b`) tinha o mesmo efeito.
+      const rows = parseCSV(await file.text()).map((r) => {
         const obj: Record<string, any> = {};
-        headers.forEach((h, i) => { obj[h] = values[i] === "" ? null : values[i]; });
+        for (const [k, v] of Object.entries(r)) obj[k] = v === "" ? null : v;
         // Remove id and timestamps to let DB generate them
         delete obj.id; delete obj.created_at; delete obj.updated_at;
         return obj;
       });
+      if (rows.length === 0) { toast.error("CSV file is empty or has no data rows"); setImporting(false); return; }
       const { error } = await supabase.from(table as any).insert(rows as any);
       if (error) { toast.error("Import error: " + error.message); setImporting(false); return; }
       toast.success(`${rows.length} records imported to ${table}`);
@@ -57,11 +63,12 @@ const AdminFerramentas = () => {
     setImporting(false);
   };
 
+  // Sem `.csv` no nome: `exportToCSV` acrescenta data e extensão.
   const tools = [
-    { table: "produtos", label: "Products", icon: Package, filename: "products.csv" },
-    { table: "categorias", label: "Categories", icon: FolderTree, filename: "categories.csv" },
-    { table: "clientes", label: "Clients", icon: Users, filename: "clients.csv" },
-    { table: "tabelas_preco", label: "Price Lists", icon: DollarSign, filename: "price-lists.csv" },
+    { table: "produtos", label: "Products", icon: Package, filename: "products" },
+    { table: "categorias", label: "Categories", icon: FolderTree, filename: "categories" },
+    { table: "clientes", label: "Clients", icon: Users, filename: "clients" },
+    { table: "tabelas_preco", label: "Price Lists", icon: DollarSign, filename: "price-lists" },
   ];
 
   return (

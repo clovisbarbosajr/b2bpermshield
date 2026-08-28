@@ -35,9 +35,12 @@ const AdminOptions = () => {
   const [saving, setSaving] = useState(false);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("product_options").select("*").order("nome");
-    setOptions(data ?? []);
+    const { data, error } = await supabase.from("product_options").select("*").order("nome");
     setLoading(false);
+    // Sem isto, falha de leitura virava "No options yet" e o admin recriava grupos
+    // que ja existem.
+    if (error) { toast.error("Could not load options: " + error.message); return; }
+    setOptions(data ?? []);
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -49,7 +52,12 @@ const AdminOptions = () => {
   };
 
   const openEdit = async (o: any) => {
-    setEditing(o);
+    // Le PRIMEIRO. Antes a tela trocava antes do await: com a leitura falhando
+    // (erro nunca olhado) o editor mostrava "No values yet" para uma opcao que TEM
+    // valores, e o admin recadastrava Small/Medium/Large por cima dos existentes.
+    const { data, error } = await supabase.from("option_values").select("*").eq("option_id", o.id).order("ordem");
+    if (error) { toast.error("Could not load this option's values: " + error.message); return; }
+    setValues((data ?? []) as OptionValue[]);
     setForm({
       nome: o.nome,
       codigo: o.codigo || "",
@@ -58,28 +66,43 @@ const AdminOptions = () => {
       obrigatorio: o.obrigatorio,
       ativo: o.ativo,
     });
-    const { data } = await supabase.from("option_values").select("*").eq("option_id", o.id).order("ordem");
-    setValues((data ?? []) as OptionValue[]);
+    setEditing(o);
   };
 
   const handleSave = async () => {
     if (!form.nome.trim()) { toast.error("Name is required"); return; }
     setSaving(true);
+    const isNew = editing === "new";
     let optionId: string;
 
-    if (editing === "new") {
+    if (isNew) {
       const { data, error } = await supabase.from("product_options").insert(form as any).select().single();
       if (error) { toast.error(error.message); setSaving(false); return; }
       optionId = data.id;
-      toast.success("Option created");
+      // A opcao JA existe no banco. Sem isto, um erro na gravacao dos valores
+      // devolvia o usuario para uma tela que ainda se dizia "new": o Save seguinte
+      // criava uma SEGUNDA opcao.
+      setEditing(data);
     } else {
       const { error } = await supabase.from("product_options").update(form as any).eq("id", editing.id);
       if (error) { toast.error(error.message); setSaving(false); return; }
       optionId = editing.id;
-      toast.success("Option updated");
     }
 
-    // Save values
+    // Save values — sao N escritas em sequencia, e nenhuma tinha o erro lido: o
+    // valor digitado sumia e a tela dizia "Option updated" do mesmo jeito. Parar na
+    // primeira falha e dizer ate onde foi e o unico relato honesto.
+    // Chave = a PROPRIA LINHA (referencia do objeto), nunca a posicao: os inputs
+    // nao ficam desabilitados durante o save, entao o admin pode apagar ou mexer
+    // numa linha do meio enquanto grava. Por indice, o id novo acabaria colado
+    // numa linha que ja tem id — duas linhas com o mesmo id, pior que o bug
+    // original. Por referencia, no maximo o id se perde (a linha sumiu).
+    const idsNovos = new Map<any, string>();
+    const aplicaIdsNovos = () => {
+      if (idsNovos.size === 0) return;
+      setValues((prev: any[]) => prev.map((x) => (idsNovos.has(x) ? { ...x, id: idsNovos.get(x) } : x)));
+    };
+
     for (let i = 0; i < values.length; i++) {
       const v = values[i];
       const payload = {
@@ -92,13 +115,32 @@ const AdminOptions = () => {
         padrao: v.padrao,
         ordem: i,
       };
-      if (v.id && !v.id.startsWith("temp-")) {
-        await supabase.from("option_values").update(payload as any).eq("id", v.id);
-      } else {
-        await supabase.from("option_values").insert(payload as any);
+      // O ID DO QUE FOI INSERIDO VOLTA PARA O ESTADO, e nao e detalhe.
+      //
+      // O laco para na primeira falha (certo) e a mensagem diz quantos passaram.
+      // Mas o Save de novo — que e o que a mensagem manda fazer — reprocessava a
+      // lista INTEIRA, e os valores ja gravados ainda estavam com `temp-`: cada
+      // tentativa inseria de novo os que tinham dado certo. Duas falhas seguidas
+      // deixavam o "Small" tres vezes na opcao.
+      //
+      // Guardando o id devolvido, a segunda passada faz UPDATE neles.
+      const existente = v.id && !v.id.startsWith("temp-");
+      const { data: gravado, error } = existente
+        ? await supabase.from("option_values").update(payload as any).eq("id", v.id).eq("option_id", optionId).select("id").maybeSingle()
+        : await supabase.from("option_values").insert(payload as any).select("id").single();
+      if (!existente && gravado?.id) idsNovos.set(v, (gravado as any).id as string);
+      if (error) {
+        // Aplica os ids ANTES de sair: sao gravacoes que ACONTECERAM, e perde-las
+        // aqui e o que criava a duplicata no retry.
+        aplicaIdsNovos();
+        toast.error(`Value "${v.valor || i + 1}" was not saved (the first ${i} were): ${error.message}`);
+        setSaving(false);
+        return;
       }
     }
+    aplicaIdsNovos();
 
+    toast.success(isNew ? "Option created" : "Option updated");
     setSaving(false);
     setEditing(null);
     fetchData();
@@ -106,7 +148,10 @@ const AdminOptions = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this option and all its values?")) return;
-    await supabase.from("option_values").delete().eq("option_id", id);
+    // Se os valores nao sairem e a opcao sair, sobram orfaos apontando para uma
+    // opcao que nao existe mais — e a tela dizia "Option removed" assim mesmo.
+    const { error: valErr } = await supabase.from("option_values").delete().eq("option_id", id);
+    if (valErr) { toast.error("Could not remove the option's values: " + valErr.message); return; }
     const { error } = await supabase.from("product_options").delete().eq("id", id);
     if (error) { toast.error(error.message); return; }
     toast.success("Option removed");

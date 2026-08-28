@@ -17,7 +17,7 @@ import { useActivityLog } from "@/hooks/useActivityLog";
 import { categoryTreeOptions } from "@/lib/categoryTree";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { gravacaoRecusadaComCerteza } from "@/lib/gravacaoRecusada";
-import { gravarProdutoComToken } from "@/lib/gravarProdutoComToken";
+import { gravarComToken } from "@/lib/gravarComToken";
 
 // O PostgREST corta em 1000 linhas SEM erro. Este wrapper pagina e devolve o
 // mesmo formato `{ data, error }` das outras leituras, para caber no `Promise.all`
@@ -563,7 +563,7 @@ const ProductEdit = () => {
         return;
       }
       const revAtual = revRef.current;
-      const r = await gravarProdutoComToken(supabase, productId, payload, revAtual);
+      const r = await gravarComToken(supabase, "produtos", productId, payload, revAtual);
       if (r.tipo === "recusado") {
         // O PostgREST respondeu com `code`: a transacao abortou, nada foi escrito e
         // o token da tela continua valendo. Corrigir o campo e salvar de novo

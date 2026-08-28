@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { gravarProdutoComToken } from "./gravarProdutoComToken";
+import { gravarComToken } from "./gravarComToken";
 
 // ESTE TESTE EXISTE POR CAUSA DE UMA MUTACAO QUE PASSOU.
 //
@@ -37,25 +37,36 @@ function clienteFalso(resposta: Resposta) {
 
 const OK: Resposta = { data: { admin_rev: 8 }, error: null, status: 200 };
 
-describe("gravarProdutoComToken", () => {
+describe("gravarComToken", () => {
   // ── A FIACAO. Sao estes que morrem se o bloqueio for removido. ──────────────
 
   it("filtra por id E por admin_rev — sem os dois nao ha bloqueio", async () => {
     const { sb, registro } = clienteFalso(OK);
-    await gravarProdutoComToken(sb, "prod-1", { nome: "x" }, 7);
+    await gravarComToken(sb, "produtos", "prod-1", { nome: "x" }, 7);
     expect(registro.tabela).toBe("produtos");
     expect(registro.filtros).toEqual([["id", "prod-1"], ["admin_rev", 7]]);
   });
 
+  // A tabela e parametro: as telas de produto e de cliente usam a MESMA funcao.
+  // Se alguem voltar a fixar "produtos" aqui dentro, o save de cliente passaria a
+  // gravar em produtos — e este teste acende.
+  it("grava na tabela que recebeu, nao numa fixa", async () => {
+    const { sb, registro } = clienteFalso(OK);
+    await gravarComToken(sb, "clientes", "cli-1", { nome: "x" }, 3);
+    expect(registro.tabela).toBe("clientes");
+    expect(registro.filtros).toEqual([["id", "cli-1"], ["admin_rev", 3]]);
+    expect(registro.payload).toEqual({ nome: "x", admin_rev: 4 });
+  });
+
   it("incrementa o token no MESMO statement, e preserva o payload", async () => {
     const { sb, registro } = clienteFalso(OK);
-    await gravarProdutoComToken(sb, "prod-1", { nome: "x", preco: 10 }, 7);
+    await gravarComToken(sb, "produtos", "prod-1", { nome: "x", preco: 10 }, 7);
     expect(registro.payload).toEqual({ nome: "x", preco: 10, admin_rev: 8 });
   });
 
   it("le o token de volta, senao o proximo save da mesma tela ja nasce defasado", async () => {
     const { sb, registro } = clienteFalso(OK);
-    await gravarProdutoComToken(sb, "prod-1", {}, 7);
+    await gravarComToken(sb, "produtos", "prod-1", {}, 7);
     expect(registro.selecionou).toBe("admin_rev");
   });
 
@@ -63,39 +74,39 @@ describe("gravarProdutoComToken", () => {
 
   it("gravou => ok, com o token novo vindo do banco", async () => {
     const { sb } = clienteFalso(OK);
-    expect(await gravarProdutoComToken(sb, "p", {}, 7)).toEqual({ tipo: "ok", rev: 8 });
+    expect(await gravarComToken(sb, "produtos", "p", {}, 7)).toEqual({ tipo: "ok", rev: 8 });
   });
 
   it("banco nao devolveu o token => cai no rev + 1 calculado, nunca em undefined", async () => {
     const { sb } = clienteFalso({ data: {}, error: null, status: 200 });
-    expect(await gravarProdutoComToken(sb, "p", {}, 7)).toEqual({ tipo: "ok", rev: 8 });
+    expect(await gravarComToken(sb, "produtos", "p", {}, 7)).toEqual({ tipo: "ok", rev: 8 });
   });
 
   it("zero linhas => conflito (alguem gravou no meio)", async () => {
     const { sb } = clienteFalso({ data: null, error: null, status: 200 });
-    expect(await gravarProdutoComToken(sb, "p", {}, 7)).toEqual({ tipo: "conflito" });
+    expect(await gravarComToken(sb, "produtos", "p", {}, 7)).toEqual({ tipo: "conflito" });
   });
 
   it("erro COM code => recusado: abortou, o token da tela continua valendo", async () => {
     const { sb } = clienteFalso({ data: null, error: { code: "22003", message: "out of range" }, status: 400 });
-    expect(await gravarProdutoComToken(sb, "p", {}, 7))
+    expect(await gravarComToken(sb, "produtos", "p", {}, 7))
       .toEqual({ tipo: "recusado", mensagem: "out of range" });
   });
 
   it("erro de concorrencia (5xx COM code) tambem e recusado, nao incerto", async () => {
     const { sb } = clienteFalso({ data: null, error: { code: "40001", message: "serialization failure" }, status: 500 });
-    expect((await gravarProdutoComToken(sb, "p", {}, 7)).tipo).toBe("recusado");
+    expect((await gravarComToken(sb, "produtos", "p", {}, 7)).tipo).toBe("recusado");
   });
 
   it("falha de transporte (status 0, code vazio) => incerto", async () => {
     const { sb } = clienteFalso({ data: null, error: { code: "", message: "FetchError" }, status: 0 });
-    expect(await gravarProdutoComToken(sb, "p", {}, 7))
+    expect(await gravarComToken(sb, "produtos", "p", {}, 7))
       .toEqual({ tipo: "incerto", mensagem: "FetchError" });
   });
 
   it("5xx de gateway SEM code => incerto, pode ter commitado", async () => {
     const { sb } = clienteFalso({ data: null, error: { message: "<html>502</html>" }, status: 502 });
-    expect((await gravarProdutoComToken(sb, "p", {}, 7)).tipo).toBe("incerto");
+    expect((await gravarComToken(sb, "produtos", "p", {}, 7)).tipo).toBe("incerto");
   });
 
   // ── O CASO QUE NAO PODE SER CONFUNDIDO ─────────────────────────────────────
@@ -105,8 +116,8 @@ describe("gravarProdutoComToken", () => {
   it("conflito e recusado sao desfechos distintos", async () => {
     const semLinha = clienteFalso({ data: null, error: null, status: 200 });
     const comErro = clienteFalso({ data: null, error: { code: "22003", message: "x" }, status: 400 });
-    const a = await gravarProdutoComToken(semLinha.sb, "p", {}, 7);
-    const b = await gravarProdutoComToken(comErro.sb, "p", {}, 7);
+    const a = await gravarComToken(semLinha.sb, "produtos", "p", {}, 7);
+    const b = await gravarComToken(comErro.sb, "produtos", "p", {}, 7);
     expect(a.tipo).not.toBe(b.tipo);
   });
 });

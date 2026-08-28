@@ -133,10 +133,26 @@ const Checkout = () => {
         setCustomerCountry(((cliente as any).pais || "").trim());
         // Sub-customer sem permissão de confirmar não finaliza (espelha a trava do banco).
         setSubCannotOrder(!!(cliente as any).parent_customer_id && (cliente as any).can_confirm_order === false);
-        // Le a PROPRIA ficha, nao a do pai, para casar exatamente com o que o
-        // gatilho `fn_block_order_inactive_customer` confere no banco
-        // (ele olha `pedidos.cliente_id`). Front e banco discordando seria pior
-        // que qualquer um dos dois sozinho.
+        // SO A PROPRIA FICHA, porque o front NAO CONSEGUE ver a do titular.
+        //
+        // Isto NAO e escolha: nao existe policy que deixe um sub-login ler a linha
+        // do pai em `clientes`. As de SELECT sao "Clients can read own data"
+        // (`auth.uid() = user_id`), "Contacts read company cliente"
+        // (`is_company_contact`, que exige linha em `company_contacts` — e o
+        // `company-member` nunca cria uma) e as de staff. Um select do pai volta
+        // VAZIO e sem erro, entao qualquer `||` com o valor dele seria codigo morto
+        // — eu cheguei a escrever esse `||` e ele nunca teria enxergado nada.
+        //
+        // QUEM IMPEDE DE VERDADE E O BANCO: `20260828030000` fez
+        // `fn_block_order_inactive_customer` olhar os dois lados, entao o
+        // funcionario de empresa bloqueada e recusado no INSERT. O custo de a tela
+        // nao saber antes e o cliente montar o carrinho e so descobrir no fim — mas
+        // a mensagem NAO e crua: a linha ~753 reconhece `ORDERING_DISABLED` e
+        // traduz.
+        //
+        // Para a tela avisar antes, o caminho e uma RPC `SECURITY DEFINER` que
+        // devolva a situacao da conta (o projeto ja usa esse padrao em
+        // `conta_liberada_de`). Nao entrou nesta leva.
         setOrderingDisabled((cliente as any).disable_ordering === true);
         setMinimoPedido(
           (cliente as any).minimum_order_value != null

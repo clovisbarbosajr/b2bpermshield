@@ -14,14 +14,21 @@ import { Plus, Pencil, Trash2, Newspaper } from "lucide-react";
 const AdminNoticias = () => {
   const [noticias, setNoticias] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ titulo: "", conteudo: "", imagem_url: "", ativo: true, destaque: false });
   const [saving, setSaving] = useState(false);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("noticias").select("*").order("publicado_em", { ascending: false });
-    setNoticias(data ?? []);
+    const { data, error } = await supabase.from("noticias").select("*").order("publicado_em", { ascending: false });
+    if (error) {
+      setLoadError(error.message);
+      toast.error("Could not load news: " + error.message);
+    } else {
+      setLoadError(null);
+      setNoticias(data ?? []);
+    }
     setLoading(false);
   };
 
@@ -64,6 +71,12 @@ const AdminNoticias = () => {
       </div>
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>
+      ) : loadError ? (
+        <Card className="flex flex-col items-center justify-center py-16 text-center">
+          <h3 className="text-lg font-semibold">Could not load news</h3>
+          <p className="text-muted-foreground mb-4">{loadError}</p>
+          <Button variant="outline" onClick={() => { setLoading(true); fetchData(); }}>Try again</Button>
+        </Card>
       ) : noticias.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-16 text-center">
           <Newspaper className="h-12 w-12 text-muted-foreground mb-3" />

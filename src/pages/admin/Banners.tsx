@@ -14,6 +14,7 @@ import { Plus, Pencil, Trash2, Image as ImageIcon, Upload } from "lucide-react";
 const AdminBanners = () => {
   const [banners, setBanners] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ titulo: "", imagem_url: "", link_url: "", ativo: true, ordem: 0 });
@@ -21,8 +22,14 @@ const AdminBanners = () => {
   const [uploading, setUploading] = useState(false);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("banners").select("*").order("ordem");
-    setBanners(data ?? []);
+    const { data, error } = await supabase.from("banners").select("*").order("ordem");
+    if (error) {
+      setLoadError(error.message);
+      toast.error("Could not load banners: " + error.message);
+    } else {
+      setLoadError(null);
+      setBanners(data ?? []);
+    }
     setLoading(false);
   };
 
@@ -44,7 +51,7 @@ const AdminBanners = () => {
     const { error } = await supabase.storage.from("product-images").upload(path, file);
     if (error) { toast.error("Upload error: " + error.message); setUploading(false); return; }
     const { data: urlData } = supabase.storage.from("product-images").getPublicUrl(path);
-    setForm({ ...form, imagem_url: urlData.publicUrl });
+    setForm((f) => ({ ...f, imagem_url: urlData.publicUrl }));
     setUploading(false);
     toast.success("Image uploaded");
   };
@@ -79,6 +86,12 @@ const AdminBanners = () => {
       </div>
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>
+      ) : loadError ? (
+        <Card className="flex flex-col items-center justify-center py-16 text-center">
+          <h3 className="text-lg font-semibold">Could not load banners</h3>
+          <p className="text-muted-foreground mb-4">{loadError}</p>
+          <Button variant="outline" onClick={() => { setLoading(true); fetchData(); }}>Try again</Button>
+        </Card>
       ) : banners.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-16 text-center">
           <ImageIcon className="h-12 w-12 text-muted-foreground mb-3" />

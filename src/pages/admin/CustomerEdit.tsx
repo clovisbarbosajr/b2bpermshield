@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { gravarComToken } from "@/lib/gravarComToken";
 import { ArrowLeft, Plus, Trash2, Pencil } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
 
@@ -29,6 +30,13 @@ const CustomerEdit = () => {
   // seria pior que o defeito.
   const [falhouCarregar, setFalhouCarregar] = useState<string[]>([]);
   const [cliente, setCliente] = useState<any>(null);
+  // Token do bloqueio otimista — o `admin_rev` da versao que ESTA tela carregou.
+  // Ver `src/lib/gravarComToken.ts`. `useRef` porque precisa valer ja na proxima
+  // linha do mesmo handler, e um re-render nao pode ressuscitar token velho.
+  const revRef = useRef<number | null>(null);
+  // Gravacao cujo desfecho ficou DESCONHECIDO: a resposta se perdeu e o commit
+  // pode ou nao ter acontecido. Trava o proximo save.
+  const estadoIncertoRef = useRef(false);
   const [enderecos, setEnderecos] = useState<any[]>([]);
   const [tabelasPreco, setTabelasPreco] = useState<any[]>([]);
   const [taxGroups, setTaxGroups] = useState<any[]>([]);
@@ -101,6 +109,10 @@ const CustomerEdit = () => {
 
     if (c) {
       setCliente(c);
+      revRef.current = (c as any).admin_rev ?? null;
+      // A incerteza morre com a ficha a que pertencia: trocar de cliente sem
+      // remontar nao pode herdar a trava do anterior.
+      estadoIncertoRef.current = false;
       setForm({
         empresa: c.empresa || "", nome: c.nome || "", email: c.email || "",
         telefone: c.telefone || "", activity: c.activity || "",
@@ -175,6 +187,14 @@ const CustomerEdit = () => {
   };
 
   const handleSave = async (goBack = false) => {
+    // A gravacao anterior ficou sem resposta: nao da para tentar de novo as cegas.
+    // Se ela commitou, o token da tela ja nao vale e o proximo save acusaria de
+    // conflito um colega que nao existe.
+    if (estadoIncertoRef.current) {
+      toast.error("Nothing was saved: the previous save never came back, so it may or may not have gone through. Reload the page and check before saving again.");
+      return;
+    }
+
     setSaving(true);
 
     let userId = cliente?.user_id;
@@ -255,8 +275,48 @@ const CustomerEdit = () => {
     // o enum ("ativo" | "inativo" | "pendente"). O valor vem de um <Select> com
     // essas opções — é o TYPE que é mais estreito que o formulário.
     const payload = buildPayload(userId!) as any;
-    const { error } = await supabase.from("clientes").update(payload).eq("id", cliente.id);
-    if (error) { toast.error("Error saving"); setSaving(false); return; }
+
+    // BLOQUEIO OTIMISTA — mesmo defeito medido na tela de produto, mesma solucao.
+    //
+    // As tres listas abaixo (`syncPrivacyGroups`, `syncPaymentOptions`,
+    // `syncShippingOptions`) sao APAGADAS E REESCRITAS a partir do estado da TELA.
+    // Com dois admins na mesma ficha, o segundo a salvar apaga o trabalho do
+    // primeiro e os DOIS leem "Customer saved". No produto isso foi medido contra
+    // o banco (`docs/ESTRESSE-SAVE-PRODUTO.sql`); aqui a mecanica e identica, e o
+    // estrago e pior: grupo de privacidade e opcao de pagamento decidem o que o
+    // cliente VE e COMO ele paga.
+    //
+    // A funcao e a mesma do produto, com a tabela por parametro — ela levou sete
+    // rodadas de revisao para ficar certa, e uma copia divergiria.
+    if (revRef.current === null) {
+      // `=== null` e nao `!revRef.current`: `admin_rev` comeca em ZERO e zero e
+      // falsy. Testar a verdade travaria o save de TODO cliente ja cadastrado.
+      setSaving(false);
+      toast.error("Nothing was saved: this customer's version is unknown. Reload the page and try again.");
+      return;
+    }
+    const r = await gravarComToken(supabase, "clientes", cliente.id, payload, revRef.current);
+    if (r.tipo === "recusado") {
+      // O PostgREST respondeu com `code`: a transacao abortou, nada foi escrito e o
+      // token continua valendo. Corrigir o campo e salvar de novo funciona.
+      toast.error(r.mensagem);
+      setSaving(false);
+      return;
+    }
+    if (r.tipo === "incerto") {
+      estadoIncertoRef.current = true;
+      toast.error(`${r.mensagem} — the save may or may not have gone through. Reload the page and check before trying again.`);
+      setSaving(false);
+      return;
+    }
+    if (r.tipo === "conflito") {
+      // Zero linhas tem duas causas: token velho, ou o cliente foi APAGADO. Recusa
+      // ANTES das tres listas — sao elas que destroem.
+      setSaving(false);
+      toast.error("Nothing was saved: this customer was changed or removed by someone else while you had it open. Reload the page before saving again.");
+      return;
+    }
+    revRef.current = r.rev;
 
     try {
       await syncPrivacyGroups(cliente.id);

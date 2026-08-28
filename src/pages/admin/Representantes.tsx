@@ -13,6 +13,7 @@ import { Plus, Pencil, Trash2, UserCheck } from "lucide-react";
 
 const AdminRepresentantes = () => {
   const [reps, setReps] = useState<any[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -20,7 +21,13 @@ const AdminRepresentantes = () => {
   const [saving, setSaving] = useState(false);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("representantes").select("*").order("nome");
+    // `error` LIDO: sem isso, leitura recusada ou queda de rede virava lista
+    // vazia e a tela afirmava "No sales reps yet" — dizendo que a tabela está
+    // vazia quando o que houve foi erro. E `representantes` não tem UNIQUE em
+    // `email` (20260318182853:38-48): o admin recadastra o rep que "sumiu" e o
+    // banco aceita a duplicata sem reclamar.
+    const { data, error } = await supabase.from("representantes").select("*").order("nome");
+    setLoadError(error ? error.message : null);
     setReps(data ?? []);
     setLoading(false);
   };
@@ -38,7 +45,11 @@ const AdminRepresentantes = () => {
     setSaving(true);
     const payload = { ...form, telefone: form.telefone || null, comissao_percentual: Number(form.comissao_percentual) };
     if (editing) {
-      const { error } = await supabase.from("representantes").update(payload).eq("id", editing.id);
+      // `.select("id").single()`: UPDATE que não achou linha (rep apagado por
+      // outro admin enquanto este dialog estava aberto) volta `error: null` com
+      // zero linhas — a tela dizia "Sales rep updated" por cima de nada.
+      const { error } = await supabase
+        .from("representantes").update(payload).eq("id", editing.id).select("id").single();
       if (error) { toast.error(error.message); setSaving(false); return; }
       toast.success("Sales rep updated");
     } else {
@@ -50,7 +61,16 @@ const AdminRepresentantes = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this sales rep?")) return;
+    // `clientes.representante_id` é `ON DELETE SET NULL` (20260318182853:53):
+    // apagar o rep desatribui TODOS os clientes dele, em silêncio e sem volta —
+    // e o confirm só perguntava "Delete this sales rep?". Conta antes, para o
+    // admin decidir sabendo o estrago. Se a contagem falhar, NÃO apaga:
+    // perguntar sem saber o tamanho do dano é pior que recusar.
+    const { count, error: countError } = await supabase
+      .from("clientes").select("id", { count: "exact", head: true }).eq("representante_id", id);
+    if (countError) { toast.error("Could not check linked clients: " + countError.message); return; }
+    const aviso = count ? ` ${count} client(s) will be left with no sales rep.` : "";
+    if (!confirm(`Delete this sales rep?${aviso}`)) return;
     const { error } = await supabase.from("representantes").delete().eq("id", id);
     if (error) { toast.error(error.message); return; }
     toast.success("Sales rep removed"); fetchData();
@@ -64,6 +84,12 @@ const AdminRepresentantes = () => {
       </div>
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>
+      ) : loadError ? (
+        <Card className="p-6">
+          <p className="font-semibold">Sales reps could not be loaded — this list is not empty, it is unknown.</p>
+          <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => { setLoading(true); fetchData(); }}>Retry</Button>
+        </Card>
       ) : reps.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-16 text-center">
           <UserCheck className="h-12 w-12 text-muted-foreground mb-3" />

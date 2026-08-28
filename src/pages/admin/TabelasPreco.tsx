@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, DollarSign, Search, Copy } from "lucide-react";
 
@@ -38,9 +39,12 @@ const AdminTabelasPreco = () => {
   const [savingPrices, setSavingPrices] = useState(false);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("tabelas_preco").select("*").order("nome");
-    setTabelas((data as TabelaPreco[]) ?? []);
+    const { data, error } = await supabase.from("tabelas_preco").select("*").order("nome");
     setLoading(false);
+    // Sem isto, a falha de leitura virava a tela vazia "No price lists yet" —
+    // convite a recriar reguas que ja existem.
+    if (error) { toast.error("Could not load price lists: " + error.message); return; }
+    setTabelas((data as TabelaPreco[]) ?? []);
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -81,10 +85,21 @@ const AdminTabelasPreco = () => {
       .insert({ nome: `${t.nome} (copy)`, descricao: t.descricao, ativo: t.ativo, is_default: false })
       .select("id").single();
     if (error || !nova) { toast.error(error?.message ?? "Error duplicating"); return; }
-    const { data: items, error: readErr } = await supabase.from("tabela_preco_itens")
-      .select("produto_id, preco").eq("tabela_preco_id", t.id);
-    if (readErr) { toast.error("List created, but failed to read prices: " + readErr.message); fetchData(); return; }
-    if (items && items.length > 0) {
+    // PAGINADO: `tabela_preco_itens` cresce com produtos x reguas (1974 linhas hoje)
+    // e o PostgREST corta em 1000 SEM erro. Uma leitura so copiava as primeiras 1000
+    // e a tela ainda dizia "1000 price(s) copied" — a copia nascia incompleta, e o
+    // que faltasse cairia no preco base, mais caro, sem ninguem notar.
+    let items: { produto_id: string; preco: number }[];
+    try {
+      items = await fetchAllRows<{ produto_id: string; preco: number }>((from, to) =>
+        supabase.from("tabela_preco_itens").select("produto_id, preco")
+          .eq("tabela_preco_id", t.id).order("id", { ascending: true }).range(from, to));
+    } catch (e: any) {
+      toast.error("List created, but failed to read prices: " + (e?.message ?? String(e)));
+      fetchData();
+      return;
+    }
+    if (items.length > 0) {
       // SEM `origem` DE PROPOSITO — a linha nasce no default `desconhecido`.
       //
       // Duplicar copia TODAS as linhas de uma vez; ninguem "mexeu" em nenhuma.
@@ -101,19 +116,35 @@ const AdminTabelasPreco = () => {
       const { error: insErr } = await supabase.from("tabela_preco_itens").insert(rows);
       if (insErr) { toast.error("List created, but prices failed to copy: " + insErr.message); fetchData(); return; }
     }
-    toast.success(`Price list duplicated (${items?.length ?? 0} price(s) copied)`);
+    toast.success(`Price list duplicated (${items.length} price(s) copied)`);
     fetchData();
   };
 
   const openItems = async (t: TabelaPreco) => {
+    // As DUAS leituras paginadas e com erro tratado. `produtos` cresce sem limite
+    // com o catalogo e `tabela_preco_itens` com produtos x reguas: cortadas em 1000
+    // (silenciosamente), o produto que sobrasse ficava sem linha na tela — sem jeito
+    // de dar preco custom — e o preco custom que sobrasse aparecia como "sem preco".
+    // Erro na leitura NAO abre o popup: o snapshot `origPrices` vazio e o que
+    // sustenta o Save, e um snapshot mentiroso e pior que nao abrir.
+    let prods: Produto[];
+    let items: ItemPreco[];
+    try {
+      [prods, items] = await Promise.all([
+        fetchAllRows<Produto>((from, to) =>
+          supabase.from("produtos").select("id, nome, sku, preco")
+            .order("nome").order("id", { ascending: true }).range(from, to)),
+        fetchAllRows<ItemPreco>((from, to) =>
+          supabase.from("tabela_preco_itens").select("id, tabela_preco_id, produto_id, preco")
+            .eq("tabela_preco_id", t.id).order("id", { ascending: true }).range(from, to)),
+      ]);
+    } catch (e: any) {
+      toast.error("Could not open the prices of this list: " + (e?.message ?? String(e)));
+      return;
+    }
     setSelectedTabela(t);
     setItemSearch("");
-    const [prodRes, itemRes] = await Promise.all([
-      supabase.from("produtos").select("id, nome, sku, preco").order("nome"),
-      supabase.from("tabela_preco_itens").select("*").eq("tabela_preco_id", t.id),
-    ]);
-    setProdutos((prodRes.data as Produto[]) ?? []);
-    const items = (itemRes.data as ItemPreco[]) ?? [];
+    setProdutos(prods);
     setItens(items);
     const prices: Record<string, string> = {};
     items.forEach((i) => { prices[i.produto_id] = String(i.preco); });

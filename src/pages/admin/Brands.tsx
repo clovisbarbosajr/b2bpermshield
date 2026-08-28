@@ -20,9 +20,12 @@ const AdminBrands = () => {
   const [saving, setSaving] = useState(false);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("brands").select("*").order("nome");
-    setBrands(data ?? []);
+    const { data, error } = await supabase.from("brands").select("*").order("nome");
     setLoading(false);
+    // Sem isto, falha de leitura virava "No brands yet" e o admin recriava marcas
+    // que ja existem.
+    if (error) { toast.error("Could not load brands: " + error.message); return; }
+    setBrands(data ?? []);
   };
 
   useEffect(() => { fetchData(); }, []);

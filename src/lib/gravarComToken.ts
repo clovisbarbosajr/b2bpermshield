@@ -1,12 +1,17 @@
 import { gravacaoRecusadaComCerteza } from "./gravacaoRecusada";
 
 /**
- * Grava a ficha do produto com BLOQUEIO OTIMISTA.
+ * Grava uma ficha com BLOQUEIO OTIMISTA, contra a coluna `admin_rev`.
+ *
+ * `tabela` e parametro porque o MESMO defeito existe em `produtos` e em
+ * `clientes`: as duas telas apagam-e-reescrevem tabelas filhas a partir do estado
+ * da TELA. Uma copia por tela divergiria — e esta funcao levou sete rodadas de
+ * revisao para ficar certa, entao duplicar seria duplicar o risco.
  *
  * POR QUE ISTO E UMA FUNCAO, e nao tres linhas dentro do `handleSave`: enquanto
  * estava la, apagar o `.eq("admin_rev", rev)` NAO quebrava teste nenhum — a suite
  * inteira (120 verdes) passava com o bloqueio removido. Uma guarda contra perda
- * silenciosa que morre em silencio nao e guarda. Aqui ela tem `gravarProdutoComToken.test.ts`
+ * silenciosa que morre em silencio nao e guarda. Aqui ela tem `gravarComToken.test.ts`
  * em cima, e o teste reprova se o filtro ou o incremento sumirem.
  *
  * O QUE ELA IMPEDE, medido contra o banco (`docs/ESTRESSE-SAVE-PRODUTO.sql`,
@@ -32,14 +37,15 @@ export type ResultadoGravacao =
   | { tipo: "recusado"; mensagem: string }
   | { tipo: "incerto"; mensagem: string };
 
-export async function gravarProdutoComToken(
+export async function gravarComToken(
   sb: any,
+  tabela: string,
   id: string,
   payload: Record<string, any>,
   rev: number,
 ): Promise<ResultadoGravacao> {
   const { data, error, status } = await sb
-    .from("produtos")
+    .from(tabela)
     // O incremento vai no MESMO statement do filtro. Separar em dois (ler, decidir,
     // gravar) reabre a corrida no meio.
     .update({ ...payload, admin_rev: rev + 1 })
