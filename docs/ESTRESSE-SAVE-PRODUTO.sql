@@ -260,6 +260,130 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- TESTE 7 a 11 — O BLOQUEIO OTIMISTA, que e a correcao dos testes 1, 2 e 3.
+--
+-- O save passou a mandar `.eq("admin_rev", <a versao que a tela carregou>)` junto
+-- do `.eq("id", ...)`, incrementando a coluna. Se alguem gravou no meio, o UPDATE
+-- casa ZERO linhas e a tela recusa ANTES do `saveSubData` — que e quem destroi.
+--
+-- O TOKEN E UM INTEIRO, E ISSO IMPORTA PARA ESTE TESTE. A primeira versao usava
+-- `updated_at`, e o teste correspondente NAO SABIA REPROVAR: `now()` no Postgres e
+-- `transaction_timestamp()`, congelado, e este script roda numa transacao so —
+-- entao o carimbo nunca avancava e qualquer token continuava casando. O mesmo erro
+-- apareceu duas vezes, em versoes diferentes do teste. Com inteiro nao ha relogio
+-- envolvido: `admin_rev + 1` e `admin_rev + 1` em qualquer transacao.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE p uuid := (SELECT id FROM zz_ids WHERE chave = 'produto');
+        tela_de_A int;
+        tela_de_B int;
+        n int;
+BEGIN
+  -- Os dois abrem a ficha e carregam a MESMA versao. Aqui isso e literal: os dois
+  -- leem o mesmo inteiro, sem simulacao.
+  SELECT admin_rev INTO tela_de_A FROM public.produtos WHERE id = p;
+  tela_de_B := tela_de_A;
+
+  -- ADMIN A salva, com o token em dia.
+  UPDATE public.produtos SET nome = 'ZZSTRESS-editado-por-A', admin_rev = tela_de_A + 1
+   WHERE id = p AND admin_rev = tela_de_A;
+  GET DIAGNOSTICS n = ROW_COUNT;
+
+  INSERT INTO zz_resultado VALUES (
+    7, 'bloqueio otimista: o save de A, que carregou a versao atual',
+    '1 linha atingida', n || ' linha(s)',
+    CASE WHEN n = 1 THEN 'A SALVA NORMALMENTE — a guarda nao atrapalha quem esta em dia'
+         ELSE 'FALSO POSITIVO — a guarda barrou um save legitimo' END);
+
+  -- ADMIN B tenta salvar com o token que carregou ANTES de A salvar.
+  UPDATE public.produtos SET nome = 'ZZSTRESS-editado-por-B', admin_rev = tela_de_B + 1
+   WHERE id = p AND admin_rev = tela_de_B;
+  GET DIAGNOSTICS n = ROW_COUNT;
+
+  INSERT INTO zz_resultado VALUES (
+    8, 'bloqueio otimista: o save de B, com a tela velha',
+    '0 linhas atingidas (recusado)', n || ' linha(s)',
+    CASE WHEN n = 0 THEN 'BLOQUEIO FUNCIONA — B e recusado e o saveSubData nem roda'
+         ELSE 'BLOQUEIO FALHOU — B sobrescreveu A, a perda continua' END);
+END $$;
+
+INSERT INTO zz_resultado
+SELECT 9, 'quem venceu a disputa', 'o trabalho de A, que salvou primeiro',
+       nome,
+       CASE WHEN nome = 'ZZSTRESS-editado-por-A'
+            THEN 'A PRESERVADO — sem o bloqueio, aqui estaria o nome de B'
+            ELSE 'A FOI SOBRESCRITO' END
+  FROM public.produtos WHERE id = (SELECT id FROM zz_ids WHERE chave = 'produto');
+
+-- ---------------------------------------------------------------------------
+-- TESTE 10 — O FALSO POSITIVO QUE `updated_at` TERIA CAUSADO.
+--
+-- Reserva de estoque roda a cada item de pedido
+-- (`UPDATE produtos SET estoque_reservado = ...`). Com `updated_at` como token,
+-- isso invalidaria a ficha aberta do admin e ele levaria "alguem salvou antes de
+-- voce" a cada venda — mentira, e `estoque_reservado` nem esta no payload da tela.
+-- Com `admin_rev`, a reserva nao encosta no token.
+--
+-- Este teste SABE REPROVAR: se alguem um dia fizer a reserva mexer em `admin_rev`,
+-- ele acende. Nao depende de relogio nem de trigger.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE p uuid := (SELECT id FROM zz_ids WHERE chave = 'produto');
+        antes int;
+        depois int;
+BEGIN
+  SELECT admin_rev INTO antes FROM public.produtos WHERE id = p;
+  UPDATE public.produtos SET estoque_reservado = estoque_reservado + 1 WHERE id = p;
+  SELECT admin_rev INTO depois FROM public.produtos WHERE id = p;
+
+  INSERT INTO zz_resultado VALUES (
+    10, 'venda do cliente (reserva de estoque) NAO invalida o token do admin',
+    'admin_rev parado em ' || antes, 'admin_rev = ' || depois,
+    CASE WHEN depois = antes THEN 'SEM FALSO POSITIVO — o save do admin sobrevive a uma venda'
+         ELSE 'FALSO POSITIVO — o admin seria recusado a cada venda' END);
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- TESTE 11 — O FALSO NEGATIVO que a outra tentativa teria causado.
+--
+-- Os testes 1, 2 e 3 sao perdas de SUB-DADO: galeria, preco, variante. Um save
+-- assim nao muda coluna nenhuma de `produtos`. Se o token so andasse quando o dado
+-- da ficha mudasse (foi a tentativa anterior, com trigger comparando a linha), o
+-- bloqueio ficaria cego exatamente ai. `admin_rev` e incrementado pelo SAVE, nao
+-- pela mudanca — entao anda mesmo num save que nao altera mais nada.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE p uuid := (SELECT id FROM zz_ids WHERE chave = 'produto');
+        antes int;
+        depois int;
+        n int;
+BEGIN
+  SELECT admin_rev INTO antes FROM public.produtos WHERE id = p;
+
+  -- Save que so mexeu na galeria: a ficha vai com os MESMOS valores de sempre.
+  UPDATE public.produtos SET nome = nome, admin_rev = antes + 1
+   WHERE id = p AND admin_rev = antes;
+  SELECT admin_rev INTO depois FROM public.produtos WHERE id = p;
+
+  INSERT INTO zz_resultado VALUES (
+    11, 'save que so mexe em sub-dado ainda move o token',
+    'admin_rev = ' || (antes + 1), 'admin_rev = ' || depois,
+    CASE WHEN depois = antes + 1
+         THEN 'SEM FALSO NEGATIVO — a guarda cobre galeria, preco e variante'
+         ELSE 'FALSO NEGATIVO — o bloqueio ficaria cego no caso que ele existe para cobrir' END);
+
+  -- E o token velho, agora, tem que ser recusado.
+  UPDATE public.produtos SET nome = 'ZZSTRESS-nao-deveria-gravar', admin_rev = antes + 1
+   WHERE id = p AND admin_rev = antes;
+  GET DIAGNOSTICS n = ROW_COUNT;
+
+  INSERT INTO zz_resultado VALUES (
+    12, 'depois desse save, o token velho e recusado',
+    '0 linhas', n || ' linha(s)',
+    CASE WHEN n = 0 THEN 'ok' ELSE 'GUARDA FUROU' END);
+END $$;
+
+-- ---------------------------------------------------------------------------
 -- RELATORIO
 -- ---------------------------------------------------------------------------
 SELECT ordem, teste, esperado, obtido, veredito

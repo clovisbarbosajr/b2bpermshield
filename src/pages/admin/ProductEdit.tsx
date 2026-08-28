@@ -16,6 +16,8 @@ import { ArrowLeft, Save, Upload, Plus, Trash2, Image as ImageIcon, FileText, Lo
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { categoryTreeOptions } from "@/lib/categoryTree";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { gravacaoRecusadaComCerteza } from "@/lib/gravacaoRecusada";
+import { gravarProdutoComToken } from "@/lib/gravarProdutoComToken";
 
 // O PostgREST corta em 1000 linhas SEM erro. Este wrapper pagina e devolve o
 // mesmo formato `{ data, error }` das outras leituras, para caber no `Promise.all`
@@ -66,6 +68,14 @@ const ProductEdit = () => {
   // Id do produto que ESTE save criou. Ver o comentario no `handleSave`: existe
   // para a segunda tentativa nao criar um segundo produto.
   const criadoIdRef = useRef<string | null>(null);
+  // `admin_rev` da versao que ESTA tela carregou — o token do bloqueio otimista.
+  // `useRef` porque ele precisa valer ja na proxima linha do mesmo handler, e
+  // porque um re-render nao pode ressuscitar um token velho.
+  const revRef = useRef<number | null>(null);
+  // Gravacao cujo desfecho ficou DESCONHECIDO — a resposta se perdeu e o commit
+  // pode ou nao ter acontecido. Trava o proximo save: sem saber se gravou, tentar
+  // de novo ou cria produto duplicado ou acusa um colega que nao existe.
+  const estadoIncertoRef = useRef(false);
   const [uploading, setUploading] = useState(false);
   const [activeTab, setActiveTab] = useState("product");
   const [meta, setMeta] = useState<{ created_at?: string; updated_at?: string }>({});
@@ -207,6 +217,14 @@ const ProductEdit = () => {
     });
 
     setMeta({ created_at: (data as any).created_at, updated_at: (data as any).updated_at });
+    // Token do bloqueio otimista, junto com o resto do carregamento: e a versao
+    // que o admin esta vendo na tela.
+    revRef.current = (data as any).admin_rev ?? null;
+    // A incerteza morre com a ficha a que ela pertencia. Sem isto, pular do produto
+    // A para o B pelo historico do navegador (a rota `:id` nao tem `key`, entao a
+    // instancia sobrevive) carregaria B com token novo e MESMO ASSIM recusaria o
+    // save, com uma mensagem que e falsa para B.
+    estadoIncertoRef.current = false;
 
     // TRES DESTAS LEITURAS ESCALAM COM O NUMERO DE CLIENTES, E O PostgREST CORTA
     // EM 1000 LINHAS SEM ERRO NENHUM.
@@ -428,6 +446,16 @@ const ProductEdit = () => {
       return;
     }
 
+    // A GRAVACAO ANTERIOR FICOU SEM RESPOSTA. Nao da para tentar de novo as cegas:
+    // se ela commitou, um novo INSERT cria produto duplicado e um novo UPDATE
+    // acusa um colega que nao existe. Recarregar e conferir e a unica saida
+    // honesta — e o `criadoIdRef` nao ajuda aqui, porque ele so e preenchido com
+    // a resposta que nao chegou.
+    if (estadoIncertoRef.current) {
+      toast.error("Nothing was saved: the previous save never came back, so it may or may not have gone through. Reload the products list and check before saving again.");
+      return;
+    }
+
     setSaving(true);
 
     const payload: any = {
@@ -452,10 +480,15 @@ const ProductEdit = () => {
     // `criadoIdRef`: SEGUNDA tentativa nao cria SEGUNDO produto.
     //
     // A validacao acima cobre o que da para checar na tela. O que sobra falha no
-    // servidor — RLS, rede, constraint — e a falha vem DEPOIS do INSERT, ja com o
-    // produto criado. Sem esta memoria, o Save de novo (que e exatamente o que a
-    // mensagem manda fazer) inseria outro. Guardando o id, a repeticao vira UPDATE
-    // do mesmo produto.
+    // servidor, e ai ha DOIS casos diferentes:
+    //
+    //   1. o INSERT passou e o `saveSubData` falhou depois. O produto existe e o
+    //      id esta na mao — `criadoIdRef` guarda, e o Save de novo vira UPDATE do
+    //      mesmo produto. E o caso comum, e e para ele que esta memoria existe;
+    //   2. o proprio INSERT nao devolveu resposta. Ai `criadoIdRef` NAO ajuda: ele
+    //      so e preenchido com a resposta que nao chegou, e nao da para saber se o
+    //      produto foi criado. Quem cobre isso e o `estadoIncertoRef`, que trava o
+    //      proximo Save em vez de deixar nascer um duplicado.
     //
     // `useRef` e nao `useState` de proposito: o valor precisa valer JA na proxima
     // linha deste mesmo handler, e `setState` so aparece no render seguinte.
@@ -468,13 +501,97 @@ const ProductEdit = () => {
     let productId = criadoIdRef.current ?? (isNew ? null : id);
 
     if (!productId) {
-      const { data, error } = await supabase.from("produtos").insert(payload).select("id").single();
-      if (error) { toast.error(error.message); setSaving(false); return; }
+      const { data, error, status } = await supabase.from("produtos").insert(payload)
+        .select("id, admin_rev").single();
+      if (error) {
+        // Recusa CERTA e so a que vem com `code` — o PostgREST respondeu e sabe o
+        // desfecho. A regra e o porque estao em `src/lib/gravacaoRecusada.ts`; nao
+        // duplico aqui porque ja errei essa regra duas vezes, e da segunda a prosa
+        // no call site tinha derivado da funcao.
+        //
+        // A diferenca importa muito aqui: `criadoIdRef` so e preenchido com a
+        // resposta. Sem ela, o proximo Save recalcula `productId = null` e faz um
+        // SEGUNDO INSERT — produto duplicado e ATIVO no catalogo do cliente, com o
+        // primeiro orfao, sem sub-dado nenhum. E recarregar nao resolve: em
+        // `/products/new` o `fetchProduct` nem roda, entao volta um formulario em
+        // branco e o produto criado nao aparece NESTA TELA. Ele aparece na lista e
+        // no catalogo do cliente — nasce ATIVO —, e e para la que o toast manda
+        // olhar.
+        if (!gravacaoRecusadaComCerteza(status, error)) {
+          estadoIncertoRef.current = true;
+          toast.error(`${error.message} — the product may have been created. Check the products list before trying again; saving now could create a duplicate.`);
+        } else {
+          toast.error(error.message);
+        }
+        setSaving(false);
+        return;
+      }
       productId = data.id;
       criadoIdRef.current = data.id;
+      revRef.current = (data as any).admin_rev ?? 0;
     } else {
-      const { error } = await supabase.from("produtos").update(payload).eq("id", productId);
-      if (error) { toast.error(error.message); setSaving(false); return; }
+      // BLOQUEIO OTIMISTA — dois admins na mesma ficha nao se apagam mais.
+      //
+      // MEDIDO no banco real (27/ago/2026, `docs/ESTRESSE-SAVE-PRODUTO.sql`): com
+      // A e B com o mesmo produto aberto, o save de B apagava o trabalho de A e os
+      // DOIS liam "Product saved". O `saveSubData` faz DELETE + INSERT a partir do
+      // estado da TELA, entao quem salva por ultimo reescreve tudo com um retrato
+      // velho — some imagem, some variante (levando o vinculo do pedido junto) e
+      // preco apagado reaparece.
+      //
+      // `admin_rev` E NAO `updated_at`, que ja existia. Tentei `updated_at` e ele
+      // falha dos DOIS lados — a migration `20260827030000` guarda o detalhe:
+      //   * FALSO POSITIVO: o trigger de `produtos` carimba em qualquer escrita,
+      //     inclusive a reserva de estoque de cada item de pedido. Cliente
+      //     comprando durante a edicao = save do admin recusado por engano;
+      //   * FALSO NEGATIVO: fazer o trigger so carimbar quando o dado muda desliga
+      //     o bloqueio no caso que ele existe para cobrir — save que so mexe em
+      //     galeria, variante ou preco nao altera coluna nenhuma de `produtos`.
+      // `admin_rev` significa uma coisa so: "a tela do admin gravou". Nenhum outro
+      // escritor toca nela, entao nao tem nenhum dos dois problemas.
+      //
+      // Guardar `productId` no `criadoIdRef` e o `admin_rev` aqui e o que faz a
+      // segunda tentativa funcionar: os dois andam juntos a cada gravacao.
+
+      // `=== null` E NAO `!revRef.current`: `admin_rev` e NUMERO e comeca em ZERO
+      // para todo produto ja existente. Testar a verdade do valor travaria o save
+      // de todos eles com "version is unknown" — o teste errado aqui derrubaria o
+      // catalogo inteiro, nao um caso de borda.
+      if (revRef.current === null) {
+        setSaving(false);
+        toast.error("Nothing was saved: this product's version is unknown. Reload the page and try again.");
+        return;
+      }
+      const revAtual = revRef.current;
+      const r = await gravarProdutoComToken(supabase, productId, payload, revAtual);
+      if (r.tipo === "recusado") {
+        // O PostgREST respondeu com `code`: a transacao abortou, nada foi escrito e
+        // o token da tela continua valendo. Corrigir o campo e salvar de novo
+        // funciona — nao mexer em ref nenhum aqui e o comportamento certo.
+        toast.error(r.mensagem);
+        setSaving(false);
+        return;
+      }
+      if (r.tipo === "incerto") {
+        // Sem resposta estruturada nao da para saber se commitou. Tentar de novo as
+        // cegas acusaria de conflito um colega que nao existe.
+        estadoIncertoRef.current = true;
+        toast.error(`${r.mensagem} — the save may or may not have gone through. Check the products list before trying again.`);
+        setSaving(false);
+        return;
+      }
+      if (r.tipo === "conflito") {
+        // Recusa ANTES do `saveSubData` — e ele que destroi.
+        //
+        // "changed or removed", e nao "someone else saved": zero linhas tem DUAS
+        // causas. O token pode nao ter casado, mas o produto tambem pode ter sido
+        // APAGADO (`Produtos.tsx` deleta). Acusar de "salvou" quem apagou seria
+        // mentira, e a acao que o admin toma e a mesma nos dois casos.
+        setSaving(false);
+        toast.error("Nothing was saved: this product was changed or removed by someone else while you had it open. Reload the page before saving again.");
+        return;
+      }
+      revRef.current = r.rev;
     }
 
     // Save sub-data — se um insert de privacidade/preço falhar, avisa e NÃO declara

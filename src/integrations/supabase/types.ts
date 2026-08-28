@@ -2335,6 +2335,7 @@ export type Database = {
       }
       produtos: {
         Row: {
+          admin_rev: number
           altura: number | null
           ativo: boolean
           b2bwave_id: string | null
@@ -2377,6 +2378,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          admin_rev?: number
           altura?: number | null
           ativo?: boolean
           b2bwave_id?: string | null
@@ -2419,6 +2421,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          admin_rev?: number
           altura?: number | null
           ativo?: boolean
           b2bwave_id?: string | null

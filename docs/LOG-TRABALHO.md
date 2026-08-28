@@ -3505,3 +3505,92 @@ produto, nao correcao obvia:
  (b) aceitar "ultimo salva vence" e documentar;
  (c) transacao no servidor (RPC unica para o save inteiro) — resolve a atomicidade
      mas NAO a sobrescrita, que e o problema aqui.
+
+## 28/08 — Bloqueio otimista no save de produto (7 rodadas de revisao)
+
+Fecha a perda por escrita concorrente MEDIDA em 27/08 contra o banco real
+(`docs/ESTRESSE-SAVE-PRODUTO.sql`, testes 1/2/3): dois admins com a mesma ficha
+aberta, o segundo a salvar apaga o trabalho do primeiro, e os DOIS leem
+"Product saved".
+
+### O que entrou
+
+- `supabase/migrations/20260827030000_produto_admin_rev.sql` — coluna
+  `admin_rev integer NOT NULL DEFAULT 0` em `produtos`. `ADD COLUMN` com default e
+  O(1) desde o PG11, nao reescreve a tabela;
+- `src/lib/gravarProdutoComToken.ts` — o UPDATE com `.eq("admin_rev", rev)` e o
+  incremento no MESMO statement, devolvendo quatro desfechos distintos:
+  `ok` / `conflito` / `recusado` / `incerto`;
+- `src/lib/gravacaoRecusada.ts` — decide se um erro de escrita significa "com
+  certeza nao gravou";
+- testes: 11 + 22 casos, e o `ProductEdit` ligado nas duas funcoes.
+
+### As sete rodadas, e por que foram sete
+
+Cada uma achou algo REAL, e as cinco primeiras acharam defeito de DESENHO — a
+correcao estava errada, nao o diagnostico:
+
+1. `updated_at` como token da FALSO POSITIVO: o trigger de `produtos` nao tem lista
+   de coluna e carimba na reserva de estoque de CADA item de pedido. Cliente
+   comprando durante a edicao = save do admin recusado por engano.
+2. Consertar isso fazendo o trigger comparar a linha da FALSO NEGATIVO: save que so
+   mexe em galeria, preco ou variante nao altera coluna de `produtos`, o carimbo
+   nao anda, e o bloqueio fica cego no unico caso que ele existe para cobrir — os
+   testes 1/2/3 sao todos perda de SUB-DADO. E o teste que eu escrevi para provar
+   essa correcao passava igual SEM ela.
+3. Trocado por `admin_rev`, coluna com um escritor so. Sobrou: resposta perdida
+   depois do commit deixava o token defasado, e o retry acusava um colega que nao
+   existe.
+4. A correcao disso matava o token em QUALQUER erro — e so falha de TRANSPORTE e
+   ambigua. Erro do servidor significa transacao abortada, token ainda valido:
+   virava beco sem saida num erro de digitacao (`99999999999` no estoque estoura o
+   `integer`), com a unica saida sendo recarregar e perder as onze abas.
+5. `status === 0` nao cobria 5xx de gateway (corpo HTML, sem `code`) nem `res.ok`
+   com corpo nao-JSON (status 200 COM `error`).
+6. **O bloqueador.** O bloqueio nao tinha verificacao executavel: apagar o
+   `.eq("admin_rev", revAtual)` deixava os 120 testes VERDES. Uma guarda contra
+   perda silenciosa que morre em silencio nao e guarda. E a regra da rodada 5
+   exigia 4xx, mandando erro de concorrencia (`57014`, `40001`, `40P01` — que
+   chegam como 5xx COM `code`) para o balde do "incerto", travando a tela num erro
+   que com certeza abortou.
+7. Tres imprecisoes de texto. Nenhum caminho de codigo errado.
+
+A curva foi estrutura -> logica -> prosa. Criterio de parada da regra: a rodada 7
+nao devolveu erro no que foi mexido.
+
+### A regra final, e por que ela e `!!error?.code`
+
+`code` preenchido = o PostgREST respondeu com JSON estruturado, ou seja a
+requisicao chegou nele e o desfecho e conhecido: transacao abortada. Faixa de
+status NAO entra, e errar isso ja custou duas versoes. Sem `code`: falha de fetch
+(`status 0`), 5xx de gateway (corpo HTML) e `res.ok` nao-JSON — nesses a escrita
+pode ter ido, e o postgrest-js se recusa a repetir POST/PATCH por isso mesmo.
+
+### Verificacao — mutantes, nao leitura
+
+A licao da rodada 6 virou metodo. Cada guarda foi testada apagando-a:
+
+  apagar `.eq("admin_rev")`         -> 1 teste falha
+  nao incrementar o token           -> 1 teste falha
+  conflito tratado como sucesso     -> 2 testes falham
+  regra virar `status !== 0`        -> 10 testes falham
+
+`npm test`: 137 testes, 188 migrations, 191 .sql parseados. `build` ok.
+
+### Riscos reais que a revisao pegou e que NAO eram de texto
+
+- o bloco de VERIFICACAO da migration somava `estoque_reservado` numa linha de
+  producao SORTEADA. Sessao caindo antes do ROLLBACK deixaria estoque real
+  corrompido em silencio, sem saber qual produto. Agora cria a propria linha
+  `ZZVERIF-`, inativa;
+- `admin_rev` comeca em 0, e `0` e falsy em JS. `if (!revRef.current)` teria
+  travado o save de TODO produto existente. Esta como `=== null`.
+
+### PENDENTE
+
+`CustomerEdit` tem o MESMO padrao de DELETE + INSERT a partir da tela e NAO tem
+bloqueio. Nao entrou nesta leva de proposito — o desenho agora esta provado e
+extraido, entao aplicar la e barato. Decisao do dono sobre quando.
+
+ORDEM: **1o o SQL** (`20260827030000`), **2o o Publish**. Invertido, a tela de
+produto para de salvar por completo.
