@@ -3326,3 +3326,85 @@ PENDENTE para a proxima sessao, com o dono presente:
   `produto_variantes` (essa ultima leva o vinculo dos pedidos junto, por cascata);
 - comando de limpeza pronto ANTES de comecar, rodado no fim e tambem se falhar no
   meio.
+
+## 27/08 — Varredura das mesmas classes de defeito no resto do admin
+
+Cacador (4 recortes) + cetico procurando, FORA de `ProductEdit`/`CustomerEdit`, as
+quatro classes ja confirmadas nesta sessao: (A) apaga-e-reescreve com estado
+incompleto, (B) leitura cortada em 1000, (C) grava em coluna inexistente, (D)
+update por id sem o dono. Cinco confirmados, todos corrigidos abaixo.
+
+### CRITICO — `Import Addresses` nunca importou um endereco
+
+`tools/ImportAddresses.tsx` gravava `pais` em `enderecos`. **A coluna nunca
+existiu** — nem no CREATE TABLE nem em nenhum ALTER. Como o campo era sempre
+preenchido (`|| "United States"`), TODA linha voltava `PGRST204`. O
+`(supabase.from("enderecos") as any)` e o que impedia o `tsc` de acusar.
+
+A ferramenta de migracao de enderecos do B2BWave estava 100% morta desde que foi
+escrita. Isso pesa porque o PermShield vai SUBSTITUIR o B2BWave e cliente sem
+endereco nao recebe pedido: o operador rodava, via a tela toda vermelha, e so podia
+concluir "o sistema esta com problema".
+
+Corrigido: campo removido. O `country` da planilha fica sem destino — `enderecos`
+nao tem coluna de pais, e `clientes.pais` e um valor SO por cliente (a ultima linha
+da planilha ganharia de todas). Registrado no codigo como decisao de produto
+pendente. O texto de ajuda parou de listar `country` como obrigatorio.
+
+Junto, no mesmo arquivo: a resolucao email->id usava `.in("email", emails)` sem
+`.range()` e com o `error` descartado — os dois furos davam a MESMA mensagem falsa
+("Customer not found") para cliente que existe. Trocado pelo padrao que o
+`ImportCustomers` ja usava: le a base inteira com `fetchAllRows`, cancela a
+importacao no erro. Chave do mapa agora em minusculas nos dois lados.
+
+### Tres leituras cortadas em 1000
+
+- `Clientes.tsx:51` — `clientes`. A tela INTEIRA e feita em memoria sobre esse
+  array: paginacao, 17 filtros e Export CSV. Cortado, o cliente ausente nao existe
+  em lugar nenhum da tela e o Export ainda anuncia o total errado como se fosse o
+  total. O estrago pratico: o admin busca pelo e-mail, nao acha, e CADASTRA
+  DUPLICATA — nao ha UNIQUE em `clientes.email`.
+- `Clientes.tsx:79` — `pedidos`, que alimenta "Last Order" e os filtros "Latest
+  Order From/To". A base ja tem ~884 pedidos (comentario do `Pedidos.tsx`), a 88%
+  do teto. Cliente cujo ultimo pedido cai fora dos 1000 mais recentes DA BASE fica
+  em branco e e lido como quem nunca comprou; os filtros de data escondem essa gente.
+- `Clientes.tsx:70` — `cliente_privacy_groups`. Vinculo incompleto faz o filtro
+  "Privacy group" ESCONDER cliente que esta no grupo. Privacidade decide quem ve
+  qual preco, entao a auditoria feita nesta tela e a que sai errada.
+- `OrderDetail.tsx:99` — `clientes` do seletor "Customer *" (so em `isNew`),
+  ordenado por empresa. Acima de 1000, o cliente do fim do alfabeto sumia do
+  dropdown de forma determinista, sem erro e sem lista vazia. Nao dava para criar
+  pedido manual para ele, e nada na tela explicava por que.
+
+### ERRO QUE EU IA INTRODUZIR, pego antes de commitar
+
+Paginar `clientes` faria o `.in("cliente_id", clienteIds)` das duas leituras
+seguintes mandar MILHARES de UUIDs na query string e bater em 414 (URI Too Long).
+Eu teria trocado "resposta errada em silencio" por "tela quebrada". O `.in` foi
+removido: sao duas colunas, ler a tabela inteira e mais simples e mais barato que
+montar o filtro em lotes.
+
+### ERRO MEU, confirmado pelo cetico e medido no node
+
+Trocar `.order("created_at", desc)` do banco por `sort` em memoria com
+`localeCompare` NAO reproduz a ordem. O Postgres OMITE a fracao quando os
+microssegundos sao zero, entao "12:00:00+00:00" e "12:00:00.750000+00:00" divergem
+em `+` contra `.`, e a colacao ordena pontuacao antes de simbolo — o inverso do
+code point. Medido:
+
+  "2026-08-27T12:00:00+00:00".localeCompare("2026-08-27T12:00:00.750000+00:00") === 1
+
+O cliente do segundo cheio subia ao topo como se fosse o mais recente. Trocado por
+comparacao relacional (`<`/`>`), que em ISO-8601 e a ordem cronologica sem excecao.
+Grep confirmou que nao ha outro `localeCompare` sobre data no `src/`. O de
+`OrderDetail` e sobre nome de empresa — ali esta certo e ficou.
+
+### Ciclo, conforme a regra nova
+
+Rodada 1: 5 derrubados, 1 confirmado (o `localeCompare`). Corrigido, voltou o
+ciclo. Rodada 2, escopo so na correcao: LIMPO nos tres verificadores.
+Verificacao do projeto a cada rodada: `typecheck` limpo, `vitest` 104/104,
+`build` ok.
+
+NAO entrou (decisao do dono): o desconto-base do `ImportProductDiscounts`, que nao
+tem destino no schema.

@@ -16,6 +16,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { categoryPath } from "@/lib/categoryTree";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getProductPrice } from "@/lib/pricing";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import { toast } from "sonner";
 import { ORDER_STATUSES, statusLabel, canonicalStatus } from "@/lib/orderStatuses";
 
@@ -95,11 +96,24 @@ const OrderDetail = () => {
     setAdminEmails(cfg?.email_new_orders || cfg?.email_contato || "");
     // Para criar pedido pelo admin precisamos da lista de clientes.
     if (isNew) {
-      const { data: cls } = await supabase
-        .from("clientes")
-        .select("id, nome, empresa, email, telefone, tabela_preco_id")
-        .order("empresa");
-      setAllClientes(cls ?? []);
+      // PAGINADO: cortado em 1000 e ordenado por empresa, o cliente do fim do
+      // alfabeto sumia do unico <Select> de "Customer *" — de forma determinista,
+      // sem erro e sem lista vazia. O admin nao conseguia criar pedido manual para
+      // ele e nada na tela explicava por que. `handleCreateOrder` exige
+      // `selectedClienteId`, entao o caminho ficava fechado.
+      // A mesma lista monta o e-mail/SMS de pedido novo mais abaixo.
+      let cls: any[];
+      try {
+        cls = await fetchAllRows<any>((from, to) =>
+          supabase.from("clientes")
+            .select("id, nome, empresa, email, telefone, tabela_preco_id")
+            .order("id", { ascending: true }).range(from, to));
+        cls.sort((a, b) => String(a.empresa ?? "").localeCompare(String(b.empresa ?? "")));
+      } catch (e: any) {
+        toast.error("Could not load customers: " + (e?.message ?? e));
+        cls = [];
+      }
+      setAllClientes(cls);
       // Pré-seleciona o cliente quando aberto via "Create Order" do cadastro (?customer=ID).
       const customerParam = searchParams.get("customer");
       if (customerParam && (cls ?? []).some((c) => c.id === customerParam)) {

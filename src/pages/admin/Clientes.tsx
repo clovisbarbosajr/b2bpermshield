@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Search, ChevronLeft, ChevronRight, Plus, Mail, Download, X, Pencil, Eye, Trash2, Check, Users } from "lucide-react";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -43,12 +44,47 @@ const AdminClientes = () => {
   const [inviting, setInviting] = useState(false);
 
   const fetchData = async () => {
-    const [{ data }, { data: pl }, { data: repData }, { data: pg }, { data: acts }] = await Promise.all([
-      // Ordena por data de cadastro (mais recente primeiro) para espelhar o B2BWave (clone).
+    // ESTA TELA INTEIRA E FEITA EM MEMORIA SOBRE `clientes`: a paginacao, os 17
+    // filtros e o Export CSV. Se a leitura vier cortada, o cliente que faltou nao
+    // existe em lugar nenhum daqui — e o Export ainda anuncia o total errado como
+    // se fosse o total.
+    //
+    // O estrago pratico nao e so exibicao: o admin busca um cliente antigo pelo
+    // e-mail, nao acha, e CADASTRA DUPLICATA — nao ha UNIQUE em `clientes.email`
+    // (o proprio `ImportCustomers` documenta isso).
+    //
+    // `.order("id")` porque paginar exige coluna unica; a ordem por data de
+    // cadastro que a tela usa e feita em memoria logo abaixo.
+    let data: any[];
+    try {
+      data = await fetchAllRows<any>((from, to) =>
+        supabase.from("clientes").select("*")
+          .order("id", { ascending: true }).range(from, to));
+      // Mais recente primeiro, espelhando o B2BWave (clone).
       // Sub-logins (funcionários, parent_customer_id preenchido) APARECEM na lista —
       // o admin precisa gerenciá-los (reset de senha etc.) — mas marcados com badge
       // "Employee of <empresa>" pra não parecerem empresa duplicada.
-      supabase.from("clientes").select("*").order("created_at", { ascending: false }),
+      // COMPARACAO RELACIONAL, NAO `localeCompare`.
+      //
+      // `created_at` e TIMESTAMPTZ e o PostgREST devolve ISO-8601 com offset. Quando
+      // os microssegundos sao exatamente zero, o Postgres OMITE a fracao:
+      // "12:00:00+00:00" em vez de "12:00:00.750000+00:00". Nesse ponto as duas
+      // strings divergem em `+` contra `.`, e a colacao do `localeCompare` ordena
+      // pontuacao antes de simbolo — o INVERSO do code point. Medido:
+      // `"...12:00:00+00:00".localeCompare("...12:00:00.750000+00:00")` devolve 1,
+      // entao o cliente do segundo cheio subia para o topo como se fosse o mais
+      // recente. Com `<`/`>` a ordem ISO e a ordem cronologica, sem excecao.
+      //
+      // Empate: `Array.sort` e estavel e a leitura vem por `id` asc, entao empate
+      // fica deterministico — a query original nao tinha desempate nenhum.
+      data.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+    } catch (e: any) {
+      // FALHA ALTO. Lista vazia sem aviso seria lida como "nao ha cliente".
+      toast.error("Could not load customers: " + (e?.message ?? e));
+      setLoading(false);
+      return;
+    }
+    const [{ data: pl }, { data: repData }, { data: pg }, { data: acts }] = await Promise.all([
       supabase.from("tabelas_preco").select("id, nome").eq("ativo", true),
       supabase.from("representantes").select("id, nome").eq("ativo", true).order("nome"),
       supabase.from("privacy_groups").select("id, nome").eq("ativo", true),
@@ -62,26 +98,52 @@ const AdminClientes = () => {
     setLoading(false);
 
     if (data && data.length > 0) {
-      const clienteIds = data.map((c: any) => c.id);
+      // SEM `.in("cliente_id", clienteIds)`.
+      //
+      // O filtro por lista de ids ia inteiro na URL. Enquanto `clientes` vinha
+      // cortado em 1000 isso passava; agora que a leitura e completa, a mesma
+      // linha mandaria milhares de UUIDs na query string e bateria em 414
+      // (URI Too Long) — eu teria trocado "resposta errada em silencio" por
+      // "tela quebrada" se tivesse so paginado e deixado o `.in` no lugar.
+      //
+      // Ler a tabela inteira e mais simples e mais barato que montar o filtro em
+      // lotes: sao duas colunas, e o resultado e agrupado em memoria do mesmo
+      // jeito. O `?? []` cobre cliente sem vinculo e sem pedido.
 
-      // Vinculo cliente <-> grupo de privacidade. NAO era carregado, por isso o
-      // filtro "Privacy group" existia na tela e nao filtrava nada.
-      const { data: vinculos } = await supabase
-        .from("cliente_privacy_groups").select("cliente_id, privacy_group_id")
-        .in("cliente_id", clienteIds);
-      const porCliente: Record<string, string[]> = {};
-      (vinculos ?? []).forEach((v: any) => {
-        (porCliente[v.cliente_id] ??= []).push(v.privacy_group_id);
-      });
-      setGruposPorCliente(porCliente);
+      // AS DUAS LEITURAS ABAIXO TAMBEM ESTOURAM 1000 — e cada uma faz o filtro
+      // RESPONDER ERRADO, sem lista vazia nem erro que denuncie.
+      //
+      //   `cliente_privacy_groups` e vinculo N-para-N: uma linha por cliente x
+      //   grupo. Incompleto, o filtro "Privacy group" faz `includes(...) === false`
+      //   e ESCONDE cliente que esta no grupo. Privacidade decide quem ve qual
+      //   preco, entao e a auditoria feita aqui que sai errada.
+      //
+      //   `pedidos` cresce sozinho e a base ja tem ~884 (ver `Pedidos.tsx`). Sem
+      //   paginar, so os 1000 mais recentes DA BASE INTEIRA voltam: cliente cujo
+      //   ultimo pedido esta fora disso fica com "Last Order" em branco e e lido
+      //   como quem nunca comprou. Os filtros "Latest Order From/To" fazem
+      //   `if (!ultimo) return false` e escondem essa gente.
+      try {
+        const vinculos = await fetchAllRows<any>((from, to) =>
+          supabase.from("cliente_privacy_groups").select("cliente_id, privacy_group_id")
+            .order("id", { ascending: true }).range(from, to));
+        const porCliente: Record<string, string[]> = {};
+        vinculos.forEach((v: any) => {
+          (porCliente[v.cliente_id] ??= []).push(v.privacy_group_id);
+        });
+        setGruposPorCliente(porCliente);
 
-      const { data: orders } = await supabase
-        .from("pedidos").select("cliente_id, created_at").in("cliente_id", clienteIds)
-        .order("created_at", { ascending: false });
-      if (orders) {
+        const orders = await fetchAllRows<any>((from, to) =>
+          supabase.from("pedidos").select("cliente_id, created_at")
+            .order("created_at", { ascending: false }).order("id", { ascending: true })
+            .range(from, to));
         const map: Record<string, string> = {};
         orders.forEach((o: any) => { if (!map[o.cliente_id]) map[o.cliente_id] = o.created_at; });
         setLastOrders(map);
+      } catch (e: any) {
+        // Aviso em vez de silencio: a lista de clientes continua util, mas os
+        // filtros de grupo e de data de pedido passariam a mentir caladamente.
+        toast.error("Privacy groups / last order did not load — those filters are unreliable: " + (e?.message ?? e));
       }
     }
   };

@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 const TEMPLATE_HEADERS = ["customer_email", "address", "address2", "city", "state", "country", "zip", "is_primary"];
 const TEMPLATE_ROW = ["john@acme.com", "123 Main St", "Suite 100", "New York", "NY", "United States", "10001", "yes"];
 
@@ -37,15 +38,38 @@ const ImportAddresses = () => {
     setImporting(true);
     const res: Result[] = [];
 
-    const emails = [...new Set(rows.map((r) => r["customer_email"]?.trim()).filter(Boolean))];
-    const { data: clientes } = await supabase.from("clientes").select("id, email").in("email", emails);
+    // Le a base INTEIRA de e-mails, igual ao `ImportCustomers`. O `.in(emails)`
+    // que estava aqui tinha dois furos, e os dois davam a MESMA mensagem falsa
+    // ("Customer not found") para cliente que existe:
+    //   * sem `.range()`, o PostgREST corta em 1000 e do 1001 em diante a chave
+    //     nao entra no mapa;
+    //   * o `error` nao era destruturado, entao uma planilha grande estourando o
+    //     tamanho da URL (414) devolvia zero e a importacao INTEIRA falhava
+    //     dizendo que nenhum dos clientes existe.
+    // Baixar so a coluna `email` de todos custa dezenas de KB e nao depende nem do
+    // tamanho da URL nem do limite de linhas.
     const emailMap: Record<string, string> = {};
-    (clientes ?? []).forEach((c: any) => { emailMap[c.email] = c.id; });
+    try {
+      const todos = await fetchAllRows<{ id: string; email: string | null }>((from, to) =>
+        supabase.from("clientes").select("id, email")
+          .order("id", { ascending: true }).range(from, to));
+      for (const c of todos) {
+        if (c.email) emailMap[String(c.email).trim().toLowerCase()] = c.id;
+      }
+    } catch (e: any) {
+      // FALHA ALTO. Seguir com o mapa vazio marcaria a planilha inteira como
+      // "Customer not found" — erro que parece dado ruim e nao e.
+      toast.error("Could not read customers — import cancelled: " + (e?.message ?? e));
+      setImporting(false);
+      return;
+    }
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const email = r["customer_email"]?.trim();
-      const clienteId = email ? emailMap[email] : undefined;
+      // `toLowerCase` dos dois lados: o mapa e montado em minusculas. Sem isto,
+      // "Joao@Acme.com" na planilha nao acha "joao@acme.com" no banco.
+      const clienteId = email ? emailMap[email.toLowerCase()] : undefined;
 
       if (!clienteId) {
         res.push({ row: i + 2, email: email || "â€”", status: "error", message: "Customer not found" });
@@ -58,7 +82,16 @@ const ImportAddresses = () => {
         complemento: r["address2"] || null,
         cidade: r["city"] || "",
         estado: r["state"] || "",
-        pais: r["country"] || "United States",
+        // `pais` FOI REMOVIDO — a coluna nunca existiu em `enderecos`.
+        //
+        // Como o campo era sempre preenchido (`|| "United States"`), TODA linha
+        // voltava `PGRST204` e esta ferramenta nunca importou um endereco sequer.
+        // O `as any` no `.from("enderecos")` e o que impedia o `tsc` de acusar.
+        //
+        // O `country` da planilha fica sem destino: `enderecos` nao tem coluna de
+        // pais e `clientes.pais` e um valor SO por cliente — escrever ali a partir
+        // de um import de endereco faria a ultima linha da planilha ganhar de
+        // todas as outras. Se o dono quiser guardar isso, e decisao de produto.
         cep: r["zip"] || "",
         principal: (r["is_primary"] || "").toLowerCase() === "yes",
       });
@@ -102,8 +135,11 @@ const ImportAddresses = () => {
           <p className="mt-2 text-sm text-muted-foreground">Download the CSV template.</p>
           <Button variant="outline" className="mt-4 w-full gap-2" onClick={downloadTemplate}><Download className="h-4 w-4" /> Download Template</Button>
           <div className="mt-4 rounded border p-3 text-xs text-muted-foreground space-y-1">
-            <p><strong>Required:</strong> customer_email, address, city, state, country, zip</p>
+            <p><strong>Required:</strong> customer_email, address, city, state, zip</p>
             <p><strong>Optional:</strong> address2, is_primary (yes/no)</p>
+            {/* `country` continua no template para o export do B2BWave colar sem
+                edicao, mas nao e gravado: `enderecos` nao tem coluna de pais. */}
+            <p><strong>Ignored:</strong> country (no country column on addresses)</p>
           </div>
         </Card>
       </div>
