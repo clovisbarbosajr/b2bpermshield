@@ -3594,3 +3594,81 @@ extraido, entao aplicar la e barato. Decisao do dono sobre quando.
 
 ORDEM: **1o o SQL** (`20260827030000`), **2o o Publish**. Invertido, a tela de
 produto para de salvar por completo.
+
+## 28/08 — Permissao de sub-login, portal e o resto do admin
+
+### O crítico que o dono levantou
+
+Ele pediu atencao no modelo de sub-login ("o dono da loja diz o que quem esta
+abaixo pode ou nao fazer... algumas permissoes a pessoa nem pode comprar"). A
+varredura achou exatamente isso:
+
+**"Disable Ordering" marcado na empresa nao alcancava NENHUM funcionario dela.**
+`fn_block_order_inactive_customer` decidia com `WHERE id = NEW.cliente_id` — a
+ficha de quem clicou. O sub-login nasce `status: "ativo"`, `is_active: true` e sem
+`disable_ordering` (`company-member/index.ts:264-265`), entao passava sempre. Pela
+TELA, sem truque. Empresa bloqueada seguia comprando por quantas portas tivesse.
+
+`conta_liberada_de` (a guarda da LEITURA) tinha o defeito SIMETRICO:
+`COALESCE(dono.x, me.x)` fazia o titular vencer sempre, entao funcionario demitido
+seguia vendo catalogo e PRECO da empresa de onde saiu.
+
+A de escrita nao olhava o pai; a de leitura nao olhava o filho. As duas viraram
+`OR`, com a denylist nos dois status. Aplicado: `ainda_escapam` = 0.
+
+### O buraco que EU ia abrir, e o numero que provou
+
+A primeira versao da correcao usava `COALESCE(dono.status, me.status)`. Como
+`clientes.status` e NOT NULL, o valor do pai vencia sempre — e a empresa desativa
+funcionario mexendo SO na linha dele (`company-member:116` e `:127`, "desativa;
+mantem o login para historico"). Resultado: **funcionario demitido voltaria a
+comprar**, e ele era barrado ANTES da minha migration.
+
+O diagnostico rodado no banco antes de aplicar mediu
+`funcionarios_desativados_com_pai_ativo = 1`. Uma pessoa de verdade. Nao era
+hipotese de agente.
+
+### O bloco de verificacao, errado DUAS vezes pelo mesmo motivo
+
+Ficha de teste com DOIS defeitos ao mesmo tempo, um mascarando o outro:
+- 1a versao: o demitido nascia `is_active=false` E `status='inativo'`, entao a
+  execucao saia no `IF _inativo` e a denylist do FILHO nunca era alcancada;
+- 2a versao: consertei o filho e repeti no PAI — `pai_ruim` com os dois defeitos.
+
+Das duas, uma funcao com um ramo INTEIRO faltando passava no bloco.
+
+Agora sao oito fichas e seis assercoes, uma por ramo, e a cobertura esta PROVADA:
+cada uma das cinco mutacoes possiveis reprova EXATAMENTE uma assercao. Virou
+`src/lib/contaLiberadaRamos.test.ts`, que fixa tambem a armadilha do mascaramento.
+
+Licao, escrita porque custou tres rodadas: **teste com fixture que tem mais de um
+defeito nao testa nada** — o primeiro ramo a disparar esconde todos os outros.
+
+### O resto da leva
+
+- **portal (19 defeitos, 5 grupos em paralelo)**: cartao aprovado nunca marcava o
+  pedido como pago (o UPDATE vinha do navegador, e o cliente nao tem policy de
+  UPDATE em `pedidos` — zero linhas, SEM erro); o `custo` do produto vazando por
+  `select("*")` no catalogo e na ficha; item em pedido cancelado prendendo estoque;
+  preco do localStorage virando base do calculo; frete zero silencioso;
+- **realtime**: `produtos` publicava a linha INTEIRA (com `custo`) para quem
+  estivesse com o catalogo aberto. Exigiu trocar o `REPLICA IDENTITY` junto;
+- **13 telas de admin (4 grupos)**: duplicar tabela de preco copiava 1000 de 1974
+  itens dizendo "1000 copied" (o resto passava a vender pelo preco BASE); o
+  dialogo de categoria abria antes da leitura, entao abrir A e depois B gravava o
+  acesso de A na categoria B;
+- **`CustomerEdit`**: bloqueio otimista, reusando `gravarComToken` (tabela por
+  parametro) — a funcao levou 7 rodadas no produto, copiar divergiria. `admin_rev`
+  entrou na trava de colunas privilegiadas: sem isso o cliente somava 1 no token e
+  trancava a propria ficha contra o admin.
+
+195 testes (eram 104 no inicio do dia). SQL aplicado e Publish feito.
+
+### Metodo que funcionou, e vale repetir
+
+Grupos em paralelo em arquivos DISJUNTOS, cada um com o proprio ciclo, MAIS uma
+checagem de integracao no fim — que e o passo que nenhum grupo consegue fazer
+sozinho. Nas duas levas a integracao voltou limpa (17 e 11 achados, todos
+derrubados), o que sugere que a separacao por arquivo foi bem feita.
+
+Cinco grupos, 19 correcoes, 26 testes novos em ~13 minutos de relogio.
