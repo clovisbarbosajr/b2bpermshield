@@ -3672,3 +3672,48 @@ sozinho. Nas duas levas a integracao voltou limpa (17 e 11 achados, todos
 derrubados), o que sugere que a separacao por arquivo foi bem feita.
 
 Cinco grupos, 19 correcoes, 26 testes novos em ~13 minutos de relogio.
+
+## 28/08 — Desconto sai do preco (decisao da Jess)
+
+Perguntei a ela se ja tinha usado a importacao de descontos. A resposta foi maior:
+o recurso INTEIRO esta sendo desativado no B2BWave. Palavras dela: "Todo tipo de
+desconto. Preco do cliente vai pela tabela de preco." E, sobre o preco individual:
+"Preco combinado continua valendo. Pode retirar o desconto mesmo que o valor fique
+diferente por agora."
+
+A cascata passou a ser: preco combinado -> tabela de preco -> preco base.
+
+MEDIDO DEPOIS DE APLICAR: `produto_descontos` tem **ZERO linhas**. Nenhum produto
+tinha desconto cadastrado, entao a mudanca nao alterou o preco de ninguem. E
+explica por que a importacao quebrada nunca foi notada — ela nunca importou nada, e
+a tabela estava vazia desde sempre.
+
+O que saiu:
+- `Tools -> Import Product Discounts` (a tela inteira, que gravava numa coluna
+  inexistente e nunca funcionou);
+- a chamada a `_resolve_desconto` em `preco_autoritativo` (banco) e a
+  `resolveDiscount` em `src/lib/pricing.ts` (front) — os dois na MESMA leva, porque
+  fazem a mesma cascata e discordar sai caro num sentido: front na frente do SQL
+  venderia mais barato em silencio (a guarda do checkout so pega quando o banco
+  cobra MAIS);
+- a aba Discounts do produto, junto com o DELETE + INSERT de `produto_descontos`
+  que ela alimentava. Sem tirar o DELETE, qualquer save de produto apagaria as
+  regras que ficassem no banco;
+- a coluna "Apply Extra Discounts" do preco por cliente.
+
+NAO foi apagado nada no banco: `produto_descontos`, `_resolve_desconto`,
+`aplicar_descontos_extras` e `percentual` continuam la. Religar e recolocar duas
+chamadas, nao restaurar backup.
+
+REGISTRADO, sem acao: `produtos.mostrar_ofertas` tem a opcao "Only if discounts are
+available", e o campo NUNCA e lido em lugar nenhum do sistema — ja era morto antes
+desta mudanca.
+
+### Nota de processo
+
+O remoto tinha tres commits do Lovable ("Publicou frontend", "Changes", "Work in
+progress") que regeneraram `src/integrations/supabase/types.ts` a partir do banco.
+Rebase limpo, e conferido que as duas colunas `admin_rev` sobreviveram (3
+ocorrencias em cada tabela). Vale lembrar: os types sao GERADOS, entao edicao
+manual neles sobrevive so ate o proximo publish do Lovable — o que aconteceu aqui
+foi a regeneracao confirmar o que eu tinha escrito a mao.
