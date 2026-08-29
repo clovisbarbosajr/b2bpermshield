@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
+import { restringeLocais } from "@/lib/restringeLocais";
 import { useAuth } from "@/contexts/AuthContext";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { Card } from "@/components/ui/card";
@@ -26,19 +28,34 @@ const ProducaoEntrada = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [allowedLocs, setAllowedLocs] = useState<Set<string>>(new Set());
+  // Guardado separado de `allowedLocs` de PROPOSITO: "nao tem local cadastrado" e
+  // "nao consegui ler os locais" davam os dois um Set vazio, e o vazio abria a
+  // tela inteira. Ver o comentario em `restricted`.
+  const [erro, setErro] = useState<string | null>(null);
   const [lines, setLines] = useState<Line[]>([newLine()]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const load = async () => {
-      const [p, c, ul] = await Promise.all([
-        supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("nome"),
-        supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("nome"),
-        supabase.from("user_locations").select("categoria_id").eq("user_id", user?.id ?? ""),
-      ]);
-      setProdutos((p.data as Produto[]) ?? []);
-      setCategorias((c.data as Categoria[]) ?? []);
-      setAllowedLocs(new Set(((ul.data ?? []) as any[]).map((x) => x.categoria_id)));
+      // `fetchAllRows` LANCA em erro, e e isso que se quer aqui: as tres leituras
+      // ignoravam `error` e caiam no `?? []`. Uma falha de rede ou de RLS deixava a
+      // tela sem produto nenhum, sem uma palavra — e, no caso dos locais, ABRIA o
+      // acesso (ver `restricted`). E paginado porque `.select()` sem `.range()` para
+      // em 1000 linhas com `error: null`; o operador simplesmente nao acha o produto.
+      try {
+        const [p, c, ul] = await Promise.all([
+          fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("id", { ascending: true }).range(f, t)),
+          fetchAllRows<Categoria>((f, t) => supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("id", { ascending: true }).range(f, t)),
+          fetchAllRows<any>((f, t) => supabase.from("user_locations").select("categoria_id").eq("user_id", user?.id ?? "").order("categoria_id", { ascending: true }).range(f, t)),
+        ]);
+        setProdutos([...p].sort((x, y) => x.nome.localeCompare(y.nome)));
+        setCategorias(c);
+        setAllowedLocs(new Set(ul.map((x) => x.categoria_id)));
+        setErro(null);
+      } catch (e: any) {
+        setErro(e?.message ?? String(e));
+        setProdutos([]); setCategorias([]); setAllowedLocs(new Set());
+      }
     };
     if (user) load();
   }, [user]);
@@ -66,8 +83,10 @@ const ProducaoEntrada = () => {
       while (cur && guard++ < 12) { chain.unshift(cur.nome); cur = cur.parent_id ? catById.get(cur.parent_id) : undefined; }
       return chain.length ? chain.join(" › ") : "Uncategorized";
     };
-    // Restrição: se o usuário tem locais e não é admin, só mostra produtos desses locais.
-    const restricted = role !== "admin" && allowedLocs.size > 0;
+    // Restricao: se o usuario tem locais e nao e admin, so mostra produtos desses
+    // locais. A regra mora em `lib/restringeLocais` porque tem um caso que a
+    // leitura sozinha nao mostra e um teste mostra — ver la.
+    const restricted = restringeLocais(role, allowedLocs.size, erro);
     const groups = new Map<string, { id: string; path: string; prods: Produto[] }>();
     for (const p of produtos) {
       if (restricted) {
@@ -79,7 +98,7 @@ const ProducaoEntrada = () => {
       groups.get(key)!.prods.push(p);
     }
     return [...groups.values()].sort((a, b) => a.path.localeCompare(b.path));
-  }, [produtos, categorias, allowedLocs, role]);
+  }, [produtos, categorias, allowedLocs, role, erro]);
 
   // Produtos da categoria selecionada numa linha (o 2º select puxa só desses).
   const prodsOfCat = (catId: string): Produto[] => grouped.find((g) => g.id === catId)?.prods ?? [];
@@ -136,6 +155,13 @@ const ProducaoEntrada = () => {
         </div>
         <Button onClick={save} disabled={saving} className="gap-1"><Save className="h-4 w-4" /> {saving ? "Saving..." : "Save"}</Button>
       </div>
+
+      {erro && (
+        <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-semibold">Products and locations could not be loaded — nothing is being shown.</p>
+          <p className="mt-1 text-sm text-muted-foreground">{erro}</p>
+        </div>
+      )}
 
       <div className="space-y-3">
         {lines.map((l, idx) => (

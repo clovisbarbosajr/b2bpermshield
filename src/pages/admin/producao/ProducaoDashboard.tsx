@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Factory, Truck, MapPin, ChevronRight, PackageCheck, X, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 
@@ -46,6 +48,7 @@ const ProducaoDashboard = () => {
   const [items, setItems] = useState<Item[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
   const [openLoc, setOpenLoc] = useState<Loc | null>(null);
   // Ordenação do drill-down (setas, igual à tela de Status). Padrão: ETA
   // (mais próximo primeiro; sem ETA vai pro fim).
@@ -57,18 +60,28 @@ const ProducaoDashboard = () => {
     else { setSortKey(k); setSortDir("asc"); }
   };
 
-  useEffect(() => {
-    const load = async () => {
-      const [it, cat] = await Promise.all([
-        supabase.from("producao_pedidos").select("id, quantidade, status, tracking, numero_container, est_entrega, produtos(nome, sku, categoria_id)").neq("status", "delivered"),
-        supabase.from("categorias").select("id, nome, parent_id"),
-      ]);
-      setItems((it.data as any[]) ?? []);
-      setCategorias((cat.data as Categoria[]) ?? []);
+  const load = async () => {
+      // Paginado e com erro VISIVEL. Antes, `error` era ignorado e as duas leituras
+      // caiam no `?? []`: falha de rede virava o cartao "Nothing in production right
+      // now." — a mesma tela de quando realmente nao ha nada em producao. E
+      // `producao_pedidos` e a tabela que mais cresce aqui; sem `.range()` o
+      // PostgREST corta em 1000 linhas com `error: null` e o painel subconta
+      // silenciosamente.
+      try {
+        const [it, cat] = await Promise.all([
+          fetchAllRows<any>((f, t) => supabase.from("producao_pedidos").select("id, quantidade, status, tracking, numero_container, est_entrega, produtos(nome, sku, categoria_id)").neq("status", "delivered").order("id", { ascending: true }).range(f, t)),
+          fetchAllRows<Categoria>((f, t) => supabase.from("categorias").select("id, nome, parent_id").order("id", { ascending: true }).range(f, t)),
+        ]);
+        setItems(it);
+        setCategorias(cat);
+        setErro(null);
+      } catch (e: any) {
+        setErro(e?.message ?? String(e));
+        setItems([]); setCategorias([]);
+      }
       setLoading(false);
-    };
-    load();
-  }, []);
+  };
+  useEffect(() => { load(); }, []);
 
   // Categoria do produto SEM o topo (a localização já está no título do painel):
   // ex. "Union NJ › One Plus › Blue Box" vira "One Plus › Blue Box".
@@ -121,6 +134,12 @@ const ProducaoDashboard = () => {
 
       {loading ? (
         <div className="py-20 text-center text-muted-foreground text-lg">Loading…</div>
+      ) : erro ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-semibold">Production could not be loaded — this is NOT an empty production list.</p>
+          <p className="mt-1 text-sm text-muted-foreground">{erro}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => { setLoading(true); load(); }}>Retry</Button>
+        </div>
       ) : locations.length === 0 ? (
         <Card className="p-16 flex flex-col items-center justify-center text-center text-muted-foreground gap-3">
           <Factory className="h-12 w-12 opacity-40" />

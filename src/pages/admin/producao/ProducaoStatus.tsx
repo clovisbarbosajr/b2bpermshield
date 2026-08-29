@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import { useAuth } from "@/contexts/AuthContext";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { Card } from "@/components/ui/card";
@@ -49,6 +50,7 @@ const ProducaoStatus = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
   const [trackingEdit, setTrackingEdit] = useState<Record<string, string>>({});
   const [receivingId, setReceivingId] = useState<string | null>(null);
   const [recvQty, setRecvQty] = useState<string>("");
@@ -69,27 +71,46 @@ const ProducaoStatus = () => {
     // exist", `data` vem null e a tela de Producao ficaria VAZIA — sem erro, sem
     // aviso. Entao pede as colunas novas e, se o banco nao as tiver ainda, refaz
     // a consulta sem elas. A tela funciona nos dois estados; some so o selo.
+    // PAGINADO, e o `.order("id")` de desempate nao e enfeite: `.range()` vira
+    // LIMIT/OFFSET, e `created_at` sozinho nao e unico — duas linhas criadas no
+    // mesmo instante fariam uma pagina repetir uma linha e perder outra. A
+    // ordenacao visivel e feita depois, pelo `sortKey` da tabela.
+    const pagina = (cols: string) => (f: number, t: number) =>
+      supabase.from("producao_pedidos").select(cols)
+        .order("created_at", { ascending: false }).order("id", { ascending: true }).range(f, t) as any;
     const pedidosQuery = async () => {
-      const comNovas = await supabase.from("producao_pedidos")
-        .select("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, eta_atualizado_em, eta_fonte, produtos(nome, sku)").order("created_at", { ascending: false });
-      if (!comNovas.error) return comNovas;
-      return await supabase.from("producao_pedidos")
-        .select("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)").order("created_at", { ascending: false });
+      try {
+        return await fetchAllRows<any>(pagina("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, eta_atualizado_em, eta_fonte, produtos(nome, sku)"));
+      } catch {
+        // Se a UI subiu ANTES do SQL da integracao de ETA, o PostgREST responde 400
+        // "column does not exist". Refaz sem as colunas novas: a tela funciona nos
+        // dois estados, some so o selo. Um erro REAL de leitura estoura tambem na
+        // segunda tentativa e vira o banner — nao mais uma tabela vazia sem
+        // explicacao, que era o que o `?? []` produzia.
+        return await fetchAllRows<any>(pagina("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)"));
+      }
     };
 
-    const [pr, prod, cat] = await Promise.all([
-      pedidosQuery(),
-      supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("nome"),
-      supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("nome"),
-    ]);
-    setRows((pr.data as any[]) ?? []);
+    try {
+      const [pr, prod, cat] = await Promise.all([
+        pedidosQuery(),
+        fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("id", { ascending: true }).range(f, t)),
+        fetchAllRows<Categoria>((f, t) => supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("id", { ascending: true }).range(f, t)),
+      ]);
+      setRows(pr);
+      setProdutos([...prod].sort((x, y) => x.nome.localeCompare(y.nome)));
+      setCategorias(cat);
+      setErro(null);
+    } catch (e: any) {
+      setErro(e?.message ?? String(e));
+      setRows([]); setProdutos([]); setCategorias([]);
+    }
+    // O carimbo do ultimo sync e informativo: falhar aqui nao pode esvaziar a tela.
     const { data: sync } = await (supabase as any)
       .from("producao_eta_sync_log")
       .select("iniciado_em, ok, mensagem, itens_lidos, itens_casados, itens_atualizados, itens_com_erro")
       .order("iniciado_em", { ascending: false }).limit(1).maybeSingle();
     setUltimoSync(sync ?? null);
-    setProdutos((prod.data as Produto[]) ?? []);
-    setCategorias((cat.data as Categoria[]) ?? []);
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
@@ -391,6 +412,11 @@ const ProducaoStatus = () => {
           <TableBody>
             {loading ? (
               <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
+            ) : erro ? (
+              <TableRow><TableCell colSpan={8} className="py-8 text-center">
+                <p className="font-semibold text-destructive">Production could not be loaded — this is NOT an empty list.</p>
+                <p className="mt-1 text-sm text-muted-foreground">{erro}</p>
+              </TableCell></TableRow>
             ) : active.length === 0 ? (
               <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Nothing active in production.</TableCell></TableRow>
             ) : active.map((r) => {
