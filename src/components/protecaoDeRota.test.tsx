@@ -47,6 +47,8 @@ describe("ProtectedRoute: o portao de permissao", () => {
     const html = render({ requiredRole: "staff", requiredPermission: "view_products" });
     expect(html, "a tela protegida vazou para quem nao tem a chave")
       .not.toContain("CONTEUDO_PROTEGIDO");
+    expect(html, "nao chegou no portao — a negacao veio de outra guarda")
+      .toContain("You do not have access");
   });
 
   it("SEM a permissao, o operador recebe uma EXPLICACAO", () => {
@@ -87,18 +89,79 @@ describe("ProtectedRoute: o portao de permissao", () => {
   it("a chave certa e a chave PEDIDA, nao qualquer uma", () => {
     // Ter `view_orders` nao pode abrir uma rota que pede `view_products`.
     comoStaff({ view_orders: true, view_products: false });
-    expect(render({ requiredRole: "staff", requiredPermission: "view_products" }))
-      .not.toContain("CONTEUDO_PROTEGIDO");
+    const html = render({ requiredRole: "staff", requiredPermission: "view_products" });
+    expect(html).not.toContain("CONTEUDO_PROTEGIDO");
+    // E a assercao POSITIVA prova que a negacao veio do PORTAO, e nao de o
+    // componente ter desviado antes (sem `user`, por exemplo, o markup fica
+    // vazio e um `not.toContain` sozinho passaria sem exercitar nada).
+    expect(html, "nao chegou no portao de permissao").toContain("You do not have access");
   });
 });
 
 describe("ProtectedRoute: as guardas que ja existiam continuam valendo", () => {
-  it("carregando: nao decide nada ainda", () => {
+  it("carregando: mostra o spinner e nao decide nada", () => {
     Object.assign(auth, { user: null, role: null, loading: true, isDemo: false,
       contaAprovada: true, falhaAoLerPapel: false, hasPermission: () => false });
     const html = render({ requiredRole: "staff", requiredPermission: "view_products" });
+    // A ASSERCAO POSITIVA E O QUE IMPORTA: so afirmar as duas ausencias deixava
+    // apagar a guarda de `loading` INTEIRA sem reprovar nada — o markup vazio do
+    // `<Navigate to="/">` (que `!user` produz) satisfaz qualquer `not.toContain`.
+    // Sem a guarda, todo staff e jogado para `/` a cada refresh, antes do auth
+    // resolver.
+    expect(html, "sumiu a guarda de carregamento").toContain("animate-spin");
     expect(html, "decidir antes de carregar barraria quem tem acesso")
       .not.toContain("You do not have access");
+    expect(html).not.toContain("CONTEUDO_PROTEGIDO");
+  });
+
+  // D3: as tres clausulas `!isDemo` nao tinham cobertura nenhuma — remover
+  // qualquer uma delas passava nos 384 testes. O modo demo existe para mostrar o
+  // sistema sem ficha de cliente no banco; sem o `!isDemo` ele bate nas guardas
+  // de aprovacao e nao ve nada.
+  // Cada uma das tres exige uma assercao POSITIVA (o conteudo renderiza), porque
+  // sem `!isDemo` a guarda dispara um `<Navigate>` — que nao emite markup, e
+  // markup vazio satisfaz qualquer `not.toContain`. Foi assim que a primeira
+  // versao deste teste deixou a mutacao de `!role` passar verde.
+  it("demo sem papel: `!isDemo` isenta a guarda de `!role`", () => {
+    Object.assign(auth, { user: { id: "demo" }, role: null, loading: false, isDemo: true,
+      contaAprovada: true, falhaAoLerPapel: false, hasPermission: () => true });
+    expect(render({}), "`!isDemo` sumiu da guarda de `!role`: demo vai para /pending-approval")
+      .toContain("CONTEUDO_PROTEGIDO");
+  });
+
+  it("demo com falha de leitura de papel: `!isDemo` isenta", () => {
+    Object.assign(auth, { user: { id: "demo" }, role: null, loading: false, isDemo: true,
+      contaAprovada: true, falhaAoLerPapel: true, hasPermission: () => true });
+    const html = render({});
+    expect(html, "`!isDemo` sumiu da guarda de `falhaAoLerPapel`").toContain("CONTEUDO_PROTEGIDO");
+    expect(html).not.toContain("ERRO_DE_VERIFICACAO");
+  });
+
+  it("demo de cliente NAO aprovado: `!isDemo` isenta a guarda de aprovacao", () => {
+    Object.assign(auth, { user: { id: "demo" }, role: "cliente", loading: false, isDemo: true,
+      contaAprovada: false, falhaAoLerPapel: false, hasPermission: () => true });
+    expect(render({ requiredRole: "cliente" }),
+      "`!isDemo` sumiu da guarda de `contaAprovada`: a demo do portal para de abrir")
+      .toContain("CONTEUDO_PROTEGIDO");
+  });
+
+  // CONTROLE das tres acima: sem `isDemo`, cada guarda TEM que barrar.
+  it("sem demo, as mesmas situacoes barram", () => {
+    Object.assign(auth, { user: { id: "u1" }, role: null, loading: false, isDemo: false,
+      contaAprovada: true, falhaAoLerPapel: true, hasPermission: () => true });
+    expect(render({})).toContain("ERRO_DE_VERIFICACAO");
+
+    Object.assign(auth, { user: { id: "u1" }, role: "cliente", loading: false, isDemo: false,
+      contaAprovada: false, falhaAoLerPapel: false, hasPermission: () => true });
+    expect(render({ requiredRole: "cliente" })).not.toContain("CONTEUDO_PROTEGIDO");
+  });
+
+  it("demo com papel de staff e SEM a chave continua barrado", () => {
+    // O `isDemo` isenta das guardas de FICHA, nao do portao de permissao.
+    Object.assign(auth, { user: { id: "demo" }, role: "warehouse", loading: false, isDemo: true,
+      contaAprovada: true, falhaAoLerPapel: false, hasPermission: () => false });
+    const html = render({ requiredRole: "staff", requiredPermission: "view_products" });
+    expect(html).toContain("You do not have access to this screen.");
     expect(html).not.toContain("CONTEUDO_PROTEGIDO");
   });
 

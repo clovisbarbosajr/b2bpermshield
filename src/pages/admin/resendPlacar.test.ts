@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node). Mesma nota dos outros testes de fonte.
 import { readFileSync } from "node:fs";
+import { fatiaEntre } from "@/test/fatia";
 
 // A LOGICA saiu deste arquivo. Classificacao, texto do toast, texto do log e
 // leitura do corpo do erro moram em `src/lib/reenvioPlacar.ts` e sao exercitadas
@@ -70,7 +71,10 @@ describe("Resend do pedido: o que so a tela faz", () => {
     // ali. Quem topasse com isso ia cacar um bug que nao existe.
     const m = /\}\s*catch\s*(\([^)]*\)\s*)?\{/.exec(bloco);
     expect(m, "sem `catch`, a excecao sobe como unhandled rejection").not.toBeNull();
-    const corpo = bloco.slice(m!.index, bloco.indexOf("} finally {", m!.index));
+    // `fatiaEntre` a partir do texto que o regex casou: exige o `} finally {`
+    // DEPOIS dele. Sem essa exigencia, remover o `finally` fazia a fatia virar o
+    // resto do bloco e as assercoes casarem com codigo de outro lugar.
+    const corpo = fatiaEntre(bloco.slice(m!.index), m![0], "} finally {", 40);
     expect(corpo, "sem o toast o operador nao fica sabendo de nada")
       .toMatch(/toast\.error\(/);
     expect(corpo, "e tem que ser mandado ao log antes de reenviar")

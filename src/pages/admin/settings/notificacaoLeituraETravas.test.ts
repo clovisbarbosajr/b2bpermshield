@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 // `tsc --noEmit` do `npm test` nao acha `node:fs`. Em execucao o modulo existe.
 // @ts-expect-error
 import { readFileSync } from "node:fs";
+import { fatiaEntre } from "@/test/fatia";
 
 // TESTE DE FIACAO das telas de notificacao e sync (montar a tela exigiria
 // `@testing-library/dom`, que nao esta instalado).
@@ -62,7 +63,10 @@ describe("Notificacoes: leituras que alimentam envio e gravacao", () => {
     const select = bloco.match(/const \{[^}]*\} = await sb\.from\('pedidos'\)[^;]*;/);
     expect(select, "nao achei o select de pedidos do preview").toBeTruthy();
     expect(select![0]).toMatch(/error: pedErr/);
-    expect(bloco.slice(0, bloco.indexOf("No orders found to preview"))).toMatch(/if \(pedErr\)/);
+    // A guarda do erro tem que vir ANTES da mensagem de "nao ha pedido": e
+    // exatamente a diferenca entre "falhou a leitura" e "nao ha nada".
+    expect(fatiaEntre(bloco, "const {", "No orders found to preview"))
+      .toMatch(/if \(pedErr\)/);
   });
 
   it("sendEventTest so manda o email real depois de ler o cliente sem erro", () => {

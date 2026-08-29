@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
+import { fatiaEntre } from "@/test/fatia";
 
 const fonte = readFileSync("src/pages/admin/settings/WarehouseSettings.tsx", "utf8");
 
@@ -22,9 +23,13 @@ describe("WarehouseSettings: leitura honesta e gravacao sem lost update", () => 
   // Sem este ramo, isso caia no mesmo lugar do erro: tela com os valores iniciais
   // do componente, como se fossem os do banco.
   it("RPC sem erro e SEM LINHA tambem fecha a tela", () => {
-    const i = fonte.indexOf("if (!data) {");
-    expect(i, "sem este ramo a tela mostra os valores iniciais do componente").toBeGreaterThan(-1);
-    const ramo = fonte.slice(i, fonte.indexOf("setErro(null);", i));
+    // O RECORTE ERA SEM GUARDA, e isso custou a propria protecao deste teste:
+    // apagar `setErro(null);` (refactor plausivel, sem bug) fazia `indexOf`
+    // devolver -1, o `slice(i, -1)` pegava 79% do arquivo, e os tres `toContain`
+    // abaixo passavam batendo em qualquer outro trecho. Com a fatia morta, o
+    // `return;` do ramo — a guarda que este teste existe para proteger — podia ser
+    // removido com os 384 testes verdes.
+    const ramo = fatiaEntre(fonte, "if (!data) {", "setErro(null);", 20);
     expect(ramo).toContain("The warehouse settings row was not returned");
     // O `return` E O QUE IMPORTA: sem ele o codigo segue para o `setSalvo({
     // ...data.warehouse_popup_enabled })` com `data` nulo e estoura TypeError —

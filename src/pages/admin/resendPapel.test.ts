@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
+import { fatiaEntre } from "@/test/fatia";
 
 // A tela de pedido e aberta por admin, manager E warehouse: `App.tsx` a protege
 // com `requiredRole="staff"` e `ProtectedRoute` trata os tres como staff. O botao
@@ -28,8 +29,7 @@ describe("Resend: as opcoes que exigem admin", () => {
   });
 
   it("'To customer' e 'To email' so para admin", () => {
-    const modal = fonte.slice(fonte.indexOf("<DialogTitle>Resend order</DialogTitle>"));
-    const corpo = modal.slice(0, modal.indexOf("</Dialog>"));
+    const corpo = fatiaEntre(fonte, "<DialogTitle>Resend order</DialogTitle>", "</Dialog>", 60);
     expect(corpo, "sem isto o manager marca, envia e leva 403")
       .toMatch(/checked=\{resend\.customer\} disabled=\{!cliente\?\.email \|\| !ehAdmin\}/);
     expect(corpo).toMatch(/checked=\{resend\.other\} disabled=\{!ehAdmin\}/);
@@ -41,8 +41,7 @@ describe("Resend: as opcoes que exigem admin", () => {
   });
 
   it("'To admin' NAO e travado — e a unica que funciona para staff", () => {
-    const modal = fonte.slice(fonte.indexOf("<DialogTitle>Resend order</DialogTitle>"));
-    const corpo = modal.slice(0, modal.indexOf("</Dialog>"));
+    const corpo = fatiaEntre(fonte, "<DialogTitle>Resend order</DialogTitle>", "</Dialog>", 60);
     const linhaAdmin = corpo.slice(corpo.indexOf("checked={resend.admin}"));
     expect(linhaAdmin.slice(0, 200)).not.toMatch(/disabled=\{!ehAdmin\}/);
   });

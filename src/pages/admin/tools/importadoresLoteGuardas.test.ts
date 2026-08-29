@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 // `src/pages/admin/estoqueUpdateCondicional.test.ts`.
 // @ts-expect-error
 import { readFileSync } from "node:fs";
+import { fatiaEntre } from "@/test/fatia";
 
 // TESTE DE FIACAO, pelo mesmo motivo do `estoqueUpdateCondicional.test.ts`: as
 // guardas moram DENTRO de componentes de pagina, e importar o modulo arrastaria
@@ -168,15 +169,13 @@ describe("ImportRelatedProducts: perda entre o delete e o insert", () => {
   });
 
   it("tenta restaurar quando o insert falha", () => {
-    const iErro = fonte.indexOf("if (error) {", iDelete);
-    const ramo = fonte.slice(iErro, fonte.indexOf("continue;", iErro));
+    const ramo = fatiaEntre(fonte.slice(iDelete), "if (error) {", "continue;", 40);
     expect(ramo).toMatch(/restaurar/);
     expect(ramo).toMatch(/\.from\("produtos_relacionados"\)\.insert\(restaurar\)/);
   });
 
   it("a mensagem distingue os tres desfechos, e nao afirma perda quando nao houve", () => {
-    const iErro = fonte.indexOf("if (error) {", iDelete);
-    const ramo = fonte.slice(iErro, fonte.indexOf("continue;", iErro));
+    const ramo = fatiaEntre(fonte.slice(iDelete), "if (error) {", "continue;", 40);
     expect(ramo, "falta o caso 'restaurou'").toMatch(/were restored/);
     expect(ramo, "falta o caso 'restauracao tambem falhou'").toMatch(/also failed/);
     expect(ramo, "falta o caso 'nao havia nada'").toMatch(/nothing was lost/);

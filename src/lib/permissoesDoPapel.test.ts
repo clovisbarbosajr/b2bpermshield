@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
+import { fatiaEntre } from "@/test/fatia";
 import { DEFAULT_PERMISSIONS } from "./permissions";
 import { permissoesDoPapel } from "./permissoesDoPapel";
 
@@ -86,9 +87,7 @@ describe("fiacao: o AuthContext e as rotas", () => {
   // `UPDATE produtos` para warehouse de proposito (20260619003000).
   it("Inventory Adjustment exige a mesma chave do menu", () => {
     for (const rota of ['path="/admin/estoque"', 'path="/admin/estoque/adjustment"']) {
-      const i = app.indexOf(`<Route ${rota} `);
-      expect(i, `rota sumiu: ${rota}`).toBeGreaterThan(-1);
-      const linha = app.slice(i, app.indexOf("\n", i));
+      const linha = fatiaEntre(app, `<Route ${rota} `, "\n", 2);
       expect(linha, `${rota} aceita qualquer staff`).toContain('<SP perm="view_products">');
     }
   });
@@ -109,9 +108,7 @@ describe("fiacao: o AuthContext e as rotas", () => {
       ['path="/admin/producao/status"', "view_products"],
       ['path="/admin/producao/dashboard"', "view_products"],
     ]) {
-      const i = app.indexOf(`<Route ${rota} `);
-      expect(i, `rota sumiu: ${rota}`).toBeGreaterThan(-1);
-      const linha = app.slice(i, app.indexOf("\n", i));
+      const linha = fatiaEntre(app, `<Route ${rota} `, "\n", 2);
       expect(linha, `${rota} voltou a aceitar qualquer staff`).toContain(`<SP perm="${perm}">`);
     }
   });
