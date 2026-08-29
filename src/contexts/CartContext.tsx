@@ -249,10 +249,21 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
         // ficava NaN e levava o total do carrinho inteiro junto. Valor inválido
         // MANTÉM a quantidade atual, não a destrói.
         const pedido = Math.floor(num(quantidade, i.quantidade));
-        // só limita pelo disponível quando número > 0 (não trava backorder/pré-venda em 0)
-        const capped = (typeof i.estoque_disponivel === "number" && i.estoque_disponivel > 0)
-          ? Math.min(pedido, i.estoque_disponivel) : pedido;
-        return { ...i, quantidade: Math.max(i.quantidade_minima ?? 1, capped) };
+        // NAO CLAMPA MAIS PELO `estoque_disponivel` DA LINHA.
+        //
+        // Esse campo e gravado no localStorage quando o item ENTRA no carrinho e
+        // nada nunca o atualiza — nem o watcher de 10s do Carrinho (que escreve
+        // so em `insufficientItems`), nem re-adicionar pelo catalogo (`{...i,
+        // quantidade}` mantem o valor velho). Carrinho que passou dias com um
+        // piso de 2 unidades continuava valendo 2 depois do deposito repor 500:
+        // o cliente digitava 100 e o campo voltava para 2, sem toast, sem badge,
+        // sem nada. A tela dizia "pode comprar" e o campo recusava.
+        //
+        // Quem sabe o estoque de verdade e o `checkCartStock`, que le produto e
+        // variante frescos a cada 10s e ja marca a linha com o numero que
+        // destrava, alem de travar o botao NEXT. Deixar o cliente digitar e ver
+        // a mensagem e melhor que corrigir o numero dele em silencio.
+        return { ...i, quantidade: Math.max(i.quantidade_minima ?? 1, pedido) };
       })
     );
   };

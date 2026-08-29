@@ -151,10 +151,31 @@ export function checkCartStock(
 
     if (teto < 1) { blocked.set(key, item); continue; }
 
-    // (b) a soma do produto inteiro também limita esta linha.
+    // (b) a soma do produto inteiro também limita esta linha — e o numero que vai
+    //     para a tela tem que ser o que DESTRAVA esta linha, nao o teto da variante.
+    //
+    // O BUG: com produto de 10, variantes A e B de 8 cada, e 6+6 no carrinho,
+    // nenhuma linha passa do proprio teto (6 < 8) mas a soma passa (12 > 10).
+    // As duas linhas eram marcadas com `teto` = 8, e a tela dizia "Only 8 left"
+    // numa linha que tinha 6. O cliente obedecia, punha 8, e a badge continuava
+    // igual — nao existia valor indicado pela mensagem que resolvesse, porque a
+    // mensagem falava do teto da variante e a trava vinha da SOMA.
+    //
+    // Agora o numero e a folga REAL desta linha: o que sobra do produto depois
+    // das OUTRAS linhas dele, limitado pelo teto da variante. Reduzir para esse
+    // numero sempre destrava.
     const totalDoProduto = pedidoPorProduto.get(item.produto_id) ?? item.quantidade;
-    if (item.quantidade > teto || totalDoProduto > dispProduto) {
-      insufficient.set(key, teto);
+    const outrasLinhas = totalDoProduto - item.quantidade;
+    const maxDestaLinha = Math.min(teto, dispProduto - outrasLinhas);
+
+    if (maxDestaLinha < 1) {
+      // As outras linhas deste produto ja consumiram tudo. "Only 0 left — reduce
+      // qty" seria um beco: nao ha quantidade que resolva, so tirar a linha.
+      blocked.set(key, item);
+      continue;
+    }
+    if (item.quantidade > maxDestaLinha) {
+      insufficient.set(key, maxDestaLinha);
     }
   }
 

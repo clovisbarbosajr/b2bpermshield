@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { useCart, cartKey } from "@/contexts/CartContext";
 import { checkCartStock } from "@/lib/stock";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -26,6 +27,8 @@ const Carrinho = () => {
   const { user, canPlaceOrders, impersonatedCustomer } = useAuth();
   const navigate = useNavigate();
   const [salesTax, setSalesTax] = useState(0);
+  // Falhou a leitura da taxa? Entao o imposto na tela NAO e zero — e desconhecido.
+  const [taxOk, setTaxOk] = useState(true);
   // Taxa (%) buscada 1x; o VALOR do imposto é derivado de total × taxa (efeito abaixo).
   const [taxRate, setTaxRate] = useState(0);
   // Chaveados por `cartKey` (produto+variante), não por produto: com duas
@@ -151,8 +154,18 @@ const Carrinho = () => {
         // `ids.length`, NAO `varIds.length`: pular quando nenhuma linha tem
         // variante e exatamente perder o caso que interessa — produto que ganhou
         // opcao DEPOIS que o cliente o colocou no carrinho.
+        // PAGINADO: `.in(...)` sem `.range()` para em 1000 linhas com `error: null`.
+        // Um carrinho de 25 produtos com grade de tamanho x cor chega la. E o
+        // corte e pior que um erro: variante que ficou de fora vira "Out of
+        // stock" numa linha que tem estoque, e produto cujas variantes TODAS
+        // ficaram de fora deixa de acionar a guarda de linha-sem-variante — que
+        // e a que impede a linha de viajar ate o pedido com o preco do pai.
         ids.length
-          ? supabase.from("produto_variantes").select("id, produto_id, quantidade, estoque_reservado").eq("ativo", true).in("produto_id", ids)
+          ? fetchAllRows<any>((f, t) => supabase.from("produto_variantes")
+              .select("id, produto_id, quantidade, estoque_reservado")
+              .eq("ativo", true).in("produto_id", ids)
+              .order("id", { ascending: true }).range(f, t))
+              .then((data) => ({ data }), (e) => ({ data: null as any[] | null, erro: e }))
           : Promise.resolve({ data: [] as any[] }),
       ]);
       // Cobre `vars` tambem: sem isso, falha na consulta de variantes deixava a
@@ -192,36 +205,62 @@ const Carrinho = () => {
   // mesma classe da lentidão corrigida no Checkout. O VALOR do imposto é
   // derivado no efeito [total, taxRate] logo abaixo, sem ir ao banco.
   useEffect(() => {
+    // FALHA DE LEITURA NAO E IMPOSTO ZERO.
+    //
+    // Os seis `await` desta cascata descartavam o `error` e caiam todos num
+    // `setTaxRate(0)` indistinguivel de "este cliente nao paga imposto". E o caso
+    // nao e hipotetico: `tax_rules` NAO tem unique em
+    // (tax_class_id, tax_customer_group_id) e a tela de Sales Tax insere sem
+    // checar — duas regras para o mesmo par fazem o `maybeSingle()` errar. A tela
+    // mostrava "Sales Tax $0.00" e "Gross Total = subtotal" enquanto o banco, que
+    // resolve com LIMIT 1, cobrava o imposto de verdade.
+    //
+    // Duas mudancas: `error` marca `taxOk = false` (a tela para de afirmar zero),
+    // e a busca da regra usa `.limit(1)` para casar com o que o BANCO faz — assim
+    // o cliente ve o mesmo numero que vai pagar, mesmo com regra duplicada.
     const fetchTaxRate = async () => {
-      if (!user && !impersonatedCustomer) { setTaxRate(0); return; }
-      // Get customer's tax group
+      const semImposto = () => { setTaxRate(0); setTaxOk(true); };
+      const naoSei = () => { setTaxRate(0); setTaxOk(false); };
+
+      if (!user && !impersonatedCustomer) { semImposto(); return; }
       const clienteQuery = impersonatedCustomer?.id
         ? supabase.from("clientes").select("tax_customer_group_id").eq("id", impersonatedCustomer.id).maybeSingle()
         : supabase.from("clientes").select("tax_customer_group_id").eq("user_id", user!.id).maybeSingle();
-      const { data: cliente } = await clienteQuery;
-      if (!cliente) { setTaxRate(0); return; }
+      const { data: cliente, error: cliErr } = await clienteQuery;
+      if (cliErr) { naoSei(); return; }
+      if (!cliente) { semImposto(); return; }
 
       const groupId = cliente.tax_customer_group_id;
-      const { data: defaultClass } = await supabase.from("tax_classes").select("id").eq("is_default", true).maybeSingle();
-      if (!defaultClass?.id) { setTaxRate(0); return; }
+      const { data: defaultClass, error: clsErr } = await supabase
+        .from("tax_classes").select("id").eq("is_default", true).maybeSingle();
+      if (clsErr) { naoSei(); return; }
+      if (!defaultClass?.id) { semImposto(); return; }
 
-      // Resolve group: use customer's group or default group
       let effectiveGroupId = groupId;
       if (!effectiveGroupId) {
-        const { data: dg } = await supabase.from("tax_customer_groups").select("id").eq("is_default", true).maybeSingle();
+        const { data: dg, error: dgErr } = await supabase
+          .from("tax_customer_groups").select("id").eq("is_default", true).maybeSingle();
+        if (dgErr) { naoSei(); return; }
         effectiveGroupId = dg?.id;
       }
-      if (!effectiveGroupId) { setTaxRate(0); return; }
+      if (!effectiveGroupId) { semImposto(); return; }
 
-      const { data: rule } = await supabase.from("tax_rules")
+      // `.limit(1)`: e o que o trigger do banco faz. Sem isso, regra duplicada
+      // derruba a leitura inteira e a tela mostra zero.
+      const { data: regras, error: ruleErr } = await supabase.from("tax_rules")
         .select("tax_rate_id")
         .eq("tax_class_id", defaultClass.id)
         .eq("tax_customer_group_id", effectiveGroupId)
-        .maybeSingle();
-      if (!rule?.tax_rate_id) { setTaxRate(0); return; }
+        .limit(1);
+      if (ruleErr) { naoSei(); return; }
+      const taxRateId = regras?.[0]?.tax_rate_id;
+      if (!taxRateId) { semImposto(); return; }
 
-      const { data: rate } = await supabase.from("tax_rates").select("percentual").eq("id", rule.tax_rate_id).maybeSingle();
+      const { data: rate, error: rateErr } = await supabase
+        .from("tax_rates").select("percentual").eq("id", taxRateId).maybeSingle();
+      if (rateErr) { naoSei(); return; }
       setTaxRate(Number(rate?.percentual) || 0);
+      setTaxOk(true);
     };
     fetchTaxRate();
   }, [user, impersonatedCustomer]);
@@ -308,7 +347,13 @@ const Carrinho = () => {
                       <Input
                         type="number"
                         min={item.quantidade_minima}
-                        max={item.estoque_disponivel}
+                        {...(insufficientItems.has(cartKey(item))
+                          // Teto FRESCO, do watcher de 10s. `item.estoque_disponivel`
+                          // e o numero congelado de quando o item entrou no carrinho:
+                          // usa-lo aqui marcava o campo como invalido em item de
+                          // pre-venda (disponivel 0) e travava em estoque antigo.
+                          ? { max: insufficientItems.get(cartKey(item)) }
+                          : {})}
                         value={item.quantidade}
                         onChange={e => updateQuantity(cartKey(item), parseInt(e.target.value) || item.quantidade_minima)}
                         className="h-8 w-20"
@@ -352,11 +397,16 @@ const Carrinho = () => {
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase">Sales Tax</p>
-                  <p className="font-bold">${salesTax.toFixed(2)}</p>
+                  <p className="font-bold">{taxOk ? `$${salesTax.toFixed(2)}` : "—"}</p>
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase">Gross Total</p>
-                  <p className="font-bold">${grossTotal.toFixed(2)}</p>
+                  <p className="font-bold">{taxOk ? `$${grossTotal.toFixed(2)}` : "—"}</p>
+                  {!taxOk && (
+                    <p className="mt-1 text-xs text-destructive">
+                      Sales tax could not be calculated — the final total will be shown at checkout.
+                    </p>
+                  )}
                 </div>
               </Card>
 

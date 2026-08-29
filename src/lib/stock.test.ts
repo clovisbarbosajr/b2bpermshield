@@ -231,3 +231,52 @@ describe("reservado da variante desconta do disponivel", () => {
     expect(blocked.has("p1::v1")).toBe(false);
   });
 });
+
+// O NUMERO DA BADGE TEM QUE DESTRAVAR A LINHA.
+//
+// A tela imprime "Only {N} left — reduce qty" com o valor de `insufficient`. Ele
+// era o teto da VARIANTE, mas o bloqueio podia vir da SOMA do produto — e ai o
+// numero apontava para um valor que nao resolvia nada. O cliente obedecia, digitava
+// o numero indicado, e a badge continuava igual. Nao havia saida descobrivel a
+// partir do que a tela dizia.
+describe("insufficient: o numero indicado tem que resolver", () => {
+  const duasVariantes = (qA: number, qB: number) => checkCartStock(
+    [item({ produto_id: "p1", variante_id: "vA", quantidade: qA }),
+     item({ produto_id: "p1", variante_id: "vB", quantidade: qB })],
+    [prod("p1", 10)],
+    STATUSES,
+    [{ id: "vA", produto_id: "p1", quantidade: 8, estoque_reservado: 0 },
+     { id: "vB", produto_id: "p1", quantidade: 8, estoque_reservado: 0 }],
+  );
+
+  it("6+6 num produto de 10: nenhuma linha passa do proprio teto, a SOMA passa", () => {
+    const r = duasVariantes(6, 6);
+    // Antes as duas vinham com 8 — o teto da variante — numa linha que tem 6.
+    expect(r.insufficient.get(key("p1", "vA"))).toBe(4);
+    expect(r.insufficient.get(key("p1", "vB"))).toBe(4);
+  });
+
+  it("e obedecer ao numero indicado DESTRAVA de verdade", () => {
+    // O cliente reduz UMA das linhas para o valor que a badge mandou.
+    const r = duasVariantes(4, 6);
+    expect(r.insufficient.size, "seguir a instrucao tem que resolver").toBe(0);
+    expect(r.blocked.size).toBe(0);
+  });
+
+  it("linha sem folga nenhuma vira bloqueio, nao 'Only 0 left'", () => {
+    // A outra linha ja consumiu o produto inteiro: nao ha quantidade que resolva.
+    const r = duasVariantes(10, 3);
+    expect(r.insufficient.has(key("p1", "vB")), "'reduce qty' seria um beco").toBe(false);
+    expect(r.blocked.has(key("p1", "vB")), "so tirar a linha resolve").toBe(true);
+  });
+
+  it("linha unica continua limitada pelo teto da propria variante", () => {
+    const r = checkCartStock(
+      [item({ produto_id: "p1", variante_id: "vA", quantidade: 9 })],
+      [prod("p1", 20)],
+      STATUSES,
+      [{ id: "vA", produto_id: "p1", quantidade: 5, estoque_reservado: 0 }],
+    );
+    expect(r.insufficient.get(key("p1", "vA"))).toBe(5);
+  });
+});
