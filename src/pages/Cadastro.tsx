@@ -14,6 +14,7 @@ const Cadastro = () => {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [fichaFalhou, setFichaFalhou] = useState(false);
   // "Allow open customer registration" (Settings) era um checkbox MORTO: nada no
   // caminho publico lia a flag. Comeca `true` e so fecha se a RPC disser que nao —
   // fail-open, pra ligar esta trava nunca fechar o cadastro por acidente.
@@ -55,7 +56,20 @@ const Cadastro = () => {
       // (email pro cliente + email/SMS pro admin). Feito no servidor porque no
       // signup o cliente ainda NÃO tem sessão — o frontend cairia na trava anti-relay
       // e no 401 do notify-dispatch. Aguarda pra garantir que roda antes de sair.
-      await supabase.functions.invoke("register-customer", { body: { email, nome, empresa } }).catch(() => {});
+      //
+      // O ERRO E LIDO. Antes eram DOIS descartes no mesmo `await`: o `.catch(() => {})`
+      // engolia a falha de rede e o `{ error }` da resposta nem era desestruturado.
+      // Falhar aqui significa que NAO existe ficha em `clientes` e o admin nunca
+      // sera avisado — a conta de auth fica viva, a pessoa loga e cai para sempre
+      // em /pending-approval, e ninguem do lado de ca sabe que ela existe.
+      // Nao da para desfazer o signUp daqui, entao o minimo honesto e contar.
+      const { error: fichaErr } = await supabase.functions
+        .invoke("register-customer", { body: { email, nome, empresa } })
+        .catch((e: unknown) => ({ error: e }));
+      if (fichaErr) {
+        console.error("[cadastro] register-customer falhou; ficha pendente e aviso ao admin podem nao ter sido criados", fichaErr);
+        setFichaFalhou(true);
+      }
     }
   };
 
@@ -69,6 +83,14 @@ const Cadastro = () => {
               We sent a confirmation link to <strong>{email}</strong>.
             </CardDescription>
           </CardHeader>
+          {fichaFalhou && (
+            <CardContent>
+              <p className="text-sm text-destructive">
+                We could not reach our team about your registration. If you do not hear back,
+                email <a className="underline" href="mailto:info@permshield.com">info@permshield.com</a>.
+              </p>
+            </CardContent>
+          )}
           <CardFooter className="justify-center">
             <Link to="/login" className="text-accent hover:underline">
               Back to login

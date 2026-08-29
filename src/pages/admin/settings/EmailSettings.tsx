@@ -282,7 +282,13 @@ const EmailSettings = () => {
       if (data?.success) {
         toast.success(`✓ "${template?.label ?? type}" sent to ${recipientEmail}`);
       } else if (data?.skipped) {
-        toast.warning(`⚠ "${template?.label ?? type}" is disabled in notification settings.`);
+        // O motivo vem do servidor e nao e sempre "desligado nas configuracoes":
+        // send-email devolve `skipped` tambem para a torneira geral
+        // (`envio_pausado`), para o teto por e-mail ("muitos pedidos para este
+        // e-mail") e para os bloqueios de flood. Colar um unico diagnostico em
+        // todos mandava o admin arrumar a coisa errada — mesma correcao ja feita
+        // em Notificacoes.tsx.
+        toast.warning(`⚠ "${template?.label ?? type}" was not sent — ${data.reason ?? "blocked by the server"}`);
       } else {
         toast.error(data?.error || `Falha ao enviar "${template?.label ?? type}"`);
       }
@@ -538,7 +544,10 @@ const EmailSettings = () => {
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              These emails are sent automatically when the event occurs.
+              These toggles decide whether each email is <em>allowed</em>. They are not the only
+              gate: the master switch and the Email channel on the <strong>Notifications</strong>
+              page override everything here, and the server still applies its own sending caps —
+              so a checked box here does not guarantee the email goes out.
             </p>
             {[
               { key: "email_on_new_registration", label: "New customer registration — notify admin" },

@@ -37,7 +37,10 @@ const PaymentOptions = () => {
   const [form, setForm] = useState(defaultForm);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("payment_options").select("*").order("ordem");
+    const { data, error } = await supabase.from("payment_options").select("*").order("ordem");
+    // Erro calado deixava a lista vazia — parecia "nao ha forma de pagamento
+    // configurada", e o admin cadastrava a segunda por cima da primeira.
+    if (error) toast.error("Could not load payment options: " + error.message);
     setItems(data ?? []); setLoading(false);
   };
   useEffect(() => { fetchData(); }, []);
@@ -98,8 +101,15 @@ const PaymentOptions = () => {
 
   const toggleSecret = (field: string) => setShowSecrets(prev => ({ ...prev, [field]: !prev[field] }));
 
-  const SecretInput = ({ field, label, required }: { field: string; label: string; required?: boolean }) => (
-    <div>
+  // Era um COMPONENTE declarado DENTRO do render. A cada tecla o `updateConfig`
+  // chama `setForm`, o componente pai re-renderiza e `SecretInput` ganha uma
+  // identidade nova — pro React e outro tipo de componente, entao ele DESMONTA e
+  // remonta o <input>. O campo perdia o foco a cada caractere: dava pra digitar
+  // exatamente uma letra por clique. Chave de gateway (Stripe secret, token do
+  // Square) so entrava colada, e qualquer correcao depois era impossivel.
+  // Como funcao que devolve JSX nao ha fronteira de componente e o input fica.
+  const secretInput = (field: string, label: string, required?: boolean) => (
+    <div key={field}>
       <Label>{label}{required && " *"}</Label>
       <div className="relative">
         <Input
@@ -121,7 +131,7 @@ const PaymentOptions = () => {
           <Card className="p-4 space-y-4 mt-4">
             <h4 className="text-base font-semibold text-primary">Sola Configuration</h4>
             <p className="text-xs text-muted-foreground">Obtain your API Key from the Sola dashboard under <strong>Gateway Settings → Key Management</strong></p>
-            <SecretInput field="api_key" label="API Key" required />
+            {secretInput("api_key", "API Key", true)}
           </Card>
         );
       case "paypal":
@@ -134,9 +144,9 @@ const PaymentOptions = () => {
                 https://developer.paypal.com/docs/nvp-soap-api/apiCredentials/#api-signatures
               </a>
             </p>
-            <SecretInput field="api_login" label="API Login" required />
-            <SecretInput field="api_password" label="API Password" required />
-            <SecretInput field="api_signature" label="API Signature" required />
+            {secretInput("api_login", "API Login", true)}
+            {secretInput("api_password", "API Password", true)}
+            {secretInput("api_signature", "API Signature", true)}
             <div>
               <Label>Mode *</Label>
               <select className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={form.gateway_config.mode ?? "production"} onChange={e => updateConfig("mode", e.target.value)}>
@@ -164,8 +174,8 @@ const PaymentOptions = () => {
             </div>
             {form.gateway_config.use_keys ? (
               <>
-                <SecretInput field="publishable_key" label="Publishable Key" required />
-                <SecretInput field="secret_key" label="Secret Key" required />
+                {secretInput("publishable_key", "Publishable Key", true)}
+                {secretInput("secret_key", "Secret Key", true)}
               </>
             ) : (
               <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
@@ -185,9 +195,9 @@ const PaymentOptions = () => {
         return (
           <Card className="p-4 space-y-4 mt-4">
             <h4 className="text-base font-semibold text-primary">Square configuration</h4>
-            <SecretInput field="application_id" label="Application ID" required />
-            <SecretInput field="location_id" label="Location ID" required />
-            <SecretInput field="access_token" label="Access Token" required />
+            {secretInput("application_id", "Application ID", true)}
+            {secretInput("location_id", "Location ID", true)}
+            {secretInput("access_token", "Access Token", true)}
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.gateway_config.save_cards ?? false} onChange={e => updateConfig("save_cards", e.target.checked)} /> Allow saving of card details for reuse</label>
           </Card>
         );
@@ -196,8 +206,8 @@ const PaymentOptions = () => {
           <Card className="p-4 space-y-4 mt-4">
             <h4 className="text-base font-semibold text-primary">Authorize.Net Configuration</h4>
             <p className="text-xs text-muted-foreground">Sign up with Authorize.Net to accept Credit Card payments.</p>
-            <SecretInput field="api_login_id" label="API Login ID" required />
-            <SecretInput field="transaction_key" label="Transaction Key" required />
+            {secretInput("api_login_id", "API Login ID", true)}
+            {secretInput("transaction_key", "Transaction Key", true)}
             <div>
               <Label>Mode</Label>
               <select className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={form.gateway_config.mode ?? "production"} onChange={e => updateConfig("mode", e.target.value)}>
@@ -212,8 +222,8 @@ const PaymentOptions = () => {
           <Card className="p-4 space-y-4 mt-4">
             <h4 className="text-base font-semibold text-primary">Paynote Configuration</h4>
             <p className="text-xs text-muted-foreground">Sign up with Paynote to accept ACH payments.</p>
-            <SecretInput field="api_key" label="API Key" required />
-            <SecretInput field="merchant_id" label="Merchant ID" required />
+            {secretInput("api_key", "API Key", true)}
+            {secretInput("merchant_id", "Merchant ID", true)}
           </Card>
         );
       default:

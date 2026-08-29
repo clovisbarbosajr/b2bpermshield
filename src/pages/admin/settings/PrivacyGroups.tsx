@@ -34,22 +34,54 @@ const PrivacyGroups = () => {
 
   const handleSave = async () => {
     setSaving(true);
-    const payload = { nome: form.nome, default_for_new_customers: form.default_for_new_customers, ativo: true };
+    const payload = { nome: form.nome, default_for_new_customers: form.default_for_new_customers };
     // Checa o erro antes de dizer que salvou. Grupo de privacidade decide QUEM VE
     // QUAL produto/categoria: dizer "Created" sem ter criado deixa o admin achando
     // que restringiu o catalogo quando nao restringiu.
+    //
+    // `ativo` so vai no INSERT. Esta tela nao tem controle de `ativo`, mas
+    // Clientes, CustomerEdit, ProductEdit, ProductExport e Produtos filtram por
+    // `.eq("ativo", true)` — mandar `ativo: true` no UPDATE fazia um grupo
+    // desativado voltar a TODOS esses seletores so porque alguem corrigiu o nome.
     const { error } = editing
       ? await supabase.from("privacy_groups").update(payload).eq("id", editing.id)
-      : await supabase.from("privacy_groups").insert(payload);
+      : await supabase.from("privacy_groups").insert({ ...payload, ativo: true });
     setSaving(false);
     if (error) { toast.error("Could not save: " + error.message); return; }
     toast.success(editing ? "Updated" : "Created");
     setListView(true); fetchData();
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this privacy group?")) return;
-    const { error } = await supabase.from("privacy_groups").delete().eq("id", id);
+  const handleDelete = async (r: any) => {
+    // As TRES tabelas que apontam para privacy_groups tem ON DELETE CASCADE
+    // (cliente_privacy_groups, categoria_acesso, produto_acesso). Apagar o grupo
+    // apaga junto, sem volta, todo vinculo de cliente e toda liberacao de
+    // categoria/produto que dependia dele — e os clientes daquele grupo perdem o
+    // que so enxergavam por ele. O confirm dizia so "Delete this privacy group?".
+    //
+    // Contar antes. Se a contagem falhar, RECUSAR: nao da para avisar do estrago
+    // que nao se conseguiu medir.
+    const contar = (t: "cliente_privacy_groups" | "categoria_acesso" | "produto_acesso") =>
+      supabase.from(t).select("privacy_group_id", { count: "exact", head: true }).eq("privacy_group_id", r.id);
+    const [cli, cat, prod] = await Promise.all([
+      contar("cliente_privacy_groups"), contar("categoria_acesso"), contar("produto_acesso"),
+    ]);
+    const contagemErr = cli.error || cat.error || prod.error;
+    if (contagemErr) {
+      toast.error("Could not check what this group is used by — nothing was deleted: " + contagemErr.message);
+      return;
+    }
+
+    if (!confirm(
+      `Delete "${r.nome}"?\n\n` +
+      `This permanently deletes, together with the group:\n` +
+      `• ${cli.count ?? 0} customer assignment(s)\n` +
+      `• ${cat.count ?? 0} category permission(s)\n` +
+      `• ${prod.count ?? 0} product permission(s)\n\n` +
+      `Those customers lose whatever this group was granting them. This cannot be undone.`
+    )) return;
+
+    const { error } = await supabase.from("privacy_groups").delete().eq("id", r.id);
     if (error) { toast.error("Could not delete: " + error.message); return; }
     toast.success("Deleted");
     fetchData();
@@ -107,7 +139,7 @@ const PrivacyGroups = () => {
                 <TableCell><BoolIcon val={r.default_for_new_customers ?? false} /></TableCell>
                 <TableCell className="text-right space-x-1">
                   <Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleDelete(r.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(r)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                 </TableCell>
               </TableRow>
             ))}

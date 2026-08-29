@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Plus, Search, Trash2, Pencil } from "lucide-react";
 import { PERMISSION_GROUPS, DEFAULT_PERMISSIONS, type PermissionKey } from "@/lib/permissions";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 
 type StaffRole = "admin" | "manager" | "warehouse";
 
@@ -35,6 +36,9 @@ const UsersManagement = () => {
   const [allUsers, setAllUsers] = useState<StaffUser[]>([]);
   const [filtered, setFiltered] = useState<StaffUser[]>([]);
   const [loading, setLoading] = useState(true);
+  // Motivo da lista estar vazia. `null` = vazia de verdade (ver a celula vazia
+  // da tabela): "nenhum usuario" e "nao consegui ler" nao podem sair iguais.
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [searchName, setSearchName] = useState("");
   const [searchEmail, setSearchEmail] = useState("");
 
@@ -53,19 +57,44 @@ const UsersManagement = () => {
   // Acesso por localização (categorias de topo). editLocs = locais marcados do usuário em edição.
   const [topCats, setTopCats] = useState<{ id: string; nome: string }[]>([]);
   const [editLocs, setEditLocs] = useState<Set<string>>(new Set());
+  // Sequencia do "abrir edicao": so a resposta do clique MAIS RECENTE pode
+  // mexer no dialogo (ver openEdit).
+  const editReq = useRef(0);
 
+  // `categorias` e paginada aqui pelo mesmo motivo dos outros 12 pontos que ja
+  // usam `fetchAllRows` (Produtos, Pedidos, InventoryControl...): sem `.range()`
+  // o PostgREST corta em 1000 linhas com `error: null`. Aqui o corte nao apagaria
+  // nada — `editLocs` vem de `user_locations`, nao desta lista — mas uma
+  // localizacao alem da linha 1000 ficaria impossivel de conceder, sem sintoma.
+  // E `fetchAllRows` LANCA no erro, entao a falha para de ser silenciosa: antes,
+  // `error` era descartado e a secao Locations simplesmente sumia do dialogo,
+  // como se aquele funcionario nao pudesse ser restrito.
   useEffect(() => {
-    supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("nome")
-      .then(({ data }) => setTopCats(((data ?? []) as any[]).filter((c) => !c.parent_id).map((c) => ({ id: c.id, nome: c.nome }))));
+    fetchAllRows<any>((f, t) => supabase.from("categorias")
+      .select("id, nome, parent_id").eq("ativo", true)
+      .order("nome").order("id", { ascending: true }).range(f, t) as any)
+      .then((todas) => setTopCats(todas.filter((c) => !c.parent_id).map((c) => ({ id: c.id, nome: c.nome }))))
+      .catch((e: any) => toast.error("Could not load the location list — the Locations section is hidden: " + e.message));
   }, []);
 
   const fetchData = async () => {
     setLoading(true);
 
-    const { data: roles } = await supabase
+    const { data: roles, error: rolesErr } = await supabase
       .from("user_roles")
       .select("user_id, role, permissions")
       .in("role", ["admin", "manager", "warehouse"] as any[]);
+
+    // Sem isto, uma leitura falhada pintava "No users found." — numa tela cujo
+    // trabalho e dizer QUEM TEM ACESSO. "Nao ha ninguem" e "nao consegui ler"
+    // levavam o admin a conclusoes opostas e saiam identicos.
+    if (rolesErr) {
+      setLoadErr(rolesErr.message);
+      toast.error("Could not load the user list: " + rolesErr.message);
+      setLoading(false);
+      return;
+    }
+    setLoadErr(null);
 
     if (!roles || roles.length === 0) {
       setAllUsers([]);
@@ -76,9 +105,15 @@ const UsersManagement = () => {
 
     const userIds = (roles as any[]).map((r: any) => r.user_id);
 
-    const { data: staffData } = await supabase.functions.invoke("admin-create-user", {
+    const { data: staffData, error: staffErr } = await supabase.functions.invoke("admin-create-user", {
       body: { action: "list_staff", user_ids: userIds },
     });
+    // Os papeis (o que importa) vieram; nomes/e-mails/ultimo login, nao. Dizer
+    // isso, em vez de deixar a coluna com "—" como se o cadastro fosse assim.
+    if (staffErr || staffData?.error) {
+      toast.error("Roles loaded, but names/e-mails could not be read (shown as “—”): " +
+        (staffData?.error ?? staffErr?.message ?? "unknown error"));
+    }
 
     const authMap: Record<string, any> = {};
     (staffData?.users ?? []).forEach((u: any) => { authMap[u.id] = u; });
@@ -125,13 +160,35 @@ const UsersManagement = () => {
   };
 
   const openEdit = async (u: StaffUser) => {
+    const req = ++editReq.current;
+
+    // A LEITURA VEM ANTES DE QUALQUER setState, por dois motivos.
+    //
+    // 1. `error` era descartado. Leitura falhada devolvia `locs = null`, virava
+    //    Set vazio, e o Save mandava `set_user_locations(user, [])` — que APAGA
+    //    as restricoes. E lista vazia NAO significa "sem acesso": a policy de
+    //    `categorias` (20260619220000) libera tudo quando nao ha linha em
+    //    `user_locations`. Ou seja, um erro de rede promovia o funcionario
+    //    restrito a VER TODAS as localizacoes, e a tela dizia "User updated".
+    //    Agora falha FECHADO: sem os locais, o editor nem abre.
+    //
+    // 2. Corrida ja vista em Categorias e Options: clicar Edit em A, clicar
+    //    Edit em B, e a resposta de A chegar depois. O dialogo mostrava B e o
+    //    Save gravava os locais de A em B. So o pedido mais recente escreve.
+    const { data: locs, error: locErr } = await supabase
+      .from("user_locations").select("categoria_id").eq("user_id", u.user_id);
+    if (req !== editReq.current) return;
+    if (locErr) {
+      toast.error("Could not load this user's location access — the editor was not opened: " + locErr.message);
+      return;
+    }
+
     setEditUser(u);
     setEditRole(u.role);
     setEditPassword("");
     // Merge stored permissions with defaults for the role (in case new perms were added)
     const defaults = u.role !== "admin" ? (DEFAULT_PERMISSIONS[u.role as "manager" | "warehouse"] || {}) : {};
     setEditPerms({ ...defaults, ...u.permissions });
-    const { data: locs } = await supabase.from("user_locations").select("categoria_id").eq("user_id", u.user_id);
     setEditLocs(new Set(((locs ?? []) as any[]).map((l) => l.categoria_id)));
     setEditOpen(true);
   };
@@ -324,7 +381,9 @@ const UsersManagement = () => {
                 {filtered.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
-                      No users found.
+                      {loadErr
+                        ? <span className="text-destructive">The user list could not be read — this is NOT “no users”: {loadErr}</span>
+                        : "No users found."}
                     </TableCell>
                   </TableRow>
                 ) : filtered.map(u => {

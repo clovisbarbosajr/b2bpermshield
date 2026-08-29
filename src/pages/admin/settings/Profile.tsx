@@ -220,11 +220,20 @@ const SettingsProfile = () => {
       return;
     }
     try {
-      const { data: order } = await supabase
+      // `error` era descartado. Leitura falhada mandava `data: null` para o
+      // endpoint e a tela imprimia "Status: 200" — o admin concluia que a
+      // integracao funcionava tendo enviado um pedido VAZIO.
+      const { data: order, error: orderErr } = await supabase
         .from("pedidos")
         .select("*, pedido_itens(*), clientes(nome, email, empresa)")
         .eq("id", webhookTestOrder)
         .single();
+      if (orderErr || !order) {
+        setWebhookTestOutput(
+          `Could not read the selected order — nothing was sent to ${url}.\n` +
+          (orderErr?.message ?? "order not found"));
+        return;
+      }
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (config?.webhook_auth_header) headers["Authorization"] = config.webhook_auth_header;
       setWebhookTestOutput(`Sending ${type} webhook to ${url}...\n`);

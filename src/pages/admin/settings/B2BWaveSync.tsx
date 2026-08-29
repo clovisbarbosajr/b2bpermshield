@@ -45,7 +45,6 @@ const B2BWaveSync = () => {
   const [orderTotalSynced, setOrderTotalSynced] = useState(0);
   const [orderTotalUpdated, setOrderTotalUpdated] = useState(0);
   const [orderTotalSkipped, setOrderTotalSkipped] = useState(0);
-  const [orderTotalItems, setOrderTotalItems] = useState(0);
   const [orderTotalErrors, setOrderTotalErrors] = useState(0);
   const stopRef = useRef(false);
 
@@ -88,11 +87,31 @@ const B2BWaveSync = () => {
 
   // Status PERSISTENTE — lido de sync_log no banco (não some ao recarregar a página).
   const [lastRuns, setLastRuns] = useState<any[]>([]);
+  // Este painel e o UNICO lugar da tela onde os avisos `BLOQUEIO_` aparecem.
+  // Descartando o `error`, a leitura falhando esvaziava `lastRuns` e o painel
+  // inteiro sumia — indistinguivel de "nunca rodou / nada bloqueado".
+  const [lastRunsErro, setLastRunsErro] = useState<string | null>(null);
   const fetchLastRuns = async () => {
-    const { data } = await (supabase as any).from("sync_log").select("*").order("created_at", { ascending: false }).limit(50);
+    // As 50 linhas mais novas NAO cobrem uma acao por acao. O cron de `orders`
+    // grava a cada 15 min (~96 linhas/dia): depois de meio dia, as 50 mais novas
+    // sao so `orders`, e a ultima rodada de `products`/`customers` — com o aviso
+    // `BLOQUEIO_` junto — desaparecia do painel sem nada dizendo que sumiu.
+    // A varredura fica (acha acao nova que eu nao conheco aqui) e cada acao
+    // conhecida ganha a propria consulta de 1 linha.
+    const tab = () => (supabase as any).from("sync_log").select("*").order("created_at", { ascending: false });
+    const [scan, ...porAcao] = await Promise.all([
+      tab().limit(50),
+      ...["orders", "products", "customers", "sync_orders_backfill"].map((a) => tab().eq("action", a).limit(1)),
+    ]);
+    const erro = [scan, ...porAcao].find((r: any) => r?.error)?.error;
+    setLastRunsErro(erro ? erro.message : null);
     const seen = new Set<string>();
     const latest: any[] = [];
-    for (const r of data ?? []) if (!seen.has(r.action)) { seen.add(r.action); latest.push(r); }
+    // A varredura vem primeiro: para uma acao presente nos dois, ganha a linha
+    // mais nova, que e a dela.
+    for (const r of [...(scan.data ?? []), ...porAcao.flatMap((p: any) => p.data ?? [])]) {
+      if (!seen.has(r.action)) { seen.add(r.action); latest.push(r); }
+    }
     setLastRuns(latest);
   };
   useEffect(() => { fetchLastRuns(); }, [orderSyncing]);
@@ -145,11 +164,26 @@ const B2BWaveSync = () => {
   };
 
   const syncAllOrders = async () => {
+    // ESTE BOTAO PODE MANDAR MENSAGEM. Ele chama `cron_orders`, que roda com
+    // `notify = true` (ver o ramo `action === "cron_orders"` na edge function):
+    // o aviso de STATUS fica
+    // suprimido durante o tick, mas o de PEDIDO NOVO sai para pedidos com menos
+    // de 48h. O botao ao lado, "Importar historico completo" — que nao notifica
+    // ninguem — ja pedia confirmacao; este, que notifica, nao pedia nada.
+    if (!confirm(
+      [
+        "Sincronizar pedidos do B2BWave agora?",
+        "",
+        "Pedidos com MENOS DE 48 HORAS podem disparar a notificação de PEDIDO NOVO (e-mail/SMS) para admin e cliente.",
+        "A notificação de mudança de status fica suprimida durante a sincronização.",
+        "",
+        'Para trazer pedidos antigos sem avisar ninguém, use "Importar histórico completo".',
+      ].join("\n")
+    )) return;
     setOrderSyncing(true);
     stopRef.current = false;
     setOrderTotalSynced(0);
     setOrderTotalSkipped(0);
-    setOrderTotalItems(0);
     setOrderTotalErrors(0);
 
     // Usa o cursor do servidor (action cron_orders): RETOMA de onde parou. Se você
@@ -160,6 +194,7 @@ const B2BWaveSync = () => {
     let totalSkipped = 0;
     let totalErrors = 0;
     let tick = 0;
+    let falhasSeguidas = 0;
 
     while (!stopRef.current) {
       tick++;
@@ -170,6 +205,7 @@ const B2BWaveSync = () => {
         });
         if (error) throw error;
 
+        falhasSeguidas = 0;
         totalSynced += data.created || 0;
         totalUpdated += data.updated || 0;
         totalSkipped += data.skipped || 0;
@@ -189,8 +225,17 @@ const B2BWaveSync = () => {
         }
       } catch (err: any) {
         totalErrors++;
+        falhasSeguidas++;
         setOrderTotalErrors(totalErrors);
-        setOrderProgress(`⚠️ Erro no lote ${tick}: ${err.message}. Tentando de novo…`);
+        // Sem teto, um erro PERMANENTE (credencial, função fora do ar) virava
+        // uma chamada a cada 2s enquanto a aba ficasse aberta — para uma ação
+        // que pode notificar — e a tela seguia dizendo "tentando de novo".
+        if (falhasSeguidas >= 5) {
+          setOrderProgress(`⛔ Parei após 5 falhas seguidas. Último erro: ${err.message}`);
+          toast.error("Sincronização interrompida após 5 falhas seguidas", { description: err.message });
+          break;
+        }
+        setOrderProgress(`⚠️ Erro no lote ${tick} (${falhasSeguidas}/5): ${err.message}. Tentando de novo…`);
         await new Promise(r => setTimeout(r, 2000));
       }
     }
@@ -371,6 +416,16 @@ const B2BWaveSync = () => {
         </div>
       </div>
 
+      {lastRunsErro && (
+        <Card className="mb-4 border-destructive/40 bg-destructive/10 p-4 text-sm">
+          <p className="font-semibold">Não consegui ler o histórico de sincronização</p>
+          <p className="text-muted-foreground">{lastRunsErro}</p>
+          <p className="text-muted-foreground mt-1">
+            Sem ele não dá para ver os avisos de bloqueio — a ausência de aviso abaixo não quer dizer que não houve bloqueio.
+          </p>
+        </Card>
+      )}
+
       {/* Status persistente — sobrevive a recarregar/trocar de aba (vem do banco) */}
       {lastRuns.length > 0 && (
         <Card className="mb-4 p-4">
@@ -537,9 +592,12 @@ const B2BWaveSync = () => {
               <ShoppingCart className="h-5 w-5 text-accent" />
             </div>
             <div className="flex-1">
-              <CardTitle className="text-base">Orders (Full History)</CardTitle>
+              <CardTitle className="text-base">Orders</CardTitle>
               <p className="text-xs text-muted-foreground mt-1">
-                Sync ALL orders from B2B Wave history. Processes 50 orders per batch to avoid timeouts.
+                "Sync All Orders" runs the same engine as the automatic cron: it resumes from the
+                saved cursor (it does not restart from zero) and <strong>can send the new-order
+                notification</strong> for orders less than 48 hours old. To bring the old history
+                without notifying anyone, use "Importar histórico completo".
               </p>
             </div>
           </CardHeader>
@@ -547,12 +605,14 @@ const B2BWaveSync = () => {
             {orderProgress && (
               <div className="mb-3 rounded-md bg-muted/50 p-3 text-sm">
                 <p>{orderProgress}</p>
+                {/* "Items" saiu: nada nunca alimentava o contador, entao a tela
+                    mostrava "Items: 0" durante uma sincronizacao que estava,
+                    sim, gravando itens. */}
                 {orderSyncing && (
-                  <div className="mt-2 grid grid-cols-5 gap-4 text-xs text-muted-foreground">
+                  <div className="mt-2 grid grid-cols-4 gap-4 text-xs text-muted-foreground">
                     <span>New: <strong className="text-foreground">{orderTotalSynced}</strong></span>
                     <span>Updated: <strong className="text-foreground">{orderTotalUpdated}</strong></span>
                     <span>Unchanged: <strong className="text-foreground">{orderTotalSkipped}</strong></span>
-                    <span>Items: <strong className="text-foreground">{orderTotalItems}</strong></span>
                     <span>Errors: <strong className="text-foreground">{orderTotalErrors}</strong></span>
                   </div>
                 )}

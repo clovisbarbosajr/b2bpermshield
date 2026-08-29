@@ -32,8 +32,18 @@ const BulkUpdateOrders = () => {
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
-    const text = await file.text();
-    const rows = parseCSV(text);
+    let rows: Record<string, string>[];
+    try {
+      // `file.text()` REJEITA quando o arquivo sumiu, foi renomeado ou o disco
+      // falhou entre o clique e a leitura — comum com drag & drop. Sem este
+      // `catch` virava rejeicao nao tratada: o admin soltava o CSV e NADA
+      // acontecia, sem toast e sem explicacao. Mesmo conserto ja feito no
+      // `ImportOrders.tsx`.
+      rows = parseCSV(await file.text());
+    } catch (e: any) {
+      toast.error("Could not read this file: " + (e?.message ?? String(e)));
+      return;
+    }
     if (rows.length === 0) { toast.error("No data rows found"); return; }
 
     setImporting(true);
@@ -48,7 +58,20 @@ const BulkUpdateOrders = () => {
     // A janela cobre o lote inteiro com folga. A supressao e contada por
     // referencia no banco (20260826010000), entao ligar aqui nao atrapalha um
     // sync que esteja rodando, nem o sync desliga a nossa.
-    const minutos = Math.max(10, Math.ceil(rows.length / 100) * 5);
+    // Piso de 30 minutos, nao 10 — o mesmo que o `ImportOrders.tsx` ja usa, pela
+    // mesma razao, e este arquivo tinha ficado para tras.
+    //
+    // `desde` e COMPARTILHADO e fica ancorado no PRIMEIRO incremento da
+    // sequencia (20260826010000: `desde` so e renovado quando `_novo = 1`). Se um
+    // lote orfao — tick de `cron_orders` que morreu sem decrementar — abriu a
+    // sequencia ha 110 minutos, esta chamada HERDA aquele `desde`: o ramo
+    // `n > 0` do gatilho vence em 10 minutos (`desde + 120`), e o unico silencio
+    // que resta e a janela `ate`, que com 10 tambem morre em 10. Uma planilha de
+    // 500 pedidos faz duas requisicoes por linha e passa disso com folga — e o
+    // que sai do outro lado e o incidente de 25/ago: SMS por pedido, no meio do
+    // lote. Com 30, `ate` sozinho cobre. O SQL ja limita em 120, entao pedir
+    // mais nao custa nada.
+    const minutos = Math.max(30, Math.ceil(rows.length / 100) * 5);
     const { error: supErr } = await supabase.rpc("set_suppress_order_notify" as any, {
       _on: true, _minutos: minutos,
     });
@@ -64,10 +87,20 @@ const BulkUpdateOrders = () => {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const orderNumberRaw = r["order_number"]?.trim();
-      const orderNumber = parseInt(orderNumberRaw);
+      // `parseInt` LE O PREFIXO e descarta o resto: "1001abc" vira 1001, "10.5"
+      // vira 10, "1 001" vira 1. O numero errado nao dava erro nenhum — resolvia
+      // para UM pedido existente, mudava o status DELE e reportava "Updated" em
+      // verde. E mudanca de status baixa estoque e (quando o gatilho voltar)
+      // avisa o cliente: um digito perdido na planilha manda "seu pedido foi
+      // enviado" para quem nao pediu nada.
+      //
+      // `Number` recusa a string inteira; `Number.isInteger` corta o decimal que
+      // `Number` aceitaria ("10.5"), e `orderNumberRaw` vazio ja e barrado
+      // antes porque `Number("")` e 0 e passaria em `isInteger`.
+      const orderNumber = Number(orderNumberRaw);
 
-      if (!orderNumberRaw || isNaN(orderNumber)) {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw || "—", status: "error", message: "Invalid or missing order_number" });
+      if (!orderNumberRaw || !Number.isInteger(orderNumber)) {
+        res.push({ row: i + 2, orderNumber: orderNumberRaw || "—", status: "error", message: `Invalid or missing order_number "${orderNumberRaw ?? ""}"` });
         continue;
       }
 
@@ -165,11 +198,18 @@ const BulkUpdateOrders = () => {
         <Card className="p-6">
           <h3 className="text-lg font-semibold">Upload CSV</h3>
           <p className="mt-2 text-sm text-muted-foreground">Columns: <code className="text-xs bg-muted px-1 rounded">{TEMPLATE_HEADERS.join(", ")}</code></p>
+          {/* `importing` trava a AREA inteira, nao so o botao — o mesmo conserto
+              que o `ImportOrders.tsx` ja tinha. So o `<Button>` interno estava
+              desabilitado: clicar na moldura ou soltar um segundo arquivo
+              disparava um `handleFile` concorrente. Dois lotes ao mesmo tempo
+              partilham UM `res`? nao — cada um tem o seu, e o `setResults` do
+              que terminar primeiro e apagado pelo outro: o admin fica com o
+              relatorio de UM lote e os UPDATEs dos DOIS aplicados. */}
           <div
-            className="mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 cursor-pointer hover:border-primary/50"
-            onClick={() => inputRef.current?.click()}
+            className={`mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 ${importing ? "opacity-60 cursor-not-allowed" : "cursor-pointer hover:border-primary/50"}`}
+            onClick={() => { if (!importing) inputRef.current?.click(); }}
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+            onDrop={(e) => { e.preventDefault(); if (importing) return; const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
           >
             <div className="text-center">
               <Upload className="mx-auto h-10 w-10 text-muted-foreground" />

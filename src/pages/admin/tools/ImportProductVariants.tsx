@@ -9,8 +9,18 @@ import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
-const TEMPLATE_HEADERS = ["parent_sku", "variant_sku", "variant_name", "option_value", "price", "stock"];
-const TEMPLATE_ROW = ["PROD-001", "PROD-001-AZ", "Azul 1L", "Azul", "45.90", "100"];
+// `variant_name` e `price` SAIRAM do modelo: `produto_variantes` nao tem coluna
+// para nenhum dos dois (`id, produto_id, codigo, valores_opcao, quantidade,
+// estoque_reservado, imagem_url, ativo` — ver `types.ts`), e o codigo NUNCA os
+// gravou. O modelo prometia, a ajuda ao lado dizia "Optional: variant_name (...)
+// price", e a tela devolvia "Inserted" em verde: o operador subia a tabela de
+// preco das variantes e ia embora achando que tinha entrado.
+// Variante herda o preco do produto pai; preco proprio nao existe no banco.
+const TEMPLATE_HEADERS = ["parent_sku", "variant_sku", "option_value", "stock"];
+const TEMPLATE_ROW = ["PROD-001", "PROD-001-AZ", "Azul", "100"];
+// Colunas que o arquivo pode trazer e que esta tela NAO tem onde guardar. Em vez
+// de ignorar calado, cada linha diz o que foi descartado.
+const COLUNAS_SEM_DESTINO = ["variant_name", "price"];
 
 type Result = { row: number; sku: string; status: "ok" | "error"; message: string };
 
@@ -31,8 +41,17 @@ const ImportProductVariants = () => {
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
-    const text = await file.text();
-    const rows = parseCSV(text);
+    let rows: Record<string, string>[];
+    try {
+      // `file.text()` REJEITA quando o arquivo sumiu, foi renomeado ou o disco
+      // falhou entre o clique e a leitura — comum com drag & drop. Sem este
+      // `catch` virava rejeicao nao tratada: o admin soltava o CSV e NADA
+      // acontecia, sem toast e sem explicacao.
+      rows = parseCSV(await file.text());
+    } catch (e: any) {
+      toast.error("Could not read this file: " + (e?.message ?? String(e)));
+      return;
+    }
     if (rows.length === 0) { toast.error("No data rows found"); return; }
 
     setImporting(true);
@@ -72,6 +91,12 @@ const ImportProductVariants = () => {
       }
     }
 
+    // O laco abre em `try` porque a AREA DE DROP agora fica travada enquanto
+    // `importing` for true: se uma excecao pulasse o `setImporting(false)` la
+    // embaixo, a tela nao ficaria so mentindo "Importing..." — ficaria
+    // INUTILIZAVEL ate recarregar. Mesma estrutura ja usada em
+    // `ImportOrders.tsx` e `BulkUpdateOrders.tsx`.
+    try {
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const parentSku = r["parent_sku"]?.trim();
@@ -121,16 +146,40 @@ const ImportProductVariants = () => {
       if (error) {
         res.push({ row: i + 2, sku: variantSku, status: "error", message: error.message });
       } else {
-        res.push({ row: i + 2, sku: variantSku, status: "ok", message: jaExiste ? "Updated" : "Inserted" });
+        // Diz o que foi DESCARTADO. "Inserted" sozinho afirmava mais do que o
+        // codigo tinha feito quando o arquivo trazia preco ou nome de variante.
+        const descartadas = COLUNAS_SEM_DESTINO.filter((c) => String(r[c] ?? "").trim() !== "");
+        res.push({
+          row: i + 2, sku: variantSku, status: "ok",
+          message: (jaExiste ? "Updated" : "Inserted")
+            + (descartadas.length ? ` — ignored, no such column on variants: ${descartadas.join(", ")}` : ""),
+        });
       }
     }
 
-    setResults(res);
-    setImporting(false);
-    const okVar = res.filter((r) => r.status === "ok").length;
-    const errVar = res.filter((r) => r.status === "error").length;
-    toast.success(`Imported ${okVar} of ${rows.length} variants`);
-    supabase.from("import_logs").insert({ tipo: "product_variants", arquivo_nome: file.name, registros_total: rows.length, registros_erro: errVar, registros_sucesso: rows.length - errVar, status: errVar === 0 ? "success" : "partial" } as any).then(() => {});
+    // Toast de sucesso DENTRO do try: fora dele, uma excecao mostraria o
+    // vermelho e o verde ao mesmo tempo.
+    toast.success(`Imported ${res.filter((r) => r.status === "ok").length} of ${rows.length} variants`);
+    } catch (e: any) {
+      toast.error("Import stopped: " + (e?.message ?? String(e)));
+    } finally {
+      // `setResults` aqui: numa excecao ele nunca rodava e a tabela ficava
+      // VAZIA — o admin perdia o registro de quais linhas tinham passado antes
+      // da falha.
+      setResults(res);
+      setImporting(false);
+      // UM contador, e o erro sai por SUBTRACAO. `rows.length - errVar` mentia
+      // se o laco parasse no meio: as linhas que nem chegaram a ser tentadas
+      // entravam como sucesso. Mesma regra ja escrita no `ImportOrders.tsx`.
+      const okVar = res.filter((r) => r.status === "ok").length;
+      supabase.from("import_logs").insert({
+        tipo: "product_variants", arquivo_nome: file.name,
+        registros_total: rows.length,
+        registros_erro: rows.length - okVar,
+        registros_sucesso: okVar,
+        status: okVar === 0 ? "failed" : okVar === rows.length ? "success" : "partial",
+      } as any).then(() => {}, () => {});   // rejeicao tratada: sem isto vira unhandled rejection
+    }
   };
 
   return (
@@ -143,11 +192,19 @@ const ImportProductVariants = () => {
         <Card className="p-6">
           <h3 className="text-lg font-semibold">Upload CSV</h3>
           <p className="mt-2 text-sm text-muted-foreground">Columns: <code className="text-xs bg-muted px-1 rounded">{TEMPLATE_HEADERS.join(", ")}</code></p>
+          {/* `importing` trava a AREA inteira, nao so o botao. So o `<Button>`
+              interno estava desabilitado: clicar na moldura ou soltar um segundo
+              arquivo disparava um `handleFile` concorrente — e aqui isso
+              DUPLICA VARIANTE. `variantesPorChave` e local a cada chamada, entao
+              dois lotes com o mesmo arquivo leem "nao existe" ao mesmo tempo e
+              os DOIS inserem; nao ha UNIQUE em (produto_id, codigo) para
+              segurar. E exatamente o estrago que aquele mapa foi escrito para
+              impedir, so que por duas abas do mesmo laco. */}
           <div
-            className="mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 cursor-pointer hover:border-primary/50"
-            onClick={() => inputRef.current?.click()}
+            className={`mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 ${importing ? "opacity-60 cursor-not-allowed" : "cursor-pointer hover:border-primary/50"}`}
+            onClick={() => { if (!importing) inputRef.current?.click(); }}
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+            onDrop={(e) => { e.preventDefault(); if (importing) return; const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
           >
             <div className="text-center">
               <Upload className="mx-auto h-10 w-10 text-muted-foreground" />
@@ -167,8 +224,9 @@ const ImportProductVariants = () => {
           </Button>
           <div className="mt-4 rounded border p-3 text-xs text-muted-foreground space-y-1">
             <p><strong>Required:</strong> parent_sku, variant_sku</p>
-            <p><strong>Optional:</strong> variant_name, option_value, price, stock (defaults to 0)</p>
+            <p><strong>Optional:</strong> option_value, stock (defaults to 0)</p>
             <p><strong>Note:</strong> parent_sku must match an existing product SKU.</p>
+            <p><strong>Not imported:</strong> variant_name and price — variants have no name or price of their own; the price comes from the parent product. Extra columns are reported per row, not saved.</p>
           </div>
         </Card>
       </div>

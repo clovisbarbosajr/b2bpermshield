@@ -18,11 +18,18 @@ type Log = { id: string; event: string; channel: string; recipient: string; stat
 export default function NotificacoesLog() {
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState(true);
+  // Esta e a tela onde se confere o que foi ENVIADO. Descartando o `error`, uma
+  // leitura que falha virava lista vazia e a tela afirmava "Nenhuma notificacao
+  // enviada ainda" — a mentira mais cara possivel justamente aqui, depois dos
+  // 1.508 SMS de 25/ago. Falha de leitura tem que aparecer como falha.
+  const [erro, setErro] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
-    const { data } = await sb.from('notification_log').select('*').order('created_at', { ascending: false }).limit(200);
-    setLogs((data as Log[]) ?? []);
+    setErro(null);
+    const { data, error } = await sb.from('notification_log').select('*').order('created_at', { ascending: false }).limit(200);
+    if (error) { setErro(error.message); setLogs([]); }
+    else setLogs((data as Log[]) ?? []);
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -38,6 +45,12 @@ export default function NotificacoesLog() {
       </div>
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+      ) : erro ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm">
+          <p className="font-semibold">Não consegui ler o histórico</p>
+          <p className="text-muted-foreground">{erro}</p>
+          <p className="text-muted-foreground mt-1">Isto NÃO quer dizer que nada foi enviado — quer dizer que a leitura falhou.</p>
+        </div>
       ) : logs.length === 0 ? (
         <p className="text-sm text-muted-foreground py-16 text-center">Nenhuma notificação enviada ainda.</p>
       ) : (

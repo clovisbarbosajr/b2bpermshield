@@ -44,6 +44,11 @@ const SalesTax = () => {
       supabase.from("tax_rates").select("*").order("regiao"),
       supabase.from("tax_rules").select("*, tax_classes(nome), tax_customer_groups(nome), tax_rates(nome, regiao, percentual)").order("created_at"),
     ]);
+    // Erro de leitura calado pintava a tela de "nao ha nenhuma regra de imposto"
+    // — e o admin recriava as regras que ja existiam. Pior: com `classes` vazio,
+    // o botao "New Sales Tax rate" grava `tax_class_id: ""`.
+    const erro = c.error ?? g.error ?? r.error ?? ru.error;
+    if (erro) toast.error("Could not load the tax settings: " + erro.message);
     setClasses(c.data ?? []);
     setGroups(g.data ?? []);
     setRates(r.data ?? []);
@@ -71,8 +76,21 @@ const SalesTax = () => {
       ? await supabase.from("tax_classes").update(classForm).eq("id", editingClass.id).select("id").maybeSingle()
       : await supabase.from("tax_classes").insert(classForm).select("id").maybeSingle();
     if (error) { setSaving(false); toast.error("Could not save: " + error.message); return; }
+    // `update` que nao casa nenhuma linha (outro admin apagou a classe) volta
+    // `data: null, error: null` — dizia "Updated" sem ter gravado nada. E o passo
+    // seguinte era pior: sem `data.id`, `limparOutrosDefault` recebia `undefined`,
+    // caia no ramo SEM `neq` e tirava o `is_default` de TODAS. Zero classe padrao
+    // = `tax_classes WHERE is_default LIMIT 1` vazio no trigger = imposto ZERO em
+    // todo pedido seguinte, calado. Falha FECHADO: nao limpa nada.
+    if (!data) {
+      setSaving(false);
+      toast.error(editingClass
+        ? "This tax class no longer exists — nothing was saved. Reload the page."
+        : "Could not confirm the saved tax class — reload the page before setting a default.");
+      fetchAll(); return;
+    }
     if ((classForm as any).is_default) {
-      const e2 = await limparOutrosDefault("tax_classes", data?.id ?? editingClass?.id);
+      const e2 = await limparOutrosDefault("tax_classes", data.id);
       if (e2) { setSaving(false); toast.error("Saved, but could not clear the previous default: " + e2.message); fetchAll(); return; }
     }
     toast.success(editingClass ? "Updated" : "Created");
@@ -85,8 +103,17 @@ const SalesTax = () => {
       ? await supabase.from("tax_customer_groups").update(groupForm).eq("id", editingGroup.id).select("id").maybeSingle()
       : await supabase.from("tax_customer_groups").insert(groupForm).select("id").maybeSingle();
     if (error) { setSaving(false); toast.error("Could not save: " + error.message); return; }
+    // Mesmo caso do `saveClass`: sem `data.id`, o `limparOutrosDefault` roda sem
+    // `neq` e zera o padrao de TODOS os grupos.
+    if (!data) {
+      setSaving(false);
+      toast.error(editingGroup
+        ? "This customer group no longer exists — nothing was saved. Reload the page."
+        : "Could not confirm the saved customer group — reload the page before setting a default.");
+      fetchAll(); return;
+    }
     if ((groupForm as any).is_default) {
-      const e2 = await limparOutrosDefault("tax_customer_groups", data?.id ?? editingGroup?.id);
+      const e2 = await limparOutrosDefault("tax_customer_groups", data.id);
       if (e2) { setSaving(false); toast.error("Saved, but could not clear the previous default: " + e2.message); fetchAll(); return; }
     }
     toast.success(editingGroup ? "Updated" : "Created");

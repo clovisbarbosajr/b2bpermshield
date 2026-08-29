@@ -112,6 +112,16 @@ const ImportCustomers = () => {
         payload.pais = (r["country"] || r["pais"] || "United States");
         payload.status = "pendente";
         payload.is_active = false;
+        // `clientes.user_id` e NOT NULL e NAO tem DEFAULT (20260317043654:68).
+        // Sem ele todo INSERT morria com 23502 e esta importacao NUNCA criou um
+        // cliente — o `payload: any` escondia a coluna faltando do `tsc`.
+        // Importar sem login e o desenho: a FK para `auth.users` foi dropada de
+        // proposito ("so we can import customers without auth users",
+        // 20260319152251), e o sync do B2BWave faz exatamente isto
+        // (supabase/functions/b2bwave-sync/index.ts:2005). No primeiro login,
+        // `claim_customer_record()` casa por e-mail e troca pelo `auth.uid()`
+        // real. Aleatorio tambem satisfaz o `clientes_user_id_unique`.
+        payload.user_id = crypto.randomUUID();
       }
 
       // ANTES: `.upsert(payload, { onConflict: "email" })`. Mesmo defeito da

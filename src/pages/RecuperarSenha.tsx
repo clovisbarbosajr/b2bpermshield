@@ -33,8 +33,18 @@ const RecuperarSenha = () => {
       <div className="flex min-h-screen items-center justify-center bg-background p-4">
         <Card className="w-full max-w-md text-center">
           <CardHeader>
-            <CardTitle>Email sent</CardTitle>
-            <CardDescription>Check your inbox to reset your password.</CardDescription>
+            {/* A tela NAO SABE que o e-mail saiu. `send-email` responde
+                `{success:true}` tambem quando o e-mail nao existe (anti-oraculo,
+                de proposito) e quando o limite de 3 links por 15 min ja foi
+                atingido. "Email sent / check your inbox" afirmava o que o codigo
+                nao sabe, e quem batia no limite ficava esperando um e-mail que
+                nunca ia chegar. O texto agora cobre os tres casos sem revelar
+                qual deles aconteceu. */}
+            <CardTitle>Check your inbox</CardTitle>
+            <CardDescription>
+              If an account exists for that address, a reset link is on its way. Reset links are
+              limited to a few every 15 minutes — if nothing arrives, wait a moment before trying again.
+            </CardDescription>
           </CardHeader>
           <CardFooter className="justify-center">
             <Link to="/login" className="text-accent hover:underline">Back to login</Link>

@@ -20,20 +20,32 @@ const Coupons = () => {
   const [form, setForm] = useState({ codigo: "", tipo: "percentual", valor: 0, uso_maximo: null as number | null, data_inicio: "", data_fim: "", ativo: true });
   const [saving, setSaving] = useState(false);
 
-  const fetchData = async () => { const { data } = await supabase.from("coupons").select("*").order("created_at", { ascending: false }); setItems(data ?? []); setLoading(false); };
+  const fetchData = async () => {
+    const { data, error } = await supabase.from("coupons").select("*").order("created_at", { ascending: false });
+    // Sem ler o erro a tabela vinha VAZIA e a tela dizia, na pratica, "nao ha
+    // cupom nenhum" — o admin recriava um codigo que ja existe.
+    if (error) toast.error("Could not load coupons: " + error.message);
+    setItems(data ?? []); setLoading(false);
+  };
   useEffect(() => { fetchData(); }, []);
 
   const openNew = () => { setEditing(null); setForm({ codigo: "", tipo: "percentual", valor: 0, uso_maximo: null, data_inicio: "", data_fim: "", ativo: true }); setDialogOpen(true); };
   const openEdit = (r: any) => { setEditing(r); setForm({ codigo: r.codigo, tipo: r.tipo, valor: Number(r.valor), uso_maximo: r.uso_maximo, data_inicio: r.data_inicio?.split("T")[0] ?? "", data_fim: r.data_fim?.split("T")[0] ?? "", ativo: r.ativo }); setDialogOpen(true); };
 
   const handleSave = async () => {
+    // `cupom_por_codigo` (20260826050000) casa com
+    // `upper(c.codigo) = upper(trim(_codigo))`: o trim vale SO pro que o cliente
+    // digita, nao pro que esta gravado. Um codigo colado com espaco ("SAVE10 ")
+    // nascia MORTO — nenhum cliente conseguia usar, e nada na tela indicava isso.
+    const codigo = form.codigo.trim();
+    if (!codigo) { toast.error("Code is required"); return; }
     setSaving(true);
     // `data_fim` e uma data ("2026-08-10") gravada numa coluna com hora: virava
     // 00:00 e as duas validacoes (`data_fim >= now()` no trigger e no checkout)
     // matavam o cupom na VIRADA do dia 10 — um dia inteiro antes do que o admin
     // configurou. Grava o fim do dia. `data_inicio` continua 00:00, que e o certo.
     const fimDoDia = form.data_fim ? `${form.data_fim}T23:59:59` : null;
-    const payload = { ...form, valor: Number(form.valor), // `|| null` transformava ZERO em "ilimitado", em silencio: o admin digitava 0,
+    const payload = { ...form, codigo, valor: Number(form.valor), // `|| null` transformava ZERO em "ilimitado", em silencio: o admin digitava 0,
     // o campo limpava, e o cupom virava sem limite. E o BANCO trata 0 como
     // esgotado (`uso_atual < uso_maximo` com 0 e falso), entao os dois
     // DISCORDAVAM — a tela aplicava o desconto e o servidor recusava, o que hoje

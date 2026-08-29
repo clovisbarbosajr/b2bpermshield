@@ -226,6 +226,12 @@ export default function Notificacoes() {
   const [typeTpls, setTypeTpls] = useState<Record<string, { id?: string; assunto: string; corpo: string }>>({});
   const [typeTplSaving, setTypeTplSaving] = useState<string | null>(null);
   const [typeTplPreview, setTypeTplPreview] = useState<{ tipo: string; html: string } | null>(null);
+  // Leitura de `email_templates` que falha NAO pode virar "corpo vazio". Corpo
+  // vazio significa "usa o padrao do sistema" na tela e no send-email, e o Save
+  // sem `id` faz INSERT — criando uma segunda linha para o mesmo `tipo` (a
+  // tabela nao tem unico em `tipo`) por cima de um template que existe e que
+  // esta tela nao conseguiu ler. Falha FECHADO: bloqueia o Save.
+  const [typeTplLoadError, setTypeTplLoadError] = useState<string | null>(null);
   const setTypeTpl = (tipo: string, patch: Partial<{ assunto: string; corpo: string }>) =>
     setTypeTpls((prev) => ({ ...prev, [tipo]: { ...(prev[tipo] ?? { assunto: '', corpo: '' }), ...patch } }));
 
@@ -271,6 +277,11 @@ export default function Notificacoes() {
       sb.from('notification_events').select('*').order('id'),
       sb.from('notification_recipients').select('*').order('created_at'),
     ]);
+    // Sem ler o `error`, falha de leitura ficava identica a "nao ha canal /
+    // evento / destinatario configurado": a aba Channels renderizava vazia e
+    // nada na tela dizia por que.
+    const erroCarga = [c.error, e.error, r.error].find(Boolean);
+    if (erroCarga) toast.error('Could not load the notification settings', { description: erroCarga.message });
     setChannels((c.data as Channel[]) ?? []);
     // O `error` e lido. Descarta-lo fazia a falha de leitura virar `false`, e a
     // faixa anunciava "Sending is active" com toda confianca — mentira
@@ -311,7 +322,8 @@ export default function Notificacoes() {
 
     // Templates por tipo (email_templates) — só os tipos que a aba edita.
     const tipos = EMAIL_TYPE_DEFS.map((d) => d.tipo);
-    const { data: tplRows } = await sb.from('email_templates').select('id, tipo, assunto, corpo').in('tipo', tipos);
+    const { data: tplRows, error: tplErr } = await sb.from('email_templates').select('id, tipo, assunto, corpo').in('tipo', tipos);
+    setTypeTplLoadError(tplErr ? tplErr.message : null);
     const byTipo: Record<string, { id?: string; assunto: string; corpo: string }> = {};
     for (const row of tplRows ?? []) byTipo[row.tipo] = { id: row.id, assunto: row.assunto ?? '', corpo: row.corpo ?? '' };
     setTypeTpls(byTipo);
@@ -320,11 +332,17 @@ export default function Notificacoes() {
 
   // Se o load falhou em pegar o id (ex.: schema cache), tenta de novo NA HORA
   // do save — o Save nunca deve morrer por estado velho da página.
+  // Quem chama so faz `if (!id) return;` — a mensagem sai daqui, porque so aqui
+  // se sabe se foi "nao existe configuracao" ou "nao consegui ler". Dizer
+  // "Configuration not found" numa falha de leitura manda o admin criar o que ja
+  // existe.
   async function ensureConfigId(): Promise<string | null> {
     if (configId) return configId;
-    const { data } = await sb.from('configuracoes').select('id').limit(1).maybeSingle();
-    if (data?.id) setConfigId(data.id);
-    return data?.id ?? null;
+    const { data, error } = await sb.from('configuracoes').select('id').limit(1).maybeSingle();
+    if (error) { toast.error('Could not read the configuration', { description: error.message }); return null; }
+    if (!data?.id) { toast.error('Configuration not found'); return null; }
+    setConfigId(data.id);
+    return data.id;
   }
 
   // MASTER SWITCH: liga/desliga o canal e PERSISTE na hora. O toggle de EMAIL também
@@ -416,7 +434,12 @@ export default function Notificacoes() {
         .limit(1).maybeSingle();
       if (pedErr) { toast.error(`Could not load a sample order: ${pedErr.message}`); return; }
       if (!pedido) { toast.error('No notifiable orders found — place an order first.'); return; }
-      const { data: cliente } = await sb.from('clientes').select('*').eq('id', pedido.cliente_id).maybeSingle();
+      // Este e um caminho de ENVIO. Sem o `error`, a leitura falhando mandava o
+      // email real com nome/empresa/endereco em branco e o toast dizia
+      // "Real email sent" — o admin aprovava um template olhando um email que
+      // nao e o que o cliente recebe.
+      const { data: cliente, error: cliErr } = await sb.from('clientes').select('*').eq('id', pedido.cliente_id).maybeSingle();
+      if (cliErr) { toast.error(`Could not load the order's customer: ${cliErr.message}`); return; }
       const customer = { ...(cliente ?? {}), email: to };
       if (ev.id === 'new_order') {
         const items = (pedido.pedido_itens ?? []).map((it: any) => ({
@@ -508,7 +531,7 @@ export default function Notificacoes() {
 
   async function handleLogoSave() {
     const id = await ensureConfigId();
-    if (!id) { toast.error('Configuration not found'); return; }
+    if (!id) return;
     setLogoSaving(true);
     const { error } = await sb.from('configuracoes')
       .update({ email_logo_url: logoUrl || null, email_logo_position: logoPosition }).eq('id', id);
@@ -521,7 +544,7 @@ export default function Notificacoes() {
   // ── Template do email de confirmação de pedido (cliente) ──
   async function handleEmailOrderSave() {
     const id = await ensureConfigId();
-    if (!id) { toast.error('Configuration not found'); return; }
+    if (!id) return;
     setEmailOrderSaving(true);
     const { error } = await sb.from('configuracoes')
       .update({ email_order_template: emailOrderTemplate || null }).eq('id', id);
@@ -537,8 +560,11 @@ export default function Notificacoes() {
 
   async function handleEmailOrderPreview() {
     setEmailOrderPreviewing(true);
-    const { data: pedido } = await sb.from('pedidos').select('*, pedido_itens(*)')
+    // Mesmo defeito que `sendEventTest` ja corrigiu acima: sem o `error`, uma
+    // falha de leitura virava "No orders found" e mandava o admin criar pedido.
+    const { data: pedido, error: pedErr } = await sb.from('pedidos').select('*, pedido_itens(*)')
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (pedErr) { toast.error(`Could not load an order to preview: ${pedErr.message}`); setEmailOrderPreviewing(false); return; }
     if (!pedido) { toast.error('No orders found to preview. Place a test order first.'); setEmailOrderPreviewing(false); return; }
     const { data: cliente } = await sb.from('clientes').select('*').eq('id', pedido.cliente_id).maybeSingle();
     const { data: cfg } = await sb.from('configuracoes').select('nome_empresa, endereco, email_contato').limit(1).maybeSingle();
@@ -579,6 +605,12 @@ export default function Notificacoes() {
   // ── Template do PDF do pedido ──
   // ── Templates por tipo (email_templates) ──
   async function saveTypeTemplate(tipo: string, label: string) {
+    if (typeTplLoadError) {
+      toast.error('Not saving — the saved templates could not be read', {
+        description: 'What is shown is not what the system is using; saving would create a duplicate. Reload the page first.',
+      });
+      return;
+    }
     const t = typeTpls[tipo] ?? { assunto: '', corpo: '' };
     setTypeTplSaving(tipo);
     let error;
@@ -970,6 +1002,12 @@ export default function Notificacoes() {
               automaticamente no topo de todos (posição do card Logo acima). */}
           <div className="space-y-3">
             <p className="text-sm font-medium">All email templates</p>
+            {typeTplLoadError && (
+              <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs">
+                Could not read the saved templates ({typeTplLoadError}). What is shown below is
+                <strong> not</strong> what the system is sending, and saving is blocked. Reload the page.
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">
               Customize every email the system sends. Leave a body <strong>empty</strong> to keep the
               system default. The logo above is added automatically to all of them.
@@ -981,7 +1019,7 @@ export default function Notificacoes() {
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="text-sm font-medium flex items-center gap-2">
                       {def.label}
-                      {!t.corpo && <Badge variant="secondary" className="text-[10px]">using system default</Badge>}
+                      {!t.corpo && !typeTplLoadError && <Badge variant="secondary" className="text-[10px]">using system default</Badge>}
                     </div>
                     <div className="flex gap-2">
                       <Button size="sm" variant="outline" className="gap-1.5" onClick={() => previewTypeTemplate(def)}>

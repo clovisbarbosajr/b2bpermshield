@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 const TEMPLATE_HEADERS = ["name", "parent_name", "description", "ordem"];
 const TEMPLATE_ROW = ["Impermeabilizantes", "Produtos QuÃ­micos", "Linha completa de impermeabilizantes", "1"];
 
@@ -37,10 +38,22 @@ const ImportCategories = () => {
     setImporting(true);
     const res: Result[] = [];
 
-    // Fetch all existing categories for parent lookup
-    const { data: existingCats } = await supabase.from("categorias").select("id, nome");
+    // Fetch all existing categories for parent lookup.
+    // PAGINADO e com o erro LIDO. Antes era `const { data } = await ...select()`:
+    // o `error` ia para o lixo e o PostgREST ainda cortava em 1000 linhas sem
+    // avisar. Leitura falhando = mapa vazio = TODA linha com `parent_name` saia
+    // como "Parent category not found" — mentira, a categoria pai existe.
     const nameMap: Record<string, string> = {};
-    (existingCats ?? []).forEach((c: any) => { nameMap[c.nome.toLowerCase()] = c.id; });
+    try {
+      const existingCats = await fetchAllRows<{ id: string; nome: string }>((from, to) =>
+        supabase.from("categorias").select("id, nome")
+          .order("id", { ascending: true }).range(from, to));
+      for (const c of existingCats) nameMap[c.nome.toLowerCase()] = c.id;
+    } catch (e: any) {
+      toast.error("Could not read existing categories — import cancelled: " + (e?.message ?? e));
+      setImporting(false);
+      return;
+    }
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
@@ -81,9 +94,18 @@ const ImportCategories = () => {
       const temOrdem = Number.isFinite(ordemParsed);
 
       const buscaExistente = supabase.from("categorias").select("id").eq("nome", name);
-      const { data: existente } = categoriaPaiId
+      // O `error` desta busca era descartado. Falhando ela — inclusive com o
+      // PGRST116 que o `maybeSingle()` devolve quando ja existe mais de uma
+      // categoria com este (nome, pai) — `existente` vinha nulo e o codigo caia
+      // no INSERT: a tela dizia "Created" e a importacao criava justamente a
+      // DUPLICATA que este bloco existe para evitar. Falha FECHADO.
+      const { data: existente, error: buscaErr } = categoriaPaiId
         ? await buscaExistente.eq("parent_id", categoriaPaiId).maybeSingle()
         : await buscaExistente.is("parent_id", null).maybeSingle();
+      if (buscaErr) {
+        res.push({ row: i + 2, name, status: "error", message: `Could not check whether this category already exists, nothing written: ${buscaErr.message}` });
+        continue;
+      }
 
       const campos: any = {
         nome: name,

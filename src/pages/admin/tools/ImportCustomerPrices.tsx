@@ -38,37 +38,82 @@ const ImportCustomerPrices = () => {
     setImporting(true);
     const res: Result[] = [];
 
-    // Fetch clientes emailâ†’id map
-    // PAGINADO: sem isto, do milesimo cliente em diante o e-mail nao era
-    // encontrado e a linha do CSV era descartada com "Customer not found" —
-    // mensagem mentirosa, porque o cliente existe.
-    const clientes = await fetchAllRows<any>((from, to) =>
-      supabase.from("clientes").select("id, email")
-        .order("id", { ascending: true }).range(from, to));
     const emailMap: Record<string, string> = {};
-    (clientes ?? []).forEach((c: any) => { emailMap[c.email] = c.id; });
-
-    // Fetch produtos skuâ†’id map
-    const produtos = await fetchAllRows<any>((from, to) =>
-      supabase.from("produtos").select("id, sku")
-        .order("id", { ascending: true }).range(from, to));
+    const emailAmbiguo = new Set<string>();
     const skuMap: Record<string, string> = {};
-    (produtos ?? []).forEach((p: any) => { if (p.sku) skuMap[p.sku] = p.id; });
+    const skuAmbiguo = new Set<string>();
+    try {
+      // Fetch clientes email→id map
+      // PAGINADO: sem isto, do milesimo cliente em diante o e-mail nao era
+      // encontrado e a linha do CSV era descartada com "Customer not found" —
+      // mensagem mentirosa, porque o cliente existe.
+      const clientes = await fetchAllRows<{ id: string; email: string | null }>((from, to) =>
+        supabase.from("clientes").select("id, email")
+          .order("id", { ascending: true }).range(from, to));
+      // Casa em MINUSCULAS. O resto do sistema ja trata e-mail como identidade
+      // sem caixa (`claim_customer_record()` casa com `lower(email) = _email`,
+      // 20260619000000) e `ImportCustomers` deduplica assim. Comparando exato,
+      // base com `John@Acme.com` e CSV com `john@acme.com` davam "Customer not
+      // found" e o preco negociado simplesmente nao entrava.
+      for (const c of clientes) {
+        if (!c.email) continue;
+        const k = c.email.trim().toLowerCase();
+        // Duas linhas de `clientes` com o mesmo e-mail (nao ha UNIQUE em
+        // `clientes.email`): qual delas receberia o preco seria sorteio. Marca e
+        // recusa a linha em vez de cobrar do cadastro errado.
+        if (emailMap[k] && emailMap[k] !== c.id) emailAmbiguo.add(k);
+        else emailMap[k] = c.id;
+      }
+
+      // Fetch produtos sku→id map
+      const produtos = await fetchAllRows<{ id: string; sku: string | null }>((from, to) =>
+        supabase.from("produtos").select("id, sku")
+          .order("id", { ascending: true }).range(from, to));
+      // SKU REPETE de proposito: a UNIQUE de `produtos.sku` foi DROPADA em
+      // 20260708140000 ("pra manter 1:1 com o original, a UNIQUE cai"). Com dois
+      // produtos de mesmo SKU, o mapa guardava o ultimo da paginacao e o preco
+      // negociado ia para um produto sorteado pela ordem de leitura — com "ok"
+      // verde na tela. Recusa e mostra qual SKU esta duplicado.
+      for (const p of produtos) {
+        if (!p.sku) continue;
+        const k = p.sku.trim();
+        if (skuMap[k] && skuMap[k] !== p.id) skuAmbiguo.add(k);
+        else skuMap[k] = p.id;
+      }
+    } catch (e: any) {
+      // `fetchAllRows` LANCA quando a leitura falha, e ninguem pegava: a promessa
+      // rejeitava fora do fluxo, `setImporting(false)` nunca rodava e a tela
+      // ficava em "Importing..." para sempre, sem uma palavra de erro.
+      toast.error("Could not read customers/products — import cancelled: " + (e?.message ?? e));
+      setImporting(false);
+      return;
+    }
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
-      const email = r["customer_email"]?.trim();
+      const emailBruto = r["customer_email"]?.trim();
       const sku = r["product_sku"]?.trim();
-      const key = `${email} / ${sku}`;
+      const key = `${emailBruto} / ${sku}`;
 
-      if (!email || !sku) {
+      if (!emailBruto || !sku) {
         res.push({ row: i + 2, key, status: "error", message: "Missing customer_email or product_sku" });
+        continue;
+      }
+      const email = emailBruto.toLowerCase();
+
+      if (emailAmbiguo.has(email)) {
+        res.push({ row: i + 2, key, status: "error", message: `More than one customer record uses ${emailBruto} — merge them before importing prices` });
         continue;
       }
 
       const clienteId = emailMap[email];
       if (!clienteId) {
-        res.push({ row: i + 2, key, status: "error", message: `Customer not found: ${email}` });
+        res.push({ row: i + 2, key, status: "error", message: `Customer not found: ${emailBruto}` });
+        continue;
+      }
+
+      if (skuAmbiguo.has(sku)) {
+        res.push({ row: i + 2, key, status: "error", message: `More than one product uses SKU ${sku} — give them distinct codes before importing prices` });
         continue;
       }
 
@@ -78,21 +123,56 @@ const ImportCustomerPrices = () => {
         continue;
       }
 
-      const preco = parseFloat(r["price"]);
-      if (isNaN(preco)) {
-        res.push({ row: i + 2, key, status: "error", message: `Invalid price: ${r["price"]}` });
+      // `parseFloat` para no primeiro caractere invalido e devolve um numero
+      // PLAUSIVEL: "1,234.56" vira 1 e "89,90" (virgula decimal, o jeito que a
+      // planilha sai em pt-BR) vira 89. Nao e NaN, nao acusa nada — o cliente
+      // passa a ser cobrado o preco errado com "Upserted" verde na tela. Aqui so
+      // passa decimal puro e nao negativo.
+      const precoBruto = (r["price"] ?? "").trim();
+      if (!/^\d+(\.\d+)?$/.test(precoBruto)) {
+        res.push({ row: i + 2, key, status: "error", message: `Invalid price: ${r["price"]} (use a plain number like 89.90)` });
         continue;
       }
+      const preco = parseFloat(precoBruto);
 
-      const { error } = await supabase.from("produto_precos_cliente").upsert(
-        { cliente_id: clienteId, produto_id: produtoId, preco },
-        { onConflict: "cliente_id,produto_id" }
-      );
+      // ANTES: `.upsert({...}, { onConflict: "cliente_id,produto_id" })`. NAO
+      // existe UNIQUE (cliente_id, produto_id) em `produto_precos_cliente` — a
+      // tabela tem so a PK em `id` (20260318202244:71-78) e nenhuma migration
+      // acrescentou indice depois. Sem o indice o Postgres recusa TODA linha com
+      // 42P10 ("no unique or exclusion constraint matching the ON CONFLICT
+      // specification"): esta importacao nunca gravou um preco desde que foi
+      // escrita. Entao aqui e procurar e UPDATE ou INSERT explicito.
+      const { data: existentes, error: buscaErr } = await supabase
+        .from("produto_precos_cliente").select("id")
+        .eq("cliente_id", clienteId).eq("produto_id", produtoId);
+      if (buscaErr) {
+        // Falha FECHADO: seguir para o insert criaria uma segunda linha de preco
+        // para o mesmo par, e ai o servidor cobra a que ele achar primeiro.
+        res.push({ row: i + 2, key, status: "error", message: buscaErr.message });
+        continue;
+      }
+      if (!existentes) {
+        // Sem erro E sem linhas nao e um estado que este select produz. Nao
+        // inventa: nao afirma duplicata, so recusa em vez de arriscar o insert.
+        res.push({ row: i + 2, key, status: "error", message: "Could not read the current custom price, nothing written" });
+        continue;
+      }
+      if (existentes.length > 1) {
+        // Sem o UNIQUE a tabela PODE ja ter duplicata. Atualizar uma so deixaria
+        // a outra valendo, e `preco_para_cliente` faz `SELECT ... LIMIT 1` sem
+        // ordem definida — qual preco vale seria sorteio.
+        res.push({ row: i + 2, key, status: "error", message: "Duplicate custom-price rows for this customer/product — remove the extras before importing" });
+        continue;
+      }
+      const jaTinha = existentes.length === 1;
+      const { error } = jaTinha
+        ? await supabase.from("produto_precos_cliente").update({ preco }).eq("id", existentes[0].id)
+        : await supabase.from("produto_precos_cliente").insert({ cliente_id: clienteId, produto_id: produtoId, preco });
 
       if (error) {
         res.push({ row: i + 2, key, status: "error", message: error.message });
       } else {
-        res.push({ row: i + 2, key, status: "ok", message: "Upserted" });
+        res.push({ row: i + 2, key, status: "ok", message: jaTinha ? "Updated" : "Created" });
       }
     }
 

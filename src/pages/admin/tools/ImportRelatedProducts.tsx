@@ -53,7 +53,18 @@ const ImportRelatedProducts = () => {
     setSummary("");
     // Detecta o formato: .xlsx/.xls (export do B2BWave) ou .csv/.txt.
     const isXlsx = /\.x(ls|lsx)$/i.test(file.name);
-    const rows = isXlsx ? parseXlsx(await file.arrayBuffer()) : parseCSV(await file.text());
+    let rows: Record<string, string>[];
+    try {
+      // `XLSX.read` LANCA em arquivo corrompido, protegido por senha ou que so
+      // tem a extensao de planilha — e `file.arrayBuffer()`/`file.text()`
+      // rejeitam quando o arquivo sumiu entre o clique e a leitura. Sem este
+      // `catch` virava rejeicao nao tratada: o admin escolhia o arquivo e NADA
+      // acontecia, sem toast e sem explicacao.
+      rows = isXlsx ? parseXlsx(await file.arrayBuffer()) : parseCSV(await file.text());
+    } catch (e: any) {
+      toast.error("Could not read this file: " + (e?.message ?? String(e)));
+      return;
+    }
     if (rows.length === 0) { toast.error("No data rows found"); return; }
     // A coluna de relacionados no export do B2BWave chama-se "related_products_buy_with"
     // (versões antigas: "related_products"). Aceita as duas.
@@ -81,9 +92,26 @@ const ImportRelatedProducts = () => {
     //
     // `fetchAllRows` LANCA em erro — falha de rede deixa de ser indistinguivel
     // de "tabela vazia".
-    const produtos = await fetchAllRows<any>((from, to) =>
-      supabase.from("produtos").select("id, sku, b2bwave_id")
-        .order("id", { ascending: true }).range(from, to));
+    //
+    // E o `throw` PRECISA de quem o pegue. Ele nao tinha: a chamada estava
+    // solta, depois do `setImporting(true)`. Erro de leitura (RLS, sessao
+    // expirada, rede) virava rejeicao nao tratada — a tela ficava presa em
+    // "Importing..." PARA SEMPRE, sem toast, sem tabela, e so recarregando a
+    // pagina para sair. O comentario acima ja dizia que a funcao lanca; ninguem
+    // tinha escrito o `catch`.
+    let produtos: any[];
+    try {
+      produtos = await fetchAllRows<any>((from, to) =>
+        supabase.from("produtos").select("id, sku, b2bwave_id")
+          .order("id", { ascending: true }).range(from, to));
+    } catch (e: any) {
+      // FALHA FECHADA: sem o catalogo completo, todo codigo relacionado viraria
+      // "not found" e o import inteiro seria um relatorio de erro — no melhor
+      // caso. Nada e lido pela metade, nada e apagado.
+      setImporting(false);
+      toast.error("Could not read products — nothing was changed: " + (e?.message ?? String(e)));
+      return;
+    }
     const byB2bId = new Map<string, string>();
     const bySku = new Map<string, string>();
     for (const p of (produtos ?? []) as any[]) {
@@ -147,7 +175,24 @@ const ImportRelatedProducts = () => {
       const { error } = await supabase.from("produtos_relacionados").insert(
         relIds.map((rid) => ({ produto_id: mainId, produto_relacionado_id: rid, comprar_junto: false })),
       );
-      if (error) { res.push({ row: i + 2, product: label, status: "error", message: error.message }); continue; }
+      if (error) {
+        // O DELETE JA PASSOU. Nao ha transacao aqui — sao dois requests — entao
+        // este ramo significa vinculos APAGADOS e NAO recriados, e
+        // `produtos_relacionados` nao tem outra fonte (a API do B2BWave nao
+        // expoe related products). "error.message" sozinho fazia o operador ler
+        // "deu erro" e entender "nao mexeu"; o que aconteceu foi o contrario.
+        // A mensagem tem que dizer o que perdeu e o que reimportar.
+        res.push({
+          row: i + 2, product: label, status: "error",
+          // SEM contagem de propósito: o `delete` acima nao pede `.select()`, e
+          // portanto este codigo NAO SABE quantos vinculos existiam antes. A
+          // primeira versao desta mensagem dizia "N link(s) lost" usando
+          // `relIds.length` — que e quantos eu IA CRIAR, nao quantos apaguei. O
+          // que da para afirmar e o que esta escrito.
+          message: `Existing links were removed and could NOT be recreated — re-run this file for this product. ${error.message}`,
+        });
+        continue;
+      }
       linked += relIds.length;
       res.push({
         row: i + 2, product: label, status: "ok",

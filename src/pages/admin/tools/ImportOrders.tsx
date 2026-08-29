@@ -128,9 +128,19 @@ const ImportOrders = () => {
         groupRowErrors.push({ row: i + 2, key, status: "error", message: `Invalid quantity "${quantityRaw}" — must be a whole number of 1 or more` });
         continue;
       }
-      const price = parseFloat(r["price"]);
-      if (isNaN(price)) {
-        groupRowErrors.push({ row: i + 2, key, status: "error", message: `Invalid price: ${r["price"]}` });
+      // O MESMO defeito da quantidade, uma linha acima, so que em dinheiro:
+      // `parseFloat` le o PREFIXO e joga o resto fora sem reclamar. "45,90"
+      // entre aspas (planilha pt-BR) vira 45; "45x" vira 45; "1.2.3" vira 1.2.
+      // Preco errado gravado como se fosse certo num pedido historico — que nao
+      // tem de onde voltar depois que o B2BWave for desligado.
+      //
+      // `Number` recusa a string INTEIRA. A celula vazia e tratada a parte
+      // porque `Number("")` e 0, e preco zero vindo de celula em branco seria a
+      // mesma mentira com outro numero (`parseFloat("")` dava NaN e era pego).
+      const priceRaw = String(r["price"] ?? "").trim();
+      const price = priceRaw === "" ? NaN : Number(priceRaw);
+      if (!Number.isFinite(price)) {
+        groupRowErrors.push({ row: i + 2, key, status: "error", message: `Invalid price "${priceRaw}"` });
         continue;
       }
 

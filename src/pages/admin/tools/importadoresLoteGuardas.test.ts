@@ -1,0 +1,103 @@
+import { describe, it, expect } from "vitest";
+// `tsconfig.app.json` declara `"types": ["vitest/globals"]`, entao os tipos do Node
+// nao entram e o `tsc --noEmit` do `npm test` nao acha `node:fs`. Em execucao o
+// modulo existe (vitest roda em Node). Mesma nota de
+// `src/pages/admin/estoqueUpdateCondicional.test.ts`.
+// @ts-expect-error
+import { readFileSync } from "node:fs";
+
+// TESTE DE FIACAO, pelo mesmo motivo do `estoqueUpdateCondicional.test.ts`: as
+// guardas moram DENTRO de componentes de pagina, e importar o modulo arrastaria
+// layout, router, contexto de auth e o cliente Supabase. O que da para afirmar
+// sem montar a tela e a FORMA do trecho perigoso — que e exatamente o que a
+// mutacao apaga.
+//
+// Cada assert abaixo corresponde a um defeito que ESTAVA no arquivo e que voltar
+// atras reintroduz. Nenhum e estilo.
+
+const ler = (arquivo: string) => readFileSync(new URL(arquivo, import.meta.url), "utf8");
+
+/**
+ * Codigo sem os comentarios de linha. Os comentarios destes arquivos CITAM o
+ * defeito antigo ("`parseFloat` le o prefixo..."), e a primeira versao deste
+ * teste reprovou por causa da propria explicacao do conserto. Um assert que
+ * confunde o codigo com o comentario sobre o codigo nao prova nada.
+ */
+const semComentarios = (fonte: string) => fonte.replace(/^\s*\/\/.*$/gm, "");
+
+describe("importadores de lote: numero vindo de planilha e lido por inteiro", () => {
+  // `parseInt`/`parseFloat` leem o PREFIXO e descartam o resto sem erro:
+  // "1001abc" -> 1001 (pedido ERRADO atualizado, "Updated" em verde) e "45x" ->
+  // 45 (preco errado num pedido historico). O conserto e `Number` + checagem.
+  it("BulkUpdateOrders nao usa parseInt no order_number", () => {
+    const fonte = ler("./BulkUpdateOrders.tsx");
+    expect(semComentarios(fonte)).not.toMatch(/parseInt\s*\(/);
+    expect(fonte).toMatch(/Number\.isInteger\(orderNumber\)/);
+  });
+
+  it("ImportOrders nao usa parseFloat no price", () => {
+    const fonte = ler("./ImportOrders.tsx");
+    expect(semComentarios(fonte)).not.toMatch(/parseFloat\s*\(/);
+    // Celula vazia nao pode virar preco zero: `Number("")` e 0.
+    expect(fonte).toMatch(/priceRaw === ""/);
+  });
+});
+
+describe("importadores de lote: leitura que falha nao vira silencio", () => {
+  // `fetchAllRows` LANCA. Solto, depois de `setImporting(true)`, deixava a tela
+  // presa em "Importing..." para sempre, sem toast.
+  it("ImportRelatedProducts pega o throw do fetchAllRows e destrava a tela", () => {
+    const fonte = ler("./ImportRelatedProducts.tsx");
+    const bloco = fonte.match(/try \{[\s\S]*?fetchAllRows[\s\S]*?\} catch[\s\S]*?\}/);
+    expect(bloco, "fetchAllRows precisa estar dentro de try/catch").toBeTruthy();
+    expect(bloco![0]).toMatch(/setImporting\(false\)/);
+  });
+
+  // `file.text()`/`file.arrayBuffer()` rejeitam e `XLSX.read` lanca: sem catch,
+  // soltar o arquivo nao fazia NADA e nao dizia nada.
+  for (const arquivo of ["./BulkUpdateOrders.tsx", "./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx", "./ImportOrders.tsx"]) {
+    it(`${arquivo}: leitura do arquivo esta protegida e avisa`, () => {
+      const fonte = ler(arquivo);
+      const bloco = fonte.match(/try \{[\s\S]{0,600}?await file\.(text|arrayBuffer)\(\)[\s\S]*?\} catch[\s\S]*?\}/);
+      expect(bloco, "a leitura do File precisa estar dentro de try/catch").toBeTruthy();
+      expect(bloco![0]).toMatch(/toast\.error/);
+    });
+  }
+});
+
+describe("importadores de lote: um lote por vez", () => {
+  // So o `<Button>` interno estava desabilitado — a moldura continuava clicavel
+  // e aceitando drop. Dois `handleFile` concorrentes duplicam variante (nao ha
+  // UNIQUE em produto_variantes) e embaralham o relatorio.
+  for (const arquivo of ["./BulkUpdateOrders.tsx", "./ImportProductVariants.tsx", "./ImportOrders.tsx"]) {
+    it(`${arquivo}: a area de drop inteira recusa enquanto importa`, () => {
+      const fonte = ler(arquivo);
+      expect(fonte).toMatch(/onClick=\{\(\) => \{ if \(!importing\)/);
+      expect(fonte).toMatch(/onDrop=\{\(e\) => \{ e\.preventDefault\(\); if \(importing\) return;/);
+    });
+  }
+});
+
+describe("importadores de lote: janela de silencio cobre o lote", () => {
+  // `desde` e compartilhado e ancorado no PRIMEIRO incremento da sequencia
+  // (20260826010000). Herdando um `desde` velho, um piso de 10 minutos morre no
+  // meio da planilha e o gatilho de notificacao volta a falar — o formato do
+  // incidente de 25/ago.
+  for (const arquivo of ["./BulkUpdateOrders.tsx", "./ImportOrders.tsx"]) {
+    it(`${arquivo}: piso de 30 minutos`, () => {
+      expect(ler(arquivo)).toMatch(/Math\.max\(30,/);
+    });
+  }
+});
+
+describe("ImportProductVariants nao promete coluna que a tabela nao tem", () => {
+  // `produto_variantes` nao tem coluna de preco nem de nome; o codigo nunca as
+  // gravou, mas o modelo e a ajuda as ofereciam e a tela dizia "Inserted".
+  it("o modelo nao oferece price nem variant_name", () => {
+    const fonte = ler("./ImportProductVariants.tsx");
+    const modelo = fonte.match(/const TEMPLATE_HEADERS = \[[^\]]*\]/)![0];
+    expect(modelo).not.toMatch(/price|variant_name/);
+    // E o que vier no arquivo e reportado como descartado, nao engolido.
+    expect(fonte).toMatch(/COLUNAS_SEM_DESTINO/);
+  });
+});

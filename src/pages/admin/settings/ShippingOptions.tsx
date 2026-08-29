@@ -55,7 +55,11 @@ const ShippingOptions = () => {
     auto_apply: false,
     privado: false,
     tracking_url: "",
-    padrao: false,
+    // `padrao` NAO mora no form. Quem escreve essa coluna e so o `setDefault()`.
+    // Enquanto morou aqui, `handleSave` mandava a foto tirada no `openEdit`:
+    // abrir a opcao, clicar "Set default" e depois "Save" gravava `padrao: false`
+    // por cima — o padrao que o admin acabou de definir sumia, com "Updated" na
+    // tela. Com dois admins, a foto velha ressuscitava um SEGUNDO padrao.
     ativo: true,
     ordem: 0,
   };
@@ -67,6 +71,11 @@ const ShippingOptions = () => {
       supabase.from("shipping_options").select("*, tax_classes(nome)").order("ordem"),
       supabase.from("tax_classes").select("*").order("nome"),
     ]);
+    // Sem ler o erro, a lista vazia mentia de duas formas: "nao ha opcao de
+    // frete" (e o admin criava a segunda) e, pior, `taxClasses` vazio faz o
+    // formulario de opcao NOVA nascer em "Non Taxable" sem o admin escolher.
+    const erro = s.error ?? t.error;
+    if (erro) toast.error("Could not load shipping options: " + erro.message);
     setItems(s.data ?? []);
     setTaxClasses(t.data ?? []);
     setLoading(false);
@@ -90,7 +99,6 @@ const ShippingOptions = () => {
       auto_apply: r.auto_apply ?? false,
       privado: r.privado ?? false,
       tracking_url: r.tracking_url ?? "",
-      padrao: r.padrao ?? false,
       ativo: r.ativo ?? true,
       ordem: r.ordem ?? 0,
     });
@@ -406,7 +414,11 @@ const ShippingOptions = () => {
                     className="text-destructive"
                     onClick={async () => {
                       if (!confirm("Delete this shipping option?")) return;
-                      await supabase.from("shipping_options").delete().eq("id", r.id);
+                      // Sem ler o erro, uma recusa (RLS, ou FK de um pedido que
+                      // usa esta opcao) sumia: a linha voltava no `fetchData` e o
+                      // admin nao sabia por que.
+                      const { error } = await supabase.from("shipping_options").delete().eq("id", r.id);
+                      if (error) { toast.error("Could not delete: " + error.message); return; }
                       fetchData();
                     }}
                   >
