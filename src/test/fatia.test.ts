@@ -12,7 +12,7 @@
  * que protege o resto do repo era o unico sem protecao.
  */
 import { describe, it, expect } from "vitest";
-import { fatiaEntre, fatiaAPartirDe } from "./fatia";
+import { fatiaEntre, fatiaAPartirDe, fatiaAPartirDoUltimo } from "./fatia";
 
 const FONTE = [
   "linha zero",
@@ -64,5 +64,23 @@ describe("fatiaAPartirDe", () => {
 
   it("marcador ausente REPROVA", () => {
     expect(() => fatiaAPartirDe(FONTE, "NAO EXISTE")).toThrow(/marcador inicial/i);
+  });
+});
+
+describe("fatiaAPartirDoUltimo", () => {
+  const COM_REPETICAO = [
+    "return (", "primeiro", ")", "meio", "return (", "segundo", ")",
+  ].join("\n");
+
+  it("recorta a partir da ULTIMA ocorrencia", () => {
+    const r = fatiaAPartirDoUltimo(COM_REPETICAO, "return (");
+    expect(r).toContain("segundo");
+    expect(r).not.toContain("primeiro");
+  });
+
+  it("marcador ausente REPROVA, em vez de devolver o ultimo caractere", () => {
+    // `lastIndexOf` ausente devolve -1 e `slice(-1)` recorta uma string de UM
+    // caractere — em que toda assercao de "nao contem" passa, calada.
+    expect(() => fatiaAPartirDoUltimo(COM_REPETICAO, "NAO EXISTE")).toThrow(/marcador inicial/i);
   });
 });

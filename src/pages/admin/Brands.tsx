@@ -18,13 +18,27 @@ const AdminBrands = () => {
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ nome: "", descricao: "", logo_url: "", ativo: true });
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchData = async () => {
     const { data, error } = await supabase.from("brands").select("*").order("nome");
     setLoading(false);
-    // Sem isto, falha de leitura virava "No brands yet" e o admin recriava marcas
-    // que ja existem.
-    if (error) { toast.error("Could not load brands: " + error.message); return; }
+    // ESTADO DE ERRO, e nao so o toast.
+    //
+    // O comentario que estava aqui dizia que isto evitava o admin "recriar marcas
+    // que ja existem" — mas so o toast tinha sido aplicado. Sem o estado, a tela
+    // caia em `brands.length === 0` e mostrava "No brands yet" + Create Brand: o
+    // toast some em 6s e a afirmacao falsa fica na tela para sempre.
+    //
+    // `brands.nome` nao tem UNIQUE, e o `sync_brands` do B2BWave indexa por
+    // `nome.toLowerCase()` — marca duplicada faz uma das duas linhas parar de
+    // sincronizar de vez. As outras quatro telas desta pasta ja tinham o ramo.
+    if (error) {
+      setLoadError(error.message);
+      toast.error("Could not load brands: " + error.message);
+      return;
+    }
+    setLoadError(null);
     setBrands(data ?? []);
   };
 
@@ -41,8 +55,24 @@ const AdminBrands = () => {
     setSaving(true);
     const payload = { ...form, descricao: form.descricao || null, logo_url: form.logo_url || null };
     if (editing) {
-      const { error } = await supabase.from("brands").update(payload).eq("id", editing.id);
+      // `.select()` DE CONFIRMACAO: sem ele, "updated" e um chute.
+      //
+      // A RLS destas tabelas e `FOR ALL USING (has_role(auth.uid(),'admin'))`.
+      // UPDATE que nao casa NENHUMA linha nao e erro no Postgres — volta 204 com
+      // `error: null`, e a tela dizia "updated" em cima de nada.
+      //
+      // Nao e janela de milissegundos: o `AuthContext` cacheia o `role` e nunca
+      // rele `user_roles` na sessao, entao um admin rebaixado para manager
+      // continua com a tela aberta e funcional ate fechar a aba, com o banco
+      // recusando toda escrita e a tela confirmando cada uma. `Representantes.tsx`
+      // ja tinha essa guarda; estas quatro ficaram de fora.
+      const { data: salvo, error } = await supabase.from("brands")
+        .update(payload).eq("id", editing.id).select("id").maybeSingle();
       if (error) { toast.error(error.message); setSaving(false); return; }
+      if (!salvo) {
+        toast.error("Nothing was saved — the record no longer exists, or you no longer have permission. Reload the page.");
+        setSaving(false); return;
+      }
       toast.success("Brand updated");
     } else {
       const { error } = await supabase.from("brands").insert(payload);
@@ -67,6 +97,12 @@ const AdminBrands = () => {
       </div>
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>
+      ) : loadError ? (
+        <Card className="flex flex-col items-center justify-center py-16 text-center">
+          <h3 className="text-lg font-semibold">Could not load brands</h3>
+          <p className="text-muted-foreground mb-4">{loadError}</p>
+          <Button variant="outline" onClick={() => { setLoading(true); fetchData(); }}>Try again</Button>
+        </Card>
       ) : brands.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-16 text-center">
           <Tag className="h-12 w-12 text-muted-foreground mb-3" />

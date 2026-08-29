@@ -3,7 +3,8 @@ import { describe, it, expect } from "vitest";
 // `"types": ["vitest/globals"]`, entao os tipos do Node nao entram e o
 // `tsc --noEmit` do `npm test` nao acha `node:fs`. Em execucao o modulo existe.
 // @ts-expect-error
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { fatiaAPartirDoUltimo } from "@/test/fatia";
 
 // TESTE DE FIACAO (montar a tela exigiria `@testing-library/dom`, que nao esta
 // instalado — RTL 16 o tem como peer e o repo nao tem nenhum teste de render).
@@ -23,6 +24,12 @@ const telas = [
   { arquivo: "./Banners.tsx", tabela: "banners" },
   { arquivo: "./Noticias.tsx", tabela: "noticias" },
   { arquivo: "./Paginas.tsx", tabela: "paginas" },
+  // `Brands` ENTROU. Ela era a unica das cinco sem o ramo de erro — o comentario
+  // no arquivo AFIRMAVA a correcao, mas so o toast tinha sido aplicado, e a tela
+  // continuava mostrando "No brands yet" quando a leitura falhava. Estar fora
+  // desta lista foi o que deixou passar.
+  { arquivo: "./Brands.tsx", tabela: "brands" },
+  { arquivo: "./Representantes.tsx", tabela: "representantes" },
 ];
 
 describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () => {
@@ -35,16 +42,35 @@ describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () =
       expect(select, `nao achei o select de ${tabela}`).toBeTruthy();
       // Este e o assert que morre se alguem voltar ao `const { data }`.
       expect(select![0]).toMatch(/const \{ data, error \}/);
-      expect(fonte).toMatch(/if \(error\) \{\s*setLoadError\(error\.message\)/);
+      // Duas formas equivalentes no repo: `if (error) { setLoadError(error.message) }`
+      // e `setLoadError(error ? error.message : null)`. O que importa e o `error`
+      // ALIMENTAR o estado — exigir uma das duas reprovava a outra.
+      expect(fonte, "o `error` da leitura nao alimenta o `loadError`")
+        .toMatch(/setLoadError\(\s*error/);
+      // E O CAMINHO DE SUCESSO TEM QUE LIMPAR. Sem isto, depois de uma falha
+      // transitoria o "Try again" recarrega os dados mas o card de erro nunca sai
+      // — o ramo de erro vem antes do conteudo, entao a tela fica travada no erro
+      // com os dados carregados atras. Apagar essa linha passava verde.
+      //
+      // Duas formas: `setLoadError(null)` explicito no sucesso, ou o ternario
+      // `setLoadError(error ? error.message : null)`, que ja limpa sozinho.
+      const limpa = /setLoadError\(null\)/.test(fonte) ||
+        /setLoadError\(\s*error \?[^)]*:\s*null\s*\)/.test(fonte);
+      expect(limpa, "o `loadError` nunca e limpo no caminho de sucesso").toBe(true);
     });
 
     it(`${arquivo}: o ramo de erro vem antes do estado vazio`, () => {
       const fonte = ler(arquivo);
-      const erro = fonte.indexOf(": loadError ? (");
-      const vazio = fonte.search(/: \w+\.length === 0 \? \(/);
-      expect(erro, "nao achei o ramo de erro na renderizacao").toBeGreaterThan(-1);
+      // Idem aqui: o estado vazio pode ser ternario ou curto-circuito.
+      // SO O JSX. `search` no arquivo inteiro pegava a primeira ocorrencia em
+      // qualquer lugar — um helper com `banners.length === 0 && !loading` acima do
+      // `return (` reprovava codigo correto. O render comeca no `return (`.
+      const jsx = fatiaAPartirDoUltimo(fonte, "return (");
+      const erroJsx = jsx.indexOf(": loadError ? (");
+      const vazio = jsx.search(/\w+\.length === 0 \s*(\?|&&)/);
+      expect(erroJsx, "nao achei o ramo de erro na renderizacao").toBeGreaterThan(-1);
       expect(vazio, "nao achei o estado vazio na renderizacao").toBeGreaterThan(-1);
-      expect(erro).toBeLessThan(vazio);
+      expect(erroJsx).toBeLessThan(vazio);
     });
   }
 
@@ -54,5 +80,37 @@ describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () =
     const upload = ler("./Banners.tsx").match(/getPublicUrl\(path\);[\s\S]*?setForm\([^;]*;/);
     expect(upload, "nao achei o setForm depois do getPublicUrl").toBeTruthy();
     expect(upload![0]).toMatch(/setForm\(\(f\) => \(\{ \.\.\.f,/);
+  });
+});
+
+// A LISTA ACIMA TEM QUE COBRIR A PASTA.
+//
+// `Brands.tsx` passou meses com o defeito por um motivo so: ela nao estava no
+// array. Uma tela nova de conteudo entra na pasta e ninguem lembra de acrescentar
+// aqui — entao o teste passa a exigir que toda tela com o par `loadError` +
+// estado vazio esteja listada.
+describe("a lista de telas nao fica para tras", () => {
+  it("toda tela de admin com loadError e estado vazio esta coberta", () => {
+    const dir = "src/pages/admin";
+    const candidatas = readdirSync(dir)
+      .filter((n: string) => n.endsWith(".tsx"))
+      .filter((n: string) => {
+        const fonte = readFileSync(`${dir}/${n}`, "utf8");
+        // DUAS formas de estado vazio, e as duas existem no repo: o ternario
+        // `x.length === 0 ? (` e o curto-circuito `x.length === 0 && (`. Enxergar
+        // so o ternario deixava uma tela nova escrita com `&&` escapar da rede —
+        // pelo mesmo motivo que `Brands.tsx` escapou.
+        // O estado vazio conta so se estiver no JSX do render. `.length === 0 &&`
+        // tambem aparece em guarda de negocio (`InventoryAdjustment.tsx:338`), e
+        // isso acusava tela correta de estar fora da lista.
+        const jsx = fatiaAPartirDoUltimo(fonte, "return (");
+        return /const \[loadError/.test(fonte) && /\.length === 0 \s*(\?|&&)/.test(jsx);
+      });
+    const cobertas = new Set(telas.map((t) => t.arquivo.replace("./", "")));
+    const faltando = candidatas.filter((n: string) => !cobertas.has(n));
+    expect(
+      faltando,
+      "tela com `loadError` fora da lista deste teste — foi assim que `Brands.tsx` escapou",
+    ).toEqual([]);
   });
 });

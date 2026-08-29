@@ -41,6 +41,25 @@ const AdminRepresentantes = () => {
     setDialogOpen(true);
   };
 
+  // FAIXA 0..100, igual ao B2BWave — conferido no formulario dele
+  // (`admin/sales_reps/new`, `sales_rep[commission]` com `min="0" max="100"
+  // step="0.1"`). Somos um clone; a regra e a de la.
+  //
+  // O `|| 0` de antes nao pegava negativo (`-5` e truthy), e este numero e
+  // multiplicado em `reports/OrderRepsPerformance.tsx:69`
+  // (`o.total * (rate / 100)`) e exportado em CSV para o financeiro: digitar
+  // `1500` achando que e valor fixo virava comissao de 15x a receita.
+  //
+  // O `min`/`max` do input nao basta sozinho — o Input nao esta dentro de um
+  // `<form>`, entao a validacao nativa nunca roda — e o sync do B2BWave grava
+  // nesta coluna sem passar por aqui. O `CHECK` no banco fecha as duas portas e
+  // e SQL, entao vai na lista do dono.
+  const faixaComissao = (v: string) => {
+    const n = parseFloat(v);
+    if (!Number.isFinite(n)) return 0;
+    return Math.min(100, Math.max(0, n));
+  };
+
   const handleSave = async () => {
     setSaving(true);
     const payload = { ...form, telefone: form.telefone || null, comissao_percentual: Number(form.comissao_percentual) };
@@ -129,7 +148,7 @@ const AdminRepresentantes = () => {
             <div><Label>Email</Label><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-2">
               <div><Label>Phone</Label><Input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} /></div>
-              <div><Label>Commission %</Label><Input type="number" step="0.1" value={form.comissao_percentual} onChange={(e) => setForm({ ...form, comissao_percentual: parseFloat(e.target.value) || 0 })} /></div>
+              <div><Label>Commission %</Label><Input type="number" min="0" max="100" step="0.1" value={form.comissao_percentual} onChange={(e) => setForm({ ...form, comissao_percentual: faixaComissao(e.target.value) })} /></div>
             </div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ativo} onChange={(e) => setForm({ ...form, ativo: e.target.checked })} /> Active</label>
             <Button onClick={handleSave} disabled={saving} className="w-full">{saving ? "Saving..." : "Save"}</Button>

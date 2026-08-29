@@ -60,8 +60,24 @@ const AdminBanners = () => {
     setSaving(true);
     const payload = { ...form, imagem_url: form.imagem_url || null, link_url: form.link_url || null };
     if (editing) {
-      const { error } = await supabase.from("banners").update(payload).eq("id", editing.id);
+      // `.select()` DE CONFIRMACAO: sem ele, "updated" e um chute.
+      //
+      // A RLS destas tabelas e `FOR ALL USING (has_role(auth.uid(),'admin'))`.
+      // UPDATE que nao casa NENHUMA linha nao e erro no Postgres — volta 204 com
+      // `error: null`, e a tela dizia "updated" em cima de nada.
+      //
+      // Nao e janela de milissegundos: o `AuthContext` cacheia o `role` e nunca
+      // rele `user_roles` na sessao, entao um admin rebaixado para manager
+      // continua com a tela aberta e funcional ate fechar a aba, com o banco
+      // recusando toda escrita e a tela confirmando cada uma. `Representantes.tsx`
+      // ja tinha essa guarda; estas quatro ficaram de fora.
+      const { data: salvo, error } = await supabase.from("banners")
+        .update(payload).eq("id", editing.id).select("id").maybeSingle();
       if (error) { toast.error(error.message); setSaving(false); return; }
+      if (!salvo) {
+        toast.error("Nothing was saved — the record no longer exists, or you no longer have permission. Reload the page.");
+        setSaving(false); return;
+      }
       toast.success("Banner updated");
     } else {
       const { error } = await supabase.from("banners").insert(payload);

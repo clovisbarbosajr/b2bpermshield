@@ -57,3 +57,18 @@ export function fatiaAPartirDe(fonte: string, de: string): string {
   expect(i, `marcador inicial nao encontrado: ${de}`).toBeGreaterThan(-1);
   return fonte.slice(i);
 }
+
+/**
+ * Como `fatiaAPartirDe`, mas do ULTIMO marcador.
+ *
+ * Serve para pegar o JSX de um componente: `return (` aparece varias vezes num
+ * arquivo (helpers, handlers), e o do render e o ultimo. `lastIndexOf` a mao tem
+ * o mesmo defeito do `indexOf`: marcador ausente devolve -1 e `slice(-1)` pega o
+ * ULTIMO CARACTERE do arquivo — uma string de tamanho 1 em que toda assercao de
+ * "nao contem" passa.
+ */
+export function fatiaAPartirDoUltimo(fonte: string, de: string): string {
+  const i = fonte.lastIndexOf(de);
+  expect(i, `marcador inicial nao encontrado: ${de}`).toBeGreaterThan(-1);
+  return fonte.slice(i);
+}

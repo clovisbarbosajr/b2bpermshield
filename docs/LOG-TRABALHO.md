@@ -4102,3 +4102,83 @@ testes de guarda desta mesma leva. O dono deu OK para fechar aqui. Nao foi rodad
 uma rodada 16 — entao o criterio "ate nao voltar erro" NAO foi atingido para os
 testes de fiacao; o que esta provado e que os defeitos de produto conhecidos estao
 todos cobertos por mutante que reprova.
+
+## 2026-08-29 — Grupo G: catalogo do portal + admin de conteudo
+
+**Catalogo (a vitrine).** Cinco defeitos, nenhum com teste antes:
+
+O `error` do lookup de `clientes` era descartado. `clienteId` virava `null`, o
+efeito de precos (`if (!clienteId) return`) nunca rodava, e `getPrice` caia em
+`produtos.preco` — o preco de tabela publica. Pior: `precoIncerto` so liga DENTRO
+do `fetchPrices`, que nao executou, entao o banner vermelho que existe para dizer
+"esse nao e o seu preco" tambem nao aparecia. E nada redispara o efeito: um blip
+no carregamento deixava a SESSAO INTEIRA com preco de balcao, calada. Agora usa o
+`clienteDoPortal` (o mesmo tri-estado do Carrinho, com teste que executa).
+
+Realtime: `setProdutos(prev => prev.map(...))` devolve array novo SEMPRE, e o
+efeito de precos tinha `produtos` na dep — todo UPDATE em `produtos` rerodava o
+`Promise.all` do catalogo inteiro (~327 produtos x ~4 idas ao banco). O gatilho e
+o fluxo normal: `fn_reserve_stock_on_order_item` faz um UPDATE por ITEM de pedido.
+A dep virou uma chave `id:quantidade_minima` — estoque nao e entrada de preco.
+
+O clamp do item ja no carrinho usava `estoque_disponivel` da LINHA, gravado quando
+o item entrou e nunca atualizado — o mesmo campo que o `CartContext.updateQuantity`
+tinha parado de usar, com o motivo escrito. A linha mostrava "Available: 502" e o
+toast dizia "only 2 available", com o campo travado em 2.
+
+`statusRes.error` nao era lido: com o mapa vazio a pilula caia em "Available", em
+VERDE, para produto `descontinuado` com saldo. E o erro de `categorias` fazia a
+tela imprimir "This category is no longer available." + "No products found.".
+
+**Admin de conteudo.** Banners, Noticias, Paginas e Brands faziam
+`.update(...).eq("id", ...)` sem `.select()`: UPDATE que nao casa linha volta 204
+com `error: null`, e a tela dizia "updated" por cima de nada. Nao e janela de
+milissegundos — o `AuthContext` cacheia o `role` e nunca rele `user_roles`, entao
+um admin rebaixado para manager segue com a tela funcional ate fechar a aba, o
+banco recusando toda escrita e a tela confirmando cada uma. `Representantes` ja
+tinha a guarda; as outras quatro ficaram de fora. E o `Brands` era a unica das
+cinco sem o ramo `loadError` — o comentario dele AFIRMAVA a correcao, mas so o
+toast tinha sido aplicado, e a tela dizia "No brands yet" quando a leitura falhava.
+
+**Comissao — respondido pelo B2BWave, sem precisar do dono.** `comissao_percentual`
+aceitava qualquer numero (o `|| 0` nao pega negativo) e e multiplicada em
+`OrderRepsPerformance.tsx:69` e exportada em CSV. Fui ao formulario do B2BWave
+(`admin/sales_reps/new`): `sales_rep[commission]` tem `min="0" max="100"
+step="0.1"`. A faixa e a de la.
+
+**Tres rodadas de cacador/cetico**, 20 achados nas proprias correcoes. Os que mais
+valem registrar:
+
+O aviso de preco eu tinha feito como estado de MAO UNICA — nada o desligava.
+Staff no portal fora do "view as" (o caso que `precoDoItem.ts` define como "o
+preco base E o certo, nada a avisar") ficava com o banner vermelho a sessao
+inteira, por cima de precos corretos. Virou valor derivado do tri-estado.
+
+O banner de erro de categorias eu liguei no ESTADO, mas o unico ponto que o
+renderiza esta dentro de `sorted.length === 0` — com produtos carregados nao
+aparecia nada, e todo link de categoria passava a mostrar a loja inteira sem
+filtro e sem aviso. E quando ganhou render proprio, a chave `sorted` fez uma BUSCA
+sem resultado exibir "This is a loading problem, not an empty catalog" — mentira
+sobre a busca. Os dois pontos passaram a decidir por `produtos`.
+
+A correcao do rotulo de status cobriu so a visao em LISTA; na grade o mesmo
+produto continuava dizendo "In stock". As duas visoes se contradiziam conforme o
+botao List/Photos.
+
+E quatro guardas que JA existiam no catalogo (erro de produtos, erro de variantes,
+`filtraPorCategoria` conferindo o erro, `fetchAllRows`) nao tinham cobertura
+nenhuma — o cacador derrubou as quatro com a suite de 540 verde.
+
+Verificacao: `npm test` 551/551 em 54 arquivos, `tsc` limpo, `npm run build` ok,
+`check-edge` ok. ~35 mutantes plantados nas tres rodadas; todos reprovam a suite.
+
+### Nao e regressao desta leva, mas fica registrado
+
+Com a linha `Pre-order` ausente de `product_statuses`, `getStatusInfo` devolve o
+`status_produto` CRU (`pre_venda`) e `isPreOrder` compara com `"pre-order"` — entao
+`Catalogo` e `ProdutoDetalhe` bloqueiam a compra de pre-venda sem estoque,
+enquanto `lib/stock.ts` e o trigger do banco DEIXAM PASSAR. O mesmo produto nao
+pode ser adicionado pelas duas telas, mas fecha no checkout se ja estiver no
+carrinho. E alcancavel sem erro nenhum: o admin de status permite apagar ou
+renomear aquela linha sem guarda. Corrigir numa tela so criaria uma terceira
+opiniao — e decisao do dono, nas tres pontas.

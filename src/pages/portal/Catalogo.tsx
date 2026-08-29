@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { cartKey } from "@/lib/stock";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice, PriceResult } from "@/lib/pricing";
+import { clienteDoPortal } from "@/lib/precoDoItem";
 import { catalogCategoryButtons, descendantIds, ancestorChain } from "@/lib/categoryTree";
 
 import { fetchAllRows } from "@/lib/fetchAllRows";
@@ -53,26 +54,44 @@ const Catalogo = () => {
   // Algum preco caiu no fallback por ERRO (nao por regra de negocio). A tela nao
   // pode exibir o preco de tabela como se fosse o preco do cliente sem dizer.
   const [precoIncerto, setPrecoIncerto] = useState(false);
-  const [clienteId, setClienteId] = useState<string | null>(null);
+  // TRI-ESTADO, a mesma regra do Carrinho (`lib/precoDoItem.ts`, com teste que
+  // executa): `null` = leitura OK e nao ha ficha (preco base E o certo);
+  // `undefined` = nao sei, porque a leitura falhou ou ainda esta no ar.
+  const [clienteId, setClienteId] = useState<string | null | undefined>(undefined);
   const [statusMap, setStatusMap] = useState<Record<string, ProductStatus>>({});
+  // A leitura de `product_statuses` falhou: o rotulo nao pode afirmar "Available".
+  const [statusIlegivel, setStatusIlegivel] = useState(false);
 
   // Fetch clienteId
+  //
+  // O `error` E LIDO. Descartado, `clienteId` virava `null`, o efeito de precos
+  // (`if (!clienteId ...) return`) NUNCA rodava, e `getPrice` caia em `p.preco` —
+  // o preco de tabela publica. Pior: `precoIncerto` so liga DENTRO do
+  // `fetchPrices`, que nao executou, entao o banner vermelho que existe
+  // exatamente para dizer "esse nao e o seu preco" tambem nao aparecia. E nada
+  // redispara este efeito: um blip no carregamento deixava a SESSAO INTEIRA com
+  // preco de balcao, calada, na tela que o cliente mais usa.
+  //
+  // `clienteDoPortal` e a mesma regra do Carrinho, com teste que executa.
+  //
+  // Deps por ID: o `supabase-js` reemite `SIGNED_IN` a cada volta da aba e o
+  // `AuthContext` grava um objeto novo com o mesmo id.
   useEffect(() => {
-    const fetchClienteId = async () => {
-      if (impersonatedCustomer?.id) {
-        setClienteId(impersonatedCustomer.id);
-        return;
-      }
-      if (!user) return;
-      const { data } = await supabase
-        .from("clientes")
-        .select("id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      setClienteId(data?.id ?? null);
-    };
-    fetchClienteId();
-  }, [user, impersonatedCustomer]);
+    const contexto = { impersonatedId: impersonatedCustomer?.id, userId: user?.id };
+    setClienteId(clienteDoPortal(contexto));
+    if (impersonatedCustomer?.id || !user) return;
+
+    let cancelado = false;
+    supabase.from("clientes").select("id").eq("user_id", user.id).maybeSingle()
+      .then((leitura) => {
+        if (cancelado) return;
+        if (leitura.error) console.error(leitura.error);
+        setClienteId(clienteDoPortal({ ...contexto, leitura }));
+      });
+    return () => { cancelado = true; };
+  }, [user?.id, impersonatedCustomer?.id]);
+
+
 
   // Fetch products (with privacy group filtering) and categories
   useEffect(() => {
@@ -171,15 +190,54 @@ const Catalogo = () => {
         setLoading(false);
         return;
       }
-      // Sucesso: limpa o erro. Sem isto, uma falha na primeira passada (com
-      // `clienteId` ainda nulo) deixava o banner setado, e o cliente que
-      // legitimamente nao tem produto visivel via "Could not load the catalog"
-      // em vez de "no products".
-      setErroCarga(null);
+      // FALHA EM `categorias` TAMBEM E FALHA DE CARGA.
+      //
+      // O `catRes.error` ja blindava o filtro de produto (`filtraPorCategoria`),
+      // mas nao aparecia: com uma URL `?category=`, `cats` vazio fazia a tela
+      // imprimir "This category is no longer available." e, logo abaixo, "No
+      // products found." — duas afirmacoes falsas sobre o negocio, causadas por um
+      // erro de rede, com o banner de erro apagado porque os produtos carregaram.
+      if (catRes.error) {
+        console.error(catRes.error);
+        setErroCarga("Could not load the categories.");
+        setLoading(false);
+        // Os produtos carregaram: segue e mostra o que da, com o banner ligado.
+      } else {
+        // Sucesso: limpa o erro. Sem isto, uma falha na primeira passada (com
+        // `clienteId` ainda nulo) deixava o banner setado, e o cliente que
+        // legitimamente nao tem produto visivel via "Could not load the catalog"
+        // em vez de "no products".
+        setErroCarga(null);
+      }
       // Produtos que têm variante: o "Add" do grid leva pra página do produto (escolher a opção).
       setVariantProductIds(comVariante);
 
       // Build status map
+      //
+      // `statusRes.error` E LIDO. Descartado, `sMap` ficava vazio e a pilula caia
+      // no ramo "Available", em VERDE, para produto `descontinuado` com saldo em
+      // estoque — a tela afirmando um status que ninguem conseguiu ler.
+      //
+      // O `permite_comprar: true` do default FICA: o banco usa a mesma regra
+      // conservadora (20260825330000:113 — status sem linha em `product_statuses`
+      // NAO bloqueia). O que esta correcao muda e so o ROTULO, igual ao que
+      // `ProdutoDetalhe.tsx:130` ja faz: mostra o `status_produto` cru em vez de
+      // inventar "Available".
+      //
+      // O QUE ELA NAO CONSERTA, e vale registrar: com o mapa vazio,
+      // `getStatusInfo` devolve o `status_produto` CRU (`pre_venda`), enquanto
+      // `isPreOrder` compara com `"pre-order"` — entao produto de PRE-VENDA sem
+      // estoque vira "Sold Out" com o botao desabilitado. Isso e PRE-EXISTENTE
+      // (identico no HEAD anterior a esta leva) e vale tambem em operacao normal,
+      // se alguem apagar ou renomear a linha `Pre-order` no admin de status.
+      //
+      // E e uma divergencia de CAMINHO DE VENDA, nao de rotulo: `lib/stock.ts:110`
+      // normaliza sempre e deixa passar, e o trigger do banco tambem — entao o
+      // mesmo produto nao pode ser adicionado pelo catalogo nem pela ficha, mas
+      // passa no checkout se ja estiver no carrinho. Corrigir so aqui criaria uma
+      // terceira opiniao; e decisao do dono, nas tres pontas de uma vez.
+      if (statusRes.error) console.error(statusRes.error);
+      setStatusIlegivel(!!statusRes.error);
       const sMap: Record<string, ProductStatus> = {};
       (statusRes.data ?? []).forEach((s: any) => { sMap[s.nome.toLowerCase()] = s; });
       setStatusMap(sMap);
@@ -246,6 +304,13 @@ const Catalogo = () => {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // O que o preco realmente depende: quais produtos, e com que quantidade minima.
+  // Mudanca de estoque nao altera esta string, entao nao redispara nada.
+  const chaveDePreco = useMemo(
+    () => produtos.map((p) => `${p.id}:${p.quantidade_minima ?? 1}`).join(","),
+    [produtos],
+  );
+
   // Fetch prices for all products when clienteId and produtos are ready
   useEffect(() => {
     if (!clienteId || produtos.length === 0) return;
@@ -279,9 +344,34 @@ const Catalogo = () => {
       }
     };
     fetchPrices();
-  }, [clienteId, produtos]);
+    // DEPS PELO QUE O PRECO REALMENTE USA, e nao pelo array de produtos.
+    //
+    // A subscription de realtime faz `setProdutos(prev => prev.map(...))`, e
+    // `map` devolve array NOVO sempre — inclusive quando o id nem esta na lista.
+    // Com `produtos` na dep, todo UPDATE em `produtos` rerodava o `Promise.all`
+    // para o catalogo INTEIRO: ~327 produtos x ~4 idas ao banco = ~1.300
+    // requisicoes por evento, por aba. E o gatilho e o fluxo normal —
+    // `fn_reserve_stock_on_order_item` faz um UPDATE por ITEM de pedido, e o
+    // `b2bwave-sync` altera dezenas por rodada.
+    //
+    // Estoque nao entra no preco. As entradas sao `id` e `quantidade_minima`.
+  }, [clienteId, chaveDePreco]);
 
   const getPrice = (p: Produto) => prices[p.id]?.price ?? p.preco;
+
+  // AVISO DERIVADO, e nao estado de mao unica.
+  //
+  // A primeira versao ligava `precoIncerto` num efeito e nada o desligava: o
+  // staff no portal FORA do "view as" — o caso que `precoDoItem.ts` define como
+  // "o preco base E o certo, nada a avisar" — ficava com o banner vermelho na
+  // tela a sessao inteira, por cima de precos corretos. Sair do "view as" fazia o
+  // mesmo. E em toda visita normal o banner PISCAVA, porque o estado inicial e
+  // `undefined`.
+  //
+  // Derivado, ele acompanha o tri-estado sozinho: `undefined` = nao sei (avisa),
+  // `null` = nao tem ficha, preco base e o certo (nao avisa). O `!loading`
+  // evita o pisco do carregamento inicial.
+  const precoDesconhecido = clienteId === undefined && !loading;
 
   // Category hierarchy
   const childrenOf = (parentId: string) => categorias.filter(c => c.parent_id === parentId);
@@ -297,7 +387,11 @@ const Catalogo = () => {
   // `categoryIds = []` **não casa com nada**. Passar `null` aqui significaria
   // "sem filtro" e despejaria o CATÁLOGO INTEIRO numa tela que diz estar dentro
   // de uma categoria. O aviso abaixo explica o vazio.
-  const categoriaInvalida = !!categoryParam && !selectedCategory;
+  // "Categoria nao existe mais" so pode ser dito quando a lista de categorias FOI
+  // LIDA. Com `erroCarga` de categorias, `cats` esta vazio por falha — afirmar que
+  // a categoria sumiu e inventar, e o `categoryIds = []` logo abaixo zerava a
+  // vitrine junto ("No products found" numa loja cheia).
+  const categoriaInvalida = !!categoryParam && !selectedCategory && !erroCarga;
   const categoryIds = selectedCategory
     ? descendantIds(categorias, selectedCategory.id)
     : (categoriaInvalida ? [] : null);
@@ -362,6 +456,9 @@ const Catalogo = () => {
     if (isPreOrder(p)) return { label: "Backorder", cls: green };
     if (isSoldOut(p)) return { label: "Sold Out", cls: red };
     if (!canBuy(p)) return { label: getStatusLabel(p), cls: red };
+    // Sem ter lido `product_statuses`, o rotulo e o `status_produto` cru — que
+    // veio da leitura que DEU CERTO. "Available" seria afirmacao.
+    if (statusIlegivel) return { label: getStatusLabel(p), cls: green };
     return { label: "Available", cls: green };
   };
 
@@ -408,8 +505,20 @@ const Catalogo = () => {
       // O `updateQuantity` CLAMPA por estoque e minimo. Sem repetir o clamp aqui, o
       // aviso dizia "updated to 50" com 5 no carrinho, e o campo continuava exibindo
       // 50 pra sempre (o `qtys` nunca era limpo) — tela e carrinho discordando.
+      //
+      // TETO FRESCO (`disponivel(p)`), e nao `jaNoCarrinho.estoque_disponivel`.
+      //
+      // Aquele campo e gravado quando o item ENTRA no carrinho e nada nunca o
+      // atualiza — e o `CartContext.updateQuantity` foi corrigido justamente para
+      // PARAR de clampar por ele ("carrinho que passou dias com um piso de 2
+      // continuava valendo 2 depois do deposito repor 500"). O catalogo
+      // reintroduzia o clamp pelo chamador, com o mesmo dado fossil: a linha
+      // exibia "Available: 502" e o toast dizia "only 2 available", com o campo
+      // travado em 2. O ramo de INSERCAO logo abaixo ja usava `disponivel(p)`.
+      //
+      // Pre-venda passa sem teto: `clampQty` so limita quando `avail > 0`.
       const alvo = qtyOf(p);
-      const nova = clampQty(alvo, jaNoCarrinho.quantidade_minima, jaNoCarrinho.estoque_disponivel);
+      const nova = clampQty(alvo, jaNoCarrinho.quantidade_minima, isPreOrder(p) ? 0 : disponivel(p));
       const chave = cartKey(jaNoCarrinho);
       updateQuantity(chave, nova);
       // Limpa o valor digitado: o campo volta a ESPELHAR o carrinho.
@@ -561,7 +670,15 @@ const Catalogo = () => {
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
         </div>
       ) : sorted.length === 0 ? (
-        erroCarga ? (
+        // `produtos.length === 0`, e nao `sorted.length === 0`: `sorted` ja passou
+        // pelo filtro de BUSCA. Com a leitura de `categorias` falhando e os 327
+        // produtos na tela, uma busca por SKU inexistente trocava a lista por
+        // "This is a loading problem, not an empty catalog" — mentira sobre a
+        // busca do cliente, que concluia que a busca esta quebrada.
+        //
+        // Os erros de produto e de variante fazem `setProdutos([])` + `return`,
+        // entao o caso original continua caindo aqui.
+        erroCarga && produtos.length === 0 ? (
           // NUNCA dizer "No products found" quando a carga falhou: isso afirma
           // algo falso sobre o negocio e o cliente vai embora achando que a loja
           // esta vazia.
@@ -598,6 +715,12 @@ const Catalogo = () => {
                     <Badge variant="destructive" className="text-xs">{getStatusLabel(p)}</Badge>
                   ) : isPreOrder(p) ? (
                     <Badge className="text-xs bg-blue-600">Pre-order</Badge>
+                  ) : statusIlegivel ? (
+                    // Sem ter lido `product_statuses`, "In stock" e afirmacao. A
+                    // visao em lista ja mostrava o rotulo cru; a grade ficou de
+                    // fora da primeira versao e as duas se contradiziam — o mesmo
+                    // produto dizia `descontinuado` numa e "In stock" na outra.
+                    <Badge className="text-xs bg-green-600 hover:bg-green-600">{getStatusLabel(p)}</Badge>
                   ) : (
                     <Badge className="text-xs bg-green-600 hover:bg-green-600">In stock</Badge>
                   )}
@@ -700,7 +823,27 @@ const Catalogo = () => {
           </Table>
         </Card>
       )}
-      {precoIncerto && (
+      {erroCarga && produtos.length > 0 && (
+        // O BANNER DE ERRO TAMBEM COM A LISTA CHEIA.
+        //
+        // O outro ponto que mostra `erroCarga` esta dentro de
+        // `sorted.length === 0`. Com a leitura de `categorias` falhando e os
+        // produtos carregados, o estado ficava setado e a tela nao mostrava nada:
+        // todo link de categoria passava a exibir a loja INTEIRA, sem filtro e sem
+        // uma palavra, ate o fim da sessao — porque so o botao "Try again" daquele
+        // ramo redispara a carga.
+        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+          <p className="text-sm text-destructive font-medium">{erroCarga}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Category filtering is unavailable — products are not being filtered by category.
+          </p>
+          <Button variant="outline" size="sm" className="mt-2"
+            onClick={() => { setErroCarga(null); setLoading(true); setTentativa((t) => t + 1); }}>
+            Try again
+          </Button>
+        </div>
+      )}
+      {(precoIncerto || precoDesconhecido) && (
         <p className="mt-4 text-xs text-destructive">
           Some prices could not be loaded and are showing the list price — your agreed price may be different.
         </p>
