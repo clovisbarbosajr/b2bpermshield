@@ -263,23 +263,33 @@ const OrderDetail = () => {
     }
     const results = await Promise.allSettled(calls);
     setResending(false);
-    // `skipped` E FALHA AQUI, e nao era tratado.
+    // `skipped` E FALHA, e o PLACAR importa mais que a palavra.
     //
-    // O `send-email` responde `{ skipped: true }` (HTTP 200, sem `error`) quando o
-    // envio foi BLOQUEADO — canal de e-mail desligado no interruptor mestre, ou o
-    // `email_on_*` daquele tipo desligado. O filtro so olhava `error`, entao um
-    // envio recusado caia no `else` e a tela dizia "Order confirmation re-sent."
-    // O staff acreditava ter reenviado, e o cliente nunca recebia.
+    // O `send-email` responde `{ skipped: true }` com HTTP 200 e SEM `error` quando
+    // bloqueia. O filtro so olhava `error`, entao envio recusado caia no `else` e a
+    // tela dizia "Order confirmation re-sent." — o staff acreditava ter reenviado e
+    // o cliente nunca recebia.
     //
-    // O caso ficou ALCANCAVEL com a correcao de 28/ago no `send-email`: o `force`
-    // passou a exigir admin, entao manager e warehouse — que abrem esta tela e
-    // veem este botao — passam a ser barrados. O botao continua visivel para eles
-    // de proposito: quem decide se staff pode reenviar e o dono, e mentir sobre o
-    // resultado seria pior que qualquer das duas respostas.
+    // QUANDO ISSO COMECOU: nao foi com a correcao do `force` em 28/ago, como uma
+    // versao anterior deste comentario afirmava. O ramo `travaErro` do mesmo `if`
+    // NUNCA olhou `force`, e ha outros caminhos que devolvem `skipped` sem
+    // consultar privilegio nenhum — pedido mais velho que o limite retroativo
+    // (padrao 7 dias), teto de e-mail por hora, envio pausado. Todos alcancaveis
+    // por ADMIN, e desde antes. A mudanca de 28/ago so acrescentou mais um caminho
+    // (o interruptor mestre, para manager/warehouse).
+    //
+    // SAO ATE TRES CHAMADAS INDEPENDENTES, uma por destinatario, e o bloqueio e
+    // decidido DENTRO de cada uma — o teto por hora derruba a terceira e deixa as
+    // duas primeiras passarem. Por isso o resultado e um PLACAR, e nao um sim/nao:
+    // dizer "nothing was sent" com dois e-mails entregues seria a mesma mentira na
+    // direcao oposta.
     const bloqueado = (r: any) => r.status === "fulfilled" && r.value?.data?.skipped === true;
-    const failed = results.filter((r) => r.status === "rejected" || (r as any).value?.error || (r as any).value?.data?.error || bloqueado(r));
-    if (failed.length) {
-      const primeiro: any = failed[0];
+    const falhou = (r: any) => r.status === "rejected" || r.value?.error || r.value?.data?.error || bloqueado(r);
+    const naoForam = results.filter(falhou);
+    const foram = results.length - naoForam.length;
+
+    if (naoForam.length) {
+      const primeiro: any = naoForam[0];
       const motivoBloqueio = primeiro?.value?.data?.skipped
         ? (primeiro.value.data.reason ?? "the email channel or this notification is turned off")
         : null;
@@ -287,16 +297,35 @@ const OrderDetail = () => {
         || primeiro?.value?.data?.error
         || primeiro?.value?.error?.message
         || "unknown error";
-      toast.error(
-        motivoBloqueio
-          ? `Nothing was sent: ${msg}. Ask an admin to turn the channel on, or to resend.`
-          : `Some emails failed: ${msg}`,
-      );
+      // A saida "peca a um admin" SO vale para o interruptor mestre e os
+      // `email_on_*`. Para limite de idade, teto por hora ou envio pausado, nenhum
+      // canal esta desligado e o admin repetindo leva o mesmo bloqueio — a frase
+      // mandaria o operador atras de um conserto que nao existe.
+      const adminResolve = !!motivoBloqueio && /master switch|notification.*(disabled|off)/i.test(msg);
+      const placar = foram > 0 ? `Sent ${foram} of ${results.length}. ` : "Nothing was sent. ";
+      toast.error(`${placar}${msg}${adminResolve ? " — ask an admin to turn the channel on." : ""}`);
     } else {
       toast.success("Order confirmation re-sent.");
-      setResendOpen(false);
     }
-    log("updated", "order", order.id, `Resent order #${order.numero || order.id} confirmation`);
+
+    // FECHA O MODAL SEMPRE QUE ALGO SAIU, e nao so no sucesso total.
+    //
+    // Deixando aberto com a selecao intacta, o caminho natural do operador diante
+    // de "falhou" e apertar Resend de novo — e ai os destinatarios que JA
+    // receberam recebem outra vez. Duplicar e-mail para o cliente e pior que
+    // fecha-lo e ele reabrir.
+    if (foram > 0) setResendOpen(false);
+
+    // O LOG DE ATIVIDADE NAO PODE AFIRMAR ENVIO QUE NAO HOUVE. Ele ficava fora do
+    // if/else e gravava "Resent order #N confirmation" mesmo com tudo bloqueado —
+    // contradizendo o `notification_log`, que o servidor grava com status `failed`
+    // no mesmo instante. E o log persiste; o toast some.
+    log(
+      "updated", "order", order.id,
+      naoForam.length === 0
+        ? `Resent order #${order.numero || order.id} confirmation`
+        : `Resend order #${order.numero || order.id}: ${foram} of ${results.length} sent`,
+    );
   };
 
   const handleSave = async (goBack = false) => {
