@@ -92,20 +92,23 @@ export const textoDoLog = (numero: string, p: Placar) =>
  * 403 de permissao, 400 de config e 502 de provedor caido diziam o mesmo.
  *
  * `error.context` e o Response ainda nao lido — e `value.response` e o MESMO
- * objeto, entao o corpo so pode ser lido UMA vez. Para `FunctionsFetchError` o
- * `context` e o erro de fetch cru (um TypeError, sem `.json`), e o teste de tipo
- * corta antes de tocar nele.
+ * objeto, entao o corpo so pode ser lido UMA vez.
  *
- * Nao ha guarda de `bodyUsed`: uma existiu aqui e uma mutacao mostrou que era
- * redundante — `json()` sobre corpo ja consumido rejeita, e o `catch` devolve o
- * mesmo `null`. O `catch` tambem e o que segura o 502 de gateway, que responde
- * HTML em vez de JSON.
+ * O `catch` faz TODO o trabalho de defesa, e por isso nao ha mais nenhuma guarda
+ * antes dele. Duas existiram e duas mutacoes mostraram que eram redundantes,
+ * pelo mesmo criterio: `bodyUsed` (corpo ja consumido rejeita) e o teste de tipo
+ * de `.json` — para `FunctionsFetchError` o `context` e o erro de fetch cru, um
+ * TypeError, e chamar `.json()` nele estoura dentro do `try`. Os tres caminhos
+ * chegam no mesmo `null`. O `catch` tambem segura o 502 de gateway, que responde
+ * HTML em vez de JSON, e o 204 de corpo vazio.
+ *
+ * `typeof corpo?.error === "string"` NAO e redundante e tem teste: sem ele, um
+ * `error` que venha objeto passa adiante, o `||` da tela para de cair no
+ * fallback e o toast imprime `[object Object]` no lugar do motivo.
  */
 export async function motivoHttp(err: any): Promise<string | null> {
-  const ctx = err?.context;
-  if (!ctx || typeof ctx.json !== "function") return null;
   try {
-    const corpo = await ctx.json();
+    const corpo = await err.context.json();
     return typeof corpo?.error === "string" ? corpo.error : null;
   } catch {
     return null;

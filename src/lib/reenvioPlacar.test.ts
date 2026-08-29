@@ -166,6 +166,29 @@ describe("motivoHttp", () => {
     expect(await motivoHttp(r.value.error)).toBeNull();
   });
 
+  // Sem o teste de tipo, `msg` na tela recebe o objeto, o `||` para de cair no
+  // fallback do `error.message` e o toast imprime `[object Object]` no lugar do
+  // motivo. Hoje o `send-email` so responde `error` string, entao isto e uma
+  // trava contra o dia em que alguem devolver um objeto de validacao.
+  it("`error` que nao e string NAO vira mensagem", async () => {
+    for (const corpo of [
+      { error: { code: "42501", detail: "permission denied" } },
+      { error: ["a", "b"] },
+      { error: 500 },
+      { error: true },
+      { error: null },
+    ]) {
+      const r: any = erroHttp(corpo);
+      expect(await motivoHttp(r.value.error), JSON.stringify(corpo)).toBeNull();
+    }
+  });
+
+  it("erro sem `context` nenhum nao estoura", async () => {
+    expect(await motivoHttp({ message: "x" })).toBeNull();
+    expect(await motivoHttp(null)).toBeNull();
+    expect(await motivoHttp(undefined)).toBeNull();
+  });
+
   it("FunctionsFetchError: `context` e um TypeError, nao um Response", async () => {
     expect(await motivoHttp(redeCaiu().value.error)).toBeNull();
   });

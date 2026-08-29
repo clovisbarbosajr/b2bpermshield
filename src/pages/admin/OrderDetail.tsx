@@ -336,6 +336,19 @@ const OrderDetail = () => {
       }
 
       log("updated", "order", order.id, textoDoLog(String(order.numero || order.id), placar));
+    } catch (e) {
+      // `try/finally` SEM `catch` re-lanca — e ai o `finally` soltava o botao, a
+      // excecao subia como unhandled rejection (o handler esta pendurado direto
+      // no `onClick`), e o operador ficava com o modal ABERTO, as caixas ainda
+      // marcadas e o Send de novo clicavel, sem toast e sem log. Com os e-mails
+      // ja enviados, o passo natural dali e clicar de novo — e nao ha
+      // idempotencia no `send-email` para segurar a segunda leva.
+      //
+      // Antes do `finally` o mesmo erro travava o botao, o que sem querer FREAVA
+      // a duplicata. Trocar uma falha silenciosa por outra nao serve: aqui o
+      // operador e avisado e mandado ao log antes de reenviar.
+      console.error("Resend: falha depois do envio", e);
+      toast.error("The emails were sent but the screen failed afterwards — check the notification log before re-sending.");
     } finally {
       setResending(false);
     }

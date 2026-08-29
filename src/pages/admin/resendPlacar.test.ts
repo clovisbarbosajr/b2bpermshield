@@ -57,6 +57,21 @@ describe("Resend do pedido: o que so a tela faz", () => {
       .toMatch(/\} finally \{\s+setResending\(false\);\s+\}/);
   });
 
+  // `try/finally` sem `catch` RE-LANCA. So com o `finally`, um throw depois do
+  // envio devolvia o botao e deixava o modal aberto com as caixas marcadas, sem
+  // toast e sem log — e o passo natural dali e clicar Send de novo, duplicando.
+  // Um `catch {}` vazio passaria por qualquer teste que so procure a palavra:
+  // o que se exige aqui e que ele AVISE.
+  it("o catch avisa o operador em vez de engolir", () => {
+    const iCatch = bloco.indexOf("} catch (e) {");
+    expect(iCatch, "sem `catch`, a excecao sobe como unhandled rejection").toBeGreaterThan(-1);
+    const corpo = bloco.slice(iCatch, bloco.indexOf("} finally {", iCatch));
+    expect(corpo, "o operador tem que saber que os e-mails sairam")
+      .toMatch(/toast\.error\(/);
+    expect(corpo, "e tem que ser mandado ao log antes de reenviar")
+      .toMatch(/check the notification log before re-sending/i);
+  });
+
   // E o `finally` no FIM: soltar o botao logo apos o `allSettled` deixava a tela
   // clicavel durante o `await` da leitura do corpo — modal aberto, caixas
   // marcadas — e um clique ali dispara um segundo envio inteiro.
