@@ -170,13 +170,29 @@ describe("ImportRelatedProducts: perda entre o delete e o insert", () => {
   });
 
   it("tenta restaurar quando o insert falha", () => {
-    const ramo = fatiaEntre(fonte.slice(iDelete), "if (error) {", "continue;", 40);
+    const ramo = fatiaEntre(
+      fonte.slice(iDelete),
+      "if (error) {",
+      "continue;",
+      // 60, e nao 40: o ramo real ja tem 31 linhas — 78% do teto — e um quarto
+      // desfecho reprovaria com "recorte grande demais", alarme falso sobre
+      // edicao legitima. O cap pega recorte que FUGIU; nao congela o tamanho.
+      60,
+    );
     expect(ramo).toMatch(/restaurar/);
     expect(ramo).toMatch(/\.from\("produtos_relacionados"\)\.insert\(restaurar\)/);
   });
 
   it("a mensagem distingue os tres desfechos, e nao afirma perda quando nao houve", () => {
-    const ramo = fatiaEntre(fonte.slice(iDelete), "if (error) {", "continue;", 40);
+    const ramo = fatiaEntre(
+      fonte.slice(iDelete),
+      "if (error) {",
+      "continue;",
+      // 60, e nao 40: o ramo real ja tem 31 linhas — 78% do teto — e um quarto
+      // desfecho reprovaria com "recorte grande demais", alarme falso sobre
+      // edicao legitima. O cap pega recorte que FUGIU; nao congela o tamanho.
+      60,
+    );
     expect(ramo, "falta o caso 'restaurou'").toMatch(/were restored/);
     expect(ramo, "falta o caso 'restauracao tambem falhou'").toMatch(/also failed/);
     expect(ramo, "falta o caso 'nao havia nada'").toMatch(/nothing was lost/);

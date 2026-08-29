@@ -61,7 +61,11 @@ describe("WarehouseSettings: leitura honesta e gravacao sem lost update", () => 
     // `slice(indexOf(x))` com UM argumento tambem erra calado: marcador ausente
     // devolve -1 e `slice(-1)` pega o ultimo caractere — assercao passa a testar
     // nada. `fatiaAPartirDe` exige o marcador.
-    const fim = fatiaEntre(fonte, 'toast.success("Warehouse settings saved.")', "};", 12);
+    // Delimitador `const update` (a proxima declaracao do componente), e nao
+    // `};`: aquele fecha no PRIMEIRO objeto literal depois do toast, entao uma
+    // linha legitima no meio (`const auditoria = { ... };`) reprovava o teste
+    // acusando remocao do `fetchData()` que continuava exatamente onde estava.
+    const fim = fatiaEntre(fonte, 'toast.success("Warehouse settings saved.")', "  if (loading)", 30);
     expect(fim).toContain("fetchData()");
   });
 

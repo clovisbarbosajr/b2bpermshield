@@ -41,13 +41,18 @@ for (const nome of readdirSync(DIR)) {
   const dir = join(DIR, nome);
   if (!statSync(dir).isDirectory()) continue;
   for (const f of readdirSync(dir)) {
-    // Arquivo de TESTE nao vai para o Deno — ele roda no vitest, que resolve os
-    // imports de verdade. Aqui o `tsc` roda com `--noResolve` (de proposito, para
-    // nao baixar os imports remotos do Deno), entao qualquer `import` local dele
-    // vira "nome nao encontrado" e este portao acusaria um erro que nao existe em
-    // producao. O `tsc -p tsconfig.app.json` do `npm test` ja typecheca esses
-    // arquivos com resolucao completa.
-    if (f.endsWith(".test.ts") || f.endsWith(".test.tsx")) continue;
+    // OS TESTES ENTRAM TAMBEM, e a tentativa de exclui-los foi revertida.
+    //
+    // Eu os pulei alegando que o `import` local de um teste viraria TS2304 aqui
+    // (o `tsc` roda com `--noResolve`, de proposito, para nao baixar os imports
+    // remotos do Deno). A alegacao era FALSA em duas frentes: o erro que sai e
+    // TS2307 "Cannot find module", que ja esta em `CODIGOS_ESPERADOS`; e o
+    // `tsc -p tsconfig.app.json` do `npm test` NAO cobre estes arquivos —
+    // `tsconfig.app.json` tem `"include": ["src"]`.
+    //
+    // Ou seja: o skip resolvia um problema que nao existia e, em troca, deixava
+    // nome fora de escopo em teste de edge function sem NENHUMA verificacao —
+    // provado com um `NOME_QUE_NAO_EXISTE` que passou por tudo.
     if (f.endsWith(".ts")) alvos.push(join(dir, f));
   }
 }
