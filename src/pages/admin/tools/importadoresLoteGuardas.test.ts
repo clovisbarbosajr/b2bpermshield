@@ -101,3 +101,42 @@ describe("ImportProductVariants nao promete coluna que a tabela nao tem", () => 
     expect(fonte).toMatch(/COLUNAS_SEM_DESTINO/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ImportOrders: pedido sem item nao pode sobreviver ao lote.
+//
+// O caminho de erro dos itens deixava o `pedidos` ja criado no banco, com o total
+// que a planilha mandou e no status que o CSV pediu — inclusive `complete`. E o
+// operador, lendo "Order created but items failed", reimportava a planilha
+// corrigida e criava outro.
+//
+// Estes testes sao sobre a FIACAO do caminho de erro, que e onde o defeito estava.
+// ---------------------------------------------------------------------------
+describe("ImportOrders: pedido orfao", () => {
+  const fonte = readFileSync("src/pages/admin/tools/ImportOrders.tsx", "utf8");
+  const ramoErro = fonte.slice(
+    fonte.indexOf("if (itensError) {"),
+    fonte.indexOf("} else {", fonte.indexOf("if (itensError) {")),
+  );
+
+  it("apaga o pedido quando os itens falham", () => {
+    expect(ramoErro).toMatch(/\.from\("pedidos"\)\.delete\(\)\.eq\("id", pedido\.id\)/);
+  });
+
+  it("le o erro da limpeza — senao o lixo fica e ninguem sabe", () => {
+    // Destruturado E usado depois. Sem a segunda ocorrencia, o delete falharia em
+    // silencio e o pedido vazio continuaria no banco com a mensagem de sucesso.
+    expect(ramoErro).toMatch(/const \{ error: limpezaErr \}/);
+    const usos = ramoErro.match(/limpezaErr/g) ?? [];
+    expect(usos.length, "`limpezaErr` foi lido mas nunca usado").toBeGreaterThan(1);
+  });
+
+  it("a mensagem MUDA quando a limpeza falha, e entrega o id para apagar a mao", () => {
+    expect(ramoErro).toMatch(/could NOT be removed/);
+    expect(ramoErro).toMatch(/\$\{pedido\.id\}/);
+  });
+
+  it("nao afirma mais que o pedido foi criado quando nada foi importado", () => {
+    expect(ramoErro).not.toMatch(/Order created but items failed/);
+  });
+});

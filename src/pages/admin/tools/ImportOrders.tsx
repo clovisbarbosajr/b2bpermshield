@@ -266,7 +266,31 @@ const ImportOrders = () => {
         const amigavel = /ITEM_NEEDS_VARIANT/i.test(itensError.message)
           ? "a product in this order has options (size/color) and the CSV has no variant column — import it through the product page"
           : itensError.message;
-        res.push({ row: group.rows[0].rowNum, key, status: "error", message: `Order created but items failed: ${amigavel}` });
+
+        // PEDIDO SEM ITEM NAO PODE FICAR. Antes a linha dizia "Order created but
+        // items failed" e ia embora: sobrava no banco um pedido com ZERO itens,
+        // carregando o `total`/`subtotal` que a planilha mandou (o recalculo do
+        // `fn_pedido_total_appside` so roda no AFTER INSERT dos itens) e no status
+        // que o CSV pediu — inclusive `complete`. Um pedido de valor fantasma na
+        // fila e no historico do cliente, e o operador reimportava a planilha
+        // corrigida, criando outro.
+        //
+        // Apagar direto, e nao pela RPC `pedido_rollback_checkout`: ela exige
+        // status `submitted` (`ROLLBACK_ADVANCED`), e aqui o CSV escolhe o status.
+        // Justamente o orfao marcado `complete` — o pior — ela recusaria.
+        //
+        // Seguro: os itens NAO entraram, entao nao houve reserva de estoque
+        // (`trg_reserve_stock_on_order_item` e no INSERT do item), e o ajuste por
+        // status e AFTER UPDATE, nao INSERT. Nao ha o que devolver.
+        const { error: limpezaErr } = await supabase.from("pedidos").delete().eq("id", pedido.id);
+        res.push({
+          row: group.rows[0].rowNum, key, status: "error",
+          message: limpezaErr
+            // A mensagem TEM que mudar quando a limpeza falha: o operador precisa
+            // saber que ficou lixo, senao ele reimporta e duplica.
+            ? `Items failed (${amigavel}) — and the empty order could NOT be removed: ${limpezaErr.message}. Delete order ${pedido.id} by hand before importing again.`
+            : `Items failed, nothing was imported for this order: ${amigavel}`,
+        });
       } else {
         res.push({ row: group.rows[0].rowNum, key, status: "ok", message: `Order created (${items.length} item${items.length !== 1 ? "s" : ""}, total R$ ${total.toFixed(2)})` });
         linhasOk += group.rows.length;
