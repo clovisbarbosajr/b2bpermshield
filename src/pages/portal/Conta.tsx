@@ -61,9 +61,17 @@ const Conta = () => {
   const fetchData = async () => {
     if (!user && !impersonatedCustomer) return;
 
+    // COLUNAS EXPLICITAS, e nao `*`.
+    //
+    // RLS filtra LINHA, nao COLUNA: `select("*")` em `clientes` entregava ao
+    // navegador do proprio cliente o `admin_comments` ("anotacao interna do
+    // admin SOBRE o cliente", 20260826020000:25), mais `discount`,
+    // `minimum_order_value`, `representante_id` e `tabela_preco_id`. Nada disso
+    // e renderizado — chega inteiro pela aba Network. Mesma classe do `custo` de
+    // produto e do `gateway_config`, ja fechados em outros pontos.
     const clienteQuery = impersonatedCustomer?.id
-      ? supabase.from("clientes").select("*").eq("id", impersonatedCustomer.id).maybeSingle()
-      : supabase.from("clientes").select("*").eq("user_id", user!.id).maybeSingle();
+      ? supabase.from("clientes").select("id, user_id, nome, email, telefone, empresa, endereco, endereco2, cidade, cep, estado, pais, parent_customer_id, can_view_full_history, can_confirm_order, status, is_active").eq("id", impersonatedCustomer.id).maybeSingle()
+      : supabase.from("clientes").select("id, user_id, nome, email, telefone, empresa, endereco, endereco2, cidade, cep, estado, pais, parent_customer_id, can_view_full_history, can_confirm_order, status, is_active").eq("user_id", user!.id).maybeSingle();
 
     const profileQuery = impersonatedCustomer?.user_id
       ? supabase.from("profiles").select("*").eq("user_id", impersonatedCustomer.user_id).maybeSingle()

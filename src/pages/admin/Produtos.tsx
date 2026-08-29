@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { paginasVisiveis } from "@/lib/paginacao";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { descendantIds } from "@/lib/categoryTree";
 import AdminLayout from "@/components/layouts/AdminLayout";
@@ -262,18 +263,20 @@ const AdminProdutos = () => {
           <Button variant="outline" size="icon" className="h-7 w-7" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
             <ChevronLeft className="h-3 w-3" />
           </Button>
-          {Array.from({ length: Math.min(totalPages, 9) }, (_, i) => {
-            let pageNum: number;
-            if (totalPages <= 9) pageNum = i + 1;
-            else if (i < 7) pageNum = i + 1;
-            else if (i === 7) pageNum = totalPages - 1;
-            else pageNum = totalPages;
-            return (
-              <Button key={i} variant={page === pageNum ? "default" : "outline"} size="icon" className="h-7 w-7 text-xs" onClick={() => setPage(pageNum)}>
-                {i === 7 && totalPages > 9 && pageNum !== 8 ? "..." : pageNum}
+          {/* `paginasVisiveis` no lugar da janela fixa. A antiga mostrava sempre
+              `1..7` mais as duas ultimas: com 20 paginas, as paginas 8 a 18 nao
+              tinham botao. E o item rotulado `...` era um Button que levava para
+              `totalPages - 1` — clicar nas reticencias jogava o admin na
+              penultima pagina sem avisar. Agora `...` e texto. */}
+          {paginasVisiveis(page, totalPages).map((n, i) =>
+            n === "..." ? (
+              <span key={`e${i}`} className="px-1 text-xs text-muted-foreground select-none">...</span>
+            ) : (
+              <Button key={n} variant={page === n ? "default" : "outline"} size="icon" className="h-7 w-7 text-xs" onClick={() => setPage(n)}>
+                {n}
               </Button>
-            );
-          })}
+            ),
+          )}
           <Button variant="outline" size="icon" className="h-7 w-7" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
             <ChevronRight className="h-3 w-3" />
           </Button>

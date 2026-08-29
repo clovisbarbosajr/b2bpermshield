@@ -15,6 +15,7 @@ import { ORDER_STATUSES, statusLabel, statusBadge as statusBadgeClass } from "@/
 import { formatOpcao } from "@/lib/variants";
 
 import { getProductPrice } from "@/lib/pricing";
+import { paginasVisiveis } from "@/lib/paginacao";
 const STATUS_OPTIONS = [{ value: "", label: "Please select..." }, ...ORDER_STATUSES];
 
 const statusBadge = (status: string) => (
@@ -102,9 +103,18 @@ const Pedidos = () => {
   // Load orders
   useEffect(() => {
     if (!clienteId) { setLoading(false); return; }
+    // GUARDA DE CANCELAMENTO. Dois cliques rapidos em paginas diferentes deixavam
+    // duas leituras no ar, e a que chegasse por ULTIMO vencia: a tabela mostrava
+    // as linhas da pagina 2 com o "3" destacado na paginacao. O padrao ja existe
+    // em `Carrinho.tsx:145`.
+    let cancelado = false;
+
     const fetchOrders = async () => {
       setLoading(true);
-      let q = supabase.from("pedidos").select("*", { count: "exact" })
+      // Sem `*`: `admin_notes` e campo de staff e ia junto para o navegador do
+      // cliente. Estas sao as colunas que a lista realmente usa.
+      let q = supabase.from("pedidos")
+        .select("id, numero, status, total, quantidade_total, created_at, updated_at, delivery_date, po_number", { count: "exact" })
         // Desempate unico: OFFSET sem ordem estavel repete/pula linha entre
         // paginas — o cliente veria o mesmo pedido duas vezes, ou nenhuma.
         .order("created_at", { ascending: false })
@@ -132,6 +142,10 @@ const Pedidos = () => {
       if (applied.reference) q = q.ilike("po_number", `%${applied.reference}%`);
 
       const { data, count, error } = await q;
+      // A leitura CANCELADA nao escreve nada — nem o resultado, nem o erro, nem o
+      // `loading`. Escrever qualquer um deles faria a resposta velha mandar na
+      // tela da nova.
+      if (cancelado) return;
       // Erro nao pode virar lista vazia: "No orders found" e uma AFIRMACAO.
       if (error) {
         console.error(error);
@@ -145,6 +159,7 @@ const Pedidos = () => {
       setLoading(false);
     };
     fetchOrders();
+    return () => { cancelado = true; };
   }, [clienteId, page, applied, rlsEscopa]);
 
   const handleSearch = () => {
@@ -353,16 +368,12 @@ const Pedidos = () => {
   };
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
-  const pageNumbers = () => {
-    const pages: (number | string)[] = [];
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) pages.push(i);
-    } else {
-      pages.push(1, 2, 3, 4, 5, 6, 7);
-      if (totalPages > 8) pages.push("...", totalPages - 1, totalPages);
-    }
-    return pages;
-  };
+  // JANELA EM VOLTA DA PAGINA ATUAL, e nao as sete primeiras fixas — a regra
+  // esta em `lib/paginacao.ts`, com teste, porque as tres telas do admin tinham
+  // o mesmo defeito. Com `totalPages === 8` a pagina 8 nao ganhava botao nenhum
+  // (o `if` exigia `> 8`); com 20, as paginas 8 a 18 tambem nao. So dava para
+  // chegar clicando `>` varias vezes — e sem saber onde se esta indo parar.
+  const pageNumbers = () => paginasVisiveis(page, totalPages);
 
   return (
     <PortalLayout>
@@ -412,12 +423,20 @@ const Pedidos = () => {
       {totalPages > 1 && (
         <div className="flex items-center gap-1 mb-3">
           <button onClick={() => setPage(p => Math.max(1, p - 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">‹</button>
+          {/* `key={n}`, e nao `key={i}`. Com a janela FIXA de antes, indice e numero
+              eram a mesma coisa e o indice servia. Com a janela deslizante o
+              indice 5 e "6" antes do clique e "7" depois: por chave de indice o
+              React reaproveita o MESMO nó do DOM e so troca o rotulo, entao o
+              foco fica no botao que agora diz "7". Quem clicou com o teclado e
+              apertou Enter de novo (a tela busca no servidor e mostra spinner —
+              "nao aconteceu nada, aperto de novo" e o reflexo normal) ia parar na
+              pagina errada. Verificado em DOM real, nao por leitura. */}
           {pageNumbers().map((n, i) =>
             n === "..." ? (
-              <span key={i} className="px-2 py-1 text-sm text-muted-foreground">...</span>
+              <span key={`e${i}`} className="px-2 py-1 text-sm text-muted-foreground">...</span>
             ) : (
               <button
-                key={i}
+                key={n}
                 onClick={() => setPage(Number(n))}
                 className={`px-2.5 py-1 text-sm rounded ${page === n ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
               >{n}</button>
@@ -488,12 +507,20 @@ const Pedidos = () => {
       {totalPages > 1 && (
         <div className="flex items-center gap-1 mt-3">
           <button onClick={() => setPage(p => Math.max(1, p - 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">‹</button>
+          {/* `key={n}`, e nao `key={i}`. Com a janela FIXA de antes, indice e numero
+              eram a mesma coisa e o indice servia. Com a janela deslizante o
+              indice 5 e "6" antes do clique e "7" depois: por chave de indice o
+              React reaproveita o MESMO nó do DOM e so troca o rotulo, entao o
+              foco fica no botao que agora diz "7". Quem clicou com o teclado e
+              apertou Enter de novo (a tela busca no servidor e mostra spinner —
+              "nao aconteceu nada, aperto de novo" e o reflexo normal) ia parar na
+              pagina errada. Verificado em DOM real, nao por leitura. */}
           {pageNumbers().map((n, i) =>
             n === "..." ? (
-              <span key={i} className="px-2 py-1 text-sm text-muted-foreground">...</span>
+              <span key={`e${i}`} className="px-2 py-1 text-sm text-muted-foreground">...</span>
             ) : (
               <button
-                key={i}
+                key={n}
                 onClick={() => setPage(Number(n))}
                 className={`px-2.5 py-1 text-sm rounded ${page === n ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
               >{n}</button>

@@ -55,11 +55,20 @@ const ProdutoDetalhe = () => {
         return;
       }
       if (!user) return;
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("clientes")
         .select("id")
         .eq("user_id", user.id)
         .maybeSingle();
+      // `error` LIDO. Descartado, `clienteId` virava null, o efeito de preco
+      // (`if (!produto || !clienteId) return`) nunca rodava e a ficha caia no
+      // `produto.preco` — o preco de BALCAO. O cliente com preco negociado via e
+      // adicionava ao carrinho o valor errado, sem nenhum aviso. A tela irma
+      // `portal/Pedidos.tsx:90` ja checava, com a justificativa escrita.
+      if (error) {
+        console.error(error);
+        toast.error("Could not load your pricing. The price shown may not be yours — reload the page.");
+      }
       setClienteId(data?.id ?? null);
     };
     fetchClienteId();
@@ -102,7 +111,39 @@ const ProdutoDetalhe = () => {
         const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
         const normalized = (nameMap[statusName] || statusName).toLowerCase();
         const matched = (statusesRes.data ?? []).find((s: any) => s.nome.toLowerCase() === normalized);
-        setStatusInfo(matched ? { permite_comprar: matched.permite_comprar ?? true, nome: matched.nome } : { permite_comprar: true, nome: statusName });
+        // O DEFAULT `permite_comprar: true` ESTA CERTO e fica: o banco usa a mesma
+        // regra conservadora (20260825330000:113 — status sem linha em
+        // `product_statuses` NAO bloqueia), e invertê-lo aqui divergiria da trava.
+        //
+        // O que faltava era distinguir "status nao cadastrado" de "NAO CONSEGUI
+        // LER". Com a leitura falhando, o ramo `matched === undefined` gravava
+        // `nome: statusName` CRU — a tela mostrava `indisponivel`, em portugues e
+        // em verde, com o botao habilitado. Agora a falha e dita, e o rotulo nao
+        // afirma um status que ninguem leu.
+        if (statusesRes.error) {
+          // O NOME CRU DO PRODUTO, que veio da leitura que DEU CERTO.
+          //
+          // Duas tentativas anteriores erraram por motivos opostos.
+          // `{ nome: "" }` e TRUTHY: o `<p>` caia no ramo `statusInfo.nome` e
+          // imprimia string vazia — a linha de status sumia da ficha.
+          // `null` era pior: caia no fallback derivado do ESTOQUE e um produto
+          // `descontinuado` com 50 em estoque passava a anunciar "Available" em
+          // verde. Trocar um campo vazio por uma afirmacao falsa nao e correcao,
+          // e aquele fallback era codigo morto ate entao (`produto` nao-nulo
+          // sempre gravava um objeto).
+          //
+          // `statusName` esta em `produtos.status_produto` e nao depende de
+          // `product_statuses`. E e o mesmo que o irmao `Catalogo.tsx:337` mostra
+          // — duas telas discordando sobre o mesmo produto seria pior que as
+          // duas mostrarem o rotulo cru.
+          //
+          // Sem toast de proposito: a tela ja pode disparar o de `clientes` no
+          // mesmo carregamento, e empilhar dois e ruido.
+          console.error(statusesRes.error);
+          setStatusInfo({ permite_comprar: true, nome: statusName });
+        } else {
+          setStatusInfo(matched ? { permite_comprar: matched.permite_comprar ?? true, nome: matched.nome } : { permite_comprar: true, nome: statusName });
+        }
       }
       setCategorias((catsRes.data as Categoria[]) ?? []);
       setLoading(false);
@@ -123,7 +164,9 @@ const ProdutoDetalhe = () => {
     setVariantesCarregadas(false);
     supabase
       .from("produto_variantes")
-      .select("id, codigo, quantidade, valores_opcao, imagem_url, ativo")
+      // `estoque_reservado` JUNTO: o banco decide por
+      // `(quantidade - estoque_reservado)` (20260825320000:136).
+      .select("id, codigo, quantidade, estoque_reservado, valores_opcao, imagem_url, ativo")
       .eq("produto_id", id)
       .eq("ativo", true)
       .order("codigo")
@@ -197,7 +240,20 @@ const ProdutoDetalhe = () => {
   // Variantes: estoque e "pode comprar" passam a depender da variante escolhida.
   const hasVariants = variantes.length > 0;
   const selectedVariante = variantes.find((v) => v.id === selectedVarianteId) || null;
-  const effectiveDisponivel = hasVariants ? (selectedVariante ? (selectedVariante.quantidade ?? 0) : 0) : disponivel;
+  // DESCONTA O RESERVADO, e respeita o teto do PRODUTO-PAI.
+  //
+  // Estava `selectedVariante.quantidade` cru: uma variante com tudo preso em
+  // pedido aberto (`quantidade 8, reservado 8`) aparecia como "AVAILABLE
+  // QUANTITY: 8" em verde, com o botao habilitado, e so o carrinho ou o trigger
+  // recusava depois. E quando havia variante o teto do produto sumia da conta por
+  // inteiro, entao o reservado do PAI tambem era ignorado. Os irmaos
+  // `Pedidos.tsx:243` e `stock.ts:138` ja faziam os dois.
+  const dispVariante = selectedVariante
+    ? (selectedVariante.quantidade ?? 0) - ((selectedVariante as any).estoque_reservado ?? 0)
+    : 0;
+  const effectiveDisponivel = hasVariants
+    ? (selectedVariante ? Math.max(0, Math.min(disponivel, dispVariante)) : 0)
+    : disponivel;
   const effectiveCanBuy = hasVariants
     ? (!!selectedVariante && (statusInfo ? statusInfo.permite_comprar : true) && (effectiveDisponivel > 0 || isPreOrder))
     : canBuy;
@@ -311,7 +367,21 @@ const ProdutoDetalhe = () => {
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Options</p>
                 <div className="flex flex-wrap gap-2">
                   {variantes.map((v) => {
-                    const out = (v.quantidade ?? 0) <= 0 && !isPreOrder;
+                    // DESCONTA O RESERVADO, igual a `effectiveDisponivel`.
+                    //
+                    // Ate esta leva os dois liam `quantidade` cru e concordavam.
+                    // Ao fazer `effectiveDisponivel` descontar `estoque_reservado`
+                    // (que e como o banco decide, 20260825320000:136) e deixar
+                    // este aqui cru, a opcao com tudo preso em pedido aberto
+                    // (`quantidade 8, reservado 8`) aparecia normal, sem o
+                    // `(out of stock)` — o cliente clicava e ai o botao ficava
+                    // desabilitado, sem o marcador que a tela tem justamente para
+                    // avisar antes.
+                    //
+                    // O teto do produto-pai fica de fora de proposito: ele e por
+                    // SELECAO, nao por opcao — marcar todas as opcoes quando o pai
+                    // zera seria outra decisao.
+                    const out = ((v.quantidade ?? 0) - ((v as any).estoque_reservado ?? 0)) <= 0 && !isPreOrder;
                     const sel = v.id === selectedVarianteId;
                     return (
                       <button

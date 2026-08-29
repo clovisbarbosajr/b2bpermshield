@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,6 +10,7 @@ import { Download } from "lucide-react";
 import { toast } from "sonner";
 import { statusLabel, statusBadge } from "@/lib/orderStatuses";
 import { formatOpcao } from "@/lib/variants";
+import { precoDoItem, AVISO_PRECO_INCERTO } from "@/lib/precoDoItem";
 // Uma definicao so para as tres telas do historico — ver `Pedidos.tsx`.
 import { escoparPelaRls } from "./Pedidos";
 
@@ -43,9 +44,17 @@ const PedidoDetalhe = () => {
       setLoading(true);
 
       // Load cliente
+      // COLUNAS EXPLICITAS, e nao `*`.
+      //
+      // RLS filtra LINHA, nao COLUNA: `select("*")` em `clientes` entregava ao
+      // navegador do proprio cliente o `admin_comments` ("anotacao interna do
+      // admin SOBRE o cliente", 20260826020000:25), mais `discount`,
+      // `minimum_order_value`, `representante_id` e `tabela_preco_id`. Nada disso
+      // e renderizado — chega inteiro pela aba Network. Mesma classe do `custo` de
+      // produto e do `gateway_config`, ja fechados em outros pontos.
       const clienteQuery = impersonatedCustomer?.id
-        ? supabase.from("clientes").select("*").eq("id", impersonatedCustomer.id).maybeSingle()
-        : supabase.from("clientes").select("*").eq("user_id", user!.id).maybeSingle();
+        ? supabase.from("clientes").select("id, user_id, nome, email, telefone, empresa, endereco, cidade, cep, estado, pais, can_view_full_history, can_confirm_order, status, is_active").eq("id", impersonatedCustomer.id).maybeSingle()
+        : supabase.from("clientes").select("id, user_id, nome, email, telefone, empresa, endereco, cidade, cep, estado, pais, can_view_full_history, can_confirm_order, status, is_active").eq("user_id", user!.id).maybeSingle();
       const { data: clienteData, error: clienteErr } = await clienteQuery;
       if (clienteErr) {
         console.error(clienteErr);
@@ -60,7 +69,14 @@ const PedidoDetalhe = () => {
       // e o do funcionario; comparar `p.cliente_id` com a MINHA ficha derrubava
       // exatamente esses dois casos, e ainda se desligava sozinha quando
       // `clienteData` vinha nulo (`clienteData &&` na guarda antiga).
-      const { data: p, error: pedidoErr } = await supabase.from("pedidos").select("*").eq("id", id).maybeSingle();
+      // `admin_notes` FICA DE FORA: 20260825240000:127 o define como campo de
+      // staff, e o proprio admin ve o placeholder "Not shown to the customer" ao
+      // preenche-lo (`admin/OrderDetail.tsx:1069`). Com `select("*")` ele viajava
+      // para o navegador do cliente — o sistema prometia uma coisa ao admin e
+      // entregava outra.
+      const { data: p, error: pedidoErr } = await supabase.from("pedidos")
+        .select("id, numero, cliente_id, status, subtotal, total, sales_tax, shipping_costs, desconto, po_number, observacoes, tracking_number, delivery_date, created_at, updated_at, endereco_entrega_id, shipping_option_id, payment_option_id")
+        .eq("id", id).maybeSingle();
       // Falha de rede virava "Order not found" — dizia que o pedido nao existe
       // sem saber disso.
       if (pedidoErr) {
@@ -82,18 +98,53 @@ const PedidoDetalhe = () => {
       setPedido(p);
 
       // Load items, address, shipping, payment in parallel
-      const [{ data: items }, { data: addr }, { data: ship }, { data: pay }] = await Promise.all([
+      const [
+        { data: items, error: itensErr },
+        { data: addr, error: addrErr },
+        { data: ship, error: shipErr },
+        { data: pay, error: payErr },
+      ] = await Promise.all([
         supabase.from("pedido_itens").select("*").eq("pedido_id", id),
         p.endereco_entrega_id
           ? supabase.from("enderecos").select("*").eq("id", p.endereco_entrega_id).maybeSingle()
-          : Promise.resolve({ data: null }),
+          : Promise.resolve({ data: null, error: null }),
         p.shipping_option_id
           ? supabase.from("shipping_options").select("nome").eq("id", p.shipping_option_id).maybeSingle()
-          : Promise.resolve({ data: null }),
+          : Promise.resolve({ data: null, error: null }),
         p.payment_option_id
           ? supabase.from("payment_options").select("nome").eq("id", p.payment_option_id).maybeSingle()
-          : Promise.resolve({ data: null }),
+          : Promise.resolve({ data: null, error: null }),
       ]);
+      // OS QUATRO `error` SAO LIDOS. Falha na leitura dos itens deixava a tela
+      // renderizar o pedido com a tabela de produtos VAZIA e o rodape mostrando
+      // Total e Gross Total — o cliente via um pedido de milhares de reais sem
+      // nenhum item. E o `handleExport` monta o CSV a partir deste mesmo estado,
+      // entao o arquivo saia com cabecalho, zero produtos e a linha de total, com
+      // download aparentemente bem-sucedido.
+      //
+      // O proprio arquivo ja checava `error` duas vezes acima, com a justificativa
+      // escrita — estas quatro ficaram de fora.
+      if (itensErr) {
+        // SAI DA TELA. So o `return` nao bastava: `setPedido(p)` ja rodou acima e
+        // o unico guarda do render e `if (!pedido) return null`, entao a pagina
+        // aparecia inteira com a tabela de produtos VAZIA e o rodape mostrando
+        // "Total $4.812,00" — e o EXPORT baixava um CSV com cabecalho, zero
+        // produtos e a linha de total. Mesma saida dos dois erros de leitura
+        // logo acima, no mesmo `fetch`.
+        //
+        // Nao pega pedido legitimamente sem itens: RLS filtrando devolve
+        // `data: []` com `error: null`.
+        console.error(itensErr);
+        toast.error("Could not load the items of this order. Please try again.");
+        navigate("/portal/pedidos");
+        return;
+      }
+      if (addrErr || shipErr || payErr) {
+        // Estes tres sao complementares: sem eles a tela ainda diz a verdade
+        // sobre o pedido, mas nao pode fingir que o campo esta vazio.
+        console.error(addrErr ?? shipErr ?? payErr);
+        toast.warning("Some delivery details could not be loaded.");
+      }
       setItens(items ?? []);
       setEndereco(addr);
       setShippingOption(ship);
@@ -103,7 +154,27 @@ const PedidoDetalhe = () => {
     fetch();
   }, [id, user, role, impersonatedCustomer]);
 
+  // Linhas em voo — o ADD TO ORDER virou mais lento nesta leva (o
+  // `getProductPrice` acrescentou 2-3 idas ao banco EM SERIE ao `Promise.all`
+  // que ja existia), entao o botao fica mudo por mais tempo e o duplo clique
+  // ficou mais provavel. `addItem` SOMA quando a chave ja existe
+  // (`CartContext.tsx:220`): a linha de 10 unidades virava 20, calada, com dois
+  // `toast.success` normais. Mesma trava do `movendoRef` do `Carrinho`.
+  //
+  // LISTA, e nao um id so. Com escalar, clicar em A e depois em B fazia
+  // `setAdicionando(B.id)` apagar o A: o botao de A nunca chegava a desabilitar,
+  // e quando a resposta de A chegava o `finally` zerava o escalar e o botao de B
+  // voltava a parecer clicavel com B ainda em voo — clicavel e inerte, porque o
+  // `Set` (que e a trava de verdade) continuava barrando. Nenhum dado errado; um
+  // botao que mente sobre o proprio estado.
+  const adicionandoRef = useRef(new Set<string>());
+  const [adicionando, setAdicionando] = useState<string[]>([]);
+
   const handleAddToOrder = async (item: any) => {
+    if (adicionandoRef.current.has(item.id)) return;
+    adicionandoRef.current.add(item.id);
+    setAdicionando((atual) => [...atual, item.id]);
+    try {
     // Mesma regra do re-order da lista: a variante vem de `pedido_itens.variante_id`.
     // Sem ela, repetir a linha mandava o produto-pai (tamanho/cor errados).
     const [{ data: prod }, { data: v }] = await Promise.all([
@@ -112,7 +183,12 @@ const PedidoDetalhe = () => {
         .eq("id", item.produto_id).maybeSingle(),
       item.variante_id
         ? supabase.from("produto_variantes")
-            .select("id, codigo, quantidade, imagem_url, valores_opcao, ativo")
+            // `estoque_reservado` JUNTO: o banco decide por
+            // `(quantidade - estoque_reservado)` (20260825320000:136). Sem a
+            // coluna, uma variante com tudo preso em pedido aberto aparecia como
+            // disponivel, o cliente adicionava, e o carrinho ou o checkout
+            // recusava depois. O irmao `Pedidos.tsx:196` ja lia certo.
+            .select("id, codigo, quantidade, estoque_reservado, imagem_url, valores_opcao, ativo")
             .eq("id", item.variante_id).maybeSingle()
         : Promise.resolve({ data: null } as any),
     ]);
@@ -138,14 +214,32 @@ const PedidoDetalhe = () => {
       }
     }
     const dispProduto = (prod.estoque_total ?? 0) - (prod.estoque_reservado ?? 0);
-    const disponivel = v ? Math.min(dispProduto, v.quantidade ?? 0) : dispProduto;
+    const dispVariante = v ? (v.quantidade ?? 0) - ((v as any).estoque_reservado ?? 0) : 0;
+    const disponivel = v ? Math.min(dispProduto, dispVariante) : dispProduto;
+
+    // PRECO DA TABELA DO CLIENTE, e nao o preco de balcao. A decisao inteira
+    // (cascata, fallback, tri-estado do cliente e quando avisar) esta em
+    // `lib/precoDoItem.ts`, com teste que roda.
+    //
+    // O id e o do PROPRIO cliente. Resolver o `parent_customer_id` aqui matava a
+    // tabela de preco do sub-login — `pricing.ts` ja resolve o pai sozinho, e a
+    // precedencia e `tabela do sub ?? tabela da empresa`.
+    const clienteId = cliente?.id ?? null;
+    const { preco, incerto } = await precoDoItem({
+      produtoId: item.produto_id,
+      clienteId,
+      quantidade: item.quantidade,
+      precoBase: prod.preco ?? item.preco_unitario,
+    });
+    if (incerto) toast.warning(AVISO_PRECO_INCERTO);
+
     addItem({
       produto_id: item.produto_id,
       variante_id: item.variante_id ?? null,
       variante_label: v ? formatOpcao(v.valores_opcao) || v.codigo : null,
       nome: item.nome_produto,
       sku: v?.codigo || item.sku || "",
-      preco: prod.preco ?? item.preco_unitario,
+      preco,
       quantidade: Math.min(item.quantidade, Math.max(disponivel, 1)),
       unidade_venda: prod.unidade_venda ?? "UN",
       quantidade_minima: prod.quantidade_minima ?? 1,
@@ -153,6 +247,10 @@ const PedidoDetalhe = () => {
       imagem_url: v?.imagem_url || prod.imagem_url || null,
     });
     toast.success(`${item.nome_produto} added to cart`);
+    } finally {
+      adicionandoRef.current.delete(item.id);
+      setAdicionando((atual) => atual.filter((x) => x !== item.id));
+    }
   };
 
   const handleExport = () => {
@@ -188,7 +286,17 @@ const PedidoDetalhe = () => {
 
   if (!pedido) return null;
 
-  const hasTax = Number(pedido.sales_tax ?? 0) > 0;
+  // "Sem imposto" NAO e "isento".
+  //
+  // `hasTax` derivava uma afirmacao sobre a situacao FISCAL do cliente de um
+  // valor que da zero por varios motivos: nao ha regra em `tax_rules` para o par
+  // (grupo do cliente, classe do produto), o pedido veio importado do B2BWave sem
+  // o campo, ou o cupom zerou. Nao existe flag de isencao em `clientes` nem em
+  // `tax_customer_groups` — o sistema nao guarda esse dado, entao a tela nao pode
+  // afirma-lo. `Carrinho.tsx:399` ja se recusa a afirmar imposto que nao
+  // conseguiu calcular.
+  const salesTax = Number(pedido.sales_tax ?? 0);
+  const hasTax = salesTax > 0;
 
   // O bloco de endereco caia para o cadastro de QUEM ESTA OLHANDO quando o
   // pedido nao trazia `endereco_entrega_id` (pedido importado do B2BWave, por
@@ -226,11 +334,15 @@ const PedidoDetalhe = () => {
             <Field label="Email" value={perfil?.email} />
             <Field label="Last Update" value={fmtDate(pedido.updated_at ?? pedido.created_at)} />
             <Field label="Postal Code" value={endereco?.cep ?? perfil?.cep} />
-            <Field label="Country" value="US" />
+            {/* `clientes.pais` existe e o sync do B2BWave grava o valor real
+                (`b2bwave-sync:1932`), entao pedido de cliente canadense exibia
+                "US". Fica em branco no pedido de terceiro, como Phone e Email —
+                `perfil` e null quando o pedido nao e da ficha carregada. */}
+            <Field label="Country" value={perfil?.pais} />
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Sales Tax</p>
               <Input
-                value={hasTax ? "Sales Tax applies" : "Tax exempt"}
+                value={hasTax ? "Sales Tax applies" : "No sales tax on this order"}
                 readOnly
                 className="bg-muted/30 text-sm h-8"
               />
@@ -310,6 +422,7 @@ const PedidoDetalhe = () => {
                       size="sm"
                       className="h-7 text-xs bg-slate-700 hover:bg-slate-600 text-white"
                       onClick={() => handleAddToOrder(item)}
+                      disabled={adicionando.includes(item.id)}
                     >
                       ADD TO ORDER
                     </Button>

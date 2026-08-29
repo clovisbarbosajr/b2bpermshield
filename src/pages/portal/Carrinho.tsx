@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { useCart, cartKey } from "@/contexts/CartContext";
 import { checkCartStock } from "@/lib/stock";
+import { precoDoItem, clienteDoPortal, AVISO_PRECO_INCERTO } from "@/lib/precoDoItem";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,11 +40,56 @@ const Carrinho = () => {
   // Bloqueiam finalizar, mas a quantidade pode ser reduzida (input fica habilitado).
   const [insufficientItems, setInsufficientItems] = useState<Map<string, number>>(new Map());
   const [savedItems, setSavedItems] = useState<any[]>([]);
+  // Cliente ATUAL — durante "View as" e o impersonado. Serve so ao `moveToCart`,
+  // que precisa do preco da tabela do cliente e nao do preco de balcao.
+  //
+  // TRI-ESTADO (`string | null | undefined`), e a regra inteira esta em
+  // `clienteDoPortal`, com teste que roda — inclusive o valor INICIAL, que aqui
+  // era um literal solto e podia ser trocado por `null` sem nenhum teste
+  // reclamar. `null` e `undefined` nao sao a mesma coisa: um e "nao tem ficha,
+  // preco base e o certo", o outro e "nao sei, o preco base e um chute".
+  const [clienteId, setClienteId] = useState<string | null | undefined>(
+    () => clienteDoPortal({ impersonatedId: impersonatedCustomer?.id, userId: user?.id }),
+  );
 
   // Chave EFETIVA do "saved for later" — durante "View as" é a do cliente impersonado.
   const effectiveSavedKey = impersonatedCustomer?.id
     ? savedViewAsKey(impersonatedCustomer.id)
     : savedKey(user?.id);
+
+  useEffect(() => {
+    const contexto = { impersonatedId: impersonatedCustomer?.id, userId: user?.id };
+    // Reavalia sem a leitura: "view as" resolve na hora, deslogado vira `null`
+    // (senao um logout deixaria o aviso ligado para sempre), e o resto volta a
+    // "nao sei" enquanto a consulta esta no ar.
+    setClienteId(clienteDoPortal(contexto));
+    if (impersonatedCustomer?.id || !user) return;
+
+    let cancelado = false;
+    supabase.from("clientes").select("id").eq("user_id", user.id).maybeSingle()
+      .then((leitura) => {
+        if (cancelado) return;
+        // `error` LIDO: vira `undefined` (nao sei), e nao `null` (nao tem). O
+        // aviso ao cliente sai no `moveToCart`, que e onde o preco aparece.
+        if (leitura.error) console.error(leitura.error);
+        setClienteId(clienteDoPortal({ ...contexto, leitura }));
+      });
+    return () => { cancelado = true; };
+    // DEPS POR ID, e nao pelos objetos.
+    //
+    // `supabase-js` reemite `SIGNED_IN` a cada hidden->visible da aba
+    // (`GoTrueClient._onVisibilityChanged` -> `_recoverAndRefresh`), e o
+    // `AuthContext` grava `setUser(nextSession.user)` — objeto NOVO, mesmo id.
+    // Com os objetos nas deps, trocar de aba e voltar rerodava este efeito, o
+    // `setClienteId` de cima apagava o id ja resolvido, e um clique em MOVE TO
+    // CART na janela do round-trip levava o produto pelo preco de balcao com o
+    // aviso de "list price" — o defeito que esta leva fechou, reaberto a cada
+    // volta para a aba. Verificado em React/jsdom: a sequencia era
+    // `undefined -> cli-7 -> cli-7 -> undefined`.
+    //
+    // Por id, o efeito so reroda quando a identidade MUDA de verdade — e ai
+    // apagar o valor antigo e o certo.
+  }, [user?.id, impersonatedCustomer?.id]);
 
   // Carrega "saved for later" do usuário atual e limpa a chave global legada (que vazava).
   useEffect(() => {
@@ -113,9 +159,27 @@ const Carrinho = () => {
       }
     }
 
-    // Preco releito do banco: o salvo pode ter meses. E o preco BASE — o
-    // definitivo e recalculado no submit (`getProductPrice`), como no re-order.
-    addItem({ ...item, preco: prod.preco ?? item.preco });
+    // PRECO DA TABELA DO CLIENTE, e nao o preco de balcao.
+    //
+    // O preco salvo pode ter meses, entao ele e mesmo releito — mas relia
+    // `produtos.preco`, o preco BASE. Quem tem tabela de preco ou preco
+    // combinado via o item voltar do "saved for later" por um valor MAIOR do que
+    // vai pagar: o servidor recalcula no fechamento
+    // (`fn_pedido_item_preco_autoritativo`), entao nao cobrava errado — mostrava
+    // errado, e o cliente desiste antes de chegar la. Os irmaos `Catalogo.tsx:469`
+    // e `PedidoDetalhe.tsx:208` ja passavam pela cascata.
+    //
+    // Falha aqui NAO impede devolver ao carrinho: cai no preco base, que e o
+    // comportamento de antes, e o cliente e avisado de que o valor exibido pode
+    // nao ser o dele. O valor cobrado continua sendo o do servidor.
+    const { preco, incerto } = await precoDoItem({
+      produtoId: item.produto_id,
+      clienteId,
+      quantidade: item.quantidade ?? 1,
+      precoBase: prod.preco ?? item.preco,
+    });
+    if (incerto) toast.warning(AVISO_PRECO_INCERTO);
+    addItem({ ...item, preco });
     // Filtra a partir do estado ATUAL, nao do capturado na closure. Clicando em
     // dois itens rapido, os dois liam a mesma lista e o segundo regravava o
     // primeiro DE VOLTA — item no carrinho e em "saved for later" ao mesmo

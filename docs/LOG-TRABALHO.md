@@ -3881,3 +3881,224 @@ ok. 12 mutacoes aplicadas ao longo das tres rodadas, todas reprovam a suite.
 Teste de fiacao (regex sobre a fonte) protege contra reversao, e so. Nao ve ordem
 de declaracao, nao ve tipo, nao ve nada que so existe em execucao. Onde a logica
 importa, ela sai do componente e ganha teste que roda.
+
+## 2026-08-29 — Grupo F: portal (Carrinho, Pedido, Produto, Conta) + paginacao
+
+EDITADO — dez achados classe (a) do grupo F, mais a raiz que eles apontaram.
+
+**Vazamento de coluna.** RLS filtra LINHA, nao COLUNA. `select("*")` em `clientes`
+entregava ao navegador do proprio cliente o `admin_comments` ("anotacao interna do
+admin SOBRE o cliente"), mais `discount`, `minimum_order_value`,
+`representante_id` e `tabela_preco_id`; e `select("*")` em `pedidos` entregava o
+`admin_notes`, que o admin preenche debaixo do texto "Not shown to the customer".
+Nada disso e renderizado — chegava inteiro pela aba Network. Fechado com lista
+explicita em `portal/PedidoDetalhe`, `portal/Conta` e `portal/Pedidos`.
+
+**Preco de balcao no lugar do preco do cliente.** Dois pontos de entrada do
+carrinho ainda usavam `produtos.preco`: o "Add to order" do `PedidoDetalhe` e o
+"move to cart" do `Carrinho` (saved for later). O servidor recalcula no fechamento
+(`fn_pedido_item_preco_autoritativo`), entao nao cobrava errado — mostrava errado,
+e quem tem preco negociado via um valor MAIOR do que ia pagar. Os dois passaram
+pela cascata `getProductPrice`. Falha na cascata nao bloqueia: cai no preco base,
+que era o comportamento de antes.
+
+**Estoque reservado.** O banco decide por `(quantidade - estoque_reservado)`, mas
+duas telas liam so `quantidade` da variante. Variante com tudo preso em pedido
+aberto aparecia "AVAILABLE QUANTITY: 8" em verde, com o botao habilitado, e so o
+trigger recusava depois. Em `ProdutoDetalhe` o teto do produto-pai tambem sumia da
+conta quando havia variante.
+
+**Erro virando afirmacao.** Os quatro `error` do `Promise.all` de `PedidoDetalhe`
+eram descartados: falha na leitura dos itens renderizava o pedido com a tabela
+VAZIA e o rodape mostrando Total — e o `handleExport` monta o CSV desse mesmo
+estado, entao o arquivo saia com cabecalho, zero produtos e a linha de total, com
+download aparentemente bem-sucedido. Idem o lookup de cliente do `ProdutoDetalhe`
+(virava preco de balcao calado) e o `statusesRes.error` (mostrava o status cru, em
+portugues, como se fosse cadastrado).
+
+**Duas afirmacoes que a tela nao podia fazer.** `Tax exempt` era derivado de
+`sales_tax === 0`, que da zero por varios motivos — nao existe flag de isencao em
+lugar nenhum do banco. Virou "No sales tax on this order". E `Country` era o
+literal `"US"`: `clientes.pais` existe e o sync do B2BWave grava o valor real,
+entao pedido de cliente canadense exibia US.
+
+**Paginacao — a raiz, em quatro telas.** As quatro tinham a propria versao da
+janela, e as quatro tinham o mesmo defeito: janela FIXA nas primeiras paginas. Nas
+tres do admin, com 20 paginas as paginas 8 a 18 nao tinham botao; no portal, com
+exatamente 8 paginas a pagina 8 nao tinha botao nenhum. E o item rotulado `...` no
+admin era um `Button` com `onClick={() => setPage(totalPages - 1)}` — clicar nas
+reticencias jogava o admin na penultima pagina, sem aviso. Agora ha uma funcao so,
+`src/lib/paginacao.ts`, com `paginasVisiveis(page, totalPages)`, e `...` e texto,
+nao destino.
+
+**Corrida de requisicao.** `portal/Pedidos` deixava duas leituras no ar em cliques
+rapidos e a que chegasse por ULTIMO vencia: a tabela mostrava as linhas da pagina
+2 com o "3" destacado. Ganhou a guarda `cancelado`, o padrao que ja existia no
+`Carrinho`.
+
+FEITO — verificacao real: `npm test` 460/460 em 45 arquivos, `tsc -p
+tsconfig.app.json --noEmit` limpo, `npm run build` ok, `check-edge.mjs` ok.
+
+Seis mutantes plantados em `paginacao.ts`; cinco morreram de primeira. O sexto
+(`const atual = page`, sem o clamp) SOBREVIVEU: as bordas ja clampam `de`/`ate`,
+entao o clamp so tem efeito visivel com `page` NaN — onde a janela virava
+`[1, "...", 20]`, tres itens, sem os numeros do meio. Teste acrescentado; o mutante
+morre agora.
+
+### Ciclo do grupo F — tres rodadas, 11 defeitos nas proprias correcoes
+
+**Rodada 1** (6 achados). O pior foi meu: ao trocar `select("*")` por lista
+explicita em `portal/Conta.tsx` esqueci `endereco2`, e o complemento do endereco
+("Suite 400") sumia do bloco Primary sem uma palavra — `undefined` silencioso,
+exatamente a classe que a mudanca vinha fechar. Os outros cinco: `itensErr`
+avisava mas deixava a tela renderizar o pedido com a tabela vazia e o rodape com
+Total (e o EXPORT baixava esse CSV); `clienteId` nulo caia no preco de balcao sem
+o aviso que o proprio comentario prometia; `ADD TO ORDER` ficou 2-3 idas ao banco
+mais lento nesta leva e continuava sem trava de duplo clique, com `addItem`
+somando; `statusInfo` com `nome: ""` apagava a linha de status da ficha; e
+`key={i}` na paginacao virou defeito no momento em que a janela passou a
+deslizar.
+
+O `key={i}` foi verificado em DOM real, nao por leitura: clicar em "6" com 20
+paginas deixa o foco num no que o React reaproveita e que passa a dizer "7" —
+Enter de novo leva para a pagina errada. Virou teste (`paginacaoFoco.test.tsx`).
+
+**Rodada 2** (5 achados). `setStatusInfo(null)`, que eu tinha acabado de escrever,
+era pior que o defeito: caia no fallback derivado do ESTOQUE e um produto
+`descontinuado` com 50 em estoque passava a anunciar "Available" em verde. Aquele
+fallback era codigo morto — a tela nunca imprimia "Available" sem consultar
+`product_statuses`. Ficou o nome cru, igual ao irmao `Catalogo.tsx:337`. O
+`adicionando` escalar apagava a linha anterior e reabilitava o botao de B com B
+ainda em voo; virou lista.
+
+E o achado que valia mais que todos: **cinco das seis correcoes tinham cobertura
+ZERO**. O cacador plantou um mutante em cada e a suite de 469 testes ficou verde
+nas cinco. Dai sairam `colunasExplicitas.test.ts` (le a lista do `select` e a
+compara com os campos que o arquivo acessa — pega o `endereco2` de volta),
+`guardasPortal.test.ts` e a injecao de erro no estresse de preco: o banco falso
+nunca devolvia `error`, entao os cinco `throw` de `pricing.ts` podiam ser
+apagados com a suite verde — e sao eles o contrato de que os `catch` do Carrinho
+e do PedidoDetalhe dependem.
+
+Um achado da rodada 2 foi DERRUBADO pelo cetico: desabilitar "Move to cart" ate o
+`clienteId` chegar transformaria uma falha de RLS em botao morto para sempre.
+
+O lint executavel do proprio repo (`fatiaSemGuarda`) reprovou meu recorte a mao no
+teste novo. Corrigido para `fatiaEntre`.
+
+Verificacao: `npm test` 485/485 em 49 arquivos, `tsc` limpo, build ok,
+`check-edge` ok. 20 mutantes plantados nas tres rodadas; todos reprovam a suite.
+
+### Licao que fica
+
+"O comentario afirma mais do que o codigo entrega" foi a classe mais comum destas
+tres rodadas — quatro dos onze achados. Escrever no comentario que a correcao
+fecha o cenario nao fecha o cenario.
+
+### Rodadas 4 a 13 — o ciclo virou-se contra os proprios testes
+
+Da rodada 4 em diante quase todo achado foi em teste que EU tinha acabado de
+escrever, e nao no codigo do portal. Vale registrar porque a licao e transferivel.
+
+**Defeitos de produto que ainda apareceram** (rodadas 3 e 4):
+
+`contaId` matava a tabela de preco do sub-login. Eu resolvia o `parent_customer_id`
+ANTES de chamar `getProductPrice`, mas ele ja resolve o pai sozinho, e a
+precedencia e `tabela do sub ?? tabela da empresa`. Entregando o pai pronto, a
+linha do sub nunca era lida: Bob, sub-login da Acme com tabela negociada so dele,
+via o preco da ACME pelo ADD TO ORDER e o DELE pelo catalogo, pela ficha e pelo
+re-order. O servidor cobra o do sub (`COALESCE(_tp_self, _tp_conta)`), entao era o
+carrinho mentindo — o defeito que esta leva veio fechar, ao contrario.
+
+O marcador `(out of stock)` da variante ficou lendo `quantidade` cru depois que eu
+fiz o resto da tela descontar `estoque_reservado`. Opcao com tudo preso em pedido
+aberto aparecia normal; o cliente clicava e o botao ficava desabilitado, sem o
+aviso que a tela tem para isso.
+
+E uma corrida que so o teste em DOM real pegou: o `supabase-js` reemite
+`SIGNED_IN` a cada volta da aba para o primeiro plano, o `AuthContext` grava um
+objeto novo com o MESMO id, e as deps por objeto rerodavam o efeito e apagavam o
+`clienteId` ja resolvido. Sequencia medida: `undefined -> cli-7 -> cli-7 ->
+undefined`. Quem trocasse de aba e clicasse em MOVE TO CART na janela do
+round-trip levava o produto pelo preco de balcao. Deps por ID resolvem na raiz.
+
+**O resto foram os testes.** Tres classes, todas descobertas com mutante:
+
+1. *Assercao que nao consegue falhar.* `try/finally` trocado por `catch`, a forma
+   funcional do `setState`, o `clienteId` fixo em `null`, o `precoBase` vindo do
+   localStorage — todos passavam. E por tres vezes um `\b` escrito por heredoc de
+   shell virou o byte 0x08 LITERAL dentro do regex: o ramo vira codigo morto, o
+   teste fica verde e para de proteger, e nao aparece no editor nem no `git diff`.
+   Virou lint (`nadaDeControle.test.ts`, 455 arquivos) e memoria do projeto.
+
+2. *Expressao regular como instrumento errado.* Ela errou nas DUAS direcoes:
+   deixou passar `clienteId: clienteId ?? null` sem virgula final e o mesmo
+   ternario quebrado em tres linhas; e REPROVOU codigo correto que tinha um
+   comentario de bloco entre os argumentos — ou seja, documentar a regra no lugar
+   onde ela vale quebrava a suite. Trocado pelo AST do proprio TypeScript
+   (`src/test/ast.ts`), que ja e dependencia do projeto.
+
+3. *Modelo errado.* "Contar QUANTOS selects cobrem o leitor" permitia um select
+   irmao cobrir no lugar do certo, e reprovava qualquer select novo e legitimo. Foi
+   trocado por contrato declarado: o alvo diz a lista de colunas, e o teste exige
+   que exatamente N selects tenham aquela lista. E quando a ancora entrou para
+   separar a consulta da tela da do CSV, ela cegou junto a guarda anti-`select("*")`
+   — trocar o select do export por `*` devolvia o `admin_notes` ao navegador do
+   cliente com a suite verde. Guarda de `*` e escolha de lista sao coisas separadas
+   agora.
+
+**Onde a logica pode sair do componente, ela saiu e ganhou teste que roda:**
+`paginacao.ts`, `precoDoItem.ts` (a decisao de preco das duas entradas do carrinho,
+antes duplicada) e `clienteDoPortal` (o tri-estado do cliente, inclusive o valor
+INICIAL, que era um literal solto). O que sobra de fiacao le AST, nao texto.
+
+Verificacao ao fim da rodada 13: `npm test` 520/520 em 52 arquivos, `tsc` limpo,
+`npm run build` ok, `check-edge` ok. Cerca de 60 mutantes plantados nas treze
+rodadas; todos reprovam a suite.
+
+### Licao que fica
+
+Teste que nunca falhou nao provou nada. Toda guarda nova desta leva so entrou
+depois de um mutante mostrar que ela reprova o defeito que ela nomeia — e mais de
+metade dos achados foi exatamente disto: guarda que passava no defeito que dizia
+cobrir.
+
+### Rodadas 14 e 15 — resolucao de escopo, e onde o ciclo parou
+
+As duas ultimas rodadas foram sobre a mesma pergunta: "de onde vem o valor que
+entra nesta chamada?". Errei tres versoes seguidas dela.
+
+`inicializador` procurava no ARQUIVO inteiro e pegava a primeira declaracao com
+aquele nome — um helper com `const clienteId = cliente?.id` escrito acima fazia um
+`const clienteId = null` logo abaixo PASSAR, e todo "Add to order" mandava
+`clienteId: null`: cliente com tabela negociada levando o produto pelo preco de
+balcao, calado.
+
+`origemNaFuncao` parou na fronteira da funcao mas nao na do BLOCO: com
+`if (...) { addItem({preco}) } else { const preco = prod.preco; addItem({preco}) }`
+os dois resolviam para o `preco` bom do ramo de cima. E um `preco` de arrow
+aninhada, sem relacao nenhuma com o carrinho, reprovava codigo correto.
+
+`origemDoIdentificador` resolve escopo lexico de verdade — sobe do ponto de uso
+pelos blocos que o contem. Faltava ainda enxergar sombra por PARAMETRO: extrair o
+`addItem` para `const enviar = (preco: number) => addItem({..., preco})` e chamar
+com o preco de balcao atravessava a sombra e resolvia para o `const { preco } =
+await precoDoItem(...)` de cima. Agora a sombra INTERROMPE a busca e devolve
+`LIGADO_POR_PARAMETRO`, que nunca casa com o exigido: a fiacao nao consegue seguir
+valor que entra por parametro, entao ela reprova alto em vez de resolver para
+outra coisa.
+
+Saiu tambem o fallback `?? inicializador(...)`, que reabria o buraco do arquivo
+inteiro exatamente quando o resolvedor nao enxergava a forma nova — o pior momento
+possivel para salvar alguem.
+
+Verificacao final: `npm test` 520/520 em 52 arquivos, `tsc` limpo, `npm run build`
+ok, `check-edge` ok. Os tres mutantes da rodada 15 morrem, e os 9 de regressao das
+rodadas anteriores continuam morrendo.
+
+**Onde o ciclo parou, e por que.** Quinze rodadas, ~50 achados. Os defeitos de
+PRODUTO pararam de aparecer na rodada 4; da rodada 5 em diante todo achado foi nos
+testes de guarda desta mesma leva. O dono deu OK para fechar aqui. Nao foi rodada
+uma rodada 16 — entao o criterio "ate nao voltar erro" NAO foi atingido para os
+testes de fiacao; o que esta provado e que os defeitos de produto conhecidos estao
+todos cobertos por mutante que reprova.
