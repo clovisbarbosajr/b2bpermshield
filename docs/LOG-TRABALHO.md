@@ -3821,3 +3821,63 @@ cada request, como o Postgres) e insere entre as paginas:
   9.000 linhas;
 - delecao concorrente pode fazer PULAR, nunca repetir (uma linha a menos se
   resolve com F5; duplicata quebra contagem).
+
+## 28/ago — Reenvio, rodadas 5 a 7 (FEITO, commits e2d55a2, dd16ddc, 1a6b63b)
+
+O ciclo nao parou na rodada 4, e ainda bem: a rodada 5 **introduziu** o pior
+defeito de todos, e a 6 o pegou.
+
+**Rodada 5** — quatro achados aplicados:
+- a frase "Could not confirm" listava TODOS os que falharam, bastando UM ser
+  incerto. Com o cliente recusado pelo teto de e-mail (servidor gravou `failed`
+  no mesmo instante) e o admin perdido por rede, a tela mandava NAO reenviar por
+  medo de duplicar — e o cliente nunca recebia;
+- o `await` novo abriu janela: `setResending(false)` rodava antes dele, entao
+  durante a leitura do corpo da resposta o Send voltava a ficar clicavel com o
+  modal aberto;
+- `fetchAllRows` passou a DEDUPLICAR por `id`. `created_at ASC` evita a duplicata
+  da insercao normal, mas nao a da RETROATIVA: `created_at` e `DEFAULT now()`, e
+  `now()` congela no inicio da transacao — duas gravacoes sobrepostas comitam
+  fora de ordem e a linha entra no meio, empurrando a fronteira da pagina;
+- o teste de delecao do estresse era INERTE (provado por mutacao): filtrava o
+  payload em vez do estado, e a assercao de "pulou" comparava tamanhos, o que
+  dava igualdade acidental (2390 = 2390).
+
+**Rodada 6 — o defeito que a rodada 5 criou.** `quemIncerto` ficou declarado
+ACIMA do `const incerto` que ele chama. `const` fica em temporal dead zone ate a
+propria linha, e o `.map()` invoca o callback ali mesmo: TODO reenvio lancava
+`ReferenceError` **depois** de os e-mails terem saido. Como `handleResend` esta
+pendurado direto no `onClick` sem catch, virava unhandled rejection — sem toast,
+sem log de atividade, botao travado ate F5. O operador nao tinha como saber se
+enviou. Enviou.
+
+Nada do que estava em uso pegava isso: `tsc` nao emite TS2448 para uso dentro de
+callback, o eslint do projeto nao tem `no-use-before-define`, e os testes eram
+regex sobre o texto-fonte — ordem de declaracao e exatamente o que regex nao ve.
+
+A correcao foi de causa raiz, nao de ordem de linha: a classificacao e os textos
+sairam para `src/lib/reenvioPlacar.ts`, com 27 testes que EXECUTAM (qualquer um
+deles teria falhado com o TDZ). Na tela sobrou orquestracao, e o handler ganhou
+`try/finally`.
+
+**Rodada 7** — o proprio `finally` virou achado: `try/finally` sem `catch`
+RE-LANCA. So com o finally, um throw depois do envio devolvia o botao e deixava
+o modal aberto com as caixas marcadas, sem toast e sem log — e o passo natural
+dali e clicar Send de novo. Antes, o mesmo erro travava o botao, o que sem querer
+FREAVA a duplicata; trocar uma falha silenciosa por outra nao serve. Agora ha
+`catch` que avisa e manda conferir o `notification_log`. Tambem: teste para o
+`typeof error === "string"` (sem ele o toast imprime `[object Object]`), e saiu a
+ultima guarda redundante do `motivoHttp`.
+
+O cacador da rodada 7 rodou uma comparacao diferencial do bloco antigo contra o
+modulo novo: 47.250 combinacoes de resultado x destinatarios x mensagem, zero
+divergencia de comportamento.
+
+Verificacao final da leva: `npm test` 344/344 em 34 arquivos, `tsc` limpo, build
+ok. 12 mutacoes aplicadas ao longo das tres rodadas, todas reprovam a suite.
+
+### Licao que fica
+
+Teste de fiacao (regex sobre a fonte) protege contra reversao, e so. Nao ve ordem
+de declaracao, nao ve tipo, nao ve nada que so existe em execucao. Onde a logica
+importa, ela sai do componente e ganha teste que roda.
