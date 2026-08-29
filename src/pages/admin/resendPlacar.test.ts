@@ -63,13 +63,29 @@ describe("Resend do pedido: o que so a tela faz", () => {
   // Um `catch {}` vazio passaria por qualquer teste que so procure a palavra:
   // o que se exige aqui e que ele AVISE.
   it("o catch avisa o operador em vez de engolir", () => {
-    const iCatch = bloco.indexOf("} catch (e) {");
-    expect(iCatch, "sem `catch`, a excecao sobe como unhandled rejection").toBeGreaterThan(-1);
-    const corpo = bloco.slice(iCatch, bloco.indexOf("} finally {", iCatch));
-    expect(corpo, "o operador tem que saber que os e-mails sairam")
+    // O QUE IMPORTA E O CORPO, nao o nome do binding. Uma versao anterior casava
+    // a string exata "} catch (e) {": renomear a variavel para `err` reprovava a
+    // suite com mudanca de comportamento ZERO, e ainda por cima com a mensagem
+    // "sem `catch`, a excecao sobe" — acusando ausencia de um `catch` que estava
+    // ali. Quem topasse com isso ia cacar um bug que nao existe.
+    const m = /\}\s*catch\s*(\([^)]*\)\s*)?\{/.exec(bloco);
+    expect(m, "sem `catch`, a excecao sobe como unhandled rejection").not.toBeNull();
+    const corpo = bloco.slice(m!.index, bloco.indexOf("} finally {", m!.index));
+    expect(corpo, "sem o toast o operador nao fica sabendo de nada")
       .toMatch(/toast\.error\(/);
     expect(corpo, "e tem que ser mandado ao log antes de reenviar")
       .toMatch(/check the notification log before re-sending/i);
+    // `console.error` COM o objeto do erro: e a unica coisa que sobra para
+    // diagnostico. Sem esta linha, remove-lo (ou rebaixar para `console.log`)
+    // passava verde — duas mutacoes sobreviveram exatamente assim.
+    // Segundo argumento e um identificador QUALQUER, nao o nome `e`: prender ao
+    // nome era o mesmo defeito da linha acima, so que uma linha abaixo.
+    expect(corpo, "sem `console.error(msg, erro)` a excecao se perde")
+      .toMatch(/console\.error\([^)]*,\s*\w+\s*\)/);
+    // E a frase nao pode AFIRMAR envio: o catch tambem alcanca o caso em que
+    // tudo foi recusado e nada saiu.
+    expect(corpo, "com tudo recusado, dizer que os e-mails sairam e mentira")
+      .not.toMatch(/emails were sent/i);
   });
 
   // E o `finally` no FIM: soltar o botao logo apos o `allSettled` deixava a tela

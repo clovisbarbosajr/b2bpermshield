@@ -347,8 +347,15 @@ const OrderDetail = () => {
       // Antes do `finally` o mesmo erro travava o botao, o que sem querer FREAVA
       // a duplicata. Trocar uma falha silenciosa por outra nao serve: aqui o
       // operador e avisado e mandado ao log antes de reenviar.
-      console.error("Resend: falha depois do envio", e);
-      toast.error("The emails were sent but the screen failed afterwards — check the notification log before re-sending.");
+      // `console.error` com o objeto `e`: e a UNICA coisa que preserva a excecao
+      // para diagnostico. O toast so manda o operador ao log.
+      console.error("Resend: falha depois de concluir as chamadas", e);
+      // A frase NAO afirma que os e-mails sairam. O catch so e alcancavel depois
+      // de todas as chamadas terem concluido, mas "concluido" nao e "enviado":
+      // com tudo recusado (`skipped`) ou tudo 403, nada saiu, e dizer que saiu
+      // seria a mesma mentira que este bloco inteiro existe para matar — so que
+      // na direcao oposta. Mandar conferir o log esta certo nos dois casos.
+      toast.error("The resend finished but the screen failed afterwards — check the notification log before re-sending.");
     } finally {
       setResending(false);
     }
