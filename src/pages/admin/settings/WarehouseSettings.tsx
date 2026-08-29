@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { diffConfig } from "@/lib/diffConfig";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,10 @@ const WarehouseSettings = () => {
   const [configId, setConfigId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  // Espelho do que veio do banco. `diffConfig` compara contra ele para mandar SO
+  // o que este admin mexeu — ver o comentario no `handleSave`.
+  const [salvo, setSalvo] = useState<Record<string, any> | null>(null);
 
   const [form, setForm] = useState({
     warehouse_popup_enabled:      true,
@@ -39,9 +44,33 @@ const WarehouseSettings = () => {
     // `configuracoes` passou a ser de ADMIN porque a linha inteira carrega
     // `api_token`, `stripe_secret_key` e as senhas de e-mail — e RLS no Postgres
     // e por LINHA, entao quem lia a tabela levava os segredos junto.
-    const { data: rows } = await (supabase as any).rpc("config_staff");
+    const { data: rows, error } = await (supabase as any).rpc("config_staff");
+    // FALHA DE LEITURA NAO E "A CONFIGURACAO SALVA".
+    //
+    // O `error` era descartado: com a RPC falhando, `data` vinha undefined, o
+    // `if (data)` nao entrava e a tela renderizava o ESTADO INICIAL do componente
+    // como se fosse o que esta no banco — popup ligado, Monday, 5 e 480 minutos,
+    // e a mensagem VAZIA, que nem e o texto padrao. O admin lia numeros que nao
+    // existem. O Save nao chegava a gravar (para em `!configId`), mas a tela
+    // mentia calada.
+    if (error) {
+      setErro(error.message ?? String(error));
+      setLoading(false);
+      return;
+    }
+    setErro(null);
     const data = Array.isArray(rows) ? rows[0] : rows;
     if (data) {
+      // Os mesmos `??` do `setForm` abaixo, de proposito: o espelho tem que ser o
+      // que a tela MOSTRA quando ninguem toca em nada, senao o `diffConfig`
+      // acusaria mudanca em campo que o admin nem viu.
+      setSalvo({
+        warehouse_popup_enabled:      data.warehouse_popup_enabled  ?? true,
+        warehouse_popup_message:      data.warehouse_popup_message  ?? "It's Monday! Please make sure inventory levels are up to date before starting your shift.",
+        warehouse_popup_day:          data.warehouse_popup_day      ?? 1,
+        warehouse_inactivity_popup:   data.warehouse_inactivity_popup   ?? 5,
+        warehouse_inactivity_default: data.warehouse_inactivity_default ?? 480,
+      });
       setConfigId(data.id);
       setForm({
         warehouse_popup_enabled:      data.warehouse_popup_enabled  ?? true,
@@ -67,26 +96,40 @@ const WarehouseSettings = () => {
     if (form.warehouse_inactivity_default < 1) {
       toast.error("Default inactivity timeout must be at least 1 minute."); return;
     }
-    setSaving(true);
-    const { data: salvo, error } = await (supabase as any).from("configuracoes").update({
+    // SO O QUE ESTE ADMIN MUDOU.
+    //
+    // As cinco colunas iam cegas, com o `form` carregado no mount. Dois admins na
+    // mesma tela — ou um so com a aba aberta ha horas — e o ultimo Save devolvia
+    // os valores velhos por cima: A abre e nao toca em nada, B troca o dia do
+    // popup para sexta e salva, A clica Save e volta para segunda. `diffConfig`
+    // ja resolve isso em Profile e SetupApp, na MESMA tabela.
+    const payload = diffConfig(salvo, {
       warehouse_popup_enabled:      form.warehouse_popup_enabled,
       warehouse_popup_message:      form.warehouse_popup_message || null,
       warehouse_popup_day:          form.warehouse_popup_day,
       warehouse_inactivity_popup:   form.warehouse_inactivity_popup,
       warehouse_inactivity_default: form.warehouse_inactivity_default,
-    }).eq("id", configId).select();
+    });
+    if (Object.keys(payload).length === 0) { toast.info("Nothing to save"); return; }
+    setSaving(true);
+    const { data: gravado, error } = await (supabase as any)
+      .from("configuracoes").update(payload).eq("id", configId).select();
     if (error) { toast.error("Error saving: " + error.message); setSaving(false); return; }
     // A unica policy de ESCRITA em `configuracoes` e admin-only. Esta tela e
     // alcancada pelo MANAGER, e para ele o UPDATE passa pela RLS afetando ZERO
     // linhas — o supabase-js volta SEM erro e a tela dizia "saved" sem ter
     // salvado nada. Conferir a contagem e a unica forma de saber.
-    if (!salvo || salvo.length === 0) {
+    if (!gravado || gravado.length === 0) {
       toast.error("Nothing was saved — only an administrator can change warehouse settings.");
       setSaving(false);
       return;
     }
     toast.success("Warehouse settings saved.");
     setSaving(false);
+    // Recarrega o espelho. Sem isso, um segundo Save na mesma sessao compararia
+    // com o estado ANTERIOR e reenviaria campo que ja foi gravado — o que traria
+    // de volta, em menor escala, o lost update que o `diffConfig` veio fechar.
+    fetchData();
   };
 
   if (loading) {
@@ -98,6 +141,19 @@ const WarehouseSettings = () => {
       </AdminLayout>
     );
   }
+
+  // Falha FECHADO: sem a configuracao lida, nao se mostra o formulario. Um form
+  // preenchido com os valores iniciais do componente convida o admin a "salvar"
+  // numeros que nunca estiveram no banco.
+  if (erro) return (
+    <AdminLayout>
+      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+        <p className="font-semibold">Settings could not be loaded — nothing is being shown or saved.</p>
+        <p className="mt-1 text-sm text-muted-foreground">{erro}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => fetchData()}>Retry</Button>
+      </div>
+    </AdminLayout>
+  );
 
   return (
     <AdminLayout>

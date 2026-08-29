@@ -40,8 +40,14 @@ const Team = () => {
     if (impersonatedCustomer) {
       setCompanyName(impersonatedCustomer.empresa || impersonatedCustomer.nome || "");
     } else if (user?.id) {
-      const { data: me } = await supabase.from("clientes")
+      const { data: me, error: meErr } = await supabase.from("clientes")
         .select("empresa, nome").eq("user_id", user.id).maybeSingle();
+      // Esta leitura existe para o titulo dizer em QUAL empresa o funcionario vai
+      // entrar — o header mostra a marca da loja, e isso ja fez adicionarem gente
+      // no time da empresa errada. Com o `error` descartado, `companyName` ficava
+      // "" e o texto virava "Add employees who can log in for your company": a
+      // ambiguidade exata que a leitura veio matar. Falhou, avisa.
+      if (meErr) toast.error("Could not confirm which company you are managing: " + meErr.message);
       setCompanyName(me?.empresa || me?.nome || "");
     }
     setLoading(false);

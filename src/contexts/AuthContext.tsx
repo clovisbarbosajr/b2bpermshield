@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { DEFAULT_PERMISSIONS } from "@/lib/permissions";
 
 export type AppRole = "admin" | "cliente" | "warehouse" | "manager";
 
@@ -40,6 +41,22 @@ interface AuthContextType {
   falhaAoLerPapel: boolean;
   signOut: () => Promise<void>;
   clearViewAs: (dest?: string) => void;
+}
+
+/**
+ * Permissoes efetivas de um usuario de STAFF.
+ *
+ * O mapa gravado vence, chave por chave. Mapa ausente ou VAZIO cai no default do
+ * papel — `{}` significa "nunca foi configurado", nao "nao pode nada". Um mapa
+ * com pelo menos uma chave e escolha explicita do admin e e respeitado como veio,
+ * inclusive quando ele desmarcou tudo menos uma.
+ */
+function permissoesDoPapel(papel: string, gravadas: unknown): Record<string, boolean> {
+  const mapa = (gravadas && typeof gravadas === "object" ? gravadas : {}) as Record<string, boolean>;
+  const padrao = (DEFAULT_PERMISSIONS as Record<string, Record<string, boolean>>)[papel];
+  if (!padrao) return mapa;                       // admin nao usa mapa
+  if (Object.keys(mapa).length === 0) return { ...padrao };
+  return { ...padrao, ...mapa };
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -181,7 +198,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // STAFF (admin/manager/warehouse) tem prioridade.
     if (dbRole && dbRole !== "cliente") {
       setRole(dbRole);
-      setPermissions((data as any).permissions || {});
+      // MAPA VAZIO CAI NO DEFAULT DO PAPEL, e nao em "pode nada".
+      //
+      // `user_roles.permissions` e `JSONB DEFAULT '{}'` (20260410000001), e os
+      // `DEFAULT_PERMISSIONS` so eram aplicados dentro da TELA de Users, na hora
+      // de editar. Quem nunca passou por ela — todo staff criado por SQL, por
+      // sync, ou antes daquela tela existir — chegava aqui com `{}`, e como
+      // `hasPermission` testa `permissions[key] === true`, tudo virava `false`:
+      // menu de admin vazio, sem uma linha explicando por que.
+      //
+      // Passava despercebido porque as permissoes so escondiam menu. Agora que
+      // elas tambem fecham rota (ver `SP` em `App.tsx`), um mapa vazio trancaria
+      // o operador para fora do sistema inteiro.
+      setPermissions(permissoesDoPapel(dbRole, (data as any).permissions));
       setCanPlaceOrders(true);
       setIsSubUser(false);
       setContaAprovada(true);

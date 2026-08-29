@@ -206,18 +206,43 @@ const ProducaoStatus = () => {
 
   const clearTrackingEdit = (id: string) => setTrackingEdit((p) => { const n = { ...p }; delete n[id]; return n; });
 
+  /**
+   * Espelha o tracking no Container SO SE ELE AINDA ESTIVER VAZIO — e quem decide
+   * isso e o BANCO, com `.is("numero_container", null)`, nao o estado da tela.
+   *
+   * `espelharContainer` compara com `r.numero_container`, que e o valor carregado
+   * quando a tela ABRIU. `load()` so roda no mount e depois de um save proprio:
+   * nao ha realtime nem polling aqui. Entao dois operadores bastam — B preenche o
+   * container real (MSCU1234567) pelo editor, A salva um tracking de courier
+   * minutos depois com a tela velha, e o UPDATE incondicional gravava o numero do
+   * courier POR CIMA do container. Invisivel: a lista ativa nem exibe a coluna
+   * Container. E `numero_container` e a chave do `sync-container-eta`, entao a
+   * ETA passava a ser buscada por um numero que nao e de container.
+   *
+   * Devolve o valor gravado, ou null se outro ja tinha preenchido.
+   */
+  const espelhaContainerSeVazio = async (id: string, tracking: string, containerNaTela: string | null | undefined) => {
+    const valor = espelharContainer(tracking, containerNaTela);
+    if (!valor) return null;
+    const { data } = await supabase.from("producao_pedidos")
+      .update({ numero_container: valor })
+      .eq("id", id).is("numero_container", null)
+      .select("numero_container").maybeSingle();
+    return data?.numero_container ?? null;
+  };
+
   const saveTracking = async (r: Row) => {
     const tracking = (trackingEdit[r.id] ?? r.tracking ?? "").trim();
     const patch: any = { tracking: tracking || null };
-    // Tracking -> Container: este era o sentido que NAO existia.
-    const espelhoContainer = espelharContainer(tracking, r.numero_container);
-    if (espelhoContainer) patch.numero_container = espelhoContainer;
     if (tracking && r.status === "solicitado") patch.status = "a_caminho";
     setBusy(r.id);
     const { error } = await supabase.from("producao_pedidos").update(patch).eq("id", r.id);
+    if (error) { setBusy(null); toast.error(error.message); return; }
+    // Tracking -> Container: este era o sentido que NAO existia. Vai num UPDATE
+    // proprio e condicional — ver `espelhaContainerSeVazio`.
+    const container = await espelhaContainerSeVazio(r.id, tracking, r.numero_container);
     setBusy(null);
-    if (error) { toast.error(error.message); return; }
-    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { field: "tracking", tracking: tracking || null, ...(patch.numero_container ? { container: patch.numero_container } : {}), ...(patch.status ? { status: patch.status } : {}) });
+    log("updated", "production", r.id, `${r.produtos?.nome ?? "Item"} (qty ${r.quantidade})`, { field: "tracking", tracking: tracking || null, ...(container ? { container } : {}), ...(patch.status ? { status: patch.status } : {}) });
     clearTrackingEdit(r.id);
     toast.success("Tracking saved"); load();
   };
@@ -225,17 +250,16 @@ const ProducaoStatus = () => {
   // "On the way" também SALVA o tracking pendente (antes sumia ao avançar o status).
   const goOnTheWay = async (r: Row) => {
     const tracking = (trackingEdit[r.id] ?? r.tracking ?? "").trim();
-    // Mesmo espelhamento do saveTracking: avancar para "On the way" com um
-    // tracking pendente no campo tambem preenche o Container.
-    const espelhoContainer = espelharContainer(tracking, r.numero_container);
     setBusy(r.id);
     const { error } = await supabase.from("producao_pedidos").update({
       status: "a_caminho",
       tracking: tracking || null,
-      ...(espelhoContainer ? { numero_container: espelhoContainer } : {}),
     }).eq("id", r.id);
+    if (error) { setBusy(null); toast.error(error.message); return; }
+    // Mesmo espelhamento do saveTracking, e pelo mesmo caminho condicional:
+    // avancar para "On the way" com tracking pendente tambem preenche o Container.
+    const espelhoContainer = await espelhaContainerSeVazio(r.id, tracking, r.numero_container);
     setBusy(null);
-    if (error) { toast.error(error.message); return; }
     // Registra tambem o container: "On the way" pode preenche-lo pelo espelho, e
     // ele e a chave do sync de ETA — escrever nele sem deixar rastro no audit log
     // deixaria uma mudanca invisivel num campo que a lista nem exibe.

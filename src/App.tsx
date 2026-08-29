@@ -123,6 +123,20 @@ const AW = S;
 
 // Staff + permissão específica: bloqueia o papel que não tem a permissão (ex.: warehouse
 // não vê Users/Profile). Manager (sub-admin) passa pelas que tem por padrão.
+//
+// TODA ROTA CUJO MENU CONSULTA UMA PERMISSAO USA `SP` COM A MESMA CHAVE.
+//
+// Antes so 3 rotas faziam isso e o resto do admin era `AW` (= qualquer staff):
+// desmarcar "View Orders" de um warehouse tirava o item do menu e ele entrava
+// digitando /admin/orders. O checkbox prometia um controle que nao existia — e a
+// tela de Users desenha 20 deles. Estas 15 rotas fecham a metade que o menu ja
+// escondia; as demais chaves seguem sem efeito e vao na lista do dono.
+//
+// Os `DEFAULT_PERMISSIONS` dao view_dashboard/orders/customers/products a manager
+// E warehouse, entao isto NAO tira acesso de ninguem hoje: passa a valer no dia
+// em que o admin desmarcar. E o `AuthContext` agora cai nesses defaults quando o
+// mapa gravado vem vazio — sem isso, staff com `permissions = {}` (o default da
+// coluna) seria trancado para fora de tudo.
 const SP = ({ perm, children }: { perm: string; children: React.ReactNode }) => (
   <ProtectedRoute requiredRole="staff" requiredPermission={perm}>{children}</ProtectedRoute>
 );
@@ -161,39 +175,39 @@ const App = () => (
               {/* Admin Panel — UM shell persistente (sidebar/header não remontam ao trocar de aba).
                   As páginas continuam renderizando <AdminLayout>, que vira passthrough quando aninhado. */}
               <Route element={<S><AdminLayout><Outlet /></AdminLayout></S>}>
-              <Route path="/admin" element={<AW><AdminDashboard /></AW>} />
-              <Route path="/admin/orders" element={<AW><AdminPedidos /></AW>} />
-              <Route path="/admin/orders/:id" element={<AW><OrderDetail /></AW>} />
-              <Route path="/admin/customers" element={<AW><AdminClientes /></AW>} />
+              <Route path="/admin" element={<SP perm="view_dashboard"><AdminDashboard /></SP>} />
+              <Route path="/admin/orders" element={<SP perm="view_orders"><AdminPedidos /></SP>} />
+              <Route path="/admin/orders/:id" element={<SP perm="view_orders"><OrderDetail /></SP>} />
+              <Route path="/admin/customers" element={<SP perm="view_customers"><AdminClientes /></SP>} />
               {/* `key`: mesmo motivo da rota de produtos abaixo — sem ela o
                   React reaproveita a instancia entre /customers/:id e
                   /customers/new. */}
-              <Route path="/admin/customers/new" element={<AW key="new"><CustomerEdit /></AW>} />
-              <Route path="/admin/customers/:id" element={<AW><CustomerEdit /></AW>} />
-              <Route path="/admin/products" element={<AW><AdminProdutos /></AW>} />
+              <Route path="/admin/customers/new" element={<SP perm="view_customers"><CustomerEdit key="new" /></SP>} />
+              <Route path="/admin/customers/:id" element={<SP perm="view_customers"><CustomerEdit /></SP>} />
+              <Route path="/admin/products" element={<SP perm="view_products"><AdminProdutos /></SP>} />
               {/* `key`: sem ela o React reaproveita a instancia entre
                   /products/:id e /products/new, e o bloqueio de carregamento de
                   um produto que falhou seguia para a tela de produto novo, que
                   nunca mais destravava. Zerar o flag no efeito seria pior —
                   destravaria o save com as variantes ainda carregando os ids do
                   produto anterior. */}
-              <Route path="/admin/products/new" element={<AW key="new"><ProductEdit /></AW>} />
-              <Route path="/admin/products/:id" element={<AW><ProductEdit /></AW>} />
+              <Route path="/admin/products/new" element={<SP perm="view_products"><ProductEdit key="new" /></SP>} />
+              <Route path="/admin/products/:id" element={<SP perm="view_products"><ProductEdit /></SP>} />
               <Route path="/admin/price-lists" element={<A><AdminTabelasPreco /></A>} />
               <Route path="/admin/options" element={<A><AdminOptions /></A>} />
               <Route path="/admin/brands" element={<A><AdminBrands /></A>} />
-              <Route path="/admin/products/import" element={<AW><AdminProductImport /></AW>} />
-              <Route path="/admin/products/export" element={<AW><AdminProductExport /></AW>} />
-              <Route path="/admin/product-categories" element={<AW><AdminCategorias /></AW>} />
+              <Route path="/admin/products/import" element={<SP perm="view_products"><AdminProductImport /></SP>} />
+              <Route path="/admin/products/export" element={<SP perm="view_products"><AdminProductExport /></SP>} />
+              <Route path="/admin/product-categories" element={<SP perm="view_products"><AdminCategorias /></SP>} />
               <Route path="/admin/banners" element={<A><AdminBanners /></A>} />
               <Route path="/admin/news" element={<A><AdminNoticias /></A>} />
               <Route path="/admin/pages" element={<A><AdminPaginas /></A>} />
               <Route path="/admin/sales-reps" element={<A><AdminRepresentantes /></A>} />
 
               {/* Produção */}
-              <Route path="/admin/producao/entrada" element={<AW><ProducaoEntrada /></AW>} />
-              <Route path="/admin/producao/status" element={<AW><ProducaoStatus /></AW>} />
-              <Route path="/admin/producao/dashboard" element={<AW><ProducaoDashboard /></AW>} />
+              <Route path="/admin/producao/entrada" element={<SP perm="view_products"><ProducaoEntrada /></SP>} />
+              <Route path="/admin/producao/status" element={<SP perm="view_products"><ProducaoStatus /></SP>} />
+              <Route path="/admin/producao/dashboard" element={<SP perm="view_products"><ProducaoDashboard /></SP>} />
 
               {/* Tools */}
               {/* Rota removida junto com o item de menu (ver AdminLayout).
