@@ -69,7 +69,7 @@ const ProducaoDashboard = () => {
       // silenciosamente.
       try {
         const [it, cat] = await Promise.all([
-          fetchAllRows<any>((f, t) => supabase.from("producao_pedidos").select("id, quantidade, status, tracking, numero_container, est_entrega, produtos(nome, sku, categoria_id)").neq("status", "delivered").order("id", { ascending: true }).range(f, t)),
+          fetchAllRows<any>((f, t) => supabase.from("producao_pedidos").select("id, quantidade, status, tracking, numero_container, est_entrega, produtos(nome, sku, categoria_id)").neq("status", "delivered").order("created_at", { ascending: true }).order("id", { ascending: true }).range(f, t)),
           fetchAllRows<Categoria>((f, t) => supabase.from("categorias").select("id, nome, parent_id").order("id", { ascending: true }).range(f, t)),
         ]);
         setItems(it);

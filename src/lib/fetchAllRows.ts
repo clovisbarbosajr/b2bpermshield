@@ -29,7 +29,15 @@ export async function fetchAllRows<T = any>(
   const out: T[] = [];
   for (let from = 0; from < maxRows; from += chunk) {
     const { data, error } = await buildQuery(from, from + chunk - 1);
-    if (error) throw new Error(error.message ?? String(error));
+    if (error) {
+      // `causa` carrega o erro CRU do PostgREST. Sem isso, `new Error(message)`
+      // apagava o `code` — e quem chama nao conseguia distinguir "esta coluna nao
+      // existe" (42703, que tem tratamento proprio) de "a rede caiu no meio da
+      // pagina 2", que precisa virar erro na tela. `ProducaoStatus` depende disso.
+      const e = new Error(error.message ?? String(error)) as Error & { causa?: any };
+      e.causa = error;
+      throw e;
+    }
     const page = data ?? [];
     out.push(...page);
     if (page.length < chunk) return out;   // última página

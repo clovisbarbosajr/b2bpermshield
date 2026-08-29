@@ -150,4 +150,27 @@ describe("fetchAllRows", () => {
     expect(out).toHaveLength(50_000);
     expect(new Set(out.map((r) => r.id)).size).toBe(50_000);
   });
+
+  // `ProducaoStatus` pede colunas que podem nao existir ainda e, se nao
+  // existirem, refaz a leitura sem elas. Para NAO cair nesse fallback quando o
+  // problema foi outro (rede, JWT), quem chama precisa do `code` do PostgREST —
+  // e `new Error(error.message)` apagava esse code. Sem `causa`, um blip de rede
+  // vira "essa coluna nao existe" e a tela perde uma feature em silencio.
+  it("preserva o erro cru do PostgREST em `causa`", async () => {
+    const cru = { message: 'column "eta_fonte" does not exist', code: "42703", details: null };
+    const erro: any = await fetchAllRows(() => Promise.resolve({ data: null, error: cru }))
+      .then(() => null, (e) => e);
+    expect(erro, "tinha que ter lancado").not.toBeNull();
+    expect(erro.message).toBe(cru.message);
+    expect(erro.causa, "sem isto o chamador nao distingue 42703 de falha de rede").toBe(cru);
+    expect(erro.causa.code).toBe("42703");
+  });
+
+  it("erro sem `code` tambem chega inteiro em `causa`", async () => {
+    const cru = { message: "TypeError: Failed to fetch" };
+    const erro: any = await fetchAllRows(() => Promise.resolve({ data: null, error: cru }))
+      .then(() => null, (e) => e);
+    expect(erro.causa).toBe(cru);
+    expect(erro.causa.code).toBeUndefined();
+  });
 });

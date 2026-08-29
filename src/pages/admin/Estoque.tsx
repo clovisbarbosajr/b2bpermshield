@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,6 +25,9 @@ const AdminEstoque = () => {
   const [motivo, setMotivo] = useState("");
   const [saving, setSaving] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
+  const [logsErro, setLogsErro] = useState<string | null>(null);
+  // Contador de pedido: so a resposta do clique MAIS RECENTE pode escrever.
+  const pedidoSeq = useRef(0);
 
   const fetchData = async () => {
     // Pagina de verdade (o PostgREST corta em 1000 sem erro) e mostra o erro em
@@ -56,8 +59,25 @@ const AdminEstoque = () => {
     setSelected(p);
     setNovaQtd(p.estoque_total);
     setMotivo("");
-    const { data } = await supabase.from("estoque_log").select("*").eq("produto_id", p.id).order("created_at", { ascending: false }).limit(10);
-    setLogs(data ?? []);
+    setLogs([]);
+    setLogsErro(null);
+    const meu = ++pedidoSeq.current;
+    const { data, error } = await supabase.from("estoque_log")
+      .select("id, quantidade_anterior, quantidade_nova, motivo, created_at")
+      .eq("produto_id", p.id).order("created_at", { ascending: false }).limit(10);
+    // DUAS COISAS QUE FALTAVAM AQUI.
+    //
+    // 1. O `error` ia para o lixo no `?? []`: leitura falhada ficava igualzinha a
+    //    "este produto nunca foi ajustado". Quem esta prestes a corrigir um saldo
+    //    olha o historico justamente para nao repetir um ajuste — e o vazio
+    //    silencioso diz o contrario do que aconteceu.
+    // 2. RESPOSTA ATRASADA DE OUTRO PRODUTO. Clicar em A e depois em B, com a
+    //    resposta de A chegando por ultimo, colava o historico de A na caixa de
+    //    ajuste de B. Mesmo bug ja corrigido em `UsersManagement.openEdit`. O
+    //    `pedidoId` descarta o que nao e do produto aberto agora.
+    if (meu !== pedidoSeq.current) return;   // ja abriu outro produto
+    if (error) setLogsErro(error.message);
+    else setLogs(data ?? []);
   };
 
   const handleAjuste = async () => {
@@ -185,6 +205,11 @@ const AdminEstoque = () => {
             </div>
             <div><Label>Reason</Label><Input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="e.g. Receiving, Inventory..." /></div>
             <Button onClick={handleAjuste} disabled={saving} className="w-full">{saving ? "Saving..." : "Confirm Adjustment"}</Button>
+            {logsErro && (
+              <p className="mt-4 text-xs text-destructive">
+                History could not be loaded — this is NOT an empty history. {logsErro}
+              </p>
+            )}
             {logs.length > 0 && (
               <div>
                 <h4 className="mt-4 mb-2 text-sm font-semibold">History</h4>

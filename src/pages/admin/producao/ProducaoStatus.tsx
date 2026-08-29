@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAllRows";
@@ -51,6 +51,14 @@ const ProducaoStatus = () => {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  // GERACAO DO LOAD. Os oito handlers de mutacao terminam em `load()`, e com a
+  // leitura agora paginada um load leva segundos, nao milissegundos. Duas
+  // mutacoes em sequencia disparam dois loads, e o mais VELHO pode chegar por
+  // ultimo: a linha que acabou de mudar volta ao estado anterior na tela, o
+  // operador clica de novo e o `log()` grava uma auditoria com `status_before`
+  // falso. Pior ainda quando o load velho FALHA: o `catch` limpava a tela toda
+  // depois de ela ja ter carregado. So a geracao mais recente pode escrever.
+  const loadSeq = useRef(0);
   const [trackingEdit, setTrackingEdit] = useState<Record<string, string>>({});
   const [receivingId, setReceivingId] = useState<string | null>(null);
   const [recvQty, setRecvQty] = useState<string>("");
@@ -66,27 +74,43 @@ const ProducaoStatus = () => {
   const [ultimoSync, setUltimoSync] = useState<any>(null);
 
   const load = async () => {
+    const meu = ++loadSeq.current;
     // As colunas `eta_atualizado_em`/`eta_fonte` vem da migration da integracao de
     // ETA. Se a UI subir ANTES do SQL, o PostgREST responde 400 "column does not
     // exist", `data` vem null e a tela de Producao ficaria VAZIA — sem erro, sem
     // aviso. Entao pede as colunas novas e, se o banco nao as tiver ainda, refaz
     // a consulta sem elas. A tela funciona nos dois estados; some so o selo.
-    // PAGINADO, e o `.order("id")` de desempate nao e enfeite: `.range()` vira
-    // LIMIT/OFFSET, e `created_at` sozinho nao e unico — duas linhas criadas no
-    // mesmo instante fariam uma pagina repetir uma linha e perder outra. A
-    // ordenacao visivel e feita depois, pelo `sortKey` da tabela.
+    // PAGINADO em `created_at` ASCENDENTE, e isso importa. `.range()` vira
+    // LIMIT/OFFSET e cada pagina e um request separado. Com `DESC`, toda entrada
+    // nova ocupa a posicao 0 e empurra tudo uma casa: quem salvasse em
+    // `ProducaoEntrada` entre a pagina 1 e a 2 — as duas telas sao usadas pela
+    // mesma equipe ao mesmo tempo — faria a linha do offset 999 reaparecer no
+    // 1000, duplicada na tabela e contada duas vezes no "Received log". Em ASC a
+    // linha nova entra no FIM e nao mexe no que ja foi lido. O `.order("id")` de
+    // desempate cobre `created_at` igual. A ordem visivel e do `sortKey`.
     const pagina = (cols: string) => (f: number, t: number) =>
       supabase.from("producao_pedidos").select(cols)
-        .order("created_at", { ascending: false }).order("id", { ascending: true }).range(f, t) as any;
+        .order("created_at", { ascending: true }).order("id", { ascending: true }).range(f, t) as any;
+    // So e "coluna que ainda nao existe" se o Postgres disser isso. Qualquer outro
+    // erro (JWT expirado, rede caindo na pagina 2) NAO pode virar fallback.
+    const eColunaInexistente = (e: any) =>
+      e?.causa?.code === "42703" || /column .* does not exist/i.test(e?.message ?? "");
     const pedidosQuery = async () => {
       try {
         return await fetchAllRows<any>(pagina("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, eta_atualizado_em, eta_fonte, produtos(nome, sku)"));
-      } catch {
+      } catch (e: any) {
         // Se a UI subiu ANTES do SQL da integracao de ETA, o PostgREST responde 400
         // "column does not exist". Refaz sem as colunas novas: a tela funciona nos
-        // dois estados, some so o selo. Um erro REAL de leitura estoura tambem na
-        // segunda tentativa e vira o banner — nao mais uma tabela vazia sem
-        // explicacao, que era o que o `?? []` produzia.
+        // dois estados, some so o selo.
+        //
+        // O `catch` NU aqui era pior que o bug que veio consertar: um blip de rede
+        // na pagina 2 tambem caia no fallback, e ai as linhas chegavam SEM a chave
+        // `eta_fonte`. O `saveEdit` decide limpar a procedencia com
+        // `"eta_fonte" in editRow` — sem a chave, nao limpava, e o selo verde
+        // "arrived" voltava a aparecer sobre uma data que o admin tinha acabado de
+        // digitar na mao. Reintroduzia, por um caminho novo, exatamente a mentira
+        // que a guarda das linhas 274-281 existe para impedir.
+        if (!eColunaInexistente(e)) throw e;
         return await fetchAllRows<any>(pagina("id, produto_id, quantidade, est_ready, est_entrega, numero_ordem, numero_container, status, tracking, notes, quantidade_recebida, recebido_em, created_at, produtos(nome, sku)"));
       }
     };
@@ -97,11 +121,13 @@ const ProducaoStatus = () => {
         fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("id", { ascending: true }).range(f, t)),
         fetchAllRows<Categoria>((f, t) => supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("id", { ascending: true }).range(f, t)),
       ]);
+      if (meu !== loadSeq.current) return;
       setRows(pr);
       setProdutos([...prod].sort((x, y) => x.nome.localeCompare(y.nome)));
       setCategorias(cat);
       setErro(null);
     } catch (e: any) {
+      if (meu !== loadSeq.current) return;
       setErro(e?.message ?? String(e));
       setRows([]); setProdutos([]); setCategorias([]);
     }
@@ -110,6 +136,7 @@ const ProducaoStatus = () => {
       .from("producao_eta_sync_log")
       .select("iniciado_em, ok, mensagem, itens_lidos, itens_casados, itens_atualizados, itens_com_erro")
       .order("iniciado_em", { ascending: false }).limit(1).maybeSingle();
+    if (meu !== loadSeq.current) return;
     setUltimoSync(sync ?? null);
     setLoading(false);
   };
@@ -416,6 +443,9 @@ const ProducaoStatus = () => {
               <TableRow><TableCell colSpan={8} className="py-8 text-center">
                 <p className="font-semibold text-destructive">Production could not be loaded — this is NOT an empty list.</p>
                 <p className="mt-1 text-sm text-muted-foreground">{erro}</p>
+                {/* Com `erro`, `rows` e vazio e NENHUM botao da tela esta na tela —
+                    sem este Retry a unica saida do estado de erro seria F5. */}
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => { setLoading(true); load(); }}>Retry</Button>
               </TableCell></TableRow>
             ) : active.length === 0 ? (
               <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Nothing active in production.</TableCell></TableRow>
@@ -493,7 +523,7 @@ const ProducaoStatus = () => {
       <Card className="mt-4 overflow-hidden">
         <button className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors" onClick={() => setShowReceived((v) => !v)}>
           <span className="flex items-center gap-2 font-semibold text-green-700 dark:text-green-400">
-            <PackageCheck className="h-4 w-4" /> Received log ({received.length})
+            <PackageCheck className="h-4 w-4" /> Received log ({erro ? "—" : received.length})
           </span>
           {showReceived ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
@@ -503,7 +533,12 @@ const ProducaoStatus = () => {
               <TableRow><TableHead>Product</TableHead><TableHead>Ordered → Received</TableHead><TableHead>Container</TableHead><TableHead>Received at</TableHead></TableRow>
             </TableHeader>
             <TableBody>
-              {received.length === 0 ? (
+              {erro ? (
+                // O painel de recebidos vinha do mesmo `rows`, que o `catch` zera.
+                // Dizer "Nothing received yet." quando a leitura falhou e o proprio
+                // defeito que esta leva veio consertar, so que no outro painel.
+                <TableRow><TableCell colSpan={4} className="text-center py-6 text-destructive">Could not be loaded — this is NOT an empty log.</TableCell></TableRow>
+              ) : received.length === 0 ? (
                 <TableRow><TableCell colSpan={4} className="text-center py-6 text-muted-foreground">Nothing received yet.</TableCell></TableRow>
               ) : received.map((r) => (
                 <TableRow key={r.id} className="bg-green-50/30 dark:bg-green-950/10">
