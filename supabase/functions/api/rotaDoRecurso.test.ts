@@ -13,7 +13,14 @@ import { readFileSync } from "node:fs";
 // nunca era alcancado, entao o formato ensinado pela propria mensagem de ajuda
 // tambem nao funcionava.
 
-const fonte = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+// Caminho relativo a RAIZ do repo, e nao `new URL(..., import.meta.url)`.
+//
+// O vitest serve os modulos por http para transformar TypeScript, entao
+// `import.meta.url` aqui e uma URL http — e `readFileSync` so aceita `file:`.
+// Este teste existia desde 28/ago e NUNCA tinha rodado: o `include` do
+// `vitest.config.ts` era so `src/**`, entao ninguem executava e ninguem via que
+// ele nem carregava. Teste que nao roda afirma cobertura que nao existe.
+const fonte = readFileSync("supabase/functions/api/index.ts", "utf8");
 
 const bloco = fonte.match(
   /const segments = url\.pathname[\s\S]*?const resourceId = rest\[1\][^;]*;/,
