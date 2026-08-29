@@ -40,7 +40,16 @@ export function escaparCelulaCSV(val: unknown): string | number {
   // Quem tinha de desfazer a marca era a ENTRADA, e agora desfaz — ver
   // `parseCSV`, que remove o `'` inicial quando ele protege um caractere desta
   // mesma lista.
-  const perigoso = /^[=+\-@\t\r]/.test(texto);
+  // O `'` TAMBEM ENTRA NA LISTA, para o par ser INJETIVO.
+  //
+  // Sem ele o export nao era reversivel: `'=SUM(A1)` (digitado a mao no Excel)
+  // saia sem marca — o primeiro caractere nao e perigoso — e a entrada, que
+  // desmarca `'` seguido de perigoso, comia o apostrofo. `'-10`, `'@user` e
+  // `'+1 786...` tinham o mesmo destino.
+  //
+  // Marcando tambem o `'`, `'=x` vira `''=x`, e a entrada tira UM: volta `'=x`.
+  // Texto normal (`Casa`) nao e marcado e nao e tocado.
+  const perigoso = /^['=+\-@\t\r]/.test(texto);
   const seguro = perigoso ? `'${texto}` : texto;
   return `"${seguro.replace(/"/g, '""')}"`;
 }

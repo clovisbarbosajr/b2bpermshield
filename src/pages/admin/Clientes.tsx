@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { escaparCelulaCSV } from "@/lib/export-csv";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -251,7 +252,11 @@ const AdminClientes = () => {
       c.status || "",
       c.is_active !== false ? "Yes" : "No",
     ]);
-    const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    // `escaparCelulaCSV`, e nao aspas na mao: aspas resolvem virgula, NAO resolvem
+    // FORMULA — o Excel tira as aspas e avalia a celula. `nome`, `empresa` e
+    // `telefone` sao gravaveis pelo proprio cliente (`portal/Conta.tsx`), e este
+    // arquivo e aberto pelo admin.
+    const csv = [headers, ...rows].map((r) => r.map(escaparCelulaCSV).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

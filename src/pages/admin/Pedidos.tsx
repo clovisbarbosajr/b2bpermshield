@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { escaparCelulaCSV } from "@/lib/export-csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { descendantIds } from "@/lib/categoryTree";
 import AdminLayout from "@/components/layouts/AdminLayout";
@@ -162,7 +163,9 @@ const AdminPedidos = () => {
   const clearFilters = () => setFilters({ ...emptyFilters });
 
   const handleExport = () => {
-    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    // `escaparCelulaCSV`: aspas resolvem virgula, NAO resolvem formula — o Excel
+    // tira as aspas e avalia a celula. Campos gravaveis pelo cliente saem aqui.
+    const esc = escaparCelulaCSV;
     const rows = [
       ["Order", "Company", "Name", "Email", "PO", "Status", "Total", "Created"],
       ...filtered.map((p) => [

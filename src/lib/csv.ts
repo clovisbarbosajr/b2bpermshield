@@ -35,11 +35,17 @@
  * -1454 e grava o numero errado, calado. Se `+` nao fosse avaliado,
  * `+HYPERLINK(...)` nao seria vetor de injecao — e e.
  *
- * Remove SO quando o proximo caractere e um dos que o export protege: apostrofo
- * que seja dado de verdade (`'Casa do Piso'`) fica intacto.
+ * Remove SO quando o proximo caractere e um dos que o export protege — o proprio
+ * `'` incluso, para o par ser INJETIVO. Sem essa simetria, `'=SUM(A1)` digitado a
+ * mao no Excel saia do export SEM marca (o primeiro caractere nao e perigoso) e
+ * era desmarcado aqui: o apostrofo do usuario sumia. `'-10`, `'@user` e
+ * `'+1 786...` tinham o mesmo destino.
+ *
+ * Apostrofo que e dado e nao precede caractere perigoso (`'Casa do Piso'`) fica
+ * intacto nos dois lados.
  */
 const desmarcaFormula = (v: string) =>
-  /^'[=+\-@\t\r]/.test(v) ? v.slice(1) : v;
+  /^'['=+\-@\t\r]/.test(v) ? v.slice(1) : v;
 
 export function parseCSV(text: string): Record<string, string>[] {
   // Excel salva CSV com BOM (U+FEFF) na frente do 1º cabeçalho.

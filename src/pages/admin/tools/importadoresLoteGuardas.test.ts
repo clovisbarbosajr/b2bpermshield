@@ -222,19 +222,73 @@ describe("as telas reportam a linha REAL do arquivo", () => {
     "./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx",
   ];
 
+  // Quantas chamadas cada tela tem hoje. Um numero a MENOS e reversao parcial —
+  // o caso que passava despercebido. Um a MAIS e ponto novo, e a lista se atualiza
+  // de proposito, para alguem ter de olhar.
+  const ESPERADO: Record<string, number> = {
+    "./BulkUpdateOrders.tsx": 8, "./ImportOrders.tsx": 5, "./ImportCustomers.tsx": 3,
+    "./ImportAddresses.tsx": 3, "./ImportCategories.tsx": 5, "./ImportCustomerPrices.tsx": 11,
+    "./ImportProductVariants.tsx": 5, "./ImportRelatedProducts.tsx": 7,
+  };
+
   for (const arquivo of TELAS) {
     it(`${arquivo}: nenhum \`i + 2\` sobrou`, () => {
-      const fonte = ler(arquivo);
+      // Sem o bloco do proprio helper — declaracao e docblock: os dois citam
+      // `i + 2` de proposito, um como reserva para chamada que nao venha do
+      // `parseCSV`, o outro explicando por que a reserva existe.
+      const fonte = ler(arquivo).split("\n")
+        .filter((l) => !l.includes("const linhaDoArquivo =") && !l.trimStart().startsWith("*") && !l.trimStart().startsWith("//"))
+        .join("\n");
       expect(fonte, "voltou a supor que o indice do array e a linha do arquivo")
-        .not.toMatch(/i \+ 2/);
-      expect(fonte, "sumiu o helper que le o `__linha`").toMatch(/linhaDoArquivo\(r, i\)/);
+        // `\b` de verdade. A versao anterior tinha U+0008 (BACKSPACE) literal no
+        // lugar do word-boundary — escrito por heredoc de shell, que interpretou o
+        // `\b` — entao o regex era `/[BS]i \+ 2[BS]/` e nao casava com arquivo
+        // nenhum. Reverter UM ponto de `linhaDoArquivo` passava verde; so o
+        // replace global reprovava, pelo outro assert.
+        .not.toMatch(/\bi \+ 2\b/);
+      // CONTAGEM, e nao presenca: `toMatch` sozinho passa com UMA ocorrencia
+      // sobrando, entao reverter um ponto isolado — que e exatamente o defeito
+      // que esta leva veio consertar — ficava invisivel.
+      const usos = (fonte.match(/linhaDoArquivo\(r, i\)/g) ?? []).length;
+      expect(usos, "sumiu o helper que le o `__linha`").toBeGreaterThan(0);
+      expect(usos, `${arquivo}: numero de chamadas mudou — reversao parcial?`)
+        .toBe(ESPERADO[arquivo]);
     });
   }
 
   it("o helper cai no calculo antigo so como reserva", () => {
     // Se `__linha` sumir do parser, as telas nao podem quebrar — mas tambem nao
-    // podem fingir que o numero e o real.
+    // podem fingir que o numero e o real. Aqui le o arquivo INTEIRO, porque e a
+    // linha do helper que interessa.
     const fonte = ler("./BulkUpdateOrders.tsx");
     expect(fonte).toMatch(/const linhaDoArquivo = \(r: any, i: number\): number => r\?\.__linha \?\? i \+ 2;/);
   });
+});
+
+// ---------------------------------------------------------------------------
+// A TABELA DO ARQUIVO ANTERIOR NAO PODE FICAR NA TELA.
+//
+// `setFileName(file.name)` roda antes do parse, e a tabela de resultados fica
+// logo abaixo da moldura de drop. Sem limpar, um arquivo que falha no parse
+// deixava a tela com o NOME do arquivo novo e as LINHAS do anterior — o toast
+// some em segundos e sobra a leitura errada. E a mesma "tela mentindo que
+// carregou" que estas telas vieram consertar, em escala menor.
+// ---------------------------------------------------------------------------
+describe("resultado anterior e limpo antes de ler o arquivo novo", () => {
+  for (const arquivo of [
+    "./BulkUpdateOrders.tsx", "./ImportOrders.tsx", "./ImportCustomers.tsx",
+    "./ImportAddresses.tsx", "./ImportCategories.tsx", "./ImportCustomerPrices.tsx",
+    "./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx",
+  ]) {
+    it(`${arquivo}: limpa antes de parsear`, () => {
+      const fonte = ler(arquivo);
+      const i = fonte.indexOf("setFileName(file.name)");
+      expect(i, "sumiu o `setFileName`").toBeGreaterThan(-1);
+      // Tem que vir ANTES do parse: limpar depois nao adianta.
+      const iParse = fonte.indexOf("parseCSV(", i);
+      const iLimpa = fonte.indexOf("setResults([])", i);
+      expect(iLimpa, "nao limpa o resultado anterior").toBeGreaterThan(-1);
+      expect(iLimpa, "limpa DEPOIS do parse — tarde demais").toBeLessThan(iParse);
+    });
+  }
 });

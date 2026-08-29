@@ -195,9 +195,54 @@ ${escaparCelulaCSV(valor)}
     }
   });
 
+  // O PAR TEM QUE SER INJETIVO. Sem o `'` na lista do export, celula que JA
+  // comeca com apostrofo saia sem marca e a entrada desmarcava assim mesmo:
+  // `'=SUM(A1)` digitado a mao no Excel virava `=SUM(A1)` no banco.
+  it("apostrofo do USUARIO sobrevive, mesmo antes de caractere perigoso", () => {
+    for (const v of ["'=SUM(A1)", "'-10", "'+1 786 555 0100", "'@user", "'	tab", "''=x", "'"]) {
+      expect(roundTrip(v), `perdeu o apostrofo: ${JSON.stringify(v)}`).toBe(v);
+    }
+  });
+
   // A remocao e CIRURGICA: so desfaz o que o export marcou.
   it("apostrofo que e DADO nao e comido", () => {
     expect(roundTrip("'Casa do Piso'")).toBe("'Casa do Piso'");
     expect(parseCSV('campo\n"\'Casa do Piso\'"\n')[0].campo).toBe("'Casa do Piso'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIM DE LINHA EM TODAS AS FORMAS.
+//
+// FORA das aspas o parser trata `\r` sozinho como terminador; DENTRO delas, a
+// contagem de `__linha` ignorava o CR nu. De cada um em diante, tudo desalinhava
+// 1 — e nenhum teste pegava, porque os casos de `__linha` usavam so `\n`.
+// (Arquivo de Excel para Mac classico usa CR sozinho.)
+// ---------------------------------------------------------------------------
+describe("__linha com CR, LF e CRLF", () => {
+  it("CRLF dentro de aspas conta UMA linha, nao duas", () => {
+    const linhas = parseCSV('a,b\r\n1,"p\r\nq"\r\n2,z\r\n');
+    expect(linhas.map((l: any) => l.__linha)).toEqual([2, 4]);
+  });
+
+  it("CR nu dentro de aspas conta linha", () => {
+    const linhas = parseCSV('a,b\n1,"p\rq"\n2,z\n');
+    expect(linhas.map((l: any) => l.__linha)).toEqual([2, 4]);
+  });
+
+  it("arquivo inteiro em CR (Mac classico)", () => {
+    const linhas = parseCSV('a,b\r1,x\r2,y\r');
+    expect(linhas.map((l: any) => l.__linha)).toEqual([2, 3]);
+  });
+
+  it("CR no fim do arquivo nao inventa linha", () => {
+    const linhas = parseCSV('a,b\n1,x\r');
+    expect(linhas).toHaveLength(1);
+    expect((linhas[0] as any).__linha).toBe(2);
+  });
+
+  it("duas quebras no mesmo campo", () => {
+    const linhas = parseCSV('a,b\n1,"p\nq\nr"\n2,z\n');
+    expect(linhas.map((l: any) => l.__linha)).toEqual([2, 5]);
   });
 });

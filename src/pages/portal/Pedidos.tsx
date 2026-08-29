@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { escaparCelulaCSV } from "@/lib/export-csv";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCart } from "@/contexts/CartContext";
 import PortalLayout from "@/components/layouts/PortalLayout";
@@ -291,7 +292,8 @@ const Pedidos = () => {
   // Campo CSV com aspas: sem isso, um po_number/status com vírgula quebrava as colunas.
   const csvCell = (v: any) => {
     const s = v === null || v === undefined ? "" : String(v);
-    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    // `escaparCelulaCSV`: o arquivo que o CLIENTE baixa tambem passa pelo Excel.
+    return String(escaparCelulaCSV(s));
   };
 
   const handleExport = async () => {
