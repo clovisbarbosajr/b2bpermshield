@@ -3717,3 +3717,61 @@ Rebase limpo, e conferido que as duas colunas `admin_rev` sobreviveram (3
 ocorrencias em cada tabela). Vale lembrar: os types sao GERADOS, entao edicao
 manual neles sobrevive so ate o proximo publish do Lovable — o que aconteceu aqui
 foi a regeneracao confirmar o que eu tinha escrito a mao.
+
+---
+
+## 28/ago — Reenvio de pedido, rodada 3 (FEITO, commit e0fac17)
+
+Tres achados aplicados no bloco `handleResend` de `admin/OrderDetail.tsx`:
+
+1. **Reenvio sem destinatario virava sucesso.** As guardas do topo checam as
+   CAIXAS marcadas, nao as chamadas montadas — a do cliente so entra se
+   `cliente?.email` existir. Com a caixa marcada e o cliente sem e-mail, `calls`
+   ficava vazio, `naoForam.length` era 0 e caia no ramo de sucesso: toast VERDE
+   "Order confirmation re-sent." e log de atividade gravando reenvio, com ZERO
+   requisicoes feitas. E o `foram > 0` ainda deixava o modal aberto,
+   contradizendo o proprio toast. Agora sai antes, com erro.
+2. **O placar nao dizia QUEM falhou.** Depois que o modal passou a fechar, o
+   operador ficou sem nenhuma pista de quem tinha ficado sem o e-mail. As
+   chamadas passaram a ser rotuladas (`{quem, p}`) e o rotulo entra no toast e
+   no log.
+3. **O teste passava por construcao.** `resendPlacar.test.ts` fatiava o bloco
+   ate `const loadOrder`, que esta ANTES de `const bloqueado` no arquivo:
+   `indexOf` devolvia -1, `slice(i, -1)` pegava 1064 linhas e uma assercao
+   casava com o `handleSave`. Agora a fatia e ancorada em delimitador posterior
+   e ha assercao de que o delimitador foi encontrado e de que a fatia e pequena.
+
+Verificacao: `npm test` 295/295, `tsc` limpo, build ok. Mutacao: remover a
+guarda de lista vazia e quebrar o delimitador reprovam a suite.
+
+## 28/ago — Modulo Producao (FEITO, commit 928589c)
+
+**Falha ABERTA de permissao, mesma classe ja corrigida em `UsersManagement`:**
+`ProducaoEntrada` lia `user_locations` descartando o `error`. Set vazio virava
+`restricted = false` — mas Set vazio ja significa "sem local cadastrado", que a
+policy de `categorias` (20260619220000) trata como acesso a TUDO. Uma falha de
+rede promovia o warehouse de um galpao a ver, e a lancar producao em, todos os
+galpoes. A regra foi extraida para `src/lib/restringeLocais.ts`, que separa os
+tres estados (admin / sem cadastro / nao consegui ler) e tem teste; a tela ganhou
+banner de erro.
+
+**Erro de leitura virava lista vazia** em `ProducaoDashboard` e `ProducaoStatus`:
+o `?? []` transformava falha de rede no cartao "Nothing in production right now."
+— identico a quando realmente nao ha nada em producao. Agora os dois mostram o
+erro, o Dashboard com Retry.
+
+**Corte silencioso em 1000 linhas:** `producao_pedidos` e a tabela que mais cresce
+nesse modulo e era lida sem `.range()`. Passou a `fetchAllRows`, com `.order("id")`
+de desempate (LIMIT/OFFSET sobre `created_at` nao unico repete e perde linha).
+
+Verificacao: `npm test` 300/300, `tsc` limpo, build ok. Mutacao: remover
+`|| erroDeLeitura !== null` reprova 2 testes.
+
+**Auditado e limpo, sem mudanca:** `admin/Configuracoes.tsx` (ja com colunas
+explicitas e falha fechada), `admin/Relatorios.tsx` e os 13 relatorios de
+`admin/reports/` (todos ja em `fetchAllRows`).
+
+**Para o dono (decisao, nao bug):** `shipping_options.auto_apply` e editavel no
+admin e NUNCA lido no checkout. Combinado com "Show as choice to customers"
+desmarcado, a opcao some da tela e o pedido sai com frete 0 — dinheiro. Fazer o
+toggle funcionar muda o valor cobrado, entao e decisao de produto.
