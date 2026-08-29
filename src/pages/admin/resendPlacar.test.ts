@@ -33,7 +33,7 @@ describe("Resend do pedido: placar, modal e log", () => {
     // arquivo quase inteiro — foi exatamente o que aconteceu na versao anterior.
     expect(iFim, "o delimitador de fim nao foi encontrado DEPOIS do bloco").toBeGreaterThan(iBloco);
     expect(bloco.split("\n").length, "a fatia esta grande demais para ser so o bloco")
-      .toBeLessThan(120);
+      .toBeLessThan(200);
   });
 
   it("sai antes quando nao ha destinatario montado", () => {
@@ -48,6 +48,35 @@ describe("Resend do pedido: placar, modal e log", () => {
       .toMatch(/failed: \$\{quemFalhou\.join\(", "\)\}/);
   });
 
+  // Terceira direcao em que este bloco ja mentiu, e a mais cara: o `invoke` NUNCA
+  // rejeita, e uma queda de rede DEPOIS do envio vira `FunctionsFetchError`. O
+  // servidor ja gravou `notification_log` como `sent`; a tela dizia "Nothing was
+  // sent", e o operador reenviava para quem ja tinha recebido.
+  it("rede caida depois do envio nao vira 'nothing was sent'", () => {
+    expect(bloco).toMatch(/const incerto = \(r: any\) => r\.value\?\.error\?\.name === "FunctionsFetchError"/);
+    expect(bloco).toMatch(/const houveIncerto = naoForam\.some\(incerto\)/);
+    expect(bloco, "tem que mandar conferir o log antes de reenviar")
+      .toMatch(/Check the notification log before re-sending/);
+  });
+
+  // Em nao-2xx o functions-js lanca ANTES de ler o corpo e devolve `data: null`,
+  // entao `value.data.error` e sempre nulo e sobrava a string fixa "Edge Function
+  // returned a non-2xx status code" — 403, 400 e 502 viravam a mesma frase.
+  it("le o motivo real do corpo da resposta HTTP", () => {
+    expect(bloco).toMatch(/const motivoHttp = async/);
+    expect(bloco, "`context` e o Response ainda nao lido").toMatch(/const ctx = err\?\.context/);
+    expect(bloco, "ler duas vezes estoura: `value.response` e o MESMO objeto")
+      .toMatch(/ctx\.bodyUsed/);
+    expect(bloco, "502 de gateway responde HTML, nao JSON — o parse tem que ser guardado")
+      .toMatch(/await ctx\.json\(\)[\s\S]{0,120}?\} catch \{/);
+    expect(bloco).toMatch(/\(await motivoHttp\(primeiro\?\.value\?\.error\)\)/);
+  });
+
+  it("limpa a selecao depois de enviar", () => {
+    expect(bloco, "reabrir com as caixas marcadas duplica para quem ja recebeu")
+      .toMatch(/setResend\(\{ customer: false, admin: false, other: false, otherEmail: "" \}\)/);
+  });
+
   it("`skipped` conta como falha — senao envio bloqueado vira sucesso", () => {
     expect(bloco).toMatch(/value\?\.data\?\.skipped === true/);
     expect(bloco, "`bloqueado` tem que entrar no predicado de falha").toMatch(/\|\| bloqueado\(r\)/);
@@ -60,7 +89,9 @@ describe("Resend do pedido: placar, modal e log", () => {
   });
 
   it("'Nothing was sent' so quando NADA saiu", () => {
-    expect(bloco).toMatch(/foram > 0\s*\n?\s*\? `Sent [\s\S]*?`\s*\n?\s*: "Nothing was sent\. ";/);
+    // Ternario aninhado: com envio INCERTO (rede caiu depois de o servidor
+    // entregar), "Nothing was sent" tambem seria mentira — ver o teste seguinte.
+    expect(bloco).toMatch(/foram > 0\s*\n?\s*\? `Sent [\s\S]*?`\s*\n?\s*: houveIncerto \? "" : "Nothing was sent\. ";/);
   });
 
   // O pior efeito da versao anterior: modal aberto + selecao intacta + mensagem

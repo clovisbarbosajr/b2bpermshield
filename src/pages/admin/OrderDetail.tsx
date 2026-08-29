@@ -34,6 +34,8 @@ const OrderDetail = () => {
   const navigate = useNavigate();
   const { log } = useActivityLog();
   const { role } = useAuth();
+  // O `send-email` so aceita `force` e destinatario de terceiro vindo de admin.
+  const ehAdmin = role === "admin";
   const [order, setOrder] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   // A leitura dos itens falhou: a lista na tela nao vale, e o Resend nao pode sair.
@@ -310,6 +312,36 @@ const OrderDetail = () => {
     // Quem falhou, pelo indice: `allSettled` preserva a ordem de `calls`.
     const quemFalhou = results.map((r, i) => (falhou(r) ? calls[i].quem : null)).filter(Boolean);
 
+    // "NAO DEU PARA CONFIRMAR" NAO E "NAO FOI ENVIADO".
+    //
+    // `invoke` NUNCA rejeita: o catch dele devolve `{data:null, error}`. Quando a
+    // rede cai depois que o servidor ja entregou o e-mail ao provedor, o erro e um
+    // `FunctionsFetchError` — e o servidor, nesse mesmo instante, ja gravou
+    // `notification_log` com status `sent`. Dizer "Nothing was sent" ali empurra o
+    // operador a reenviar, e o cliente recebe duas confirmacoes. Nao ha
+    // idempotencia no `send-email` para segurar a segunda.
+    const incerto = (r: any) => r.value?.error?.name === "FunctionsFetchError";
+    const houveIncerto = naoForam.some(incerto);
+
+    // O MOTIVO REAL DE UM ERRO HTTP SO EXISTE NO CORPO DA RESPOSTA.
+    //
+    // Em qualquer status fora de 2xx o functions-js lanca ANTES de ler o corpo, e
+    // devolve `data: null` — entao `value.data.error` e sempre nulo aqui e sobrava
+    // `error.message`, que e a string fixa "Edge Function returned a non-2xx status
+    // code". 403 de permissao, 502 de provedor caido e 400 de config errada viravam
+    // a mesma frase inutil. O corpo esta em `error.context`, um Response ainda nao
+    // lido — e `value.response` e o MESMO objeto, entao ele e lido UMA vez so.
+    const motivoHttp = async (err: any): Promise<string | null> => {
+      const ctx = err?.context;
+      if (!ctx || typeof ctx.json !== "function" || ctx.bodyUsed) return null;
+      try {
+        const corpo = await ctx.json();
+        return typeof corpo?.error === "string" ? corpo.error : null;
+      } catch {
+        return null;   // 502 de gateway responde HTML, nao JSON
+      }
+    };
+
     if (naoForam.length) {
       const primeiro: any = naoForam[0];
       const motivoBloqueio = primeiro?.value?.data?.skipped
@@ -317,6 +349,7 @@ const OrderDetail = () => {
         : null;
       const msg = motivoBloqueio
         || primeiro?.value?.data?.error
+        || (await motivoHttp(primeiro?.value?.error))
         || primeiro?.value?.error?.message
         || "unknown error";
       // A saida "peca a um admin" SO vale para o interruptor mestre e os
@@ -326,8 +359,11 @@ const OrderDetail = () => {
       const adminResolve = !!motivoBloqueio && /master switch|notification.*(disabled|off)/i.test(msg);
       const placar = foram > 0
         ? `Sent ${foram} of ${results.length} — failed: ${quemFalhou.join(", ")}. `
-        : "Nothing was sent. ";
-      toast.error(`${placar}${msg}${adminResolve ? " — ask an admin to turn the channel on." : ""}`);
+        : houveIncerto ? "" : "Nothing was sent. ";
+      const aviso = houveIncerto
+        ? `Could not confirm ${quemFalhou.join(", ")} — the email may have gone out. Check the notification log before re-sending. `
+        : "";
+      toast.error(`${placar}${aviso}${msg}${adminResolve ? " — ask an admin to turn the channel on." : ""}`);
     } else {
       toast.success("Order confirmation re-sent.");
     }
@@ -339,6 +375,13 @@ const OrderDetail = () => {
     // receberam recebem outra vez. Duplicar e-mail para o cliente e pior que
     // fecha-lo e ele reabrir.
     if (foram > 0) setResendOpen(false);
+
+    // LIMPA A SELECAO. Fechar o modal nao bastava: o estado `resend` so e escrito
+    // pelos checkboxes e nunca era resetado, entao reabrir trazia as MESMAS caixas
+    // marcadas. Com um envio parcial ("Sent 1 of 2"), o proximo Send reenviava para
+    // quem ja tinha recebido. O estado inicial e tudo desmarcado, entao voltar a ele
+    // nao tira nada de ninguem.
+    setResend({ customer: false, admin: false, other: false, otherEmail: "" });
 
     // O LOG DE ATIVIDADE NAO PODE AFIRMAR ENVIO QUE NAO HOUVE. Ele ficava fora do
     // if/else e gravava "Resent order #N confirmation" mesmo com tudo bloqueado —
@@ -1290,10 +1333,20 @@ const OrderDetail = () => {
           <DialogHeader><DialogTitle>Resend order</DialogTitle></DialogHeader>
           <p className="text-sm text-primary">Re-send order confirmation email</p>
           <div className="space-y-3 py-2">
+            {/* SO ADMIN manda para fora da propria caixa.
+                A tela de pedido e aberta por admin, manager e warehouse (rota
+                `staff`), e o botao Resend nao tinha checagem de papel — mas o
+                `send-email` tem: o gate anti-relay recusa com 403 todo envio cujo
+                destinatario nao seja o e-mail do proprio solicitante, e `force`
+                exige admin. Para manager e warehouse estas duas opcoes eram
+                caminho MORTO: davam erro sempre. Desabilitadas com o motivo a
+                vista, em vez de escondidas, porque some a capacidade nenhuma —
+                ela ja nao existia — e o operador precisa saber a quem pedir. */}
             <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <Checkbox checked={resend.customer} disabled={!cliente?.email}
+              <Checkbox checked={resend.customer} disabled={!cliente?.email || !ehAdmin}
                 onCheckedChange={(v) => setResend((r) => ({ ...r, customer: v === true }))} />
               To customer {cliente?.email ? `(${cliente.email})` : "(no email on file)"}
+              {!ehAdmin && <span className="text-xs text-muted-foreground"> — admin only</span>}
             </label>
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <Checkbox checked={resend.admin}
@@ -1302,11 +1355,11 @@ const OrderDetail = () => {
             </label>
             <div className="flex items-center gap-2">
               <label className="flex items-center gap-2 text-sm cursor-pointer shrink-0">
-                <Checkbox checked={resend.other}
+                <Checkbox checked={resend.other} disabled={!ehAdmin}
                   onCheckedChange={(v) => setResend((r) => ({ ...r, other: v === true }))} />
-                To email
+                To email{!ehAdmin && <span className="text-xs text-muted-foreground"> — admin only</span>}
               </label>
-              <Input type="email" className="h-8" placeholder="name@company.com"
+              <Input type="email" className="h-8" placeholder="name@company.com" disabled={!ehAdmin}
                 value={resend.otherEmail}
                 onChange={(e) => setResend((r) => ({ ...r, other: true, otherEmail: e.target.value }))} />
             </div>
