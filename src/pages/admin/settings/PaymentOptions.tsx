@@ -67,9 +67,13 @@ const PaymentOptions = () => {
   };
 
   const handleSave = async () => {
+    // Mesma guarda do PrivacyGroups: `nome` NOT NULL aceita string vazia, e a
+    // opcao sem nome aparece como um radio EM BRANCO no checkout do cliente.
+    const nome = form.nome.trim();
+    if (!nome) { toast.error("Name is required."); return; }
     setSaving(true);
     const payload: any = {
-      nome: form.nome,
+      nome,
       descricao: form.descricao || null,
       instrucoes: form.instrucoes || null,
       ativo: form.ativo,
@@ -91,8 +95,33 @@ const PaymentOptions = () => {
     setListView(true); fetchData();
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this payment option?")) return;
+  const handleDelete = async (id: string, nome: string) => {
+    // `cliente_payment_options.payment_option_id` e ON DELETE CASCADE
+    // (20260407000000:25, 20260408160833:20): apagar a opcao apaga junto TODA
+    // atribuicao de cliente, sem volta, e recriar a opcao nao traz nenhuma de
+    // volta. O confirm dizia so "Delete this payment option?".
+    //
+    // Opcao ja usada em pedido nao chega aqui — `pedidos.payment_option_id` e NO
+    // ACTION e o banco recusa. O caso vivo e a opcao SEM pedido nenhum: a que o
+    // admin apaga justamente para limpar cadastro.
+    //
+    // Mesmo padrao do `PrivacyGroups.handleDelete`: contar antes, e RECUSAR se a
+    // contagem falhar — nao da para avisar de um estrago que nao se conseguiu
+    // medir.
+    const { count, error: contaErr } = await supabase
+      .from("cliente_payment_options")
+      .select("payment_option_id", { count: "exact", head: true })
+      .eq("payment_option_id", id);
+    if (contaErr) {
+      toast.error("Could not check which customers use this option — nothing was deleted: " + contaErr.message);
+      return;
+    }
+    if (!confirm(
+      `Delete "${nome}"?\n\n` +
+      `This permanently deletes, together with the option:\n` +
+      `• ${count ?? 0} customer assignment(s)\n\n` +
+      `Those customers lose this payment option at checkout. This cannot be undone.`
+    )) return;
     const { error } = await supabase.from("payment_options").delete().eq("id", id);
     if (error) { toast.error("Could not delete: " + error.message); return; }
     toast.success("Deleted");
@@ -323,7 +352,7 @@ const PaymentOptions = () => {
                 <TableCell>{r.ordem}</TableCell>
                 <TableCell className="text-right space-x-1">
                   <Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleDelete(r.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(r.id, r.nome)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                 </TableCell>
               </TableRow>
             ))}

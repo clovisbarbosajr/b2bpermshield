@@ -33,8 +33,15 @@ const PrivacyGroups = () => {
   };
 
   const handleSave = async () => {
+    // `nome` e NOT NULL, mas string VAZIA satisfaz NOT NULL. Sem esta guarda o
+    // grupo nascia sem nome e virava um checkbox EM BRANCO em seis telas
+    // (Categorias, Clientes, CustomerEdit, ProductEdit, ProductExport, Produtos):
+    // um controle de privacidade que nao da para identificar — nao se sabe que
+    // cliente ou categoria ele libera.
+    const nome = form.nome.trim();
+    if (!nome) { toast.error("Name is required."); return; }
     setSaving(true);
-    const payload = { nome: form.nome, default_for_new_customers: form.default_for_new_customers };
+    const payload = { nome, default_for_new_customers: form.default_for_new_customers };
     // Checa o erro antes de dizer que salvou. Grupo de privacidade decide QUEM VE
     // QUAL produto/categoria: dizer "Created" sem ter criado deixa o admin achando
     // que restringiu o catalogo quando nao restringiu.

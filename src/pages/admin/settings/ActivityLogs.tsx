@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
@@ -122,7 +122,16 @@ const ActivityLogs = () => {
     fetchUsers().catch((e) => { console.error(e); toast.error("Could not load the user filter."); });
   }, []);
 
+  // Geracao da leitura: so a MAIS RECENTE escreve na tela.
+  //
+  // Refresh + Next em sequencia rapida, ou dois Next seguidos, deixavam a
+  // resposta que chegasse por ultimo vencer — a tabela mostrando a pagina 2 com
+  // o rodape dizendo "Page 3 of 8". Numa trilha de auditoria, o rotulo da pagina
+  // nomeando linhas de outra pagina e leitura errada de quem fez o que.
+  const leituraSeq = useRef(0);
+
   const fetchLogs = async (p = 1) => {
+    const meu = ++leituraSeq.current;
     setLoading(true);
     const from = (p - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
@@ -152,6 +161,10 @@ const ActivityLogs = () => {
     if (filterTo) q = q.lte("created_at", fimLocal(filterTo));
 
     const { data, count, error } = await q;
+    // A guarda de geracao cobre o ramo de erro TAMBEM: sem ela, uma leitura velha
+    // que falhou apagaria o spinner da leitura nova que ainda esta no ar, e o
+    // toast de erro apareceria sobre um resultado que deu certo.
+    if (meu !== leituraSeq.current) return;
     if (error) {
       // Antes o `if (!error)` sem `else` deixava a tela com o resultado ANTIGO e
       // a contagem antiga — dado velho passando por atual numa auditoria.
@@ -160,12 +173,22 @@ const ActivityLogs = () => {
       setLoading(false);
       return;
     }
+    if (meu !== leituraSeq.current) return;
     setLogs(data ?? []);
     setTotal(count ?? 0);
     setLoading(false);
   };
 
   useEffect(() => { fetchLogs(page); }, [page]);
+
+  // FILTRO MUDOU => VOLTA PARA A PAGINA 1.
+  //
+  // Sem isto o filtro entrava em vigor sem passar por Search, na pagina em que o
+  // admin estivesse: escolher um usuario com 12 registros estando na pagina 3 e
+  // clicar Next pedia `range(150,199)` de um conjunto de 12 — tabela vazia com
+  // "12 record(s) found" logo acima. Dois numeros verdadeiros contando uma
+  // mentira, e sem como saber que era artefato da paginacao.
+  const trocaFiltro = (set: (v: string) => void) => (v: string) => { set(v); setPage(1); };
 
   const handleSearch = () => { setPage(1); fetchLogs(1); };
 
@@ -214,7 +237,7 @@ const ActivityLogs = () => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <Label className="text-xs">Action</Label>
-            <Select value={filterAction} onValueChange={v => setFilterAction(v === "all" ? "" : v)}>
+            <Select value={filterAction} onValueChange={trocaFiltro(v => setFilterAction(v === "all" ? "" : v))}>
               <SelectTrigger className="mt-1">
                 <SelectValue placeholder="All actions" />
               </SelectTrigger>
@@ -228,7 +251,7 @@ const ActivityLogs = () => {
           </div>
           <div>
             <Label className="text-xs">Type</Label>
-            <Select value={filterEntity} onValueChange={v => setFilterEntity(v === "all" ? "" : v)}>
+            <Select value={filterEntity} onValueChange={trocaFiltro(v => setFilterEntity(v === "all" ? "" : v))}>
               <SelectTrigger className="mt-1">
                 <SelectValue placeholder="All types" />
               </SelectTrigger>
@@ -244,7 +267,7 @@ const ActivityLogs = () => {
           </div>
           <div>
             <Label className="text-xs">User</Label>
-            <Select value={filterUser || "all"} onValueChange={v => setFilterUser(v === "all" ? "" : v)}>
+            <Select value={filterUser || "all"} onValueChange={trocaFiltro(v => setFilterUser(v === "all" ? "" : v))}>
               <SelectTrigger className="mt-1">
                 <SelectValue placeholder="All users" />
               </SelectTrigger>

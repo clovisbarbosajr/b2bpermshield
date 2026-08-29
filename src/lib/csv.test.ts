@@ -70,3 +70,74 @@ describe("parseCSV", () => {
     expect(parseCSV("nome\nCano de cobre")).toEqual([{ nome: "Cano de cobre" }]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ASPAS NO MEIO DO CAMPO: o dado normal de um distribuidor de pisos.
+//
+// O parser ligava o modo aspas em QUALQUER posicao, e a partir dali engolia
+// virgula e QUEBRA DE LINHA como conteudo. `12"` e `3"` sao escrita corrente, e
+// o template que as telas oferecem para download e gerado sem aspas — o admin
+// preenche a mao. Nove telas de importacao passam por aqui.
+// ---------------------------------------------------------------------------
+describe("aspas nao escapadas no meio do campo", () => {
+  it("aspa IMPAR nao engole as linhas seguintes", () => {
+    const linhas = parseCSV(
+      'order_number,status,tracking_number\n' +
+      '1001,complete,AB"123\n' +
+      '1002,sent,XY456\n' +
+      '1003,cancelled,ZZ789\n',
+    );
+    // Antes: UMA linha, com o resto do arquivo dentro do tracking_number, e a
+    // tela dizendo "Updated 1 of 1 orders" em verde.
+    expect(linhas, "as linhas seguintes foram engolidas").toHaveLength(3);
+    expect(linhas[0].tracking_number).toBe('AB"123');
+    expect(linhas[2].order_number).toBe("1003");
+  });
+
+  it("aspa PAR nao apaga as polegadas do nome", () => {
+    const linhas = parseCSV('sku,nome\nT12,Tile 12" x 12"\n');
+    expect(linhas[0].nome, "as polegadas sumiram do nome do produto")
+      .toBe('Tile 12" x 12"');
+  });
+
+  it("CSV bem-formado continua igual — aspas NO INICIO ainda abrem campo", () => {
+    const linhas = parseCSV('sku,nome\nT12,"Tile 12"" x 12"""\n');
+    expect(linhas[0].nome).toBe('Tile 12" x 12"');
+  });
+
+  it("campo entre aspas com virgula e quebra de linha continua inteiro", () => {
+    const linhas = parseCSV('sku,endereco\nA1,"Rua X, 100\nSala 3"\n');
+    expect(linhas[0].endereco).toBe("Rua X, 100\nSala 3");
+  });
+});
+
+describe("cabecalho repetido e recusado, nao silenciado", () => {
+  it("coluna duplicada estoura em vez de deixar a ultima vencer", () => {
+    // Antes: `{sku:"B2", nome:"Cano"}` — a primeira coluna sumia e o importador
+    // gravava o valor da coluna errada, reportando sucesso.
+    expect(() => parseCSV("sku,nome,sku\nA1,Cano,B2\n"))
+      .toThrow(/repeated column/i);
+  });
+
+  it("coluna vazia repetida nao conta como duplicata", () => {
+    expect(() => parseCSV("sku,,\nA1,x,y\n")).not.toThrow();
+  });
+});
+
+describe("__linha: o numero REAL no arquivo", () => {
+  it("linha em branco no meio nao desalinha o numero reportado", () => {
+    // As telas reportavam `i + 2`, mandando o admin abrir a linha errada num CSV
+    // vindo do Excel — que gosta de linha em branco.
+    const linhas = parseCSV("order_number,status\n1001,sent\n\n1003,complete\n");
+    expect(linhas).toHaveLength(2);
+    expect((linhas[0] as any).__linha).toBe(2);
+    expect((linhas[1] as any).__linha, "1003 esta na linha 4 do arquivo").toBe(4);
+  });
+
+  it("`__linha` nao aparece nas colunas do registro", () => {
+    // Nao pode virar coluna: os importadores iteram as chaves do objeto.
+    const linhas = parseCSV("sku\nA1\n");
+    expect(Object.keys(linhas[0])).toEqual(["sku"]);
+    expect(JSON.stringify(linhas[0])).not.toContain("__linha");
+  });
+});

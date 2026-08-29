@@ -38,6 +38,12 @@ export function parseCSV(text: string): Record<string, string>[] {
   let linha: string[] = [];
   let dentroDeAspas = false;
 
+  // Numero da linha NO ARQUIVO de cada linha guardada (1-based). Linha em branco
+  // e descartada, entao o indice do array nao serve para dizer ao admin onde
+  // corrigir.
+  const numeroDaLinha: number[] = [];
+  let linhaAtual = 1;
+
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
 
@@ -54,7 +60,25 @@ export function parseCSV(text: string): Record<string, string>[] {
       continue;
     }
 
-    if (ch === '"') { dentroDeAspas = true; continue; }
+    // ASPAS SO ABREM CAMPO NO INICIO DELE.
+    //
+    // Antes, qualquer `"` em qualquer posicao ligava o modo aspas — e a partir
+    // dali o parser engolia virgulas e QUEBRAS DE LINHA como conteudo. Num
+    // distribuidor de pisos, `12"` e `3"` sao o dado normal (o proprio
+    // `csv.test.ts` usa `cano de 3" polegadas` como exemplo), e o template que as
+    // telas oferecem para download e gerado SEM aspas — o admin preenche a mao.
+    //
+    // Com numero IMPAR de aspas o estrago era total: em `BulkUpdateOrders`, o
+    // arquivo de 3 pedidos virava UM, com as outras duas linhas inteiras dentro
+    // do `tracking_number`, e a tela dizia "Updated 1 of 1 orders" em verde. Os
+    // outros dois pedidos sumiam sem uma palavra.
+    // Com numero PAR era pior de notar: `Tile 12" x 12"` virava `Tile 12 x 12` —
+    // as polegadas somem do nome do produto, sem erro nenhum.
+    //
+    // `campo === ""` e o criterio do RFC 4180: aspas no meio do campo sao dado
+    // literal. CSV bem-formado (`"Tile 12"" x 12"""`) continua igual — este
+    // ramo nem e alcancado, porque ali a aspa e o primeiro caractere.
+    if (ch === '"' && campo === "") { dentroDeAspas = true; continue; }
 
     if (ch === ",") { linha.push(campo); campo = ""; continue; }
 
@@ -62,7 +86,8 @@ export function parseCSV(text: string): Record<string, string>[] {
       if (ch === "\r" && text[i + 1] === "\n") i++;   // CRLF conta como uma
       linha.push(campo);
       campo = "";
-      if (linha.some((c) => c.trim() !== "")) linhas.push(linha);
+      if (linha.some((c) => c.trim() !== "")) { linhas.push(linha); numeroDaLinha.push(linhaAtual); }
+      linhaAtual++;
       linha = [];
       continue;
     }
@@ -71,14 +96,34 @@ export function parseCSV(text: string): Record<string, string>[] {
   }
 
   linha.push(campo);
-  if (linha.some((c) => c.trim() !== "")) linhas.push(linha);
+  if (linha.some((c) => c.trim() !== "")) { linhas.push(linha); numeroDaLinha.push(linhaAtual); }
 
   if (linhas.length < 2) return [];
 
+  // CABECALHO REPETIDO E RECUSADO, em vez de a ultima coluna vencer em silencio.
+  //
+  // `sku,nome,sku` + `A1,Cano,B2` devolvia `{sku:"B2", nome:"Cano"}`: a primeira
+  // coluna sumia e o importador gravava o valor da coluna errada, reportando
+  // sucesso. Planilha que voltou do Excel com uma coluna colada duas vezes cai
+  // exatamente nisso.
   const cabecalhos = linhas[0].map((h) => h.trim().toLowerCase());
-  return linhas.slice(1).map((valores) => {
+  const repetidos = cabecalhos.filter((h, i) => h !== "" && cabecalhos.indexOf(h) !== i);
+  if (repetidos.length) {
+    throw new Error(
+      `The file has repeated column(s): ${[...new Set(repetidos)].join(", ")}. ` +
+      `Remove the duplicate column(s) and try again.`,
+    );
+  }
+
+  return linhas.slice(1).map((valores, idx) => {
     const r: Record<string, string> = {};
     cabecalhos.forEach((h, i) => { r[h] = (valores[i] ?? "").trim(); });
+    // `__linha`: o numero REAL da linha no arquivo, para a tela poder apontar
+    // onde corrigir. As linhas em branco sao descartadas acima, entao o indice do
+    // array parou de corresponder ao arquivo faz tempo — e as telas reportavam
+    // `i + 2`, mandando o admin abrir a linha errada num CSV vindo do Excel, que
+    // gosta de linha em branco.
+    Object.defineProperty(r, "__linha", { value: numeroDaLinha[idx + 1], enumerable: false });
     return r;
   });
 }

@@ -14,9 +14,18 @@ export function categoryPath(cats: CatNode[], id: string | null | undefined): st
   if (!id) return "";
   const byId = new Map(cats.map((c) => [c.id, c]));
   const chain: string[] = [];
+  // `visto` alem do limite de profundidade, igual as irmas `descendantIds` e
+  // `ancestorChain`. Com `parent_id` circular — que o comentario mais abaixo
+  // registra como real neste projeto, e que so a TELA impede — o limite sozinho
+  // nao trava, mas devolve um caminho falso repetido ("A › B › A › B › ...") na
+  // tela de pedido.
+  const visto = new Set<string>();
   let cur = byId.get(id);
-  let guard = 0;
-  while (cur && guard++ < 12) { chain.unshift(cur.nome); cur = cur.parent_id ? byId.get(cur.parent_id) : undefined; }
+  while (cur && !visto.has(cur.id)) {
+    visto.add(cur.id);
+    chain.unshift(cur.nome);
+    cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+  }
   return chain.join(" › ");
 }
 
@@ -118,6 +127,18 @@ export function categoryTreeOptions(cats: CatNode[]): { id: string; label: strin
     out.push({ id: c.id, label: depth ? `${"-".repeat(depth)} ${c.nome}` : c.nome });
     childrenOf(c.id).forEach((ch) => walk(ch, depth + 1));
   };
-  childrenOf(null).forEach((r) => walk(r, 0));
+  // `rootCategories`, e nao `childrenOf(null)`: a lista chega FILTRADA por
+  // `ativo` nos dois chamadores (`ProductEdit`, `Pedidos`), entao desativar uma
+  // categoria-pai deixava a filha ATIVA orfa — com `parent_id` apontando para
+  // alguem que nao esta na lista — e ela sumia do dropdown inteiro. O produto ja
+  // cadastrado nela abria com o campo obrigatorio "Category *" em branco, e o
+  // caminho natural do admin ali e escolher outra categoria, recategorizando sem
+  // querer. `rootCategories` conta a orfa como raiz; o portal ja fazia isso
+  // (`catalogCategoryButtons`), esta funcao ficou para tras.
+  // `sorted(...)` por fora: `rootCategories` devolve na ordem da LISTA, enquanto
+  // o `childrenOf(null)` que ele substituiu ja vinha ordenado. Sem isto, trocar a
+  // semente ordenava os filhos e deixava as RAIZES fora de ordem — regressao que
+  // so um teste que executa pegaria (o de fiacao veria a chamada certa).
+  sorted(rootCategories(cats)).forEach((r) => walk(r, 0));
   return out;
 }
