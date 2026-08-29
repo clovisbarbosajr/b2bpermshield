@@ -54,9 +54,15 @@ describe("Resend do pedido: placar, modal e log", () => {
   // sent", e o operador reenviava para quem ja tinha recebido.
   it("rede caida depois do envio nao vira 'nothing was sent'", () => {
     expect(bloco).toMatch(/const incerto = \(r: any\) => r\.value\?\.error\?\.name === "FunctionsFetchError"/);
-    expect(bloco).toMatch(/const houveIncerto = naoForam\.some\(incerto\)/);
     expect(bloco, "tem que mandar conferir o log antes de reenviar")
       .toMatch(/Check the notification log before re-sending/);
+    // A frase so pode nomear QUEM ficou incerto. Usar `quemFalhou` ali dizia
+    // "pode ter saido" sobre destinatario que o servidor recusou em definitivo —
+    // e o operador, com medo de duplicar, deixava o cliente sem o e-mail.
+    expect(bloco).toMatch(/const quemIncerto = results\.map/);
+    expect(bloco).toMatch(/Could not confirm \$\{quemIncerto\.join\(", "\)\}/);
+    expect(bloco, "o placar so cala 'nothing was sent' se houver incerto")
+      .toMatch(/: quemIncerto\.length \? "" : "Nothing was sent\. ";/);
   });
 
   // Em nao-2xx o functions-js lanca ANTES de ler o corpo e devolve `data: null`,
@@ -81,6 +87,24 @@ describe("Resend do pedido: placar, modal e log", () => {
       /if \(foram > 0\) \{\s+setResendOpen\(false\);\s+setResend\(\{ customer: false/);
   });
 
+  // O `await motivoHttp(...)` cede ao microtask queue no meio do bloco. Soltar o
+  // botao antes dele deixava a tela clicavel com o modal aberto e as caixas
+  // marcadas — um clique ali dispara um segundo envio inteiro.
+  it("o botao Send so volta no FIM, depois do await", () => {
+    const depois = bloco.slice(bloco.indexOf("await Promise.allSettled"));
+    // A CHAMADA, nao a mencao: o comentario logo abaixo do `allSettled` cita
+    // `setResending(false)` para explicar por que ele NAO fica ali, e um
+    // `indexOf` cru casava com o comentario e reprovava o codigo certo.
+    const iSolta = depois.search(/\n\s+setResending\(false\);/);
+    const iAwaitMotivo = depois.indexOf("await motivoHttp(");
+    expect(iSolta, "sumiu o setResending(false) do fim do bloco").toBeGreaterThan(-1);
+    expect(iAwaitMotivo).toBeGreaterThan(-1);
+    expect(iSolta, "soltar o botao ANTES do await reabre o caminho da duplicata")
+      .toBeGreaterThan(iAwaitMotivo);
+    expect(iSolta, "tem que vir depois do log de atividade tambem")
+      .toBeGreaterThan(depois.indexOf('"updated", "order"'));
+  });
+
   it("`skipped` conta como falha — senao envio bloqueado vira sucesso", () => {
     expect(bloco).toMatch(/value\?\.data\?\.skipped === true/);
     expect(bloco, "`bloqueado` tem que entrar no predicado de falha").toMatch(/\|\| bloqueado\(r\)/);
@@ -95,7 +119,7 @@ describe("Resend do pedido: placar, modal e log", () => {
   it("'Nothing was sent' so quando NADA saiu", () => {
     // Ternario aninhado: com envio INCERTO (rede caiu depois de o servidor
     // entregar), "Nothing was sent" tambem seria mentira — ver o teste seguinte.
-    expect(bloco).toMatch(/foram > 0\s*\n?\s*\? `Sent [\s\S]*?`\s*\n?\s*: houveIncerto \? "" : "Nothing was sent\. ";/);
+    expect(bloco).toMatch(/foram > 0[\s\S]{0,400}?: quemIncerto\.length \? "" : "Nothing was sent\. ";/);
   });
 
   // O pior efeito da versao anterior: modal aberto + selecao intacta + mensagem

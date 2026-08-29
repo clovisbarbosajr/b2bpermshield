@@ -27,6 +27,7 @@ export async function fetchAllRows<T = any>(
   { chunk = 1000, maxRows = 200_000 }: { chunk?: number; maxRows?: number } = {},
 ): Promise<T[]> {
   const out: T[] = [];
+  const vistos = new Set<unknown>();
   for (let from = 0; from < maxRows; from += chunk) {
     const { data, error } = await buildQuery(from, from + chunk - 1);
     if (error) {
@@ -39,7 +40,28 @@ export async function fetchAllRows<T = any>(
       throw e;
     }
     const page = data ?? [];
-    out.push(...page);
+    // DEDUPE POR `id`, e nao e paranoia.
+    //
+    // `.range()` vira LIMIT/OFFSET, que conta POSICOES. Se uma linha entrar no
+    // meio da ordenacao entre a pagina 1 e a 2 — e entra: `created_at` e
+    // `DEFAULT now()`, e `now()` congela no INICIO da transacao, entao duas
+    // gravacoes sobrepostas podem comitar fora de ordem — tudo desce uma casa e a
+    // linha da fronteira e servida DUAS vezes. O efeito e feio e silencioso: key
+    // repetida no React, linha duplicada na tabela, e total somando a mesma venda
+    // duas vezes num relatorio.
+    //
+    // Ordenar por `created_at` ascendente reduz muito a frequencia (a insercao
+    // normal cai no fim e nao empurra nada), mas nao fecha a retroativa. Fechar
+    // de verdade custa uma linha, aqui, para todos os chamadores de uma vez.
+    // Pular linha continua possivel — delecao concorrente encurta o inicio — e
+    // isso o dedupe nao resolve nem finge resolver.
+    for (const linha of page) {
+      const id = (linha as any)?.id;
+      if (id === undefined || id === null) { out.push(linha); continue; }
+      if (vistos.has(id)) continue;
+      vistos.add(id);
+      out.push(linha);
+    }
     if (page.length < chunk) return out;   // última página
   }
   // Teto de segurança: não é pra acontecer, mas melhor parar do que rodar sem fim.

@@ -284,7 +284,15 @@ const OrderDetail = () => {
     }
 
     const results = await Promise.allSettled(calls.map((c) => c.p));
-    setResending(false);
+    // `setResending(false)` fica no FIM, e nao aqui.
+    //
+    // Enquanto tudo abaixo era sincrono, as tres atualizacoes caiam num render so
+    // e nao havia estado intermediario visivel. Com o `await motivoHttp(...)` no
+    // meio, soltar o botao aqui deixava a tela num estado clicavel: modal aberto,
+    // caixas marcadas, "Send" habilitado — e um clique ali dispara um segundo
+    // `handleResend` inteiro, duplicando o que ja saiu. A leitura do corpo nao tem
+    // teto de tempo (o AbortController do `invoke` ja foi limpo), entao a janela
+    // pode durar o quanto a conexao ruim quiser.
     // `skipped` E FALHA, e o PLACAR importa mais que a palavra.
     //
     // O `send-email` responde `{ skipped: true }` com HTTP 200 e SEM `error` quando
@@ -311,6 +319,14 @@ const OrderDetail = () => {
     const foram = results.length - naoForam.length;
     // Quem falhou, pelo indice: `allSettled` preserva a ordem de `calls`.
     const quemFalhou = results.map((r, i) => (falhou(r) ? calls[i].quem : null)).filter(Boolean);
+    // E quem ficou INCERTO, separado de quem o servidor recusou.
+    //
+    // Nomear todos os que falharam na frase "could not confirm" era a mentira ao
+    // contrario: com o cliente recusado por teto de e-mail (o servidor gravou
+    // `failed` no mesmo instante) e o admin perdido por queda de rede, a tela
+    // mandava NAO reenviar por medo de duplicar — e o cliente nunca recebia. Pior,
+    // a mesma frase rotulava um nome como "failed" e "pode ter saido".
+    const quemIncerto = results.map((r, i) => (incerto(r) ? calls[i].quem : null)).filter(Boolean);
 
     // "NAO DEU PARA CONFIRMAR" NAO E "NAO FOI ENVIADO".
     //
@@ -321,7 +337,6 @@ const OrderDetail = () => {
     // operador a reenviar, e o cliente recebe duas confirmacoes. Nao ha
     // idempotencia no `send-email` para segurar a segunda.
     const incerto = (r: any) => r.value?.error?.name === "FunctionsFetchError";
-    const houveIncerto = naoForam.some(incerto);
 
     // O MOTIVO REAL DE UM ERRO HTTP SO EXISTE NO CORPO DA RESPOSTA.
     //
@@ -359,9 +374,11 @@ const OrderDetail = () => {
       const adminResolve = !!motivoBloqueio && /master switch|notification.*(disabled|off)/i.test(msg);
       const placar = foram > 0
         ? `Sent ${foram} of ${results.length} — failed: ${quemFalhou.join(", ")}. `
-        : houveIncerto ? "" : "Nothing was sent. ";
-      const aviso = houveIncerto
-        ? `Could not confirm ${quemFalhou.join(", ")} — the email may have gone out. Check the notification log before re-sending. `
+        // "Nothing was sent" so quando NENHUMA das falhas foi incerta: com um
+        // incerto no meio, o e-mail pode ter saido e a frase seria falsa.
+        : quemIncerto.length ? "" : "Nothing was sent. ";
+      const aviso = quemIncerto.length
+        ? `Could not confirm ${quemIncerto.join(", ")} — the email may have gone out. Check the notification log before re-sending. `
         : "";
       toast.error(`${placar}${aviso}${msg}${adminResolve ? " — ask an admin to turn the channel on." : ""}`);
     } else {
@@ -398,6 +415,7 @@ const OrderDetail = () => {
         ? `Resent order #${order.numero || order.id} confirmation`
         : `Resend order #${order.numero || order.id}: ${foram} of ${results.length} sent, failed: ${quemFalhou.join(", ")}`,
     );
+    setResending(false);
   };
 
   const handleSave = async (goBack = false) => {

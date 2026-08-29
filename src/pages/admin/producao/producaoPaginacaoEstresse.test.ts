@@ -1,40 +1,56 @@
 import { describe, it, expect } from "vitest";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 
-// TESTE DE ESTRESSE, nao de leitura. A tela de Producao (Status) e a de entrada
+// TESTE DE ESTRESSE, nao de leitura. A tela de entrada de producao e a de status
 // sao usadas AO MESMO TEMPO pela mesma equipe: enquanto o Status pagina
 // `producao_pedidos`, alguem esta salvando entradas novas. Cada `.range()` e um
-// request separado — entre a pagina 1 e a 2 o mundo muda.
+// request separado — entre a pagina 1 e a 2 o mundo muda, e `.range()` vira
+// LIMIT/OFFSET, que conta POSICOES, nao linhas.
 //
-// O QUE ISTO PROVA, e leitura de codigo nao provaria:
-//   * com `created_at DESC` (o que a tela usava), cada insercao nova ocupa a
-//     posicao 0 e empurra tudo uma casa para baixo: a linha do offset 999
-//     reaparece no 1000 e entra DUAS vezes em `rows` — key duplicada no React,
-//     linha repetida na tabela, contagem errada no "Received log";
-//   * com `created_at ASC`, a linha nova entra no FIM e nao mexe no que ja foi
-//     lido. Nenhuma duplicata, e o unico efeito e nao ver algumas das entradas
-//     criadas durante a propria leitura — que e o correto para um snapshot.
-//
-// A tabela falsa abaixo reproduz o servidor: ordena a CADA request, como o
-// Postgres faz, em vez de servir uma fatia congelada.
+// A tabela falsa reproduz o servidor: reordena o estado a CADA request, como o
+// Postgres reexecutando a query, em vez de servir uma fatia congelada. Toda
+// perturbacao mexe no ESTADO, nunca no payload ja servido — uma versao anterior
+// deste arquivo filtrava o payload e por isso o caso de delecao era um no-op que
+// passava por construcao.
 
 type Linha = { id: string; created_at: string };
+const T0 = 1_800_000_000_000;
+const iso = (ms: number) => new Date(ms).toISOString();
 
 function servidorFalso(iniciais: number, ordem: "asc" | "desc") {
-  // `created_at` crescente e `id` casado com ele: e o estado real de uma tabela
-  // que so recebe insercao.
   const estado: Linha[] = Array.from({ length: iniciais }, (_, i) => ({
     id: `p-${String(i).padStart(6, "0")}`,
-    created_at: new Date(1_800_000_000_000 + i * 1000).toISOString(),
+    created_at: iso(T0 + i * 1000),
   }));
   let seq = iniciais;
+
+  // Insercao normal: `created_at` maior que tudo que existe.
   const inserir = () => {
-    estado.push({
-      id: `novo-${String(seq).padStart(6, "0")}`,
-      created_at: new Date(1_800_000_000_000 + seq * 1000).toISOString(),
-    });
+    estado.push({ id: `novo-${String(seq).padStart(6, "0")}`, created_at: iso(T0 + seq * 1000) });
     seq++;
   };
+
+  // Insercao RETROATIVA — e ela nao e hipotese de laboratorio.
+  // `producao_pedidos.created_at` e `DEFAULT now()`, e `now()` no Postgres e o
+  // horario de INICIO DA TRANSACAO, nao o do commit. Duas transacoes sobrepostas
+  // (dois operadores salvando no `ProducaoEntrada`) podem comitar fora da ordem
+  // de `now()`: a leitura ve primeiro a linha de `created_at` maior, e a de
+  // `created_at` menor aparece depois — no MEIO da ordenacao ASC. Ali ela empurra
+  // tudo adiante uma casa, exatamente como o DESC faz com toda insercao.
+  const inserirRetroativo = (atrasoMs: number) => {
+    estado.push({ id: `atras-${String(seq).padStart(6, "0")}`, created_at: iso(T0 + seq * 1000 - atrasoMs) });
+    seq++;
+  };
+
+  // Delecao mexe no ESTADO: e o que faz os offsets andarem para tras.
+  const remover = (n: number) => {
+    const ordenado = [...estado].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    for (const l of ordenado.slice(0, n)) {
+      const i = estado.findIndex((x) => x.id === l.id);
+      if (i >= 0) estado.splice(i, 1);
+    }
+  };
+
   const servir = (from: number, to: number) => {
     const ordenado = [...estado].sort((a, b) => {
       const c = a.created_at.localeCompare(b.created_at);
@@ -43,74 +59,113 @@ function servidorFalso(iniciais: number, ordem: "asc" | "desc") {
     });
     return Promise.resolve({ data: ordenado.slice(from, to + 1), error: null });
   };
-  return { servir, inserir };
+
+  return { servir, inserir, inserirRetroativo, remover, get tamanho() { return estado.length; } };
 }
 
-// 2.400 linhas com chunk 1.000 = 3 paginas. A equipe salva entradas entre elas.
-const INICIAIS = 2_400;
+const INICIAIS = 2_400;   // 3 paginas de 1.000
 const CHUNK = 1_000;
 
-describe("Producao: paginacao sob insercao concorrente", () => {
-  it("DESC duplica linha — e por isso a tela nao usa DESC", async () => {
+// Roda a leitura completa perturbando o servidor ENTRE as paginas.
+async function lerCom(
+  s: ReturnType<typeof servidorFalso>,
+  perturbar: (pagina: number) => void,
+) {
+  let pagina = 0;
+  return await fetchAllRows<Linha>((f, t) => {
+    if (pagina > 0) perturbar(pagina);
+    pagina++;
+    return s.servir(f, t);
+  }, { chunk: CHUNK });
+}
+
+const repetidos = (out: Linha[]) => out.length - new Set(out.map((r) => r.id)).size;
+
+// As paginas como o SERVIDOR as entregou, antes do dedupe do `fetchAllRows`. E
+// aqui que se mede se a ordenacao evita a repeticao; medir depois do dedupe
+// esconderia a diferenca entre ASC e DESC, que e justamente o que se quer provar.
+async function paginasCruas(
+  s: ReturnType<typeof servidorFalso>,
+  perturbar: (pagina: number) => void,
+) {
+  const paginas: Linha[][] = [];
+  let pagina = 0;
+  await fetchAllRows<Linha>(async (f, t) => {
+    if (pagina > 0) perturbar(pagina);
+    pagina++;
+    const r = await s.servir(f, t);
+    paginas.push(r.data as Linha[]);
+    return r;
+  }, { chunk: CHUNK });
+  return paginas.flat();
+}
+
+const repetidosCru = (cru: Linha[]) => cru.length - new Set(cru.map((r) => r.id)).size;
+
+describe("Producao: paginacao sob escrita concorrente", () => {
+  // CANARIO, medido nas PAGINAS CRUAS. O `fetchAllRows` deduplica, entao olhar o
+  // resultado dele aqui passaria ate com o cenario quebrado — e o teste deixaria
+  // de provar que DESC e mesmo pior. O que se afirma e sobre o SERVIDOR: com
+  // DESC, ele serve a mesma linha duas vezes.
+  it("DESC faz o servidor repetir linha — e por isso a tela nao usa DESC", async () => {
     const s = servidorFalso(INICIAIS, "desc");
-    let paginas = 0;
-    const out = await fetchAllRows<Linha>((f, t) => {
-      // 50 entradas salvas por outros operadores entre uma pagina e a seguinte.
-      if (paginas++ > 0) for (let i = 0; i < 50; i++) s.inserir();
-      return s.servir(f, t);
-    }, { chunk: CHUNK });
-
-    const vistos = new Set(out.map((r) => r.id));
-    expect(out.length - vistos.size,
-      "se isto der 0, o cenario do teste parou de reproduzir o problema e o teste " +
-      "abaixo deixou de provar alguma coisa").toBeGreaterThan(0);
+    const cru = await paginasCruas(s, () => { for (let i = 0; i < 50; i++) s.inserir(); });
+    expect(repetidosCru(cru), "o cenario parou de reproduzir o problema").toBeGreaterThan(0);
   });
 
-  it("ASC nao duplica nenhuma linha, com 50 insercoes entre paginas", async () => {
+  it("ASC nao faz o servidor repetir com insercao normal", async () => {
     const s = servidorFalso(INICIAIS, "asc");
-    let paginas = 0;
-    const out = await fetchAllRows<Linha>((f, t) => {
-      if (paginas++ > 0) for (let i = 0; i < 50; i++) s.inserir();
-      return s.servir(f, t);
-    }, { chunk: CHUNK });
-
-    const vistos = new Set(out.map((r) => r.id));
-    expect(vistos.size, "linha repetida vira key duplicada no React e contagem errada")
-      .toBe(out.length);
-    // E nenhuma das 2.400 originais pode ter sumido: e o que a tela precisa.
-    expect(out.filter((r) => r.id.startsWith("p-")), "sumiu linha que ja existia")
-      .toHaveLength(INICIAIS);
+    const cru = await paginasCruas(s, () => { for (let i = 0; i < 50; i++) s.inserir(); });
+    expect(repetidosCru(cru),
+      "e esta e a diferenca entre ASC e DESC, medida e nao suposta").toBe(0);
   });
 
-  it("ASC aguenta insercao a CADA pagina, em volume alto", async () => {
-    const s = servidorFalso(9_000, "asc");
-    let paginas = 0;
-    const out = await fetchAllRows<Linha>((f, t) => {
-      if (paginas++ > 0) for (let i = 0; i < 200; i++) s.inserir();
-      return s.servir(f, t);
-    }, { chunk: CHUNK });
+  it("ASC nao duplica com 50 insercoes entre paginas", async () => {
+    const s = servidorFalso(INICIAIS, "asc");
+    const out = await lerCom(s, () => { for (let i = 0; i < 50; i++) s.inserir(); });
+    expect(repetidos(out), "linha repetida vira key duplicada e contagem errada").toBe(0);
+    expect(out.filter((r) => r.id.startsWith("p-")), "sumiu linha que ja existia").toHaveLength(INICIAIS);
+  });
 
-    expect(new Set(out.map((r) => r.id)).size).toBe(out.length);
+  it("ASC aguenta insercao a cada pagina, em volume alto", async () => {
+    const s = servidorFalso(9_000, "asc");
+    const out = await lerCom(s, () => { for (let i = 0; i < 200; i++) s.inserir(); });
+    expect(repetidos(out)).toBe(0);
     expect(out.filter((r) => r.id.startsWith("p-"))).toHaveLength(9_000);
   });
 
-  it("DELECAO concorrente nao duplica em ASC (so pode fazer pular)", async () => {
-    // Remover uma linha ja lida encurta o inicio e puxa tudo para tras — o risco
-    // e PULAR, nunca repetir. Vale registrar qual dos dois erros e possivel: uma
-    // linha a menos na tela e recuperavel com F5; duplicata quebra a contagem.
-    const s = servidorFalso(3_000, "asc");
-    const removidos: string[] = [];
-    let paginas = 0;
-    const estadoRemover = (n: number) => { for (let i = 0; i < n; i++) removidos.push(`p-${String(i).padStart(6, "0")}`); };
-    const out = await fetchAllRows<Linha>((f, t) => {
-      if (paginas++ === 1) estadoRemover(5);
-      return s.servir(f, t).then((r: any) => ({
-        ...r,
-        data: (r.data ?? []).filter((l: Linha) => !removidos.includes(l.id)),
-      }));
-    }, { chunk: CHUNK });
+  // O LIMITE DA DEFESA, medido em vez de suposto. `created_at ASC` protege contra
+  // a insercao normal, NAO contra a retroativa: `now()` congela no inicio da
+  // transacao, entao duas gravacoes sobrepostas podem entrar fora de ordem. Fica
+  // registrado que existe, e por isso a defesa de verdade e o dedupe do
+  // `fetchAllRows` — a paginacao ASC so reduz a frequencia.
+  it("ASC SOZINHO nao cobre insercao retroativa (por isso ha dedupe)", async () => {
+    const s = servidorFalso(INICIAIS, "asc");
+    const cru = await paginasCruas(s, () => { for (let i = 0; i < 50; i++) s.inserirRetroativo(3_000_000); });
+    expect(repetidosCru(cru),
+      "se isto zerar, a ressalva do comentario acima virou obsoleta").toBeGreaterThan(0);
+  });
 
-    expect(new Set(out.map((r) => r.id)).size, "delecao nao pode produzir duplicata")
-      .toBe(out.length);
+  it("com o dedupe do fetchAllRows, nem a retroativa duplica", async () => {
+    const s = servidorFalso(INICIAIS, "asc");
+    const out = await lerCom(s, () => { for (let i = 0; i < 50; i++) s.inserirRetroativo(3_000_000); });
+    expect(repetidos(out)).toBe(0);
+  });
+
+  // DELECAO concorrente encurta o inicio e puxa tudo para tras: o risco e PULAR,
+  // nunca repetir. Vale registrar qual dos dois erros e possivel — uma linha a
+  // menos na tela se resolve com F5; duplicata quebra a contagem.
+  it("delecao concorrente pode fazer pular, e nunca duplicar", async () => {
+    const s = servidorFalso(INICIAIS, "asc");
+    const out = await lerCom(s, () => s.remover(5));
+    expect(repetidos(out), "delecao nao pode produzir duplicata").toBe(0);
+    // E o pulo acontece de fato — sem isto o teste nao exercita nada.
+    //
+    // Comparar `out.length` com o total do servidor NAO serve: as linhas apagadas
+    // depois de lidas continuam em `out` e compensam, na conta, as que ficaram de
+    // fora. Uma versao anterior fazia isso e a igualdade acidental (2390 = 2390)
+    // dava a impressao de que nada tinha sido pulado. Entao pergunta-se pelo id.
+    const lidos = new Set(out.map((r) => r.id));
+    expect(lidos.has("p-001000"), "a linha da fronteira tinha que ter sido pulada").toBe(false);
   });
 });

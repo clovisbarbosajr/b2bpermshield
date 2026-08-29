@@ -115,16 +115,31 @@ describe("fetchAllRows", () => {
   // trocar OFFSET por cursor (keyset), os dois passam a nao perder nada e vao
   // falhar, avisando que a garantia mudou.
 
-  it("insercao concorrente antes do offset REPETE uma linha", async () => {
+  // Este caso JA DEVOLVEU duplicata, e por isso o dedupe existe. O servidor
+  // continua servindo a mesma linha duas vezes — o que mudou e que ela nao chega
+  // mais ao chamador. O teste olha as PAGINAS CRUAS para nao virar tautologia: se
+  // olhasse so o resultado, passaria ate se o cenario deixasse de reproduzir o
+  // problema, que e como um teste anterior deste projeto passou por construcao.
+  it("insercao concorrente antes do offset: o servidor repete, o dedupe segura", async () => {
+    const paginas: { id: string }[][] = [];
     const tt = tabelaFalsa(linhas(2000), {
       // Ao servir a pagina 1 (offset 1000), entra uma linha que ordena no comeco.
       onPage: (p) => { if (p === 1) tt.inserir({ id: "aaa-nova" }); },
     });
-    const out = await fetchAllRows<{ id: string }>(tt.servir, { chunk: 1000 });
+    const out = await fetchAllRows<{ id: string }>(async (f, t) => {
+      const r: any = await tt.servir(f, t);
+      paginas.push(r.data ?? []);
+      return r;
+    }, { chunk: 1000 });
+
+    const cru = paginas.flat();
+    expect(cru.length - new Set(cru.map((r) => r.id)).size,
+      "o cenario parou de reproduzir a duplicata — este bloco nao prova mais nada")
+      .toBeGreaterThan(0);
     const unicos = new Set(out.map((r) => r.id));
-    // A duplicata e o efeito: mais linhas devolvidas do que ids distintos.
-    expect(out.length).toBeGreaterThan(unicos.size);
-    // E a linha recem-inserida nao foi lida — entrou atras do ponto ja percorrido.
+    expect(out.length, "o dedupe tinha que ter tirado a repetida").toBe(unicos.size);
+    // E a linha recem-inserida continua nao lida — entrou atras do ponto ja
+    // percorrido. Dedupe nao conserta isso, e nao deve fingir que conserta.
     expect(unicos.has("aaa-nova")).toBe(false);
   });
 
