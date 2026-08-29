@@ -17,12 +17,35 @@ import { readFileSync } from "node:fs";
 // Os testes olham a fiacao do bloco, que e onde as duas mentiras moraram.
 
 const fonte = readFileSync("src/pages/admin/OrderDetail.tsx", "utf8");
-const iBloco = fonte.indexOf("const bloqueado = (r: any)");
-const bloco = fonte.slice(iBloco, fonte.indexOf("const loadOrder", iBloco));
+// O DELIMITADOR TEM QUE VIR DEPOIS DO BLOCO, e isso ja falhou aqui: a versao
+// anterior fatiava ate `const loadOrder`, que esta ANTES de `const bloqueado` no
+// arquivo. `indexOf` a partir do bloco devolvia -1, `slice(i, -1)` pegava 1064
+// linhas — quase o arquivo inteiro — e a assercao do `log` casava com o
+// `handleSave`, nao com o Resend. Passava por construcao.
+const iBloco = fonte.indexOf("const calls: { quem: string");
+const iFim = fonte.indexOf("const handleSave", iBloco);
+const bloco = fonte.slice(iBloco, iFim);
 
 describe("Resend do pedido: placar, modal e log", () => {
-  it("o bloco existe", () => {
+  it("o bloco existe e a fatia e mesmo o bloco", () => {
     expect(iBloco, "sumiu o tratamento de resultado do Resend").toBeGreaterThan(-1);
+    // Sem esta linha, um delimitador que nao existe devolve -1 e a fatia vira o
+    // arquivo quase inteiro — foi exatamente o que aconteceu na versao anterior.
+    expect(iFim, "o delimitador de fim nao foi encontrado DEPOIS do bloco").toBeGreaterThan(iBloco);
+    expect(bloco.split("\n").length, "a fatia esta grande demais para ser so o bloco")
+      .toBeLessThan(120);
+  });
+
+  it("sai antes quando nao ha destinatario montado", () => {
+    expect(bloco, "sem esta guarda, `calls` vazio cai no caminho de SUCESSO")
+      .toMatch(/if \(calls\.length === 0\)/);
+    expect(bloco).toMatch(/No recipient with an email address/);
+  });
+
+  it("o placar diz QUEM falhou, nao so quantos", () => {
+    expect(bloco).toMatch(/const quemFalhou =/);
+    expect(bloco, "sem o rotulo, o operador nao sabe quem ficou sem o e-mail")
+      .toMatch(/failed: \$\{quemFalhou\.join\(", "\)\}/);
   });
 
   it("`skipped` conta como falha — senao envio bloqueado vira sucesso", () => {
@@ -37,7 +60,7 @@ describe("Resend do pedido: placar, modal e log", () => {
   });
 
   it("'Nothing was sent' so quando NADA saiu", () => {
-    expect(bloco).toMatch(/foram > 0 \? `Sent .*` : "Nothing was sent\. "/);
+    expect(bloco).toMatch(/foram > 0\s*\n?\s*\? `Sent [\s\S]*?`\s*\n?\s*: "Nothing was sent\. ";/);
   });
 
   // O pior efeito da versao anterior: modal aberto + selecao intacta + mensagem

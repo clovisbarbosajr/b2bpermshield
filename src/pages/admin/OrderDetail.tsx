@@ -243,25 +243,45 @@ const OrderDetail = () => {
       sku: i.sku, nome_produto: i.nome_produto, preco_unitario: i.preco_unitario,
       quantidade: i.quantidade, subtotal: i.subtotal ?? i.preco_unitario * i.quantidade,
     }));
-    const calls: Promise<any>[] = [];
+    // ROTULADAS. Sem o rotulo, o placar diz quantos falharam e nunca QUEM — e
+    // depois que o modal fecha, o operador nao tem como saber se ficou sem e-mail
+    // o cliente, o admin ou o endereco avulso. E e essa a informacao que ele
+    // precisa para o proximo passo.
+    const calls: { quem: string; p: Promise<any> }[] = [];
     // force: reenvio é ação MANUAL do admin — sai mesmo se a notificação
     // automática estiver desligada (senão o botão não funcionaria).
     if (resend.customer && cliente?.email) {
-      calls.push(supabase.functions.invoke("send-email", {
+      calls.push({ quem: "customer", p: supabase.functions.invoke("send-email", {
         body: { type: "new_order_customer", order, customer: emailCustomer, items: emailItems, force: true },
-      }));
+      }) });
     }
     if (resend.admin) {
-      calls.push(supabase.functions.invoke("send-email", {
+      calls.push({ quem: "admin", p: supabase.functions.invoke("send-email", {
         body: { type: "new_order_admin", order, customer: emailCustomer, items: emailItems, force: true },
-      }));
+      }) });
     }
     if (resend.other) {
-      calls.push(supabase.functions.invoke("send-email", {
+      calls.push({ quem: custom || "other address", p: supabase.functions.invoke("send-email", {
         body: { type: "new_order_customer", order, customer: emailCustomer, items: emailItems, force: true, toOverride: custom },
-      }));
+      }) });
     }
-    const results = await Promise.allSettled(calls);
+
+    // NENHUM DESTINATARIO MONTADO: sai antes, e nao pelo caminho de sucesso.
+    //
+    // As guardas do topo checam as CAIXAS marcadas, nao as chamadas efetivamente
+    // montadas — a do cliente so entra se `cliente?.email` existir. Com a caixa
+    // marcada e o cliente sem e-mail, `calls` ficava vazio, `naoForam.length` era
+    // 0 e o bloco caia no `else`: toast VERDE "Order confirmation re-sent." e o
+    // log gravando reenvio, com ZERO requisicoes feitas. A mesma mentira que este
+    // bloco existe para matar, por um caminho que ele nao cobria — e o `foram > 0`
+    // ainda deixava o modal aberto, contradizendo o proprio toast.
+    if (calls.length === 0) {
+      setResending(false);
+      toast.error("No recipient with an email address — nothing was sent.");
+      return;
+    }
+
+    const results = await Promise.allSettled(calls.map((c) => c.p));
     setResending(false);
     // `skipped` E FALHA, e o PLACAR importa mais que a palavra.
     //
@@ -287,6 +307,8 @@ const OrderDetail = () => {
     const falhou = (r: any) => r.status === "rejected" || r.value?.error || r.value?.data?.error || bloqueado(r);
     const naoForam = results.filter(falhou);
     const foram = results.length - naoForam.length;
+    // Quem falhou, pelo indice: `allSettled` preserva a ordem de `calls`.
+    const quemFalhou = results.map((r, i) => (falhou(r) ? calls[i].quem : null)).filter(Boolean);
 
     if (naoForam.length) {
       const primeiro: any = naoForam[0];
@@ -302,7 +324,9 @@ const OrderDetail = () => {
       // canal esta desligado e o admin repetindo leva o mesmo bloqueio — a frase
       // mandaria o operador atras de um conserto que nao existe.
       const adminResolve = !!motivoBloqueio && /master switch|notification.*(disabled|off)/i.test(msg);
-      const placar = foram > 0 ? `Sent ${foram} of ${results.length}. ` : "Nothing was sent. ";
+      const placar = foram > 0
+        ? `Sent ${foram} of ${results.length} — failed: ${quemFalhou.join(", ")}. `
+        : "Nothing was sent. ";
       toast.error(`${placar}${msg}${adminResolve ? " — ask an admin to turn the channel on." : ""}`);
     } else {
       toast.success("Order confirmation re-sent.");
@@ -324,7 +348,7 @@ const OrderDetail = () => {
       "updated", "order", order.id,
       naoForam.length === 0
         ? `Resent order #${order.numero || order.id} confirmation`
-        : `Resend order #${order.numero || order.id}: ${foram} of ${results.length} sent`,
+        : `Resend order #${order.numero || order.id}: ${foram} of ${results.length} sent, failed: ${quemFalhou.join(", ")}`,
     );
   };
 
