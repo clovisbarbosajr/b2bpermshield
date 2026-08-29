@@ -22,8 +22,15 @@ describe("WarehouseSettings: leitura honesta e gravacao sem lost update", () => 
   // Sem este ramo, isso caia no mesmo lugar do erro: tela com os valores iniciais
   // do componente, como se fossem os do banco.
   it("RPC sem erro e SEM LINHA tambem fecha a tela", () => {
-    expect(fonte).toContain("if (!data) {");
-    expect(fonte).toContain("The warehouse settings row was not returned");
+    const i = fonte.indexOf("if (!data) {");
+    expect(i, "sem este ramo a tela mostra os valores iniciais do componente").toBeGreaterThan(-1);
+    const ramo = fonte.slice(i, fonte.indexOf("setErro(null);", i));
+    expect(ramo).toContain("The warehouse settings row was not returned");
+    // O `return` E O QUE IMPORTA: sem ele o codigo segue para o `setSalvo({
+    // ...data.warehouse_popup_enabled })` com `data` nulo e estoura TypeError —
+    // tela quebrada em vez de mensagem. Remover so o `return` passava verde.
+    expect(ramo, "sem `return`, segue e estoura em `data.` nulo").toContain("return;");
+    expect(ramo, "e o spinner tem que parar").toContain("setLoading(false)");
   });
 
   // As cinco colunas iam cegas, com o `form` carregado no mount: A abre e nao

@@ -35,6 +35,14 @@ describe("ProducaoStatus: o espelho de container decide no BANCO", () => {
     // volta a afirmar um container que outro operador ja tinha posto.
     expect(fn).toContain("return data?.numero_container ?? null;");
     expect(fn, "erro do 2o UPDATE nao pode sumir").toContain("if (error)");
+    // E o ramo de erro devolve NULL. Trocar por `return valor` faz o audit log
+    // (que usa este retorno, linhas ~252 e ~273) afirmar um container que o
+    // UPDATE nao gravou — o D4 de novo, num lugar diferente.
+    const ramoErro = fn.slice(fn.indexOf("if (error)"));
+    expect(ramoErro.slice(0, 400), "ramo de erro tem que devolver null")
+      .toMatch(/return null;/);
+    expect(ramoErro.slice(0, 400), "devolver `valor` aqui faz o log mentir")
+      .not.toMatch(/return valor;/);
     expect(fn, "e o operador precisa saber: a coluna nem aparece na lista ativa")
       .toContain("the container could not be filled in");
   });
