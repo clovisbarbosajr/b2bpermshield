@@ -69,8 +69,29 @@ const ProtectedRoute = ({ children, requiredRole, requiredPermission }: Props) =
   }
 
   // Permission-based access (after role check passes)
+  //
+  // EXPLICA, e nao redireciona. Mandar para `/admin` tinha dois problemas, e o
+  // segundo so apareceu quando mais rotas passaram a exigir permissao:
+  //
+  //  1. o operador era jogado para outra tela sem uma palavra — parecia bug;
+  //  2. `/admin` TAMBEM exige `view_dashboard`. Com essa caixa desmarcada, a
+  //     negacao mandava para uma rota que negava de novo: o `Navigate` monta uma
+  //     vez, nao ha laco, e o resultado e pior de diagnosticar — sidebar na tela
+  //     e area de conteudo em branco PARA SEMPRE, sem mensagem. E `/admin` e
+  //     para onde todo login de staff vai (`AdminLogin`), entao seria em todo
+  //     login.
+  //
+  // A sidebar continua montada (este componente e filho do shell), entao o
+  // operador ve o que PODE abrir e clica.
   if (requiredPermission && !hasPermission(requiredPermission)) {
-    return <Navigate to="/admin" replace />;
+    return (
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+        <p className="font-semibold">You do not have access to this screen.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Ask an administrator to enable it for your user, or pick another item in the menu.
+        </p>
+      </div>
+    );
   }
 
   return <>{children}</>;

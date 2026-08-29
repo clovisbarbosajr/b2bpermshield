@@ -126,6 +126,10 @@ const AW = S;
 //
 // TODA ROTA CUJO MENU CONSULTA UMA PERMISSAO USA `SP` COM A MESMA CHAVE.
 //
+// (`/admin/products/import` e `/export` tambem usam, embora os itens de menu
+// deles estejam comentados: as duas saem da tela de produtos, e os dois papeis
+// tem `view_products` por padrao, entao nao se tira acesso de ninguem.)
+//
 // Antes so 3 rotas faziam isso e o resto do admin era `AW` (= qualquer staff):
 // desmarcar "View Orders" de um warehouse tirava o item do menu e ele entrava
 // digitando /admin/orders. O checkbox prometia um controle que nao existia — e a
@@ -314,8 +318,14 @@ const App = () => (
               <Route path="/admin/produtos" element={<A><AdminProdutos /></A>} />
               <Route path="/admin/categorias" element={<A><AdminCategorias /></A>} />
               <Route path="/admin/clientes" element={<A><AdminClientes /></A>} />
-              <Route path="/admin/estoque" element={<AW><AdminEstoque /></AW>} />
-              <Route path="/admin/estoque/adjustment" element={<AW><InventoryAdjustment /></AW>} />
+              {/* `view_products`: o menu ja poe as duas dentro do bloco dessa chave
+                  (AdminLayout), e o Inventory Adjustment e a tela que GRAVA estoque
+                  em massa — um `update` por produto, mais `estoque_log`. Ela nao tem
+                  guarda propria, e a RLS de 20260619003000 libera `UPDATE produtos`
+                  para warehouse de proposito. Sem isto, desmarcar "View Products"
+                  tirava o item do menu e o operador entrava digitando a URL. */}
+              <Route path="/admin/estoque" element={<SP perm="view_products"><AdminEstoque /></SP>} />
+              <Route path="/admin/estoque/adjustment" element={<SP perm="view_products"><InventoryAdjustment /></SP>} />
               <Route path="/admin/tabelas-preco" element={<A><AdminTabelasPreco /></A>} />
               <Route path="/admin/relatorios" element={<A><AdminRelatorios /></A>} />
               <Route path="/admin/configuracoes" element={<A><AdminConfiguracoes /></A>} />

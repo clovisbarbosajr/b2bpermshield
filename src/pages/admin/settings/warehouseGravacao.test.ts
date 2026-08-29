@@ -18,6 +18,14 @@ describe("WarehouseSettings: leitura honesta e gravacao sem lost update", () => 
     expect(fonte, "e tem que haver caminho de volta").toMatch(/onClick=\{\(\) => fetchData\(\)\}/);
   });
 
+  // `config_staff` devolve zero linhas quando o papel nao passa no filtro dela.
+  // Sem este ramo, isso caia no mesmo lugar do erro: tela com os valores iniciais
+  // do componente, como se fossem os do banco.
+  it("RPC sem erro e SEM LINHA tambem fecha a tela", () => {
+    expect(fonte).toContain("if (!data) {");
+    expect(fonte).toContain("The warehouse settings row was not returned");
+  });
+
   // As cinco colunas iam cegas, com o `form` carregado no mount: A abre e nao
   // toca em nada, B troca o dia do popup e salva, A clica Save e devolve o valor
   // velho. `diffConfig` ja resolve isso em Profile e SetupApp, na MESMA tabela.

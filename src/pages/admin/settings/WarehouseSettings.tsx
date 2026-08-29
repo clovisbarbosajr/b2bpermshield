@@ -58,9 +58,18 @@ const WarehouseSettings = () => {
       setLoading(false);
       return;
     }
-    setErro(null);
     const data = Array.isArray(rows) ? rows[0] : rows;
-    if (data) {
+    // SEM ERRO E SEM LINHA TAMBEM E FALHA. `config_staff` devolve zero linhas
+    // quando o papel nao passa no filtro dela, e o `if (data)` sozinho deixava
+    // isso cair no mesmo lugar de antes: `erro` null, `loading` false, e a tela
+    // renderizando os valores iniciais do componente como se fossem os do banco.
+    if (!data) {
+      setErro("The warehouse settings row was not returned. Reload the page; if it persists, ask an administrator.");
+      setLoading(false);
+      return;
+    }
+    setErro(null);
+    {
       // Os mesmos `??` do `setForm` abaixo, de proposito: o espelho tem que ser o
       // que a tela MOSTRA quando ninguem toca em nada, senao o `diffConfig`
       // acusaria mudanca em campo que o admin nem viu.

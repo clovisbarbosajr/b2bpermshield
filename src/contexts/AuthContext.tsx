@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { DEFAULT_PERMISSIONS } from "@/lib/permissions";
+import { permissoesDoPapel } from "@/lib/permissoesDoPapel";
 
 export type AppRole = "admin" | "cliente" | "warehouse" | "manager";
 
@@ -43,21 +43,6 @@ interface AuthContextType {
   clearViewAs: (dest?: string) => void;
 }
 
-/**
- * Permissoes efetivas de um usuario de STAFF.
- *
- * O mapa gravado vence, chave por chave. Mapa ausente ou VAZIO cai no default do
- * papel — `{}` significa "nunca foi configurado", nao "nao pode nada". Um mapa
- * com pelo menos uma chave e escolha explicita do admin e e respeitado como veio,
- * inclusive quando ele desmarcou tudo menos uma.
- */
-function permissoesDoPapel(papel: string, gravadas: unknown): Record<string, boolean> {
-  const mapa = (gravadas && typeof gravadas === "object" ? gravadas : {}) as Record<string, boolean>;
-  const padrao = (DEFAULT_PERMISSIONS as Record<string, Record<string, boolean>>)[papel];
-  if (!padrao) return mapa;                       // admin nao usa mapa
-  if (Object.keys(mapa).length === 0) return { ...padrao };
-  return { ...padrao, ...mapa };
-}
 
 const AuthContext = createContext<AuthContextType>({
   session: null,

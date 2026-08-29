@@ -27,6 +27,16 @@ describe("ProducaoStatus: o espelho de container decide no BANCO", () => {
     expect(fn, "sem `.is(...)` quem decide volta a ser o estado velho da tela")
       .toContain('.is("numero_container", null)');
     expect(fn, "o UPDATE do container tem que ser SO dele").toContain("numero_container: valor");
+    // A ASSERCAO QUE FALTAVA, e a mais cara: sem `.eq("id", id)` este UPDATE
+    // grava em TODA linha da tabela com container nulo. A mutacao que removia o
+    // WHERE passava verde porque o teste so olhava o `.is(...)`.
+    expect(fn, "UPDATE sem WHERE id atinge a tabela inteira").toContain('.eq("id", id)');
+    // O retorno vem do BANCO, nao do valor que a tela quis gravar — senao o log
+    // volta a afirmar um container que outro operador ja tinha posto.
+    expect(fn).toContain("return data?.numero_container ?? null;");
+    expect(fn, "erro do 2o UPDATE nao pode sumir").toContain("if (error)");
+    expect(fn, "e o operador precisa saber: a coluna nem aparece na lista ativa")
+      .toContain("the container could not be filled in");
   });
 
   it("os dois chamadores usam o caminho condicional", () => {

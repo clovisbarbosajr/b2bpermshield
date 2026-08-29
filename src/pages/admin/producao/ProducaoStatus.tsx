@@ -224,10 +224,17 @@ const ProducaoStatus = () => {
   const espelhaContainerSeVazio = async (id: string, tracking: string, containerNaTela: string | null | undefined) => {
     const valor = espelharContainer(tracking, containerNaTela);
     if (!valor) return null;
-    const { data } = await supabase.from("producao_pedidos")
+    const { data, error } = await supabase.from("producao_pedidos")
       .update({ numero_container: valor })
       .eq("id", id).is("numero_container", null)
       .select("numero_container").maybeSingle();
+    // "Falhou" e "outro ja preencheu" davam os dois `data: null` — e o operador
+    // via so "Tracking saved". A coluna Container nao esta na lista ativa (ver o
+    // comentario mais abaixo), entao ele nao tinha NENHUMA forma de perceber.
+    if (error) {
+      toast.warning("Tracking saved, but the container could not be filled in: " + error.message);
+      return null;
+    }
     return data?.numero_container ?? null;
   };
 

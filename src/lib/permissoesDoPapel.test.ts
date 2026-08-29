@@ -3,11 +3,17 @@ import { describe, it, expect } from "vitest";
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
 import { DEFAULT_PERMISSIONS } from "./permissions";
+import { permissoesDoPapel } from "./permissoesDoPapel";
 
-// `permissoesDoPapel` mora dentro do `AuthContext`, que arrasta o cliente
-// Supabase e o router — nao da para importar num teste de unidade. Entao a REGRA
-// e reproduzida aqui e exercitada de verdade, e um teste de fiacao garante que o
-// arquivo continua usando essa forma.
+// A funcao vem de `src/lib/permissoesDoPapel.ts` — o CODIGO DE PRODUCAO.
+//
+// A primeira versao deste arquivo REIMPLEMENTAVA a regra aqui dentro, porque ela
+// morava no `AuthContext` (que arrasta o cliente Supabase e o router). O teste
+// exercitava a copia, e conferia o arquivo real so por `toContain` de duas
+// linhas. Resultado: inverter o merge no codigo de producao para
+// `{...mapa, ...padrao}` — o que faz desmarcar um checkbox deixar de valer, ou
+// seja o proprio bug que a funcao veio consertar — passava VERDE. Mover a funcao
+// para `lib` foi a correcao; duplica-la de novo aqui desfaz tudo.
 //
 // O QUE ELA PROTEGE: `user_roles.permissions` e `JSONB DEFAULT '{}'`
 // (20260410000001) e os `DEFAULT_PERMISSIONS` so eram aplicados dentro da TELA de
@@ -15,14 +21,6 @@ import { DEFAULT_PERMISSIONS } from "./permissions";
 // com `{}` — e como `hasPermission` testa `permissions[key] === true`, tudo virava
 // false. Enquanto as permissoes so escondiam menu isso dava um menu vazio; agora
 // que elas tambem fecham rota, trancaria o operador para fora do sistema inteiro.
-
-function permissoesDoPapel(papel: string, gravadas: unknown): Record<string, boolean> {
-  const mapa = (gravadas && typeof gravadas === "object" ? gravadas : {}) as Record<string, boolean>;
-  const padrao = (DEFAULT_PERMISSIONS as Record<string, Record<string, boolean>>)[papel];
-  if (!padrao) return mapa;
-  if (Object.keys(mapa).length === 0) return { ...padrao };
-  return { ...padrao, ...mapa };
-}
 
 describe("permissoesDoPapel", () => {
   it("mapa VAZIO cai no default do papel — nao em 'pode nada'", () => {
@@ -62,12 +60,37 @@ describe("fiacao: o AuthContext e as rotas", () => {
   const auth = readFileSync("src/contexts/AuthContext.tsx", "utf8");
   const app = readFileSync("src/App.tsx", "utf8");
 
-  it("o AuthContext resolve o mapa pelo papel", () => {
+  it("o AuthContext resolve o mapa pelo papel, usando a lib", () => {
     expect(auth, "sem isto, staff com `{}` fica sem permissao nenhuma")
       .toContain("setPermissions(permissoesDoPapel(dbRole, (data as any).permissions))");
-    expect(auth).toContain("function permissoesDoPapel");
-    expect(auth, "o default tem que vir de `lib/permissions`, nao de copia local")
-      .toContain('import { DEFAULT_PERMISSIONS } from "@/lib/permissions"');
+    expect(auth).toContain('import { permissoesDoPapel } from "@/lib/permissoesDoPapel"');
+    // Reimplementar a regra dentro do contexto e o que deixava o codigo de
+    // producao sem cobertura — o teste exercitaria de novo uma copia.
+    expect(auth, "a regra nao pode voltar para dentro do contexto")
+      .not.toContain("function permissoesDoPapel(");
+  });
+
+  // `/admin` e o destino do login de TODO staff (`AdminLogin`) e era o destino do
+  // redirect de negacao de permissao. Com `view_dashboard` desmarcado, a negacao
+  // mandava para uma rota que negava de novo: sem laco, mas com a area de
+  // conteudo em branco para sempre, sem mensagem, em todo login.
+  it("negar permissao EXPLICA, em vez de redirecionar", () => {
+    const pr = readFileSync("src/components/ProtectedRoute.tsx", "utf8");
+    const bloco = pr.slice(pr.indexOf("if (requiredPermission"));
+    expect(bloco, "redirecionar leva a tela branca quando o destino tambem exige permissao")
+      .not.toContain('<Navigate to="/admin" replace />');
+    expect(bloco).toContain("You do not have access to this screen.");
+  });
+
+  // A tela que GRAVA estoque em massa, sem guarda propria, e com a RLS liberando
+  // `UPDATE produtos` para warehouse de proposito (20260619003000).
+  it("Inventory Adjustment exige a mesma chave do menu", () => {
+    for (const rota of ['path="/admin/estoque"', 'path="/admin/estoque/adjustment"']) {
+      const i = app.indexOf(`<Route ${rota} `);
+      expect(i, `rota sumiu: ${rota}`).toBeGreaterThan(-1);
+      const linha = app.slice(i, app.indexOf("\n", i));
+      expect(linha, `${rota} aceita qualquer staff`).toContain('<SP perm="view_products">');
+    }
   });
 
   // Antes so 3 rotas exigiam permissao e o resto do admin era `AW` (qualquer
