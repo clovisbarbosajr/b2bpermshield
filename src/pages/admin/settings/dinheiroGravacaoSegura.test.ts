@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 // `tsc --noEmit` do `npm test` nao acha `node:fs`. Em execucao o modulo existe.
 // @ts-expect-error
 import { readFileSync } from "node:fs";
-import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
+import { fatiaEntre } from "@/test/fatia";
 
 // TESTE DE FIACAO das quatro telas que viram DINHEIRO na fatura. Montar a tela
 // exigiria `@testing-library/dom`, que nao esta instalado.

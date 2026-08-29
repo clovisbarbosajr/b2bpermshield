@@ -45,10 +45,13 @@ describe("send-email: `force` exige chamador privilegiado", () => {
     // Ancorado na LINHA do `if`, e nao num numero de bytes: com `+ 120` a janela
     // alcancava o comentario seguinte, e enxugar comentario (mudanca puramente
     // cosmetica) reprovava a suite com uma mensagem falsa sobre seguranca.
-    // Cap 1: `fatiaEntre` corta ANTES do `\n`, entao `split` da sempre 1 e o cap
-    // 2 nunca dispararia — decorativo, o mesmo defeito ja corrigido nas rotas.
-    // Com 1 ele afirma de verdade: "isto e UMA linha".
-    const linha = fatiaEntre(fonte.slice(iInterruptor), MARCA_INTERRUPTOR, "\n", 1);
+    // SEM CAP, de proposito. O delimitador final e o proprio `\n` e `fatiaEntre`
+    // corta ANTES dele: a regiao nao pode conter quebra de linha, entao
+    // `split(NL).length` e SEMPRE 1 e qualquer cap — 1, 2, 40 — nunca dispara.
+    // Ja passou por aqui como 2 e como 1; os dois eram decorativos, e o comentario
+    // que dizia "com 1 ele afirma de verdade" era tautologia. Cap que nao pode
+    // reprovar da impressao de cobertura sem dar nenhuma.
+    const linha = fatiaEntre(fonte.slice(iInterruptor), MARCA_INTERRUPTOR, "\n");
     expect(linha, "o interruptor voltou a olhar `body.force` direto").not.toMatch(/body\.force/);
     expect(linha).toMatch(/!forcePermitido/);
   });

@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 // `src/pages/admin/estoqueUpdateCondicional.test.ts`.
 // @ts-expect-error
 import { readFileSync } from "node:fs";
-import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
+import { fatiaEntre } from "@/test/fatia";
 
 // TESTE DE FIACAO, pelo mesmo motivo do `estoqueUpdateCondicional.test.ts`: as
 // guardas moram DENTRO de componentes de pagina, e importar o modulo arrastaria

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
-import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
+import { fatiaEntre } from "@/test/fatia";
 
 // `numero_container` e a CHAVE do `sync-container-eta`. Escrever nele por engano
 // nao aparece na tela: a lista ativa do Status nem exibe essa coluna.

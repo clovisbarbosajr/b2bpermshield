@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
-import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
+import { fatiaEntre } from "@/test/fatia";
 
 const fonte = readFileSync("src/pages/admin/settings/WarehouseSettings.tsx", "utf8");
 
@@ -61,10 +61,14 @@ describe("WarehouseSettings: leitura honesta e gravacao sem lost update", () => 
     // `slice(indexOf(x))` com UM argumento tambem erra calado: marcador ausente
     // devolve -1 e `slice(-1)` pega o ultimo caractere — assercao passa a testar
     // nada. `fatiaAPartirDe` exige o marcador.
-    // Delimitador `const update` (a proxima declaracao do componente), e nao
-    // `};`: aquele fecha no PRIMEIRO objeto literal depois do toast, entao uma
-    // linha legitima no meio (`const auditoria = { ... };`) reprovava o teste
-    // acusando remocao do `fetchData()` que continuava exatamente onde estava.
+    // Delimitador `  if (loading)` — o inicio do render — e nao `};`: aquele fecha
+    // no PRIMEIRO objeto literal depois do toast, entao uma linha legitima no meio
+    // (`const auditoria = { ... };`) reprovava o teste acusando remocao do
+    // `fetchData()` que continuava exatamente onde estava.
+    //
+    // (Uma versao anterior deste comentario dizia `const update`, que nao e o que
+    // o codigo usa — e nem funcionaria: `const update` esta ANTES do toast no
+    // arquivo, e `fatiaEntre` exige o delimitador final DEPOIS do inicial.)
     const fim = fatiaEntre(fonte, 'toast.success("Warehouse settings saved.")', "  if (loading)", 30);
     expect(fim).toContain("fetchData()");
   });

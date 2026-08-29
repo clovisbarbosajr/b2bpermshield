@@ -46,6 +46,22 @@ function arquivosDeTeste(dir: string): string[] {
 const NL = String.fromCharCode(10);
 
 /**
+ * Uma `/` inicia REGEX (e nao divisao) quando o ultimo caractere significativo
+ * antes dela nao pode terminar uma expressao. Heuristica classica de lexer.
+ */
+function podeIniciarRegex(ateAqui: string): boolean {
+  const anterior = ateAqui.replace(/\s+$/, "");
+  if (anterior === "") return true;
+  const ultimo = anterior[anterior.length - 1];
+  // Depois destes, `/` so pode ser divisao.
+  if (/[\w$\])]/.test(ultimo)) {
+    // ...com a excecao das palavras-chave, onde `/` volta a ser regex.
+    return /\b(return|typeof|instanceof|in|of|new|delete|void|case|do|else|yield|await)$/.test(anterior);
+  }
+  return true;
+}
+
+/**
  * Troca por espaco tudo que e string, template ou comentario, preservando o
  * TAMANHO do arquivo — os numeros de linha precisam continuar certos.
  *
@@ -76,6 +92,29 @@ function semLiterais(fonte: string): string {
       const fim = fonte.indexOf("*/", i + 2);
       const ate = fim === -1 ? fonte.length : fim + 2;
       saida += branco(fonte.slice(i, ate)); i = ate; continue;
+    }
+    // REGEX LITERAL antes das aspas: `/["(]/ ` tem aspas DENTRO, e sem tratar isso
+    // uma quantidade impar delas abre uma string fantasma que branqueia o resto do
+    // arquivo — a varredura para de ver os recortes seguintes, calada. Era o furo
+    // nº1 de volta pela terceira vez, por um mecanismo novo.
+    //
+    // Distinguir divisao de regex e indecidivel sem parser; o criterio usado e o
+    // classico: uma `/` inicia regex quando o ultimo token significativo NAO pode
+    // terminar uma expressao. Erro aqui, nos dois sentidos, no maximo devolve o
+    // comportamento anterior — nunca acusa recorte que nao existe.
+    if (c === "/" && podeIniciarRegex(saida)) {
+      let j = i + 1;
+      let emClasse = false;
+      while (j < fonte.length) {
+        const d = fonte[j];
+        if (d === "\\") { j += 2; continue; }
+        if (d === "\n") break;                 // regex nao atravessa linha: nao era regex
+        if (d === "[") emClasse = true;
+        else if (d === "]") emClasse = false;
+        else if (d === "/" && !emClasse) { j++; break; }
+        j++;
+      }
+      saida += branco(fonte.slice(i, j)); i = j; continue;
     }
     if (c === '"' || c === "'" || c === "`") {
       let j = i + 1;
@@ -147,6 +186,20 @@ describe("nenhum teste recorta fonte a mao", () => {
       `const b = s.slice(s.indexOf(\`(\${x}\`), s.indexOf("b"));`,
     ];
     for (const c of pega) expect(recortesAMao(c), `deveria PEGAR: ${c}`).toHaveLength(1);
+
+    // OS CASOS DA 3ª FALHA: regex literal com aspas dentro. Uma quantidade IMPAR
+    // abria string fantasma e branqueava o resto — o recorte logo abaixo sumia.
+    const depoisDeRegex = (r: string) =>
+      `const re = ${r};${NL}const b = fonte.slice(fonte.indexOf("a"), fonte.indexOf("b"));`;
+    for (const r of ['/["(]/', '/"/', "/'/", '/[(]/', `/\\bx"y/g`]) {
+      expect(recortesAMao(depoisDeRegex(r)), `regex ${r} escondeu o recorte seguinte`)
+        .toHaveLength(1);
+    }
+    // E divisao NAO pode ser lida como regex: se fosse, o `"` seguinte abriria
+    // string fantasma e o recorte sumiria de novo.
+    expect(recortesAMao(
+      `const m = (a) / 2;${NL}const b = fonte.slice(fonte.indexOf("a"), fonte.indexOf("b"));`,
+    ), "divisao lida como regex").toHaveLength(1);
 
     const ignora = [
       'const b = s.slice(0, 40);',
