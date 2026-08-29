@@ -140,3 +140,45 @@ describe("ImportOrders: pedido orfao", () => {
     expect(ramoErro).not.toMatch(/Order created but items failed/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ImportRelatedProducts: foto antes do DELETE, restauracao se o INSERT falhar.
+//
+// `produtos_relacionados` NAO tem outra fonte — a API do B2BWave nao expoe related
+// products, entao esses vinculos so existem porque alguem importou este arquivo um
+// dia. Sem transacao, delete + insert falhando no meio apaga o que nao volta.
+// ---------------------------------------------------------------------------
+describe("ImportRelatedProducts: perda entre o delete e o insert", () => {
+  const fonte = readFileSync("src/pages/admin/tools/ImportRelatedProducts.tsx", "utf8");
+  const iFoto = fonte.indexOf('.select("produto_relacionado_id, comprar_junto")');
+  const iDelete = fonte.indexOf('.from("produtos_relacionados").delete()');
+
+  it("le o estado anterior ANTES de apagar", () => {
+    expect(iFoto, "sumiu a leitura do estado anterior").toBeGreaterThan(-1);
+    expect(iDelete, "sumiu o delete").toBeGreaterThan(-1);
+    expect(iFoto, "a foto tem que vir ANTES do delete, senao nao ha o que restaurar")
+      .toBeLessThan(iDelete);
+  });
+
+  it("nao apaga se a foto falhar", () => {
+    const bloco = fonte.slice(iFoto, iDelete);
+    expect(bloco).toMatch(/antesErr/);
+    expect(bloco).toMatch(/nothing was changed/);
+    expect(bloco, "falha ao ler tem que interromper antes do delete").toMatch(/continue;/);
+  });
+
+  it("tenta restaurar quando o insert falha", () => {
+    const iErro = fonte.indexOf("if (error) {", iDelete);
+    const ramo = fonte.slice(iErro, fonte.indexOf("continue;", iErro));
+    expect(ramo).toMatch(/restaurar/);
+    expect(ramo).toMatch(/\.from\("produtos_relacionados"\)\.insert\(restaurar\)/);
+  });
+
+  it("a mensagem distingue os tres desfechos, e nao afirma perda quando nao houve", () => {
+    const iErro = fonte.indexOf("if (error) {", iDelete);
+    const ramo = fonte.slice(iErro, fonte.indexOf("continue;", iErro));
+    expect(ramo, "falta o caso 'restaurou'").toMatch(/were restored/);
+    expect(ramo, "falta o caso 'restauracao tambem falhou'").toMatch(/also failed/);
+    expect(ramo, "falta o caso 'nao havia nada'").toMatch(/nothing was lost/);
+  });
+});

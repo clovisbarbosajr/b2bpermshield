@@ -164,6 +164,27 @@ const ImportRelatedProducts = () => {
         continue;
       }
 
+      // GUARDA O QUE VAI SER APAGADO, ANTES de apagar.
+      //
+      // Nao ha transacao aqui — delete e insert sao dois requests. Se o insert
+      // falhar, os vinculos antigos ja se foram, e `produtos_relacionados` NAO tem
+      // outra fonte: a API do B2BWave nao expoe related products, entao eles so
+      // existem porque alguem importou este arquivo um dia.
+      //
+      // Uma foto do estado anterior nao substitui transacao, mas transforma "perdi
+      // e nao sei o que era" em "perdi e tenho como devolver". A restauracao roda
+      // no ramo de erro abaixo.
+      const { data: antes, error: antesErr } = await supabase
+        .from("produtos_relacionados")
+        .select("produto_relacionado_id, comprar_junto")
+        .eq("produto_id", mainId);
+      if (antesErr) {
+        // NAO apaga sem ter a foto. Preferir "nao mexi" a "apaguei e nao sei o que
+        // era" — este arquivo e a unica fonte desses vinculos.
+        res.push({ row: i + 2, product: label, status: "error", message: `Could not read existing links, nothing was changed: ${antesErr.message}` });
+        continue;
+      }
+
       // Erro no delete tambem PARA: seguir para o insert com o delete falhado
       // duplicaria os vinculos.
       const { error: delErr } = await supabase.from("produtos_relacionados").delete().eq("produto_id", mainId);
@@ -182,14 +203,28 @@ const ImportRelatedProducts = () => {
         // expoe related products). "error.message" sozinho fazia o operador ler
         // "deu erro" e entender "nao mexeu"; o que aconteceu foi o contrario.
         // A mensagem tem que dizer o que perdeu e o que reimportar.
+        // TENTA DEVOLVER o que a foto guardou. Se conseguir, o produto volta ao
+        // estado anterior e a linha do relatorio para de ser uma perda.
+        const restaurar = (antes ?? []).map((r: any) => ({
+          produto_id: mainId,
+          produto_relacionado_id: r.produto_relacionado_id,
+          comprar_junto: r.comprar_junto,
+        }));
+        const { error: restErr } = restaurar.length > 0
+          ? await supabase.from("produtos_relacionados").insert(restaurar)
+          : { error: null as any };
+
         res.push({
           row: i + 2, product: label, status: "error",
-          // SEM contagem de propósito: o `delete` acima nao pede `.select()`, e
-          // portanto este codigo NAO SABE quantos vinculos existiam antes. A
-          // primeira versao desta mensagem dizia "N link(s) lost" usando
-          // `relIds.length` — que e quantos eu IA CRIAR, nao quantos apaguei. O
-          // que da para afirmar e o que esta escrito.
-          message: `Existing links were removed and could NOT be recreated — re-run this file for this product. ${error.message}`,
+          // A contagem agora EXISTE e e verdadeira — vem da foto, nao de
+          // `relIds.length` (que era quantos eu IA CRIAR, nao quantos apaguei).
+          // Uma versao anterior desta mensagem afirmava "N link(s) lost" com o
+          // numero errado.
+          message: restErr
+            ? `Existing links were removed and could NOT be recreated, and restoring the previous ${restaurar.length} link(s) also failed — re-run this file for this product. ${error.message} / ${restErr.message}`
+            : restaurar.length > 0
+              ? `Import failed, but the previous ${restaurar.length} link(s) were restored — fix the file and try again. ${error.message}`
+              : `Import failed and this product had no links before, so nothing was lost. ${error.message}`,
         });
         continue;
       }
