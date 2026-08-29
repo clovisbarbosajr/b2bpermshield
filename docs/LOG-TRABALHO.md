@@ -3775,3 +3775,49 @@ explicitas e falha fechada), `admin/Relatorios.tsx` e os 13 relatorios de
 admin e NUNCA lido no checkout. Combinado com "Show as choice to customers"
 desmarcado, a opcao some da tela e o pedido sai com frete 0 — dinheiro. Fazer o
 toggle funcionar muda o valor cobrado, entao e decisao de produto.
+
+## 28/ago — Reenvio, rodada 4 (FEITO, commit 207250e)
+
+Cinco achados, todos CONFIRMADOS pelo cetico (nenhum derrubado). Quatro
+corrigidos, dois pendentes de decisao do dono.
+
+1. **Todo erro HTTP virava a mesma frase.** O functions-js lanca ANTES de ler o
+   corpo em qualquer status fora de 2xx e devolve `data: null` — entao
+   `value.data.error` era codigo morto e sobrava `error.message`, que e a string
+   fixa "Edge Function returned a non-2xx status code". 403 de permissao, 400 de
+   config e 502 de provedor caido diziam a mesma coisa. O motivo real esta em
+   `error.context`, um Response ainda nao lido. Lido UMA vez (o `value.response`
+   e o MESMO objeto — ler os dois estoura) e dentro de try/catch, porque 502 de
+   gateway responde HTML.
+2. **Rede caindo depois do envio virava "Nothing was sent".** `invoke` NUNCA
+   rejeita: o catch dele devolve `{data:null, error}`, e queda de rede vira
+   `FunctionsFetchError`. Nesse instante o servidor JA gravou `notification_log`
+   com status `sent`. A tela negava um e-mail que saiu, o operador reenviava e o
+   cliente recebia duas confirmacoes — nao ha idempotencia no `send-email`.
+   Agora manda conferir o log antes de reenviar.
+3. **Fechar o modal nao limpava a selecao.** Reabrir vinha com as mesmas caixas
+   marcadas; depois de um envio parcial, o proximo Send reenviava para quem ja
+   tinha recebido. O estado inicial e tudo desmarcado.
+4. **"To customer" e "To email" eram caminho morto para manager/warehouse.** Os
+   dois abrem a tela (rota `staff`) e o Resend nao tinha checagem de papel, mas o
+   `send-email` tem: o gate anti-relay recusa envio para quem nao e o proprio
+   solicitante, e `force`/`toOverride` exigem admin. Desabilitadas com o motivo a
+   vista — nao escondidas, porque a capacidade ja nao existia e o operador
+   precisa saber a quem pedir.
+
+Verificacao: `npm test` 313/313, `tsc` limpo, build ok. Mutacao: 5 aplicadas,
+todas reprovam a suite.
+
+## 28/ago — Estresse de paginacao (FEITO, commit 3f5c86a)
+
+A regra do dono manda exercitar sob concorrencia, nao so ler o codigo. A tela de
+entrada de producao e a de status sao usadas ao mesmo tempo pela mesma equipe, e
+cada `.range()` e um request separado. O teste reproduz o servidor (reordena a
+cada request, como o Postgres) e insere entre as paginas:
+
+- `created_at DESC` duplica de fato — e o teste FALHA se parar de duplicar, senao
+  o caso ASC nao estaria provando nada;
+- ASC nao duplica com 50 insercoes entre paginas, nem com 200 a cada pagina sobre
+  9.000 linhas;
+- delecao concorrente pode fazer PULAR, nunca repetir (uma linha a menos se
+  resolve com F5; duplicata quebra contagem).
