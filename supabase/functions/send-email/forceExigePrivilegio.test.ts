@@ -27,8 +27,11 @@ describe("send-email: `force` exige chamador privilegiado", () => {
     expect(iInterruptor, "sumiu a checagem do interruptor mestre").toBeGreaterThan(-1);
   });
 
-  // O DEFEITO ERA DE ORDEM. `isPrivilegedCaller` calculado depois do uso valia
-  // `undefined` na pratica — todas as strings estavam la, e a trava nao existia.
+  // O DEFEITO ERA DE ORDEM, mas nao de TDZ: a condicao antiga nao mencionava
+  // `isPrivilegedCaller` nenhuma vez — ela lia `body.force` CRU, sem checagem de
+  // privilegio alguma. `isPrivilegedCaller` existia, so que 49 linhas depois e
+  // para outros checks. Por isso a ordem importa: manter o calculo antes e o que
+  // permite a condicao usa-lo.
   it("quem esta chamando e resolvido ANTES do interruptor", () => {
     expect(iPrivilegiado, "`isPrivilegedCaller` voltou para depois do interruptor")
       .toBeLessThan(iInterruptor);
@@ -37,7 +40,10 @@ describe("send-email: `force` exige chamador privilegiado", () => {
   });
 
   it("o `force` do interruptor passa por `forcePermitido`, nunca por `body.force` cru", () => {
-    const linha = fonte.slice(iInterruptor, iInterruptor + 120);
+    // Ancorado na LINHA do `if`, e nao num numero de bytes: com `+ 120` a janela
+    // alcancava o comentario seguinte, e enxugar comentario (mudanca puramente
+    // cosmetica) reprovava a suite com uma mensagem falsa sobre seguranca.
+    const linha = fonte.slice(iInterruptor, fonte.indexOf("\n", iInterruptor));
     expect(linha, "o interruptor voltou a olhar `body.force` direto").not.toMatch(/body\.force/);
     expect(linha).toMatch(/!forcePermitido/);
   });

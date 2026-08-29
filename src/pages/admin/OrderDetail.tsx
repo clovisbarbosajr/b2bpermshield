@@ -263,10 +263,35 @@ const OrderDetail = () => {
     }
     const results = await Promise.allSettled(calls);
     setResending(false);
-    const failed = results.filter((r) => r.status === "rejected" || (r as any).value?.error || (r as any).value?.data?.error);
+    // `skipped` E FALHA AQUI, e nao era tratado.
+    //
+    // O `send-email` responde `{ skipped: true }` (HTTP 200, sem `error`) quando o
+    // envio foi BLOQUEADO — canal de e-mail desligado no interruptor mestre, ou o
+    // `email_on_*` daquele tipo desligado. O filtro so olhava `error`, entao um
+    // envio recusado caia no `else` e a tela dizia "Order confirmation re-sent."
+    // O staff acreditava ter reenviado, e o cliente nunca recebia.
+    //
+    // O caso ficou ALCANCAVEL com a correcao de 28/ago no `send-email`: o `force`
+    // passou a exigir admin, entao manager e warehouse — que abrem esta tela e
+    // veem este botao — passam a ser barrados. O botao continua visivel para eles
+    // de proposito: quem decide se staff pode reenviar e o dono, e mentir sobre o
+    // resultado seria pior que qualquer das duas respostas.
+    const bloqueado = (r: any) => r.status === "fulfilled" && r.value?.data?.skipped === true;
+    const failed = results.filter((r) => r.status === "rejected" || (r as any).value?.error || (r as any).value?.data?.error || bloqueado(r));
     if (failed.length) {
-      const msg = (failed[0] as any)?.value?.data?.error || (failed[0] as any)?.value?.error?.message || "unknown error";
-      toast.error(`Some emails failed: ${msg}`);
+      const primeiro: any = failed[0];
+      const motivoBloqueio = primeiro?.value?.data?.skipped
+        ? (primeiro.value.data.reason ?? "the email channel or this notification is turned off")
+        : null;
+      const msg = motivoBloqueio
+        || primeiro?.value?.data?.error
+        || primeiro?.value?.error?.message
+        || "unknown error";
+      toast.error(
+        motivoBloqueio
+          ? `Nothing was sent: ${msg}. Ask an admin to turn the channel on, or to resend.`
+          : `Some emails failed: ${msg}`,
+      );
     } else {
       toast.success("Order confirmation re-sent.");
       setResendOpen(false);
