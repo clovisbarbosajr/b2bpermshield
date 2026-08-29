@@ -6,7 +6,7 @@ import {
   DollarSign, BarChart3, Settings, Newspaper, FileText, UserCheck, Wrench,
   ChevronDown, Image, SlidersHorizontal, Tag, Upload, Download, FileDown,
   FileUp, ListOrdered, UserCog, CreditCard, Truck, Lock, Link2, Layers,
-  Percent, Receipt, Ruler, Building2, UserPlus, Mail, KeyRound, Database,
+  Percent, Receipt, Ruler, Building2, UserPlus, Mail, Database,
   Activity, ShoppingCart, TrendingUp, PieChart, PackageSearch, CalendarRange,
   LayoutGrid, ScrollText, ClipboardCheck, RefreshCw, ClipboardSignature, Bell, History, Factory
 } from "lucide-react";
@@ -170,9 +170,15 @@ const adminNavEntries: NavEntry[] = [
       { to: "/admin/settings/activity-logs", icon: ClipboardSignature, label: "Activity Logs" },
       { to: "/admin/settings/notifications", icon: Bell, label: "Notifications" },
       { to: "/admin/settings/notifications-log", icon: History, label: "Notifications Log" },
-      { to: "/admin/settings/oauth-applications", icon: KeyRound, label: "Oauth Applications" },
+      // REMOVIDOS em 28/ago/2026: "Oauth Applications" e "API Keys".
+      //
+      // As duas rotas foram comentadas no `App.tsx` em 25/ago porque as telas nao
+      // faziam nada — a chave `bj_...` da tela de API nao autentica coisa alguma (a
+      // edge `api` compara com `configuracoes.api_token`), e nao existe endpoint
+      // OAuth no sistema. Mas o comentario de la afirmava "ja estava fora do menu",
+      // e nao estava: os dois itens continuavam aqui, levando a rota inexistente.
+      // Quem clicasse caia no 404 sem entender por que.
       { to: "/admin/settings/extra-fields", icon: Database, label: "Extra Fields" },
-      { to: "/admin/settings/api-keys", icon: KeyRound, label: "API Keys" },
       { to: "/admin/settings/b2bwave-sync", icon: RefreshCw, label: "B2B Wave Sync" },
     ],
   },

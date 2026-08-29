@@ -105,9 +105,7 @@ import EmailSettings from "./pages/admin/settings/EmailSettings";
 import Notificacoes from "./pages/admin/settings/Notificacoes";
 import NotificacoesLog from "./pages/admin/settings/NotificacoesLog";
 // import ExtraFields from "./pages/admin/settings/ExtraFields";  // rota comentada abaixo
-// import ApiKeys from "./pages/admin/settings/ApiKeys";  // rota comentada abaixo
 import B2BWaveSync from "./pages/admin/settings/B2BWaveSync";
-// import OauthApplications from "./pages/admin/settings/OauthApplications";  // rota comentada abaixo
 const queryClient = new QueryClient();
 
 // Admin-only routes
@@ -263,16 +261,18 @@ const App = () => (
                 * As chaves geradas aqui nao autenticam nada. A API real compara o header `x-api-token` com `configuracoes.api_token` (`functions/api/index.ts`); uma chave `bj_...` desta tela devolve 403. Os `scopes` e `allowed_ips` tambem nao sao lidos — o token unico da acesso total.
                 * PARA VOLTAR: a edge `api` teria que procurar o token recebido em `api_keys` (checando `ativo`, `allowed_ips` e `scopes`) em vez de comparar com `configuracoes.api_token`.
                 *
-                * Ja estava fora do menu; isto fecha o link direto.
-                * <Route path="/admin/settings/api-keys" element={<A><ApiKeys /></A>} />
+                * O ARQUIVO FOI APAGADO em 28/ago/2026, junto com o item de menu
+                * que ainda apontava para ca — este comentario dizia que a tela ja
+                * estava fora do menu, e nao estava.
                 */}
               <Route path="/admin/settings/b2bwave-sync" element={<A><B2BWaveSync /></A>} />
               {/* TELA REMOVIDA em 25/ago/2026 — nao fazia nada.
                 * Nao existe endpoint OAuth neste sistema. Nenhuma das edge functions fala `/authorize` ou `/token`, e o `client_id`/`client_secret` gerados aqui nao sao validados por nada. O `redirect_uri` padrao aponta para um app mobile que nao existe.
                 * PARA VOLTAR: precisaria de uma edge function OAuth2 completa (authorize + token + tabela de codigos), validando contra `oauth_applications`. Hoje nao ha nem o esqueleto.
                 *
-                * Ja estava fora do menu; isto fecha o link direto.
-                * <Route path="/admin/settings/oauth-applications" element={<A><OauthApplications /></A>} />
+                * O ARQUIVO FOI APAGADO em 28/ago/2026, junto com o item de menu
+                * que ainda apontava para ca — este comentario dizia que a tela ja
+                * estava fora do menu, e nao estava.
                 */}
               {/* Settings — staff COM checagem de permissão por papel */}
               <Route path="/admin/settings/edit-password" element={<S><EditPassword /></S>} />
