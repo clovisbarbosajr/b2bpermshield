@@ -53,6 +53,25 @@ describe("Coupons: as datas vao com o fuso do admin", () => {
       .not.toMatch(/data_inicio: form\.data_inicio \|\| null/);
   });
 
+  // O ROUND-TRIP: a volta tem que desfazer o fuso que a ida aplicou.
+  //
+  // `split("T")[0]` corta a string UTC. Com a ida gravando `2026-08-10` fim do
+  // dia em UTC-4 como `2026-08-11T03:59:59Z`, a volta devolvia `2026-08-11` — um
+  // dia A MAIS. E como o dialogo reabre com a data errada, cada Edit+Save
+  // empurrava o fim do cupom mais um dia: deriva cumulativa, e o admin so
+  // descobre quando o cupom morre fora de hora.
+  it("`openEdit` converte de volta pelo fuso local, nao corta a string UTC", () => {
+    expect(cup, "`split(\"T\")[0]` sobre string UTC volta um dia errado")
+      .not.toMatch(/data_fim: r\.data_fim\?\.split\("T"\)/);
+    expect(cup).not.toMatch(/data_inicio: r\.data_inicio\?\.split\("T"\)/);
+    expect(cup).toMatch(/const soData = /);
+    // `getFullYear/getMonth/getDate` leem no fuso LOCAL — o mesmo que a ida usou.
+    expect(cup).toMatch(/d\.getFullYear\(\)/);
+    expect(cup, "`toISOString` aqui reintroduz o UTC que a ida desfez")
+      .not.toMatch(/soData[\s\S]{0,300}?toISOString/);
+    expect(cup).toMatch(/data_inicio: soData\(r\.data_inicio\), data_fim: soData\(r\.data_fim\)/);
+  });
+
   it("data invalida nao vira `Invalid Date` no banco", () => {
     expect(cup).toMatch(/Number\.isNaN\(d\.getTime\(\)\) \? null :/);
   });

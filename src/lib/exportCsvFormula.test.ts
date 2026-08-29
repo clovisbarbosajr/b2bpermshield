@@ -56,10 +56,22 @@ describe("escaparCelulaCSV: prefixo anti-formula", () => {
     expect(c(undefined)).toBe('""');
   });
 
-  // O `-` cobre numero negativo que chegue como STRING (vindo do banco como
-  // `numeric`, por exemplo). Vira texto na planilha — o preco de nao conseguir
-  // distinguir `-10` de `-1+1` sem avaliar. Quem exporta total manda `number`.
-  it("negativo em string vira texto, e isso e deliberado", () => {
-    expect(c("-10")).toBe(`"'-10"`);
+  // NUMERO E TELEFONE EM STRING NAO SAO FORMULA.
+  //
+  // A primeira versao prefixava tudo que comecasse com `+`/`-`, e isso quebrou o
+  // ciclo export -> Excel -> import que `Ferramentas.tsx` descreve como uso
+  // normal: `clientes.telefone` e TEXT e telefone B2B comeca com `+`, entao
+  // `+1 786 555 0100` voltava do arquivo com o apostrofo e ele era GRAVADO no
+  // banco. Mesmo caminho em `ProductExport` (`barcode`, `reference_code`).
+  it("telefone e numero em string passam LIMPOS", () => {
+    for (const ok of ["+1 786 555 0100", "-10", "+55 (11) 98765-4321", "-1234.56", "+1-800-555-0100"]) {
+      expect(String(c(ok)), `corrompeu dado legitimo: ${ok}`).not.toMatch(/^"'/);
+    }
+  });
+
+  it("mas formula com `+`/`-` continua neutralizada", () => {
+    for (const mau of ["+1+1", "-1+A2", "+SUM(A1:A9)", "-HYPERLINK(\"http://x\")"]) {
+      expect(String(c(mau)), `deixou passar formula: ${mau}`).toMatch(/^"'/);
+    }
   });
 });

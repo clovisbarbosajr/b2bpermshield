@@ -9,6 +9,15 @@ import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+
+/** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
+ *
+ * `i + 2` supunha que o indice do array batia com o arquivo — e nao bate: linha
+ * em branco e descartada pelo parser, e campo entre aspas pode ocupar varias
+ * linhas. Num CSV vindo do Excel, que gosta das duas coisas, o numero reportado
+ * mandava o admin para o lugar errado. `parseCSV` carimba `__linha` com o numero
+ * real; o `i + 2` fica so como reserva para chamada que nao venha de la. */
+const linhaDoArquivo = (r: any, i: number): number => r?.__linha ?? i + 2;
 const TEMPLATE_HEADERS = ["customer_email", "product_sku", "quantity", "price", "status", "po_number", "delivery_date"];
 const TEMPLATE_ROW = ["john@acme.com", "PROD-001", "10", "45.90", "submitted", "PO-2024-001", "2024-12-31"];
 
@@ -114,11 +123,11 @@ const ImportOrders = () => {
       const key = `${email} / PO: ${poNumber || "(none)"}`;
 
       if (!email) {
-        groupRowErrors.push({ row: i + 2, key, status: "error", message: "Missing customer_email" });
+        groupRowErrors.push({ row: linhaDoArquivo(r, i), key, status: "error", message: "Missing customer_email" });
         continue;
       }
       if (!sku) {
-        groupRowErrors.push({ row: i + 2, key, status: "error", message: "Missing product_sku" });
+        groupRowErrors.push({ row: linhaDoArquivo(r, i), key, status: "error", message: "Missing product_sku" });
         continue;
       }
 
@@ -129,7 +138,7 @@ const ImportOrders = () => {
       const quantityRaw = String(r["quantity"] ?? "").trim();
       const quantity = Number(quantityRaw);
       if (!Number.isInteger(quantity) || quantity < 1) {
-        groupRowErrors.push({ row: i + 2, key, status: "error", message: `Invalid quantity "${quantityRaw}" — must be a whole number of 1 or more` });
+        groupRowErrors.push({ row: linhaDoArquivo(r, i), key, status: "error", message: `Invalid quantity "${quantityRaw}" — must be a whole number of 1 or more` });
         continue;
       }
       // O MESMO defeito da quantidade, uma linha acima, so que em dinheiro:
@@ -144,7 +153,7 @@ const ImportOrders = () => {
       const priceRaw = String(r["price"] ?? "").trim();
       const price = priceRaw === "" ? NaN : Number(priceRaw);
       if (!Number.isFinite(price)) {
-        groupRowErrors.push({ row: i + 2, key, status: "error", message: `Invalid price "${priceRaw}"` });
+        groupRowErrors.push({ row: linhaDoArquivo(r, i), key, status: "error", message: `Invalid price "${priceRaw}"` });
         continue;
       }
 

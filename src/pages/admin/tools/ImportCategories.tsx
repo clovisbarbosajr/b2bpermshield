@@ -9,6 +9,15 @@ import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+
+/** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
+ *
+ * `i + 2` supunha que o indice do array batia com o arquivo — e nao bate: linha
+ * em branco e descartada pelo parser, e campo entre aspas pode ocupar varias
+ * linhas. Num CSV vindo do Excel, que gosta das duas coisas, o numero reportado
+ * mandava o admin para o lugar errado. `parseCSV` carimba `__linha` com o numero
+ * real; o `i + 2` fica so como reserva para chamada que nao venha de la. */
+const linhaDoArquivo = (r: any, i: number): number => r?.__linha ?? i + 2;
 const TEMPLATE_HEADERS = ["name", "parent_name", "description", "ordem"];
 const TEMPLATE_ROW = ["Impermeabilizantes", "Produtos QuÃ­micos", "Linha completa de impermeabilizantes", "1"];
 
@@ -31,8 +40,19 @@ const ImportCategories = () => {
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
-    const text = await file.text();
-    const rows = parseCSV(text);
+    // O PARSE PODE LANCAR, e este handler e chamado SOLTO do `onChange`/`onDrop`
+    // (`if (f) handleFile(f)`), sem `.catch()`. Sem este `try`, um CSV com coluna
+    // repetida — que `parseCSV` passou a recusar — virava rejeicao nao tratada: o
+    // nome do arquivo aparecia na tela e NADA acontecia. Sem toast, sem erro, sem
+    // spinner. Pior que o defeito que a recusa veio consertar.
+    let rows: Record<string, string>[];
+    try {
+      const text = await file.text();
+      rows = parseCSV(text);
+    } catch (e: any) {
+      toast.error("Could not read this file: " + (e?.message ?? String(e)));
+      return;
+    }
     if (rows.length === 0) { toast.error("No data rows found"); return; }
 
     setImporting(true);
@@ -60,7 +80,7 @@ const ImportCategories = () => {
       const name = r["name"]?.trim();
 
       if (!name) {
-        res.push({ row: i + 2, name: "â€”", status: "error", message: "Missing name" });
+        res.push({ row: linhaDoArquivo(r, i), name: "â€”", status: "error", message: "Missing name" });
         continue;
       }
 
@@ -70,7 +90,7 @@ const ImportCategories = () => {
       if (parentName) {
         categoriaPaiId = nameMap[parentName.toLowerCase()] ?? null;
         if (!categoriaPaiId) {
-          res.push({ row: i + 2, name, status: "error", message: `Parent category not found: ${parentName}` });
+          res.push({ row: linhaDoArquivo(r, i), name, status: "error", message: `Parent category not found: ${parentName}` });
           continue;
         }
       }
@@ -103,7 +123,7 @@ const ImportCategories = () => {
         ? await buscaExistente.eq("parent_id", categoriaPaiId).maybeSingle()
         : await buscaExistente.is("parent_id", null).maybeSingle();
       if (buscaErr) {
-        res.push({ row: i + 2, name, status: "error", message: `Could not check whether this category already exists, nothing written: ${buscaErr.message}` });
+        res.push({ row: linhaDoArquivo(r, i), name, status: "error", message: `Could not check whether this category already exists, nothing written: ${buscaErr.message}` });
         continue;
       }
 
@@ -120,11 +140,11 @@ const ImportCategories = () => {
         : await supabase.from("categorias").insert(campos).select("id").maybeSingle();
 
       if (error) {
-        res.push({ row: i + 2, name, status: "error", message: error.message });
+        res.push({ row: linhaDoArquivo(r, i), name, status: "error", message: error.message });
       } else {
         // Deixa a categoria disponível como PAI para as linhas seguintes do CSV.
         if (gravada?.id) nameMap[name.toLowerCase()] = gravada.id;
-        res.push({ row: i + 2, name, status: "ok", message: existente?.id ? "Updated" : "Created" });
+        res.push({ row: linhaDoArquivo(r, i), name, status: "ok", message: existente?.id ? "Updated" : "Created" });
       }
     }
 

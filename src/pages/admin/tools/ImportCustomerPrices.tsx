@@ -9,6 +9,15 @@ import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+
+/** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
+ *
+ * `i + 2` supunha que o indice do array batia com o arquivo — e nao bate: linha
+ * em branco e descartada pelo parser, e campo entre aspas pode ocupar varias
+ * linhas. Num CSV vindo do Excel, que gosta das duas coisas, o numero reportado
+ * mandava o admin para o lugar errado. `parseCSV` carimba `__linha` com o numero
+ * real; o `i + 2` fica so como reserva para chamada que nao venha de la. */
+const linhaDoArquivo = (r: any, i: number): number => r?.__linha ?? i + 2;
 const TEMPLATE_HEADERS = ["customer_email", "product_sku", "price"];
 const TEMPLATE_ROW = ["john@acme.com", "PROD-001", "89.90"];
 
@@ -31,8 +40,19 @@ const ImportCustomerPrices = () => {
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
-    const text = await file.text();
-    const rows = parseCSV(text);
+    // O PARSE PODE LANCAR, e este handler e chamado SOLTO do `onChange`/`onDrop`
+    // (`if (f) handleFile(f)`), sem `.catch()`. Sem este `try`, um CSV com coluna
+    // repetida — que `parseCSV` passou a recusar — virava rejeicao nao tratada: o
+    // nome do arquivo aparecia na tela e NADA acontecia. Sem toast, sem erro, sem
+    // spinner. Pior que o defeito que a recusa veio consertar.
+    let rows: Record<string, string>[];
+    try {
+      const text = await file.text();
+      rows = parseCSV(text);
+    } catch (e: any) {
+      toast.error("Could not read this file: " + (e?.message ?? String(e)));
+      return;
+    }
     if (rows.length === 0) { toast.error("No data rows found"); return; }
 
     setImporting(true);
@@ -96,30 +116,30 @@ const ImportCustomerPrices = () => {
       const key = `${emailBruto} / ${sku}`;
 
       if (!emailBruto || !sku) {
-        res.push({ row: i + 2, key, status: "error", message: "Missing customer_email or product_sku" });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: "Missing customer_email or product_sku" });
         continue;
       }
       const email = emailBruto.toLowerCase();
 
       if (emailAmbiguo.has(email)) {
-        res.push({ row: i + 2, key, status: "error", message: `More than one customer record uses ${emailBruto} — merge them before importing prices` });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: `More than one customer record uses ${emailBruto} — merge them before importing prices` });
         continue;
       }
 
       const clienteId = emailMap[email];
       if (!clienteId) {
-        res.push({ row: i + 2, key, status: "error", message: `Customer not found: ${emailBruto}` });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: `Customer not found: ${emailBruto}` });
         continue;
       }
 
       if (skuAmbiguo.has(sku)) {
-        res.push({ row: i + 2, key, status: "error", message: `More than one product uses SKU ${sku} — give them distinct codes before importing prices` });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: `More than one product uses SKU ${sku} — give them distinct codes before importing prices` });
         continue;
       }
 
       const produtoId = skuMap[sku];
       if (!produtoId) {
-        res.push({ row: i + 2, key, status: "error", message: `Product not found: ${sku}` });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: `Product not found: ${sku}` });
         continue;
       }
 
@@ -130,7 +150,7 @@ const ImportCustomerPrices = () => {
       // passa decimal puro e nao negativo.
       const precoBruto = (r["price"] ?? "").trim();
       if (!/^\d+(\.\d+)?$/.test(precoBruto)) {
-        res.push({ row: i + 2, key, status: "error", message: `Invalid price: ${r["price"]} (use a plain number like 89.90)` });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: `Invalid price: ${r["price"]} (use a plain number like 89.90)` });
         continue;
       }
       const preco = parseFloat(precoBruto);
@@ -148,20 +168,20 @@ const ImportCustomerPrices = () => {
       if (buscaErr) {
         // Falha FECHADO: seguir para o insert criaria uma segunda linha de preco
         // para o mesmo par, e ai o servidor cobra a que ele achar primeiro.
-        res.push({ row: i + 2, key, status: "error", message: buscaErr.message });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: buscaErr.message });
         continue;
       }
       if (!existentes) {
         // Sem erro E sem linhas nao e um estado que este select produz. Nao
         // inventa: nao afirma duplicata, so recusa em vez de arriscar o insert.
-        res.push({ row: i + 2, key, status: "error", message: "Could not read the current custom price, nothing written" });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: "Could not read the current custom price, nothing written" });
         continue;
       }
       if (existentes.length > 1) {
         // Sem o UNIQUE a tabela PODE ja ter duplicata. Atualizar uma so deixaria
         // a outra valendo, e `preco_para_cliente` faz `SELECT ... LIMIT 1` sem
         // ordem definida — qual preco vale seria sorteio.
-        res.push({ row: i + 2, key, status: "error", message: "Duplicate custom-price rows for this customer/product — remove the extras before importing" });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: "Duplicate custom-price rows for this customer/product — remove the extras before importing" });
         continue;
       }
       const jaTinha = existentes.length === 1;
@@ -170,9 +190,9 @@ const ImportCustomerPrices = () => {
         : await supabase.from("produto_precos_cliente").insert({ cliente_id: clienteId, produto_id: produtoId, preco });
 
       if (error) {
-        res.push({ row: i + 2, key, status: "error", message: error.message });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: error.message });
       } else {
-        res.push({ row: i + 2, key, status: "ok", message: jaTinha ? "Updated" : "Created" });
+        res.push({ row: linhaDoArquivo(r, i), key, status: "ok", message: jaTinha ? "Updated" : "Created" });
       }
     }
 

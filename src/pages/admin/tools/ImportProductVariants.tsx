@@ -9,6 +9,15 @@ import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+
+/** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
+ *
+ * `i + 2` supunha que o indice do array batia com o arquivo — e nao bate: linha
+ * em branco e descartada pelo parser, e campo entre aspas pode ocupar varias
+ * linhas. Num CSV vindo do Excel, que gosta das duas coisas, o numero reportado
+ * mandava o admin para o lugar errado. `parseCSV` carimba `__linha` com o numero
+ * real; o `i + 2` fica so como reserva para chamada que nao venha de la. */
+const linhaDoArquivo = (r: any, i: number): number => r?.__linha ?? i + 2;
 // `variant_name` e `price` SAIRAM do modelo: `produto_variantes` nao tem coluna
 // para nenhum dos dois (`id, produto_id, codigo, valores_opcao, quantidade,
 // estoque_reservado, imagem_url, ativo` — ver `types.ts`), e o codigo NUNCA os
@@ -103,20 +112,20 @@ const ImportProductVariants = () => {
       const variantSku = r["variant_sku"]?.trim();
 
       if (!parentSku || !variantSku) {
-        res.push({ row: i + 2, sku: variantSku || "â€”", status: "error", message: "Missing parent_sku or variant_sku" });
+        res.push({ row: linhaDoArquivo(r, i), sku: variantSku || "â€”", status: "error", message: "Missing parent_sku or variant_sku" });
         continue;
       }
 
       const parentId = skuMap[parentSku];
       if (!parentId) {
-        res.push({ row: i + 2, sku: variantSku, status: "error", message: `Parent product not found: ${parentSku}` });
+        res.push({ row: linhaDoArquivo(r, i), sku: variantSku, status: "error", message: `Parent product not found: ${parentSku}` });
         continue;
       }
 
       const stockBruto = String(r["stock"] ?? "").trim();
       const stock = stockBruto === "" ? 0 : Number(stockBruto);
       if (!Number.isInteger(stock) || stock < 0) {
-        res.push({ row: i + 2, sku: variantSku, status: "error", message: `Invalid stock "${stockBruto}"` });
+        res.push({ row: linhaDoArquivo(r, i), sku: variantSku, status: "error", message: `Invalid stock "${stockBruto}"` });
         continue;
       }
 
@@ -144,13 +153,13 @@ const ImportProductVariants = () => {
       }
 
       if (error) {
-        res.push({ row: i + 2, sku: variantSku, status: "error", message: error.message });
+        res.push({ row: linhaDoArquivo(r, i), sku: variantSku, status: "error", message: error.message });
       } else {
         // Diz o que foi DESCARTADO. "Inserted" sozinho afirmava mais do que o
         // codigo tinha feito quando o arquivo trazia preco ou nome de variante.
         const descartadas = COLUNAS_SEM_DESTINO.filter((c) => String(r[c] ?? "").trim() !== "");
         res.push({
-          row: i + 2, sku: variantSku, status: "ok",
+          row: linhaDoArquivo(r, i), sku: variantSku, status: "ok",
           message: (jaExiste ? "Updated" : "Inserted")
             + (descartadas.length ? ` — ignored, no such column on variants: ${descartadas.join(", ")}` : ""),
         });

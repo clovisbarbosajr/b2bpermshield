@@ -10,6 +10,15 @@ import * as XLSX from "xlsx";
 
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { parseCSV } from "@/lib/csv";
+
+/** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
+ *
+ * `i + 2` supunha que o indice do array batia com o arquivo — e nao bate: linha
+ * em branco e descartada pelo parser, e campo entre aspas pode ocupar varias
+ * linhas. Num CSV vindo do Excel, que gosta das duas coisas, o numero reportado
+ * mandava o admin para o lugar errado. `parseCSV` carimba `__linha` com o numero
+ * real; o `i + 2` fica so como reserva para chamada que nao venha de la. */
+const linhaDoArquivo = (r: any, i: number): number => r?.__linha ?? i + 2;
 // IMPORTA RELATED PRODUCTS do export de produtos do B2BWave.
 // A API do B2BWave NÃO expõe related products (confirmado na documentação oficial),
 // mas o export (Products > Export no admin deles) inclui as colunas:
@@ -128,7 +137,7 @@ const ImportRelatedProducts = () => {
         || (r["product_sku"] && bySku.get(r["product_sku"].toLowerCase()))
         || null;
       if (!mainId) {
-        res.push({ row: i + 2, product: label, status: "error", message: "Product not found locally" });
+        res.push({ row: linhaDoArquivo(r, i), product: label, status: "error", message: "Product not found locally" });
         continue;
       }
       // "-" é slot vazio no export do B2BWave — ignora. Códigos são product_sku de outros produtos.
@@ -151,7 +160,7 @@ const ImportRelatedProducts = () => {
       if (!relIds.length) {
         if (relCodes.length) {
           res.push({
-            row: i + 2, product: label, status: "error",
+            row: linhaDoArquivo(r, i), product: label, status: "error",
             message: `Related codes not found: ${missing.join(", ")} — nothing was changed for this product.`,
           });
         } else {
@@ -159,7 +168,7 @@ const ImportRelatedProducts = () => {
           // Antes isto contava como `cleared` — mas o delete ja tinha rodado, e
           // "sem codigo no arquivo" virava "apague os relacionados deste
           // produto". Agora nao mexe.
-          res.push({ row: i + 2, product: label, status: "skip", message: "No related products in file — unchanged" });
+          res.push({ row: linhaDoArquivo(r, i), product: label, status: "skip", message: "No related products in file — unchanged" });
         }
         continue;
       }
@@ -181,7 +190,7 @@ const ImportRelatedProducts = () => {
       if (antesErr) {
         // NAO apaga sem ter a foto. Preferir "nao mexi" a "apaguei e nao sei o que
         // era" — este arquivo e a unica fonte desses vinculos.
-        res.push({ row: i + 2, product: label, status: "error", message: `Could not read existing links, nothing was changed: ${antesErr.message}` });
+        res.push({ row: linhaDoArquivo(r, i), product: label, status: "error", message: `Could not read existing links, nothing was changed: ${antesErr.message}` });
         continue;
       }
 
@@ -189,7 +198,7 @@ const ImportRelatedProducts = () => {
       // duplicaria os vinculos.
       const { error: delErr } = await supabase.from("produtos_relacionados").delete().eq("produto_id", mainId);
       if (delErr) {
-        res.push({ row: i + 2, product: label, status: "error", message: `Could not clear existing links: ${delErr.message}` });
+        res.push({ row: linhaDoArquivo(r, i), product: label, status: "error", message: `Could not clear existing links: ${delErr.message}` });
         continue;
       }
 
@@ -215,7 +224,7 @@ const ImportRelatedProducts = () => {
           : { error: null as any };
 
         res.push({
-          row: i + 2, product: label, status: "error",
+          row: linhaDoArquivo(r, i), product: label, status: "error",
           // A contagem agora EXISTE e e verdadeira — vem da foto, nao de
           // `relIds.length` (que era quantos eu IA CRIAR, nao quantos apaguei).
           // Uma versao anterior desta mensagem afirmava "N link(s) lost" com o
@@ -230,7 +239,7 @@ const ImportRelatedProducts = () => {
       }
       linked += relIds.length;
       res.push({
-        row: i + 2, product: label, status: "ok",
+        row: linhaDoArquivo(r, i), product: label, status: "ok",
         message: `${relIds.length} linked${missing.length ? ` · not found: ${missing.join(", ")}` : ""}`,
       });
     }

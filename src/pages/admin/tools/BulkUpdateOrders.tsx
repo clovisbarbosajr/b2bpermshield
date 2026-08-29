@@ -8,6 +8,15 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+
+/** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
+ *
+ * `i + 2` supunha que o indice do array batia com o arquivo — e nao bate: linha
+ * em branco e descartada pelo parser, e campo entre aspas pode ocupar varias
+ * linhas. Num CSV vindo do Excel, que gosta das duas coisas, o numero reportado
+ * mandava o admin para o lugar errado. `parseCSV` carimba `__linha` com o numero
+ * real; o `i + 2` fica so como reserva para chamada que nao venha de la. */
+const linhaDoArquivo = (r: any, i: number): number => r?.__linha ?? i + 2;
 const TEMPLATE_HEADERS = ["order_number", "status", "tracking_number", "delivery_date"];
 const TEMPLATE_ROW = ["1001", "complete", "BR123456789", "2024-12-31"];
 
@@ -100,13 +109,13 @@ const BulkUpdateOrders = () => {
       const orderNumber = Number(orderNumberRaw);
 
       if (!orderNumberRaw || !Number.isInteger(orderNumber)) {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw || "—", status: "error", message: `Invalid or missing order_number "${orderNumberRaw ?? ""}"` });
+        res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw || "—", status: "error", message: `Invalid or missing order_number "${orderNumberRaw ?? ""}"` });
         continue;
       }
 
       const status = r["status"]?.trim().toLowerCase();
       if (status && !VALID_STATUSES.includes(status)) {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: `Invalid status "${status}". Must be one of: ${VALID_STATUSES.join(", ")}` });
+        res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "error", message: `Invalid status "${status}". Must be one of: ${VALID_STATUSES.join(", ")}` });
         continue;
       }
 
@@ -116,7 +125,7 @@ const BulkUpdateOrders = () => {
       if (r["delivery_date"]?.trim()) updatePayload["delivery_date"] = r["delivery_date"].trim();
 
       if (Object.keys(updatePayload).length === 0) {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: "No fields to update" });
+        res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "error", message: "No fields to update" });
         continue;
       }
 
@@ -131,15 +140,15 @@ const BulkUpdateOrders = () => {
         .from("pedidos").select("id").eq("numero", orderNumber);
 
       if (findErr) {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: findErr.message });
+        res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "error", message: findErr.message });
         continue;
       }
       if (!matches || matches.length === 0) {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: `Order #${orderNumber} not found` });
+        res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "error", message: `Order #${orderNumber} not found` });
         continue;
       }
       if (matches.length > 1) {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error",
+        res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "error",
           message: `Ambiguous: ${matches.length} orders share number #${orderNumber}. Update them individually.` });
         continue;
       }
@@ -150,9 +159,9 @@ const BulkUpdateOrders = () => {
         .eq("id", (matches[0] as any).id);
 
       if (error) {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "error", message: error.message });
+        res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "error", message: error.message });
       } else {
-        res.push({ row: i + 2, orderNumber: orderNumberRaw, status: "ok", message: "Updated" });
+        res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "ok", message: "Updated" });
       }
     }
 

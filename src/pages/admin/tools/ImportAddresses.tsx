@@ -9,6 +9,15 @@ import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+
+/** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
+ *
+ * `i + 2` supunha que o indice do array batia com o arquivo — e nao bate: linha
+ * em branco e descartada pelo parser, e campo entre aspas pode ocupar varias
+ * linhas. Num CSV vindo do Excel, que gosta das duas coisas, o numero reportado
+ * mandava o admin para o lugar errado. `parseCSV` carimba `__linha` com o numero
+ * real; o `i + 2` fica so como reserva para chamada que nao venha de la. */
+const linhaDoArquivo = (r: any, i: number): number => r?.__linha ?? i + 2;
 const TEMPLATE_HEADERS = ["customer_email", "address", "address2", "city", "state", "country", "zip", "is_primary"];
 const TEMPLATE_ROW = ["john@acme.com", "123 Main St", "Suite 100", "New York", "NY", "United States", "10001", "yes"];
 
@@ -31,8 +40,19 @@ const ImportAddresses = () => {
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
-    const text = await file.text();
-    const rows = parseCSV(text);
+    // O PARSE PODE LANCAR, e este handler e chamado SOLTO do `onChange`/`onDrop`
+    // (`if (f) handleFile(f)`), sem `.catch()`. Sem este `try`, um CSV com coluna
+    // repetida — que `parseCSV` passou a recusar — virava rejeicao nao tratada: o
+    // nome do arquivo aparecia na tela e NADA acontecia. Sem toast, sem erro, sem
+    // spinner. Pior que o defeito que a recusa veio consertar.
+    let rows: Record<string, string>[];
+    try {
+      const text = await file.text();
+      rows = parseCSV(text);
+    } catch (e: any) {
+      toast.error("Could not read this file: " + (e?.message ?? String(e)));
+      return;
+    }
     if (rows.length === 0) { toast.error("No data rows found"); return; }
 
     setImporting(true);
@@ -72,7 +92,7 @@ const ImportAddresses = () => {
       const clienteId = email ? emailMap[email.toLowerCase()] : undefined;
 
       if (!clienteId) {
-        res.push({ row: i + 2, email: email || "â€”", status: "error", message: "Customer not found" });
+        res.push({ row: linhaDoArquivo(r, i), email: email || "â€”", status: "error", message: "Customer not found" });
         continue;
       }
 
@@ -97,9 +117,9 @@ const ImportAddresses = () => {
       });
 
       if (error) {
-        res.push({ row: i + 2, email, status: "error", message: error.message });
+        res.push({ row: linhaDoArquivo(r, i), email, status: "error", message: error.message });
       } else {
-        res.push({ row: i + 2, email, status: "ok", message: "Imported" });
+        res.push({ row: linhaDoArquivo(r, i), email, status: "ok", message: "Imported" });
       }
     }
 

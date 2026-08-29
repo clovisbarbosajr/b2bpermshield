@@ -21,7 +21,12 @@ describe("a trilha de auditoria nao pode sumir calada", () => {
     // texto do insert, e ancorar nele deixava a assercao fora da fatia.
     const fn = fatiaEntre(hook, "    try {", "return { log }", 45);
     expect(fn, "sem destructuring do `error`, a falha some").toMatch(/const \{ error \} = await/);
-    expect(fn, "e alguem precisa ficar sabendo").toMatch(/console\.error\(/);
+    // O `console.error` TEM QUE ESTAR NO RAMO DO `if (error)`. Exigir so a
+    // presenca de `console.error(` na fatia deixava passar apagar essa linha: o
+    // `console.error` do `catch` ja satisfazia a busca, e o efeito da correcao
+    // — reportar a falha de RLS — ficava sem cobertura nenhuma.
+    expect(fn, "o `if (error)` voltou a nao reportar nada")
+      .toMatch(/if \(error\) console\.error\([^)]*error\)/);
   });
 
   it("o `catch` tambem deixa rastro", () => {
@@ -67,7 +72,10 @@ describe("ActivityLogs: paginacao e corrida", () => {
   // estivesse: 12 registros filtrados com `range(150,199)` davam tabela vazia sob
   // "12 record(s) found".
   it("trocar filtro volta para a pagina 1", () => {
-    expect(logs).toMatch(/const trocaFiltro = /);
+    // Exigir so o identificador deixava passar `trocaFiltro = (set) => (v) => {
+    // set(v); }` — sem o `setPage(1)`, que e a correcao inteira.
+    expect(logs, "`trocaFiltro` sem `setPage(1)` nao faz nada")
+      .toMatch(/const trocaFiltro = \(set: \(v: string\) => void\) => \(v: string\) => \{ set\(v\); setPage\(1\); \}/);
     for (const f of ["setFilterAction", "setFilterEntity", "setFilterUser"]) {
       expect(logs, `${f} nao reseta a pagina`).toMatch(new RegExp(`trocaFiltro\\(v => ${f}`));
     }

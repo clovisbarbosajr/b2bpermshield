@@ -141,3 +141,18 @@ describe("__linha: o numero REAL no arquivo", () => {
     expect(JSON.stringify(linhas[0])).not.toContain("__linha");
   });
 });
+
+describe("__linha com campo multilinha", () => {
+  it("quebra DENTRO de aspas conta para o numero do arquivo", () => {
+    // `ImportAddresses` e justamente a tela com endereco em duas linhas. Sem
+    // contar essa quebra, tudo dali em diante apontava para a linha errada — o
+    // defeito que o `__linha` veio consertar, por outra porta.
+    const linhas = parseCSV('a,b\n1,"p\nq"\n2,z\n3,w\n');
+    expect(linhas.map((l: any) => l.__linha)).toEqual([2, 4, 5]);
+  });
+
+  it("linha em branco e campo multilinha juntos", () => {
+    const linhas = parseCSV('a,b\n1,"p\nq"\n\n3,w\n');
+    expect(linhas.map((l: any) => l.__linha)).toEqual([2, 5]);
+  });
+});

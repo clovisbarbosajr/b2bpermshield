@@ -30,7 +30,25 @@ const Coupons = () => {
   useEffect(() => { fetchData(); }, []);
 
   const openNew = () => { setEditing(null); setForm({ codigo: "", tipo: "percentual", valor: 0, uso_maximo: null, data_inicio: "", data_fim: "", ativo: true }); setDialogOpen(true); };
-  const openEdit = (r: any) => { setEditing(r); setForm({ codigo: r.codigo, tipo: r.tipo, valor: Number(r.valor), uso_maximo: r.uso_maximo, data_inicio: r.data_inicio?.split("T")[0] ?? "", data_fim: r.data_fim?.split("T")[0] ?? "", ativo: r.ativo }); setDialogOpen(true); };
+  // A VOLTA TEM QUE DESFAZER O FUSO QUE A IDA APLICOU.
+  //
+  // `split("T")[0]` corta a string UTC. Desde que o save passou a gravar com o
+  // offset local — `2026-08-10` fim do dia em UTC-4 vira `2026-08-11T03:59:59Z` —
+  // essa volta devolvia `2026-08-11`, um dia A MAIS. E como o diálogo reabre com
+  // a data errada, cada Edit+Save empurrava o fim do cupom mais um dia: deriva
+  // cumulativa, e o admin so descobre quando o cupom morre fora de hora.
+  //
+  // `getFullYear/getMonth/getDate` leem no fuso LOCAL, que e o mesmo que a ida
+  // usou. E o mesmo padrao (com o mesmo comentario) ja existe em
+  // `ActivityLogs.setQuickRange` — este arquivo caiu na armadilha que aquele
+  // documenta.
+  const soData = (iso: string | null | undefined) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const openEdit = (r: any) => { setEditing(r); setForm({ codigo: r.codigo, tipo: r.tipo, valor: Number(r.valor), uso_maximo: r.uso_maximo, data_inicio: soData(r.data_inicio), data_fim: soData(r.data_fim), ativo: r.ativo }); setDialogOpen(true); };
 
   const handleSave = async () => {
     // `cupom_por_codigo` (20260826050000) casa com

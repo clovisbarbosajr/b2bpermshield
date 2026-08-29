@@ -43,6 +43,10 @@ export function parseCSV(text: string): Record<string, string>[] {
   // corrigir.
   const numeroDaLinha: number[] = [];
   let linhaAtual = 1;
+  // Linha em que o registro COMECOU. Um campo entre aspas pode ocupar varias
+  // linhas, e o que interessa ao admin e onde a linha do CSV comeca — nao onde
+  // ela termina.
+  let linhaDoRegistro = 1;
 
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -55,6 +59,12 @@ export function parseCSV(text: string): Record<string, string>[] {
       } else {
         // Inclui `\n` de propósito: quebra de linha DENTRO de aspas faz parte do
         // campo (endereço em duas linhas, observação longa).
+        //
+        // Mas ela CONTA para o numero de linha do arquivo: sem isto, um endereco
+        // em duas linhas (o caso de `ImportAddresses`) desalinhava tudo daquele
+        // ponto em diante, e o `__linha` reportado ao admin apontava para a linha
+        // errada — o defeito que ele veio consertar, por outra porta.
+        if (ch === "\n") linhaAtual++;
         campo += ch;
       }
       continue;
@@ -86,8 +96,9 @@ export function parseCSV(text: string): Record<string, string>[] {
       if (ch === "\r" && text[i + 1] === "\n") i++;   // CRLF conta como uma
       linha.push(campo);
       campo = "";
-      if (linha.some((c) => c.trim() !== "")) { linhas.push(linha); numeroDaLinha.push(linhaAtual); }
+      if (linha.some((c) => c.trim() !== "")) { linhas.push(linha); numeroDaLinha.push(linhaDoRegistro); }
       linhaAtual++;
+      linhaDoRegistro = linhaAtual;
       linha = [];
       continue;
     }
@@ -96,7 +107,7 @@ export function parseCSV(text: string): Record<string, string>[] {
   }
 
   linha.push(campo);
-  if (linha.some((c) => c.trim() !== "")) { linhas.push(linha); numeroDaLinha.push(linhaAtual); }
+  if (linha.some((c) => c.trim() !== "")) { linhas.push(linha); numeroDaLinha.push(linhaDoRegistro); }
 
   if (linhas.length < 2) return [];
 
