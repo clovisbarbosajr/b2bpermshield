@@ -40,6 +40,14 @@ const ImportCategories = () => {
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
+    // LIMPA O RESULTADO ANTERIOR ANTES DE LER O ARQUIVO NOVO.
+    //
+    // `setFileName` roda aqui em cima, e a tabela de resultados fica logo abaixo
+    // da moldura. Sem isto, um arquivo que falha no parse deixava a tela com o
+    // NOME do arquivo novo e as LINHAS do anterior — o toast some em segundos e
+    // sobra a leitura errada. E a mesma "tela mentindo que carregou" que este
+    // bloco veio matar, em escala menor.
+    setResults([]);
     // O PARSE PODE LANCAR, e este handler e chamado SOLTO do `onChange`/`onDrop`
     // (`if (f) handleFile(f)`), sem `.catch()`. Sem este `try`, um CSV com coluna
     // repetida — que `parseCSV` passou a recusar — virava rejeicao nao tratada: o

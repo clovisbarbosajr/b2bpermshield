@@ -20,6 +20,27 @@
  * lugar único: entende aspas, aspas duplicadas (`""` dentro de campo), campo
  * vazio, quebra de linha DENTRO de campo, CRLF do Windows e BOM do Excel.
  */
+/**
+ * Desfaz o apostrofo que `escaparCelulaCSV` poe na frente de celula que
+ * comecaria com `=`, `+`, `-`, `@`, tab ou CR.
+ *
+ * O apostrofo e a convencao do Excel para "isto e texto, nao formula": ele o
+ * consome ao exibir, e nao aparece para o usuario. Mas quem reimporta o arquivo
+ * exportado SEM passar pelo Excel — o ciclo que `Ferramentas.tsx` descreve como
+ * normal — recebia o apostrofo literal e o gravava no banco:
+ * `clientes.telefone` virava `'+1 786 555 0100`.
+ *
+ * A tentativa anterior de resolver isso no EXPORT (nao prefixar telefone) era
+ * pior: sem o apostrofo o Excel AVALIA `+1-800-555-0100` como `1-800-555-100` =
+ * -1454 e grava o numero errado, calado. Se `+` nao fosse avaliado,
+ * `+HYPERLINK(...)` nao seria vetor de injecao — e e.
+ *
+ * Remove SO quando o proximo caractere e um dos que o export protege: apostrofo
+ * que seja dado de verdade (`'Casa do Piso'`) fica intacto.
+ */
+const desmarcaFormula = (v: string) =>
+  /^'[=+\-@\t\r]/.test(v) ? v.slice(1) : v;
+
 export function parseCSV(text: string): Record<string, string>[] {
   // Excel salva CSV com BOM (U+FEFF) na frente do 1º cabeçalho.
   //
@@ -64,7 +85,11 @@ export function parseCSV(text: string): Record<string, string>[] {
         // em duas linhas (o caso de `ImportAddresses`) desalinhava tudo daquele
         // ponto em diante, e o `__linha` reportado ao admin apontava para a linha
         // errada — o defeito que ele veio consertar, por outra porta.
-        if (ch === "\n") linhaAtual++;
+        // `\r` tambem: FORA das aspas o parser trata CR sozinho como terminador
+        // de linha, entao ignora-lo aqui criava assimetria — de cada CR nu dentro
+        // de campo em diante, o `__linha` desalinhava 1. (Export de Excel para Mac
+        // classico.) `\r\n` conta uma vez so.
+        if (ch === "\n" || (ch === "\r" && text[i + 1] !== "\n")) linhaAtual++;
         campo += ch;
       }
       continue;
@@ -128,7 +153,7 @@ export function parseCSV(text: string): Record<string, string>[] {
 
   return linhas.slice(1).map((valores, idx) => {
     const r: Record<string, string> = {};
-    cabecalhos.forEach((h, i) => { r[h] = (valores[i] ?? "").trim(); });
+    cabecalhos.forEach((h, i) => { r[h] = desmarcaFormula((valores[i] ?? "").trim()); });
     // `__linha`: o numero REAL da linha no arquivo, para a tela poder apontar
     // onde corrigir. As linhas em branco sao descartadas acima, entao o indice do
     // array parou de corresponder ao arquivo faz tempo — e as telas reportavam

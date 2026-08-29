@@ -56,21 +56,26 @@ describe("escaparCelulaCSV: prefixo anti-formula", () => {
     expect(c(undefined)).toBe('""');
   });
 
-  // NUMERO E TELEFONE EM STRING NAO SAO FORMULA.
+  // TELEFONE TAMBEM E PREFIXADO, e isso e o CERTO.
   //
-  // A primeira versao prefixava tudo que comecasse com `+`/`-`, e isso quebrou o
-  // ciclo export -> Excel -> import que `Ferramentas.tsx` descreve como uso
-  // normal: `clientes.telefone` e TEXT e telefone B2B comeca com `+`, entao
-  // `+1 786 555 0100` voltava do arquivo com o apostrofo e ele era GRAVADO no
-  // banco. Mesmo caminho em `ProductExport` (`barcode`, `reference_code`).
-  it("telefone e numero em string passam LIMPOS", () => {
-    for (const ok of ["+1 786 555 0100", "-10", "+55 (11) 98765-4321", "-1234.56", "+1-800-555-0100"]) {
-      expect(String(c(ok)), `corrompeu dado legitimo: ${ok}`).not.toMatch(/^"'/);
+  // Eu tinha aberto excecao para "numero ou telefone puro", para nao sujar o
+  // ciclo export -> Excel -> import. Era um erro, e do tipo pior: o motivo de
+  // `+`/`-` estarem na lista e que o Excel AVALIA a celula que comeca com eles —
+  // por isso `+HYPERLINK(...)` e vetor. Sem o apostrofo, `+1-800-555-0100` nao
+  // vira telefone na planilha: vira a conta `1-800-555-100` = -1454, e era esse
+  // numero que voltava para o banco. Troquei apostrofo visivel por numero errado
+  // silencioso.
+  //
+  // Quem desfaz a marca e a ENTRADA — ver `desmarcaFormula` em `csv.ts`, e o
+  // teste de ida-e-volta em `csv.test.ts`.
+  it("telefone com `+` e prefixado, como qualquer celula que o Excel avaliaria", () => {
+    for (const tel of ["+1 786 555 0100", "+1-800-555-0100", "+55 (11) 98765-4321", "-10"]) {
+      expect(String(c(tel)), `deixou o Excel avaliar: ${tel}`).toMatch(/^"'/);
     }
   });
 
-  it("mas formula com `+`/`-` continua neutralizada", () => {
-    for (const mau of ["+1+1", "-1+A2", "+SUM(A1:A9)", "-HYPERLINK(\"http://x\")"]) {
+  it("e formula com `+`/`-` segue neutralizada", () => {
+    for (const mau of ["+1+1", "-1+A2", "+SUM(A1:A9)", "-2+3+cmd|' /C calc'!A0"]) {
       expect(String(c(mau)), `deixou passar formula: ${mau}`).toMatch(/^"'/);
     }
   });

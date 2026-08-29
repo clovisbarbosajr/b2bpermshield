@@ -56,7 +56,13 @@ describe("importadores de lote: leitura que falha nao vira silencio", () => {
 
   // `file.text()`/`file.arrayBuffer()` rejeitam e `XLSX.read` lanca: sem catch,
   // soltar o arquivo nao fazia NADA e nao dizia nada.
-  for (const arquivo of ["./BulkUpdateOrders.tsx", "./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx", "./ImportOrders.tsx"]) {
+  // Os quatro ultimos entraram depois: `parseCSV` passou a LANCAR em cabecalho
+  // repetido, e nestas telas `handleFile(f)` e chamada solta do `onChange`/`onDrop`
+  // (`if (f) handleFile(f)`), sem `.catch()`. O `setFileName` roda antes do parse,
+  // entao o admin via o nome do arquivo aparecer e NADA acontecia — sem toast, sem
+  // erro. O assert deste laco ja existia; faltava incluir os arquivos.
+  for (const arquivo of ["./BulkUpdateOrders.tsx", "./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx", "./ImportOrders.tsx",
+                         "./ImportCustomers.tsx", "./ImportAddresses.tsx", "./ImportCategories.tsx", "./ImportCustomerPrices.tsx"]) {
     it(`${arquivo}: leitura do arquivo esta protegida e avisa`, () => {
       const fonte = ler(arquivo);
       const bloco = fonte.match(/try \{[\s\S]{0,600}?await file\.(text|arrayBuffer)\(\)[\s\S]*?\} catch[\s\S]*?\}/);
@@ -196,5 +202,39 @@ describe("ImportRelatedProducts: perda entre o delete e o insert", () => {
     expect(ramo, "falta o caso 'restaurou'").toMatch(/were restored/);
     expect(ramo, "falta o caso 'restauracao tambem falhou'").toMatch(/also failed/);
     expect(ramo, "falta o caso 'nao havia nada'").toMatch(/nothing was lost/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// O NUMERO DE LINHA REPORTADO AO ADMIN.
+//
+// `i + 2` supunha que o indice do array batia com o arquivo, e nao bate: linha em
+// branco e descartada pelo parser e campo entre aspas ocupa varias linhas. Num
+// CSV vindo do Excel — que gosta das duas coisas — o numero mandava o admin abrir
+// a linha errada. `parseCSV` carimba `__linha` com o numero real.
+//
+// Reverter para `i + 2` passava VERDE ate este bloco existir.
+// ---------------------------------------------------------------------------
+describe("as telas reportam a linha REAL do arquivo", () => {
+  const TELAS = [
+    "./BulkUpdateOrders.tsx", "./ImportOrders.tsx", "./ImportCustomers.tsx",
+    "./ImportAddresses.tsx", "./ImportCategories.tsx", "./ImportCustomerPrices.tsx",
+    "./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx",
+  ];
+
+  for (const arquivo of TELAS) {
+    it(`${arquivo}: nenhum \`i + 2\` sobrou`, () => {
+      const fonte = ler(arquivo);
+      expect(fonte, "voltou a supor que o indice do array e a linha do arquivo")
+        .not.toMatch(/i \+ 2/);
+      expect(fonte, "sumiu o helper que le o `__linha`").toMatch(/linhaDoArquivo\(r, i\)/);
+    });
+  }
+
+  it("o helper cai no calculo antigo so como reserva", () => {
+    // Se `__linha` sumir do parser, as telas nao podem quebrar — mas tambem nao
+    // podem fingir que o numero e o real.
+    const fonte = ler("./BulkUpdateOrders.tsx");
+    expect(fonte).toMatch(/const linhaDoArquivo = \(r: any, i: number\): number => r\?\.__linha \?\? i \+ 2;/);
   });
 });

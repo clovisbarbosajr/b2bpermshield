@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseCSV } from "./csv";
+import { escaparCelulaCSV } from "./export-csv";
 
 describe("parseCSV", () => {
   // VIGIA — o defeito: virgula DENTRO de aspas deslocava todas as colunas
@@ -154,5 +155,49 @@ describe("__linha com campo multilinha", () => {
   it("linha em branco e campo multilinha juntos", () => {
     const linhas = parseCSV('a,b\n1,"p\nq"\n\n3,w\n');
     expect(linhas.map((l: any) => l.__linha)).toEqual([2, 5]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IDA E VOLTA: o que o export marca, a entrada desmarca.
+//
+// `escaparCelulaCSV` poe `'` na frente de celula que comecaria com `= + - @` —
+// convencao do Excel, que o consome ao exibir. Quem reimporta o arquivo SEM
+// passar pelo Excel (o ciclo que `Ferramentas.tsx` descreve como normal) recebia
+// o apostrofo literal e o gravava no banco.
+//
+// A tentativa de resolver no EXPORT (nao prefixar telefone) era pior: sem o
+// apostrofo o Excel AVALIA `+1-800-555-0100` como `1-800-555-100` = -1454.
+// ---------------------------------------------------------------------------
+describe("round-trip export -> import", () => {
+  const roundTrip = (valor: string) => {
+    const linha = `campo
+${escaparCelulaCSV(valor)}
+`;
+    return parseCSV(linha)[0].campo;
+  };
+
+  it("telefone volta EXATAMENTE como saiu", () => {
+    for (const tel of ["+1 786 555 0100", "+1-800-555-0100", "+55 (11) 98765-4321"]) {
+      expect(roundTrip(tel), `nao voltou limpo: ${tel}`).toBe(tel);
+    }
+  });
+
+  it("negativo e codigo de produto voltam inteiros", () => {
+    for (const v of ["-10", "-1234.56", "-NN-01", "@interno", "=A1"]) {
+      expect(roundTrip(v), `nao voltou limpo: ${v}`).toBe(v);
+    }
+  });
+
+  it("texto normal atravessa sem ganhar nem perder nada", () => {
+    for (const v of ["Nextgen Flooring", 'Tile 12" x 12"', "Rua X, 100", "3-M"]) {
+      expect(roundTrip(v)).toBe(v);
+    }
+  });
+
+  // A remocao e CIRURGICA: so desfaz o que o export marcou.
+  it("apostrofo que e DADO nao e comido", () => {
+    expect(roundTrip("'Casa do Piso'")).toBe("'Casa do Piso'");
+    expect(parseCSV('campo\n"\'Casa do Piso\'"\n')[0].campo).toBe("'Casa do Piso'");
   });
 });

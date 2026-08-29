@@ -52,6 +52,14 @@ const ImportOrders = () => {
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
+    // LIMPA O RESULTADO ANTERIOR ANTES DE LER O ARQUIVO NOVO.
+    //
+    // `setFileName` roda aqui em cima, e a tabela de resultados fica logo abaixo
+    // da moldura. Sem isto, um arquivo que falha no parse deixava a tela com o
+    // NOME do arquivo novo e as LINHAS do anterior — o toast some em segundos e
+    // sobra a leitura errada. E a mesma "tela mentindo que carregou" que este
+    // bloco veio matar, em escala menor.
+    setResults([]);
     let rows: Record<string, string>[];
     try {
       // Arquivo corrompido ou ilegivel lancava aqui sem toast nenhum — o usuario
@@ -167,7 +175,7 @@ const ImportOrders = () => {
           rows: [],
         };
       }
-      groups[groupKey].rows.push({ sku, quantity, price, rowNum: i + 2 });
+      groups[groupKey].rows.push({ sku, quantity, price, rowNum: linhaDoArquivo(r, i) });
     }
 
     // Push row-level errors first

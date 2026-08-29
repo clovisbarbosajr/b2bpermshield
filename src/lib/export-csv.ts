@@ -26,19 +26,21 @@ export function escaparCelulaCSV(val: unknown): string | number {
   if (val == null) return '""';
   if (typeof val === "number") return val;
   const texto = String(val);
-  // NUMERO E TELEFONE NAO SAO FORMULA.
+  // `+` E `-` VOLTAM PARA A LISTA, e a excecao de telefone foi um erro meu.
   //
-  // A primeira versao prefixava tudo que comecasse com `+` ou `-`, e isso quebrou
-  // o ciclo export -> Excel -> import que o proprio Ferramentas.tsx descreve como
-  // uso normal: `clientes.telefone` e TEXT e telefone B2B comeca com `+`, entao
-  // `+1 786 555 0100` voltava do arquivo como `'+1 786 555 0100` e o apostrofo era
-  // GRAVADO no banco. Mesmo caminho em `ProductExport` (`barcode`,
-  // `reference_code`, `product_upc`), que alimenta o B2BWave.
+  // Eu tinha tirado o prefixo de "numero ou telefone puro" para nao sujar o
+  // ciclo export -> Excel -> import. Mas o motivo de `+`/`-` estarem aqui e que o
+  // Excel AVALIA a celula que comeca com eles — e por isso `+HYPERLINK(...)` e
+  // vetor de injecao. Sem o apostrofo, `+1-800-555-0100` nao vira telefone na
+  // planilha: vira a conta `1-800-555-100` = -1454, e esse numero e que voltava
+  // para o banco. Troquei "apostrofo visivel" por "numero errado silencioso",
+  // que e pior — e e a classe de falha que este projeto persegue.
   //
-  // `=` e `@` sao sempre formula. `+`/`-` so quando NAO e um numero ou telefone
-  // puro — `+1+1` e formula, `+1 786 555 0100` e dado.
-  const soNumeroOuTelefone = /^[+-]?[\d\s().-]+$/.test(texto);
-  const perigoso = /^[=@\t\r]/.test(texto) || (/^[+-]/.test(texto) && !soNumeroOuTelefone);
+  // O apostrofo aqui esta CERTO: e a convencao do Excel, que o consome ao exibir.
+  // Quem tinha de desfazer a marca era a ENTRADA, e agora desfaz — ver
+  // `parseCSV`, que remove o `'` inicial quando ele protege um caractere desta
+  // mesma lista.
+  const perigoso = /^[=+\-@\t\r]/.test(texto);
   const seguro = perigoso ? `'${texto}` : texto;
   return `"${seguro.replace(/"/g, '""')}"`;
 }

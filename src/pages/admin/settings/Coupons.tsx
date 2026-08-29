@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { paraInstanteLocal, soDataLocal } from "@/lib/dataLocal";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,13 +43,7 @@ const Coupons = () => {
   // usou. E o mesmo padrao (com o mesmo comentario) ja existe em
   // `ActivityLogs.setQuickRange` — este arquivo caiu na armadilha que aquele
   // documenta.
-  const soData = (iso: string | null | undefined) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
-  const openEdit = (r: any) => { setEditing(r); setForm({ codigo: r.codigo, tipo: r.tipo, valor: Number(r.valor), uso_maximo: r.uso_maximo, data_inicio: soData(r.data_inicio), data_fim: soData(r.data_fim), ativo: r.ativo }); setDialogOpen(true); };
+  const openEdit = (r: any) => { setEditing(r); setForm({ codigo: r.codigo, tipo: r.tipo, valor: Number(r.valor), uso_maximo: r.uso_maximo, data_inicio: soDataLocal(r.data_inicio), data_fim: soDataLocal(r.data_fim), ativo: r.ativo }); setDialogOpen(true); };
 
   const handleSave = async () => {
     // `cupom_por_codigo` (20260826050000) casa com
@@ -91,12 +86,8 @@ const Coupons = () => {
     // diferenca e deixou as ~5 horas de fuso. Anexar o offset local fecha as duas
     // pontas, e `data_fim >= now()` (comparacao de INSTANTE) passa a bater com o
     // que o admin viu no calendario.
-    const comFuso = (data: string, hora: string) => {
-      const d = new Date(`${data}T${hora}`);          // interpretado no fuso local
-      return Number.isNaN(d.getTime()) ? null : d.toISOString();
-    };
-    const inicio = form.data_inicio ? comFuso(form.data_inicio, "00:00:00") : null;
-    const fimDoDia = form.data_fim ? comFuso(form.data_fim, "23:59:59") : null;
+    const inicio = paraInstanteLocal(form.data_inicio, "00:00:00");
+    const fimDoDia = paraInstanteLocal(form.data_fim, "23:59:59");
     const payload = { ...form, codigo, valor, // `|| null` transformava ZERO em "ilimitado", em silencio: o admin digitava 0,
     // o campo limpava, e o cupom virava sem limite. E o BANCO trata 0 como
     // esgotado (`uso_atual < uso_maximo` com 0 e falso), entao os dois

@@ -36,44 +36,35 @@ describe("Coupons: valor dentro da faixa que o servidor aceita", () => {
   });
 });
 
-describe("Coupons: as datas vao com o fuso do admin", () => {
-  // `timestamptz` + sessao UTC: string sem offset era lida como UTC. No leste dos
-  // EUA o cupom com fim "10/ago" morria as 19h do dia 10, e o inicio "10/ago"
-  // passava a valer as 20h do dia 9.
-  it("converte pelo fuso local em vez de mandar a string crua", () => {
-    expect(cup).toMatch(/const comFuso = \(data: string, hora: string\)/);
-    expect(cup, "`new Date(...)` sem `toISOString` nao carrega o offset")
-      .toMatch(/\.toISOString\(\)/);
-  });
-
-  it("as duas pontas usam a conversao", () => {
-    expect(cup).toMatch(/const inicio = form\.data_inicio \? comFuso\(form\.data_inicio, "00:00:00"\) : null/);
-    expect(cup).toMatch(/const fimDoDia = form\.data_fim \? comFuso\(form\.data_fim, "23:59:59"\) : null/);
-    expect(cup, "`data_inicio: form.data_inicio` crua era metade do defeito")
+describe("Coupons: as datas passam pela lib, nas DUAS pontas", () => {
+  // A regra em si e exercitada de verdade em `src/lib/dataLocal.test.ts` — ela
+  // saiu da tela justamente porque, inline, so dava para casar o TEXTO da fonte,
+  // e tres mutantes comportamentais passavam verdes (inclusive `new Date()` no
+  // lugar de `new Date(iso)`, que reescreveria as datas de todo cupom editado
+  // para HOJE). Aqui so se garante a FIACAO: a tela nao pode voltar a fazer a
+  // conversao a mao.
+  it("a ida usa `paraInstanteLocal`", () => {
+    expect(cup).toMatch(/const inicio = paraInstanteLocal\(form\.data_inicio, "00:00:00"\)/);
+    expect(cup).toMatch(/const fimDoDia = paraInstanteLocal\(form\.data_fim, "23:59:59"\)/);
+    expect(cup, "string crua era metade do defeito de fuso")
       .not.toMatch(/data_inicio: form\.data_inicio \|\| null/);
+    expect(cup, "concatenar a hora a mao volta a gravar sem offset")
+      .not.toMatch(/`\$\{form\.data_fim\}T23:59:59`/);
   });
 
-  // O ROUND-TRIP: a volta tem que desfazer o fuso que a ida aplicou.
-  //
-  // `split("T")[0]` corta a string UTC. Com a ida gravando `2026-08-10` fim do
-  // dia em UTC-4 como `2026-08-11T03:59:59Z`, a volta devolvia `2026-08-11` — um
-  // dia A MAIS. E como o dialogo reabre com a data errada, cada Edit+Save
-  // empurrava o fim do cupom mais um dia: deriva cumulativa, e o admin so
-  // descobre quando o cupom morre fora de hora.
-  it("`openEdit` converte de volta pelo fuso local, nao corta a string UTC", () => {
-    expect(cup, "`split(\"T\")[0]` sobre string UTC volta um dia errado")
-      .not.toMatch(/data_fim: r\.data_fim\?\.split\("T"\)/);
+  it("a volta usa `soDataLocal`", () => {
+    expect(cup).toMatch(/data_inicio: soDataLocal\(r\.data_inicio\), data_fim: soDataLocal\(r\.data_fim\)/);
+    // `split("T")[0]` sobre a string UTC devolvia um dia A MAIS, e o dialogo
+    // salvava aquilo de volta: deriva cumulativa a cada Edit+Save.
+    expect(cup).not.toMatch(/data_fim: r\.data_fim\?\.split\("T"\)/);
     expect(cup).not.toMatch(/data_inicio: r\.data_inicio\?\.split\("T"\)/);
-    expect(cup).toMatch(/const soData = /);
-    // `getFullYear/getMonth/getDate` leem no fuso LOCAL — o mesmo que a ida usou.
-    expect(cup).toMatch(/d\.getFullYear\(\)/);
-    expect(cup, "`toISOString` aqui reintroduz o UTC que a ida desfez")
-      .not.toMatch(/soData[\s\S]{0,300}?toISOString/);
-    expect(cup).toMatch(/data_inicio: soData\(r\.data_inicio\), data_fim: soData\(r\.data_fim\)/);
   });
 
-  it("data invalida nao vira `Invalid Date` no banco", () => {
-    expect(cup).toMatch(/Number\.isNaN\(d\.getTime\(\)\) \? null :/);
+  it("a regra nao foi reimplementada dentro da tela", () => {
+    // Duplicar aqui devolveria o codigo de producao para o ponto cego.
+    expect(cup).not.toMatch(/const comFuso = /);
+    expect(cup).not.toMatch(/const soData = /);
+    expect(cup).toMatch(/import \{ paraInstanteLocal, soDataLocal \} from "@\/lib\/dataLocal"/);
   });
 });
 
