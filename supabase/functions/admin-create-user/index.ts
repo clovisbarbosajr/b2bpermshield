@@ -74,14 +74,27 @@ serve(async (req) => {
     // login de STAFF, e nunca deleta login ainda referenciado por outra ficha.
     if (action === "delete_user") {
       if (!targetUserId) return json({ error: "user_id required" }, 400);
-      const { data: staffRow } = await adminClient.from("user_roles")
+      // O `error` desta leitura era descartado. `supabase-js` NAO levanta: devolve
+      // {data:null,error}. Com a leitura falhando, `staffRow` vinha null, a guarda
+      // passava batido e o login de um ADMIN/MANAGER era APAGADO de verdade — sem
+      // volta, e trancando essa pessoa para fora do sistema. Falha FECHADO agora.
+      const { data: staffRow, error: staffErr } = await adminClient.from("user_roles")
         .select("role").eq("user_id", targetUserId)
         .in("role", ["admin", "manager", "warehouse"]).maybeSingle();
+      if (staffErr) {
+        return json({ error: `Could not check whether this login belongs to a STAFF member (${staffErr.message}) — refusing to delete it.` });
+      }
       if (staffRow) {
         return json({ error: `This login belongs to a STAFF member (${staffRow.role}) — refusing to delete it.` });
       }
-      const { count } = await adminClient.from("clientes")
+      // Mesmo defeito: sem ler o `error`, uma leitura falhada virava `count = null`,
+      // `(null ?? 0) > 0` era falso, e o login ainda usado por outra ficha era
+      // apagado assim mesmo.
+      const { count, error: countErr } = await adminClient.from("clientes")
         .select("id", { count: "exact", head: true }).eq("user_id", targetUserId);
+      if (countErr) {
+        return json({ error: `Could not check whether this login is still linked to a customer (${countErr.message}) — refusing to delete it.` });
+      }
       if ((count ?? 0) > 0) {
         return json({ error: `This login is still linked to ${count} customer record(s). Delete those first.` });
       }

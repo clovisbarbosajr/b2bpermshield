@@ -249,12 +249,20 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Fetch items
-    const { data: itens } = await supabase
+    // Fetch items — LENDO O `error`. Sem isso, uma falha de leitura caia no
+    // `itens ?? []` e o PDF saia com a tabela de produtos VAZIA mas com Subtotal,
+    // Sales Tax e Gross Total preenchidos (esses vem de `pedidos`): um documento
+    // que parece completo e esta errado, indo pro cliente. Melhor nao gerar.
+    const { data: itens, error: itensErr } = await supabase
       .from("pedido_itens")
       .select("*")
       .eq("pedido_id", pedido_id)
       .order("created_at");
+    if (itensErr) {
+      return new Response(JSON.stringify({ error: `Could not read order items: ${itensErr.message}` }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Fetch delivery address
     let endereco: any = null;

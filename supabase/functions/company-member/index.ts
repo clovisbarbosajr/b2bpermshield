@@ -45,20 +45,25 @@ Deno.serve(async (req) => {
     //   então o alvo vem EXPLÍCITO no body (cliente_id) e validamos o papel. Sem isso,
     //   o funcionário era criado embaixo da linha de clientes atrelada ao usuário do
     //   admin (caso "Nextgen Flooring") — empresa errada, invisível pro dono certo.
-    let owner: { id: string; empresa: string | null; nome: string | null; parent_customer_id: string | null } | null = null;
+    let owner: { id: string; empresa: string | null; nome: string | null; parent_customer_id: string | null; status: string | null; is_active: boolean | null } | null = null;
 
     const { data: roleRow } = await db.from("user_roles").select("role").eq("user_id", caller.id).maybeSingle();
     const isStaff = ["admin", "manager"].includes(roleRow?.role ?? "");
 
+    // `status, is_active` vem JUNTO com o resto da ficha do dono. Antes a situacao
+    // da conta era relida numa 2a consulta cujo `error` ninguem olhava: se ela
+    // falhasse, `sit` vinha null, nada casava a denylist e a conta NAO APROVADA
+    // passava pelo portao. Lendo na mesma consulta, falha de leitura vira
+    // `owner = null` -> 403 logo abaixo (fecha, nao abre).
     if (isStaff) {
       if (!body.cliente_id) return json({ error: "cliente_id is required when managing a team as staff (view as)" }, 400);
       const { data } = await db.from("clientes")
-        .select("id, empresa, nome, parent_customer_id")
+        .select("id, empresa, nome, parent_customer_id, status, is_active")
         .eq("id", body.cliente_id).maybeSingle();
       owner = data;
     } else {
       const { data } = await db.from("clientes")
-        .select("id, empresa, nome, parent_customer_id")
+        .select("id, empresa, nome, parent_customer_id, status, is_active")
         .eq("user_id", caller.id).maybeSingle();
       owner = data;
     }
@@ -84,9 +89,7 @@ Deno.serve(async (req) => {
         "pendente", "inativo", "rejeitado", "suspenso",
         "pending", "inactive", "rejected", "suspended", "blocked",
       ]);
-      const { data: sit } = await db.from("clientes")
-        .select("status, is_active").eq("id", owner.id).maybeSingle();
-      if (sit?.is_active === false || BLOQUEADOS.has(String(sit?.status ?? "").toLowerCase().trim())) {
+      if (owner.is_active === false || BLOQUEADOS.has(String(owner.status ?? "").toLowerCase().trim())) {
         console.log(`[company-member] conta ${owner.id} nao aprovada tentou gerenciar equipe`);
         return json({ error: "Your account needs to be approved before you can add team members." }, 403);
       }
@@ -95,9 +98,12 @@ Deno.serve(async (req) => {
 
     // ── Listar a equipe (sub-clientes desta conta) ──
     if (action === "list") {
-      const { data } = await db.from("clientes")
+      // Sem ler o `error`, falha de leitura virava `members: []` — a tela dizia
+      // "voce ainda nao tem equipe" para quem tem, e o dono recadastrava.
+      const { data, error } = await db.from("clientes")
         .select("id, nome, email, can_confirm_order, can_view_full_history, status")
         .eq("parent_customer_id", companyId).order("created_at");
+      if (error) return json({ error: error.message }, 500);
       const members = (data ?? []).map((m: any) => ({
         id: m.id, nome: m.nome, email: m.email,
         can_confirm_order: m.can_confirm_order, can_view_full_history: m.can_view_full_history,
@@ -173,9 +179,20 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: newUser, error: createErr } = await db.auth.admin.createUser({
-      email, email_confirm: true, user_metadata: { nome: nome || "" },
-    });
+    // JA EXISTE FICHA DESTE E-MAIL NESTA EMPRESA -> nao cria um segundo login.
+    //
+    // O pre-check acima so BARRA e-mail de outra empresa; quando a ficha era da
+    // propria empresa mas ainda SEM login (funcionario migrado, ou removido antes
+    // de ter senha), o `createUser` dava certo e o fluxo seguia pro insert: nascia
+    // uma linha DUPLICADA na mesma empresa e a ficha antiga — com o historico —
+    // ficava orfa. Cair no ramo de `createErr` reaproveita a reativacao que ja
+    // existe logo abaixo: atualiza a ficha existente e reenvia o set-password
+    // (mesmo 1 e-mail de antes, sem aumentar volume de envio).
+    const { data: newUser, error: createErr } = daEmpresa
+      ? { data: null, error: { message: "member already exists in this company" } }
+      : await db.auth.admin.createUser({
+          email, email_confirm: true, user_metadata: { nome: nome || "" },
+        });
     if (createErr || !newUser?.user) {
       // Email já tem login. Mensagens ESPECÍFICAS (não "non-2xx") + reativação
       // automática quando for um funcionário removido DESTA mesma empresa.

@@ -37,36 +37,28 @@ serve(async (req) => {
       { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 
-  // Parse path: /api/v1/{resource}/{id?}
-  const pathParts = url.pathname.replace(/^\/api\//, "").replace(/^v1\//, "").split("/").filter(Boolean);
-  // Edge function URL is like /api/v1/resource/id, but the function name is "api" so pathname might be just /resource/id
+  // ROTA: o que vem DEPOIS do segmento `api` (o nome da funcao).
+  //
+  // A URL real e /functions/v1/api/v1/{resource}/{id}: o PRIMEIRO "v1" e o do
+  // gateway do Supabase, nao o da API. O `segments.indexOf("v1")` anterior casava
+  // com ele e devolvia `resource = "api"` -> caia no `default` e respondia 404
+  // "Unknown resource" para TODA chamada pela URL nativa. E o fallback de query
+  // param (`?resource=products`, o formato que a propria mensagem de ajuda
+  // ensina) vivia dentro do `else`, ramo que nunca era alcancado — entao tambem
+  // nao funcionava. Ancorar no segmento `api` resolve os dois formatos e tambem
+  // o /api/v1/{resource} de dominio proprio.
   const segments = url.pathname.split("/").filter(Boolean);
-  // Find resource after "api" segment or use first meaningful segment
-  let resource = "";
-  let resourceId = "";
-  
-  // Try to find v1/resource pattern
-  const v1Idx = segments.indexOf("v1");
-  if (v1Idx >= 0 && segments[v1Idx + 1]) {
-    resource = segments[v1Idx + 1];
-    resourceId = segments[v1Idx + 2] || "";
-  } else {
-    // Fallback: last segments
-    resource = segments[segments.length - 2] || segments[segments.length - 1] || "";
-    resourceId = segments.length >= 2 ? segments[segments.length - 1] : "";
-    // If resource equals function name, check query
-    if (resource === "api") {
-      resource = url.searchParams.get("resource") || "";
-      resourceId = url.searchParams.get("id") || "";
-    }
-  }
+  const apiIdx = segments.lastIndexOf("api");
+  const rest = apiIdx >= 0 ? segments.slice(apiIdx + 1) : segments.slice();
+  if (rest[0] === "v1") rest.shift();
+  const resource = rest[0] || url.searchParams.get("resource") || "";
+  const resourceId = rest[1] || url.searchParams.get("id") || "";
 
-  // Also support ?resource=xxx&id=xxx
-  if (!resource) resource = url.searchParams.get("resource") || "";
-  if (!resourceId) resourceId = url.searchParams.get("id") || "";
-
-  const page = parseInt(url.searchParams.get("page") || "1");
-  const perPage = Math.min(parseInt(url.searchParams.get("per_page") || "50"), 200);
+  // `parseInt("abc")` = NaN: `?page=abc` levava `range(NaN, NaN)` ao PostgREST e
+  // o erro voltava como 500 cru. `?per_page=0` virava `range(0, -1)`. Entrada de
+  // fora da casa, entao sanitiza aqui.
+  const page = Math.max(1, parseInt(url.searchParams.get("page") || "1") || 1);
+  const perPage = Math.min(Math.max(1, parseInt(url.searchParams.get("per_page") || "50") || 50), 200);
   const offset = (page - 1) * perPage;
 
   const json = (data: any, status = 200) => new Response(JSON.stringify(data), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -166,9 +158,14 @@ serve(async (req) => {
       }
 
       // ============ CATEGORIES ============
+      // Os quatro recursos abaixo devolviam 200 com `data: null` quando a leitura
+      // falhava — a mesma armadilha ja consertada em `products` (l.106): do outro
+      // lado a integracao le "nao ha categoria/tabela/representante" em vez de "a
+      // consulta falhou", e um sync que apaga o que nao veio limpa a base.
       case "categories": {
         if (req.method === "GET") {
           const { data, error } = await supabase.from("categorias").select("*").order("ordem");
+          if (error) return json({ error: error.message }, 500);
           return json({ data });
         }
         break;
@@ -177,7 +174,8 @@ serve(async (req) => {
       // ============ PRICE LISTS ============
       case "price-lists": {
         if (req.method === "GET") {
-          const { data } = await supabase.from("tabelas_preco").select("*").order("nome");
+          const { data, error } = await supabase.from("tabelas_preco").select("*").order("nome");
+          if (error) return json({ error: error.message }, 500);
           return json({ data });
         }
         break;
@@ -186,7 +184,8 @@ serve(async (req) => {
       // ============ SALES REPS ============
       case "sales-reps": {
         if (req.method === "GET") {
-          const { data } = await supabase.from("representantes").select("*").order("nome");
+          const { data, error } = await supabase.from("representantes").select("*").order("nome");
+          if (error) return json({ error: error.message }, 500);
           return json({ data });
         }
         break;
@@ -202,7 +201,13 @@ serve(async (req) => {
         if (req.method === "PUT" && resourceId) {
           const body = await req.json();
           if (body.estoque_total !== undefined) {
-            const { data: old } = await supabase.from("produtos").select("estoque_total").eq("id", resourceId).single();
+            // Le o `error` ANTES de mexer no estoque: sem isso, falha de leitura
+            // caia no `old?.estoque_total || 0` e o `estoque_log` registrava
+            // "quantidade_anterior = 0" para um produto que tinha 400 — auditoria
+            // de estoque afirmando um ajuste que nao foi esse. Fecha antes de
+            // escrever, em vez de escrever e mentir no log.
+            const { data: old, error: oldErr } = await supabase.from("produtos").select("estoque_total").eq("id", resourceId).single();
+            if (oldErr) return json({ error: oldErr.message }, 404);
             // O UPDATE vem ANTES do log: gravando o log primeiro, um update que
             // falha deixava a auditoria afirmando um ajuste de estoque que nunca
             // aconteceu.
@@ -219,7 +224,8 @@ serve(async (req) => {
       // ============ CONFIG ============
       case "config": {
         if (req.method === "GET") {
-          const { data } = await supabase.from("configuracoes").select("nome_empresa, email_contato, telefone_contato, endereco, moeda, fuso_horario, logo_url, cor_primaria, cor_secundaria, pedido_minimo").limit(1).maybeSingle();
+          const { data, error } = await supabase.from("configuracoes").select("nome_empresa, email_contato, telefone_contato, endereco, moeda, fuso_horario, logo_url, cor_primaria, cor_secundaria, pedido_minimo").limit(1).maybeSingle();
+          if (error) return json({ error: error.message }, 500);
           return json({ data });
         }
         break;

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -65,11 +65,60 @@ const purgeViewAsCarts = () => {
   } catch {}
 };
 
+const num = (v: unknown, padrao: number) =>
+  typeof v === "number" && Number.isFinite(v) ? v : padrao;
+const txt = (v: unknown) => (typeof v === "string" ? v : "");
+
+/**
+ * O localStorage e FRONTEIRA DE CONFIANCA, nao um cache nosso: o carrinho fica
+ * la por meses, pode ter sido gravado por uma versao antiga do app e o proprio
+ * cliente edita o valor pelo devtools. O que voltava de `JSON.parse` entrava no
+ * estado CRU.
+ *
+ * O que isso causava:
+ *  - qualquer coisa que nao fosse array (`{}`, `"x"`, `null` gravado por um bug
+ *    antigo) e o `items.reduce` do `total` explodia no corpo do Provider. Como o
+ *    CartProvider envolve o app inteiro, era TELA BRANCA em todas as paginas,
+ *    sem jeito de sair sem limpar o storage na mao;
+ *  - `quantidade` NaN/string/ausente => `total` NaN => checkout com total NaN;
+ *  - `quantidade` NEGATIVA sobrevivia: `addItem` soma (`i.quantidade + ...`) sem
+ *    piso e `checkCartStock` so compara `> teto`, entao a linha passava pelo
+ *    submit e virava pedido com subtotal negativo.
+ *
+ * Item sem `produto_id` e descartado — sem ele nao ha o que comprar nem chave.
+ */
+export const sanitizeCart = (raw: unknown): CartItem[] => {
+  if (!Array.isArray(raw)) return [];
+  const out: CartItem[] = [];
+  for (const bruto of raw) {
+    if (!bruto || typeof bruto !== "object") continue;
+    const i = bruto as Record<string, unknown>;
+    if (typeof i.produto_id !== "string" || !i.produto_id) continue;
+    const minimo = Math.max(1, Math.floor(num(i.quantidade_minima, 1)));
+    out.push({
+      ...(bruto as CartItem),
+      variante_id: typeof i.variante_id === "string" ? i.variante_id : null,
+      variante_label: typeof i.variante_label === "string" ? i.variante_label : null,
+      imagem_url: typeof i.imagem_url === "string" ? i.imagem_url : null,
+      // Texto tem que ser texto: o React lança "Objects are not valid as a React
+      // child" e derruba a página inteira se `nome` vier objeto do storage.
+      nome: txt(i.nome),
+      sku: txt(i.sku),
+      unidade_venda: txt(i.unidade_venda),
+      quantidade: Math.max(minimo, Math.floor(num(i.quantidade, minimo))),
+      quantidade_minima: minimo,
+      preco: Math.max(0, num(i.preco, 0)),
+      estoque_disponivel: num(i.estoque_disponivel, 0),
+    });
+  }
+  return out;
+};
+
 const loadCart = (key: string): CartItem[] => {
   try {
     if (typeof window === "undefined" || !window.localStorage) return [];
     const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : [];
+    return stored ? sanitizeCart(JSON.parse(stored)) : [];
   } catch {
     return [];
   }
@@ -98,11 +147,10 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   const cartStorageKey = viewAsId
     ? viewAsStorageKey(viewAsId)
     : (userId ? storageKey(userId) : ANON_KEY);
-  // Só persiste DEPOIS que a chave ATUAL foi hidratada do localStorage. Sem isto, o
-  // [] inicial podia sobrescrever o carrinho salvo durante a corrida do auth (causa
-  // do "itens somem ao sair e voltar") — e, ao TROCAR de chave, os itens da chave
-  // antiga seriam gravados na nova.
-  const hydratedKeyRef = useRef<string | null>(null);
+  // Chave de que os `items` em memória VIERAM. Só persiste quando ela é a chave
+  // efetiva de agora (senão o [] inicial sobrescreve o carrinho salvo durante a
+  // corrida do auth — o "itens somem ao sair e voltar").
+  const [hydratedKey, setHydratedKey] = useState<string | null>(null);
 
   // Acompanha a sessão REAL (no view-as continua sendo a do admin).
   useEffect(() => {
@@ -127,28 +175,50 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // Hidrata a partir da chave efetiva — troca de usuário OU de cliente impersonado.
-  useEffect(() => {
-    if (!authResolved) return;
+  //
+  // DURANTE O RENDER, e não num efeito, de propósito: `items` e a chave de onde
+  // eles vieram têm que mudar no MESMO commit.
+  //
+  // Com a hidratação num efeito, o efeito de persistência rodava logo DEPOIS
+  // dele, no mesmo commit, já com a marca da chave NOVA e ainda com os `items`
+  // da chave ANTIGA — e gravava um carrinho por cima do outro:
+  //   * ao trocar de cliente no "View as", `b2b_cart_viewas_<B>` recebia os
+  //     itens do cliente A;
+  //   * no logout, o carrinho do cliente ia parar em `b2b_cart_anon`;
+  //   * na entrada (authResolved false→true), o [] inicial zerava o carrinho
+  //     salvo do próprio cliente.
+  // O render seguinte reescrevia com o valor certo, então o estrago só ficava no
+  // disco quando a aba fechava/recarregava/travava nesse intervalo — mas aí ficava.
+  if (authResolved && hydratedKey !== cartStorageKey) {
+    setHydratedKey(cartStorageKey);
     setItems(loadCart(cartStorageKey));
-    hydratedKeyRef.current = cartStorageKey;
-  }, [authResolved, cartStorageKey]);
+  }
 
-  // Persiste — só na chave que já foi hidratada (evita gravar itens da chave antiga).
+  // Persiste — só na chave de onde os itens em memória vieram.
   useEffect(() => {
-    if (hydratedKeyRef.current !== cartStorageKey) return;
+    if (hydratedKey !== cartStorageKey) return;
     try {
       localStorage.setItem(cartStorageKey, JSON.stringify(items));
     } catch {}
-  }, [items, cartStorageKey]);
+  }, [items, cartStorageKey, hydratedKey]);
 
   const addItem = (item: CartItem) => {
+    // Quantidade e preço saneados na ENTRADA: a tela manda NaN quando o campo de
+    // quantidade está vazio (`parseInt("")`), e daí a linha — e o total do
+    // carrinho inteiro — vira NaN.
+    //
+    // O PISO DO MÍNIMO **NÃO** ENTRA AQUI: `item.quantidade` é o quanto
+    // ADICIONAR, e elevá-lo ao mínimo somaria o mínimo do produto a cada clique
+    // numa linha que já existe ("move to cart" do saved-for-later, página do
+    // produto). O piso vale só na primeira inserção, logo abaixo, como antes.
+    const pedido = Math.max(0, Math.floor(num(item.quantidade, 0)));
     setItems((prev) => {
       const key = cartKey(item);
       const existing = prev.find((i) => cartKey(i) === key);
       if (existing) {
         return prev.map((i) => {
           if (cartKey(i) !== key) return i;
-          const want = i.quantidade + item.quantidade;
+          const want = i.quantidade + pedido;
           // só limita pelo disponível quando ele é número > 0 (não rebaixa backorder/pré-venda)
           const qtd = (typeof i.estoque_disponivel === "number" && i.estoque_disponivel > 0)
             ? Math.min(want, i.estoque_disponivel) : want;
@@ -159,9 +229,9 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
       // passar do estoque). Só limita pelo disponível quando ele é um número > 0
       // (não rebaixa backorder/pré-venda, que podem ter disponível 0).
       const avail = item.estoque_disponivel;
-      const capped = (typeof avail === "number" && avail > 0) ? Math.min(item.quantidade, avail) : item.quantidade;
-      const qtd = Math.max(item.quantidade_minima ?? 1, capped);
-      return [...prev, { ...item, quantidade: qtd }];
+      const capped = (typeof avail === "number" && avail > 0) ? Math.min(pedido, avail) : pedido;
+      const qtd = Math.max(Math.max(1, Math.floor(num(item.quantidade_minima, 1))), capped);
+      return [...prev, { ...item, quantidade: qtd, preco: Math.max(0, num(item.preco, 0)) }];
     });
   };
 
@@ -173,9 +243,15 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
     setItems((prev) =>
       prev.map((i) => {
         if (cartKey(i) !== key) return i;
+        // O campo de quantidade do Carrinho manda `parseInt(...) || quantidade_minima`
+        // — com `quantidade_minima` ausente num item velho isso chega como
+        // `undefined`, e `Math.max(min, Math.min(undefined, ...))` é NaN: a linha
+        // ficava NaN e levava o total do carrinho inteiro junto. Valor inválido
+        // MANTÉM a quantidade atual, não a destrói.
+        const pedido = Math.floor(num(quantidade, i.quantidade));
         // só limita pelo disponível quando número > 0 (não trava backorder/pré-venda em 0)
         const capped = (typeof i.estoque_disponivel === "number" && i.estoque_disponivel > 0)
-          ? Math.min(quantidade, i.estoque_disponivel) : quantidade;
+          ? Math.min(pedido, i.estoque_disponivel) : pedido;
         return { ...i, quantidade: Math.max(i.quantidade_minima ?? 1, capped) };
       })
     );

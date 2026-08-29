@@ -709,7 +709,7 @@ Deno.serve(async (req) => {
   try {
     const adminClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    const { data: config } = await adminClient
+    const { data: config, error: configErr } = await adminClient
       .from("configuracoes")
       .select(
         "email_provider, email_api_key, email_from, email_reply_to, email_on_approval, email_on_new_order, email_on_order_status, email_on_new_registration, email_on_rejection, email_contato, email_new_orders, email_new_customer, bcc_outgoing_emails, nome_empresa, endereco",
@@ -790,24 +790,45 @@ Deno.serve(async (req) => {
     // canal). Emails de AUTH (reset de senha, magic link, set password) e alertas
     // internos NÃO são bloqueados — senão o cliente não consegue nem logar.
     // `force` (Resend manual do admin) também passa.
+    //
+    // O `try/catch` que estava aqui era CODIGO MORTO: `supabase-js` nao levanta em
+    // erro de consulta, devolve {data:null,error}. Como o `error` era descartado,
+    // uma leitura falhada deixava `emailChannelOff = false` e o INTERRUPTOR MESTRE
+    // simplesmente sumia — o e-mail de notificacao saia com o canal DESLIGADO na
+    // tela, sem rastro. Depois de 25/ago a torneira precisa valer quando ninguem
+    // esta olhando; falha FECHADO.
     let emailChannelOff = false;
-    try {
-      const { data: emailCh } = await adminClient.from("notification_channels")
+    let travaErro: string | null = null;
+    {
+      const { data: emailCh, error: chErr } = await adminClient.from("notification_channels")
         .select("enabled").eq("id", "email").maybeSingle();
-      emailChannelOff = emailCh?.enabled === false;
-    } catch (_e) { /* na dúvida, não bloqueia */ }
+      if (chErr) travaErro = "nao foi possivel ler o interruptor do canal de email: " + chErr.message;
+      else emailChannelOff = emailCh?.enabled === false;
+    }
+    // Mesmo motivo para a `configuracoes`: sem ela os flags `email_on_*` que o
+    // admin DESLIGOU somem (a checagem e `=== false`, e `undefined` nao bloqueia),
+    // as listas de destinatario viram o endereco fixo do codigo e o remetente vira
+    // o fallback. Ou seja: leitura falhada mandava MAIS e-mail do que o configurado.
+    if (configErr && !travaErro) {
+      travaErro = "nao foi possivel ler as configuracoes de email: " + configErr.message;
+    }
     // `request_magic_link` (fluxo público "me manda um link de login", usado pelos
     // clientes migrados que não têm senha) É um email de AUTH — estava faltando
     // aqui, então o interruptor mestre o bloqueava e o cliente não conseguia logar,
     // recebendo {success:true} sem email nenhum (falha invisível).
     const AUTH_TYPES = new Set(["password_reset", "magic_link", "request_magic_link", "set_password", "admin_alert", "raw"]);
-    if (emailChannelOff && !AUTH_TYPES.has(type) && body.force !== true) {
+    // `travaErro` NAO aceita `force`: o `force` existe para o admin passar por cima
+    // de um OFF que ele mesmo escolheu, nao por cima de "nao sei o que esta ligado".
+    if (!AUTH_TYPES.has(type) && (travaErro || (emailChannelOff && body.force !== true))) {
+      const motivo = travaErro ?? "skip: email channel is OFF (master switch)";
       await adminClient.from("notification_log").insert({
         event: type, channel: "email", recipient: "-",
-        status: "failed", error: "skip: email channel is OFF (master switch)", payload: {},
+        status: "failed", error: motivo, payload: {},
       });
-      return new Response(JSON.stringify({ skipped: true, reason: "email channel disabled (master switch)" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({
+        skipped: true, blocked: true,
+        reason: travaErro ?? "email channel disabled (master switch)",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     // force=true: admin escolheu enviar MESMO com a notificação desabilitada
     // (ex.: aprovar cliente com canal de email OFF — sem isso a conta ficava
@@ -1150,12 +1171,25 @@ Deno.serve(async (req) => {
         });
       }
       const { order, customer, items } = body;
-      // Fetch company branding from configuracoes for the email header
-      const { data: companyData } = await adminClient
-        .from("configuracoes")
-        .select("company_name, company_address, company_city, company_state, company_zip, email_from")
-        .limit(1)
-        .maybeSingle();
+      // Cabecalho do e-mail do cliente.
+      //
+      // Este select pedia `company_name, company_address, company_city,
+      // company_state, company_zip` — colunas que NAO EXISTEM em `configuracoes`
+      // (conferido em `types.ts`, que e gerado do banco, e em todas as migrations).
+      // Ou seja: ele FALHAVA sempre (coluna inexistente), o `error` era descartado
+      // e `companyData` ficava null. O `templateNewOrderCustomer` entao caia no
+      // nome e no e-mail FIXOS do codigo — a confirmacao de pedido do cliente
+      // ignorava o que o admin configurou, e ninguem via erro nenhum.
+      //
+      // Usa a config que ja foi lida, com os campos que existem de verdade. Sem
+      // ida extra ao banco e com o MESMO valor que o ramo do template customizado
+      // e o PDF ja usam.
+      const companyData = {
+        company_name: config?.nome_empresa ?? null,
+        company_address: config?.endereco ?? null,
+        company_city: null, company_state: null, company_zip: null,
+        email_from: config?.email_contato ?? config?.email_from ?? null,
+      };
       const orderItems: any[] = items || [];
       const companyName = config?.nome_empresa || companyData?.company_name || COMPANY_NAME;
       const companyAddress = config?.endereco || companyData?.company_address || "";

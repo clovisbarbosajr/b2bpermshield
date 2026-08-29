@@ -38,8 +38,14 @@ Deno.serve(async (req) => {
     const { data: { user } } = await userClient.auth.getUser();
     if (!user) return json({ error: "Authentication required" }, 401);
     callerUserId = user.id;
-    const { data: papeis } = await db.from("user_roles")
+    // Ler o `error`: `supabase-js` devolve {data:null,error}, nao levanta. Sem
+    // isto, uma leitura falhada rebaixava um ADMIN a cliente comum em silencio e
+    // ele tomava "Not authorized for this event" / "Missing 'vars.order_id'" —
+    // mensagens que afirmam algo que o codigo nao sabe. A causa real (banco fora)
+    // nao aparecia em lugar nenhum. Continua sem enviar; agora diz por que.
+    const { data: papeis, error: papeisErr } = await db.from("user_roles")
       .select("role").eq("user_id", user.id);
+    if (papeisErr) return json({ error: "Could not read the caller's role: " + papeisErr.message }, 500);
     const meus = new Set((papeis ?? []).map((r: any) => r.role));
     isAdmin = meus.has("admin");
     isStaff = isAdmin || meus.has("manager") || meus.has("warehouse");
@@ -56,11 +62,30 @@ Deno.serve(async (req) => {
       // `dispatchOne` direto, fora do portao — com os envios pausados, o SMS de
       // teste ainda saia. E pouco dinheiro, mas "sem bypass" tem que ser
       // verdade, senao a torneira nao e confiavel.
-      const { data: perm } = await db.rpc("envio_permitido", { _canal: test.channel === "email" ? "email" : "sms" });
-      if (!perm || (perm as any).ok !== true) {
-        return json({ ok: false, blocked: true, reason: (perm as any)?.motivo ?? "bloqueado pelo teto" });
+      // O `error` da RPC era descartado: RPC fora do ar respondia "bloqueado pelo
+      // teto", que e falso — o teto pode estar folgado. Continua falhando FECHADO,
+      // mas agora diz a causa real. Mesmo texto que `_shared/dispatch.ts` usa.
+      const { data: perm, error: permErr } = await db.rpc("envio_permitido", { _canal: test.channel === "email" ? "email" : "sms" });
+      if (permErr || !perm || (perm as any).ok !== true) {
+        return json({
+          ok: false, blocked: true,
+          reason: permErr
+            ? "checagem de teto falhou: " + permErr.message
+            : ((perm as any)?.motivo ?? "bloqueado pelo teto"),
+        });
       }
-      const { data: channels } = await db.from("notification_channels").select("*");
+      // Idem: com o `error` engolido, `ch` ficava {} e o envio morria adiante com
+      // "Twilio 'from' number not configured" — motivo INVENTADO, gravado assim no
+      // notification_log. `dispatchEvent` ja recusa nesse caso; aqui nao recusava.
+      const { data: channels, error: chErr } = await db.from("notification_channels").select("*");
+      if (chErr) {
+        const motivo = "falha ao ler notification_channels: " + chErr.message;
+        await db.from("notification_log").insert({
+          event: event ?? "test", channel: test.channel, recipient: test.to,
+          status: "failed", error: motivo, payload: vars,
+        });
+        return json({ ok: false, error: motivo });
+      }
       const ch = Object.fromEntries((channels ?? []).map((c) => [c.id, c]));
       const result = await dispatchOne(
         test.channel, test.to,
@@ -106,14 +131,22 @@ Deno.serve(async (req) => {
       if (!ref) return json({ error: "Missing 'vars.order_id'" }, 400);
       const numero = /^\d+$/.test(ref) ? Number(ref) : null;
       const q = db.from("pedidos").select("id, cliente_id").limit(1);
-      const { data: ped } = numero !== null
+      const { data: ped, error: pedErr } = numero !== null
         ? await q.eq("numero", numero).maybeSingle()
         : await q.eq("id", ref).maybeSingle();
+      // "Unknown order" afirmava que o pedido nao existe. Com o `error` engolido,
+      // uma leitura que FALHOU dava a mesma resposta — e quem investigasse iria
+      // procurar um pedido inexistente em vez de um banco fora do ar.
+      if (pedErr) return json({ error: "Could not verify the order: " + pedErr.message }, 500);
       if (!ped) return json({ error: "Unknown order" }, 403);
 
       if (callerUserId) {
-        const { data: minhaFicha } = await db.from("clientes")
+        // Fail-open DELIBERADO (ver acima) — mas o erro precisa deixar rastro:
+        // sem isto, uma leitura falhada some e a checagem de dono desaparece
+        // sem ninguem saber que ela deixou de rodar.
+        const { data: minhaFicha, error: fichaErr } = await db.from("clientes")
           .select("id").eq("user_id", callerUserId).maybeSingle();
+        if (fichaErr) console.error("notify-dispatch: falha ao ler a ficha do chamador (checagem de dono nao rodou):", fichaErr.message);
         if (minhaFicha && ped.cliente_id && minhaFicha.id !== ped.cliente_id) {
           return json({ error: "Order does not belong to caller" }, 403);
         }

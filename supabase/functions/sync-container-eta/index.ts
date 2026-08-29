@@ -132,7 +132,12 @@ Deno.serve(async (req) => {
     const linhas: Array<{ container_number: string; eta: string | null; fonte: string | null }> = await resp.json();
     const porContainer = new Map<string, { eta: string; fonte: string | null }>();
     for (const l of linhas) {
-      if (l?.container_number && l?.eta) porContainer.set(norm(l.container_number), { eta: l.eta, fonte: l.fonte ?? null });
+      // Chaveia pelo numero JA NORMALIZADO e descarta o que normaliza pra vazio
+      // (ex.: "-", "  "). Sem isso a chave "" entrava no mapa, e todo item que so
+      // tem container (tracking vazio) casava no 2o `get(norm(item.tracking))` ===
+      // `get("")` e recebia o ETA de um registro que nao e o dele.
+      const chave = norm(l?.container_number);
+      if (chave && l?.eta) porContainer.set(chave, { eta: l.eta, fonte: l.fonte ?? null });
     }
 
     for (const item of pendentes) {
