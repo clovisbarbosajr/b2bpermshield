@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node). Mesma nota dos outros testes de fonte.
 import { readFileSync } from "node:fs";
-import { fatiaEntre } from "@/test/fatia";
+import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
 
 // A LOGICA saiu deste arquivo. Classificacao, texto do toast, texto do log e
 // leitura do corpo do erro moram em `src/lib/reenvioPlacar.ts` e sao exercitadas
@@ -98,7 +98,7 @@ describe("Resend do pedido: o que so a tela faz", () => {
   // clicavel durante o `await` da leitura do corpo — modal aberto, caixas
   // marcadas — e um clique ali dispara um segundo envio inteiro.
   it("o botao NAO volta antes do await do motivo", () => {
-    const depois = bloco.slice(bloco.indexOf("await Promise.allSettled"));
+    const depois = fatiaAPartirDe(bloco, "await Promise.allSettled");
     const iSolta = depois.search(/\n\s+setResending\(false\);/);
     const iAwaitMotivo = depois.indexOf("await motivoHttp(");
     expect(iAwaitMotivo).toBeGreaterThan(-1);

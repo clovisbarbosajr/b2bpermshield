@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 // `tsc --noEmit` do `npm test` nao acha `node:fs`. Em execucao o modulo existe.
 // @ts-expect-error
 import { readFileSync } from "node:fs";
-import { fatiaEntre } from "@/test/fatia";
+import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
 
 // TESTE DE FIACAO das telas de notificacao e sync (montar a tela exigiria
 // `@testing-library/dom`, que nao esta instalado).
@@ -47,7 +47,7 @@ describe("Notificacoes: leituras que alimentam envio e gravacao", () => {
     expect(fonte).toMatch(/setTypeTplLoadError\(tplErr \? tplErr\.message : null\)/);
     // O Save sem `id` faz INSERT: com a leitura falhada ele criaria uma segunda
     // linha para o mesmo `tipo`, por cima de um template que existe.
-    const save = fonte.slice(fonte.indexOf("async function saveTypeTemplate"));
+    const save = fatiaAPartirDe(fonte, "async function saveTypeTemplate");
     const guarda = save.indexOf("if (typeTplLoadError)");
     const insert = save.indexOf(".insert(");
     expect(guarda, "saveTypeTemplate perdeu a guarda de leitura falhada").toBeGreaterThan(-1);
@@ -59,7 +59,7 @@ describe("Notificacoes: leituras que alimentam envio e gravacao", () => {
   });
 
   it("o preview do email de pedido le o error do select de pedidos", () => {
-    const bloco = fonte.slice(fonte.indexOf("async function handleEmailOrderPreview"));
+    const bloco = fatiaAPartirDe(fonte, "async function handleEmailOrderPreview");
     const select = bloco.match(/const \{[^}]*\} = await sb\.from\('pedidos'\)[^;]*;/);
     expect(select, "nao achei o select de pedidos do preview").toBeTruthy();
     expect(select![0]).toMatch(/error: pedErr/);
@@ -70,7 +70,7 @@ describe("Notificacoes: leituras que alimentam envio e gravacao", () => {
   });
 
   it("sendEventTest so manda o email real depois de ler o cliente sem erro", () => {
-    const bloco = fonte.slice(fonte.indexOf("async function sendEventTest"), fonte.indexOf("async function saveEvent"));
+    const bloco = fatiaEntre(fonte, "async function sendEventTest", "async function saveEvent");
     const select = bloco.match(/const \{[^}]*\} = await sb\.from\('clientes'\)[^;]*;/);
     expect(select, "nao achei o select de clientes").toBeTruthy();
     expect(select![0]).toMatch(/error: cliErr/);
@@ -81,7 +81,7 @@ describe("Notificacoes: leituras que alimentam envio e gravacao", () => {
   });
 
   it("ensureConfigId separa 'nao consegui ler' de 'nao existe'", () => {
-    const bloco = fonte.slice(fonte.indexOf("async function ensureConfigId"), fonte.indexOf("// MASTER SWITCH"));
+    const bloco = fatiaEntre(fonte, "async function ensureConfigId", "// MASTER SWITCH");
     expect(bloco).toMatch(/const \{ data, error \}/);
     expect(bloco).toMatch(/Could not read the configuration/);
     expect(bloco).toMatch(/Configuration not found/);
@@ -92,7 +92,7 @@ describe("EmailSettings: o motivo do envio recusado vem do servidor", () => {
   const fonte = ler("./EmailSettings.tsx");
 
   it("usa data.reason e nao um diagnostico unico colado na tela", () => {
-    const bloco = fonte.slice(fonte.indexOf("} else if (data?.skipped)"), fonte.indexOf("} catch (err: any)"));
+    const bloco = fatiaEntre(fonte, "} else if (data?.skipped)", "} catch (err: any)");
     expect(bloco).toMatch(/data\.reason/);
     // send-email tambem devolve `skipped` para a torneira geral e para o teto
     // por e-mail — nem todo `skipped` e "desligado nas configuracoes".
@@ -104,7 +104,7 @@ describe("B2BWaveSync: o botao que pode notificar avisa antes", () => {
   const fonte = ler("./B2BWaveSync.tsx");
 
   it("syncAllOrders pede confirmacao ANTES de comecar", () => {
-    const bloco = fonte.slice(fonte.indexOf("const syncAllOrders"), fonte.indexOf("const stopOrderSync"));
+    const bloco = fatiaEntre(fonte, "const syncAllOrders", "const stopOrderSync");
     const pergunta = bloco.indexOf("if (!confirm(");
     const comeco = bloco.indexOf("setOrderSyncing(true)");
     expect(pergunta, "syncAllOrders perdeu a confirmacao").toBeGreaterThan(-1);
@@ -122,7 +122,7 @@ describe("B2BWaveSync: o botao que pode notificar avisa antes", () => {
   // 2s enquanto a aba ficasse aberta — numa acao que PODE notificar pedido novo.
   // O teste passava. E o mesmo vetor de volume dos 1.508 SMS de 25/ago.
   it("a retentativa tem teto — erro permanente nao vira laco infinito", () => {
-    const bloco = fonte.slice(fonte.indexOf("const syncAllOrders"), fonte.indexOf("const stopOrderSync"));
+    const bloco = fatiaEntre(fonte, "const syncAllOrders", "const stopOrderSync");
 
     const iCatch = bloco.indexOf("} catch (err");
     expect(iCatch, "syncAllOrders perdeu o catch do laco").toBeGreaterThan(-1);
@@ -144,7 +144,7 @@ describe("B2BWaveSync: o botao que pode notificar avisa antes", () => {
   });
 
   it("le o error do sync_log — sem ele o aviso BLOQUEIO_ some calado", () => {
-    const bloco = fonte.slice(fonte.indexOf("const fetchLastRuns"), fonte.indexOf("useEffect(() => { fetchLastRuns()"));
+    const bloco = fatiaEntre(fonte, "const fetchLastRuns", "useEffect(() => { fetchLastRuns()");
     expect(bloco).toMatch(/find\(\(r: any\) => r\?\.error\)/);
     expect(bloco).toMatch(/setLastRunsErro\(erro \? erro\.message : null\)/);
     expect(fonte).toMatch(/N[aã]o consegui ler o hist[oó]rico de sincroniza[cç][aã]o/);
@@ -153,7 +153,7 @@ describe("B2BWaveSync: o botao que pode notificar avisa antes", () => {
   it("o painel busca cada acao conhecida, nao so as 50 linhas mais novas", () => {
     // O cron de `orders` grava a cada 15 min; sem a consulta por acao, a ultima
     // rodada de `products` sai da janela de 50 e some do painel calada.
-    const bloco = fonte.slice(fonte.indexOf("const fetchLastRuns"), fonte.indexOf("useEffect(() => { fetchLastRuns()"));
+    const bloco = fatiaEntre(fonte, "const fetchLastRuns", "useEffect(() => { fetchLastRuns()");
     for (const acao of ["orders", "products", "customers", "sync_orders_backfill"]) {
       expect(bloco, `a acao ${acao} saiu da busca por acao`).toContain(`"${acao}"`);
     }

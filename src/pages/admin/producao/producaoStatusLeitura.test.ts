@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node). Mesma nota dos outros testes de fonte.
 import { readFileSync } from "node:fs";
+import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
 
 // TESTE DE FIACAO. As guardas moram dentro do componente de pagina e importar o
 // modulo arrastaria layout, router e o cliente Supabase. O que da para afirmar
@@ -44,7 +45,7 @@ describe("ProducaoStatus: leitura paginada, fallback e concorrencia", () => {
 
   it("pagina em created_at ASCENDENTE", () => {
     // DESC faz cada insercao nova empurrar as paginas ja lidas.
-    const pag = fonte.slice(fonte.indexOf("const pagina = "), fonte.indexOf("const eColunaInexistente"));
+    const pag = fatiaEntre(fonte, "const pagina = ", "const eColunaInexistente");
     expect(pag).toMatch(/\.order\("created_at", \{ ascending: true \}\)/);
     expect(pag, "ASC e o que impede a linha duplicada").not.toMatch(/ascending: false/);
     expect(pag, "desempate por id para created_at igual").toMatch(/\.order\("id", \{ ascending: true \}\)/);
@@ -59,7 +60,7 @@ describe("ProducaoStatus: leitura paginada, fallback e concorrencia", () => {
   });
 
   it("o estado de erro tem saida", () => {
-    const bloco = fonte.slice(fonte.indexOf("Production could not be loaded"));
+    const bloco = fatiaAPartirDe(fonte, "Production could not be loaded");
     expect(bloco.slice(0, 600), "sem Retry a unica saida seria F5").toMatch(/onClick=\{\(\) => \{ setLoading\(true\); load\(\); \}\}/);
   });
 

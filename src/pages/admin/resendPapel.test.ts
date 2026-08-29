@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
-import { fatiaEntre } from "@/test/fatia";
+import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
 
 // A tela de pedido e aberta por admin, manager E warehouse: `App.tsx` a protege
 // com `requiredRole="staff"` e `ProtectedRoute` trata os tres como staff. O botao
@@ -42,7 +42,7 @@ describe("Resend: as opcoes que exigem admin", () => {
 
   it("'To admin' NAO e travado — e a unica que funciona para staff", () => {
     const corpo = fatiaEntre(fonte, "<DialogTitle>Resend order</DialogTitle>", "</Dialog>", 60);
-    const linhaAdmin = corpo.slice(corpo.indexOf("checked={resend.admin}"));
+    const linhaAdmin = fatiaAPartirDe(corpo, "checked={resend.admin}");
     expect(linhaAdmin.slice(0, 200)).not.toMatch(/disabled=\{!ehAdmin\}/);
   });
 });

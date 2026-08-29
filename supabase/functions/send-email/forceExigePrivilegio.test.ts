@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { fatiaEntre } from "../../../src/test/fatia";
 
 // O INTERRUPTOR MESTRE DO CANAL DE E-MAIL NAO PODE SER DESLIGADO POR QUEM CHAMA.
 //
@@ -18,7 +19,8 @@ const fonte = readFileSync("supabase/functions/send-email/index.ts", "utf8");
 
 const iPrivilegiado = fonte.indexOf("const isPrivilegedCaller = viaCron || viaService || isAdmin;");
 const iForcePermitido = fonte.indexOf("const forcePermitido =");
-const iInterruptor = fonte.indexOf("emailChannelOff &&");
+const MARCA_INTERRUPTOR = "emailChannelOff &&";
+const iInterruptor = fonte.indexOf(MARCA_INTERRUPTOR);
 
 describe("send-email: `force` exige chamador privilegiado", () => {
   it("as tres pecas existem", () => {
@@ -43,13 +45,13 @@ describe("send-email: `force` exige chamador privilegiado", () => {
     // Ancorado na LINHA do `if`, e nao num numero de bytes: com `+ 120` a janela
     // alcancava o comentario seguinte, e enxugar comentario (mudanca puramente
     // cosmetica) reprovava a suite com uma mensagem falsa sobre seguranca.
-    const linha = fonte.slice(iInterruptor, fonte.indexOf("\n", iInterruptor));
+    const linha = fatiaEntre(fonte.slice(iInterruptor), MARCA_INTERRUPTOR, "\n", 2);
     expect(linha, "o interruptor voltou a olhar `body.force` direto").not.toMatch(/body\.force/);
     expect(linha).toMatch(/!forcePermitido/);
   });
 
   it("`forcePermitido` exige as DUAS condicoes", () => {
-    const linha = fonte.slice(iForcePermitido, fonte.indexOf(";", iForcePermitido));
+    const linha = fatiaEntre(fonte.slice(iForcePermitido), "const forcePermitido =", ";", 3);
     expect(linha).toMatch(/body\.force === true/);
     expect(linha, "sem `isPrivilegedCaller` a trava volta a ser desligavel pelo chamador")
       .toMatch(/isPrivilegedCaller/);

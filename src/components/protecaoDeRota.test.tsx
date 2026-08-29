@@ -174,6 +174,21 @@ describe("ProtectedRoute: as guardas que ja existiam continuam valendo", () => {
     expect(html).not.toContain("You do not have access");
   });
 
+  // A guarda IRMA, tres linhas acima das de `isDemo`: podia ser apagada inteira
+  // com 391 testes verdes. Sem ela, visitante deslogado passa a cair nas guardas
+  // de ficha (`/pending-approval`) em vez de na home — e um `Navigate` nao emite
+  // markup, entao so assercao POSITIVA detecta a troca.
+  it("sem usuario, vai para a home — e nao para as guardas de ficha", () => {
+    Object.assign(auth, { user: null, role: null, loading: false, isDemo: false,
+      contaAprovada: true, falhaAoLerPapel: true, hasPermission: () => true });
+    // `falhaAoLerPapel: true` e o detector: se a guarda de `!user` sumir ou for
+    // movida para depois, este caso passa a renderizar o `ErroDeVerificacao`.
+    const html = render({});
+    expect(html, "a guarda de `!user` sumiu ou desceu na ordem")
+      .not.toContain("ERRO_DE_VERIFICACAO");
+    expect(html).not.toContain("CONTEUDO_PROTEGIDO");
+  });
+
   it("papel que nao e staff nao chega no portao de permissao", () => {
     Object.assign(auth, { user: { id: "u1" }, role: "cliente", loading: false, isDemo: false,
       contaAprovada: true, falhaAoLerPapel: false, hasPermission: () => true });

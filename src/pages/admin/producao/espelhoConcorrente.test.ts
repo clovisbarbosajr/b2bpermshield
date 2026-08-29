@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
+import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
 
 // `numero_container` e a CHAVE do `sync-container-eta`. Escrever nele por engano
 // nao aparece na tela: a lista ativa do Status nem exibe essa coluna.
@@ -38,9 +39,8 @@ describe("ProducaoStatus: o espelho de container decide no BANCO", () => {
     // E o ramo de erro devolve NULL. Trocar por `return valor` faz o audit log
     // (que usa este retorno, linhas ~252 e ~273) afirmar um container que o
     // UPDATE nao gravou — o D4 de novo, num lugar diferente.
-    const ramoErro = fn.slice(fn.indexOf("if (error)"));
-    expect(ramoErro.slice(0, 400), "ramo de erro tem que devolver null")
-      .toMatch(/return null;/);
+    const ramoErro = fatiaEntre(fn, "if (error) {", "return data?.numero_container", 12);
+    expect(ramoErro, "ramo de erro tem que devolver null").toMatch(/return null;/);
     expect(ramoErro.slice(0, 400), "devolver `valor` aqui faz o log mentir")
       .not.toMatch(/return valor;/);
     expect(fn, "e o operador precisa saber: a coluna nem aparece na lista ativa")

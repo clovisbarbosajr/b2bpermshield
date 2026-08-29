@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 // `tsc --noEmit` do `npm test` nao acha `node:fs`. Em execucao o modulo existe.
 // @ts-expect-error
 import { readFileSync } from "node:fs";
+import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
 
 // TESTE DE FIACAO das quatro telas que viram DINHEIRO na fatura. Montar a tela
 // exigiria `@testing-library/dom`, que nao esta instalado.
@@ -85,9 +86,10 @@ describe("ShippingOptions: `padrao` so e escrito por setDefault", () => {
   it("o unico write de `padrao` esta dentro de setDefault", () => {
     const writes = fonte.match(/\.update\(\{ padrao: \w+ \}/g) ?? [];
     expect(writes).toHaveLength(2); // limpa todos, depois marca o escolhido
-    const setDefault = fonte.slice(
-      fonte.indexOf("const setDefault"),
-      fonte.indexOf("const updateCondition"),
+    const setDefault = fatiaEntre(
+      fonte,
+      "const setDefault",
+      "const updateCondition",
     );
     expect((setDefault.match(/\.update\(\{ padrao: \w+ \}/g) ?? [])).toHaveLength(2);
   });
@@ -110,9 +112,10 @@ describe("SalesTax: nao limpa o is_default dos outros sem id confirmado", () => 
 
   it("limparOutrosDefault sem `exceto` mesmo limpa todo mundo (o risco)", () => {
     // A guarda `if (exceto)` e o que faz o `neq` existir; sem id, nao existe.
-    const fn = fonte.slice(
-      fonte.indexOf("const limparOutrosDefault"),
-      fonte.indexOf("const saveClass"),
+    const fn = fatiaEntre(
+      fonte,
+      "const limparOutrosDefault",
+      "const saveClass",
     );
     expect(fn).toMatch(/if \(exceto\) q = q\.neq\("id", exceto\)/);
   });
@@ -122,7 +125,7 @@ describe("SalesTax: nao limpa o is_default dos outros sem id confirmado", () => 
     ["const saveGroup", "const saveRate", "tax_customer_groups"],
   ] as const) {
     it(`${save}: a guarda de \`!data\` vem ANTES de limparOutrosDefault`, () => {
-      const corpo = fonte.slice(fonte.indexOf(save), fonte.indexOf(next));
+      const corpo = fatiaEntre(fonte, save, next);
       const guarda = corpo.indexOf("if (!data) {");
       // `await ...` e a CHAMADA; o nome sozinho tambem aparece nos comentarios.
       const limpa = corpo.indexOf("await limparOutrosDefault");

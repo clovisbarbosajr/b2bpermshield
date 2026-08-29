@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
-import { fatiaEntre } from "@/test/fatia";
+import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
 
 const fonte = readFileSync("src/pages/admin/settings/WarehouseSettings.tsx", "utf8");
 
@@ -53,13 +53,16 @@ describe("WarehouseSettings: leitura honesta e gravacao sem lost update", () => 
   it("o espelho reflete o que a TELA mostra, nao o cru do banco", () => {
     // Com `?? null` no espelho e o texto padrao no form, o diff acusaria mudanca
     // em campo que o admin nem viu.
-    const espelho = fonte.slice(fonte.indexOf("setSalvo({"), fonte.indexOf("setForm({"));
+    const espelho = fatiaEntre(fonte, "setSalvo({", "setForm({");
     expect(espelho).toContain("It's Monday!");
   });
 
   it("depois de gravar, recarrega — senao o segundo Save compara com o estado velho", () => {
-    const fim = fonte.slice(fonte.indexOf('toast.success("Warehouse settings saved.")'));
-    expect(fim.slice(0, 400)).toContain("fetchData()");
+    // `slice(indexOf(x))` com UM argumento tambem erra calado: marcador ausente
+    // devolve -1 e `slice(-1)` pega o ultimo caractere — assercao passa a testar
+    // nada. `fatiaAPartirDe` exige o marcador.
+    const fim = fatiaEntre(fonte, 'toast.success("Warehouse settings saved.")', "};", 12);
+    expect(fim).toContain("fetchData()");
   });
 
   // Continua valendo o que ja existia: manager passa pela RLS afetando ZERO

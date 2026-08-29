@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
-import { fatiaEntre } from "@/test/fatia";
+import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
 import { DEFAULT_PERMISSIONS } from "./permissions";
 import { permissoesDoPapel } from "./permissoesDoPapel";
 
@@ -77,7 +77,7 @@ describe("fiacao: o AuthContext e as rotas", () => {
   // conteudo em branco para sempre, sem mensagem, em todo login.
   it("negar permissao EXPLICA, em vez de redirecionar", () => {
     const pr = readFileSync("src/components/ProtectedRoute.tsx", "utf8");
-    const bloco = pr.slice(pr.indexOf("if (requiredPermission"));
+    const bloco = fatiaAPartirDe(pr, "if (requiredPermission");
     expect(bloco, "redirecionar leva a tela branca quando o destino tambem exige permissao")
       .not.toContain('<Navigate to="/admin" replace />');
     expect(bloco).toContain("You do not have access to this screen.");
@@ -87,7 +87,10 @@ describe("fiacao: o AuthContext e as rotas", () => {
   // `UPDATE produtos` para warehouse de proposito (20260619003000).
   it("Inventory Adjustment exige a mesma chave do menu", () => {
     for (const rota of ['path="/admin/estoque"', 'path="/admin/estoque/adjustment"']) {
-      const linha = fatiaEntre(app, `<Route ${rota} `, "\n", 2);
+      // Cap 1, e nao 2: o recorte para NO primeiro `\n`, entao `split("\n")` da
+      // exatamente 1. Com 2 o cap nunca dispararia — decorativo. Com 1 ele vira
+      // afirmacao de verdade: "isto e UMA linha de rota".
+      const linha = fatiaEntre(app, `<Route ${rota} `, "\n", 1);
       expect(linha, `${rota} aceita qualquer staff`).toContain('<SP perm="view_products">');
     }
   });
@@ -108,7 +111,10 @@ describe("fiacao: o AuthContext e as rotas", () => {
       ['path="/admin/producao/status"', "view_products"],
       ['path="/admin/producao/dashboard"', "view_products"],
     ]) {
-      const linha = fatiaEntre(app, `<Route ${rota} `, "\n", 2);
+      // Cap 1, e nao 2: o recorte para NO primeiro `\n`, entao `split("\n")` da
+      // exatamente 1. Com 2 o cap nunca dispararia — decorativo. Com 1 ele vira
+      // afirmacao de verdade: "isto e UMA linha de rota".
+      const linha = fatiaEntre(app, `<Route ${rota} `, "\n", 1);
       expect(linha, `${rota} voltou a aceitar qualquer staff`).toContain(`<SP perm="${perm}">`);
     }
   });

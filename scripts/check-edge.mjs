@@ -41,6 +41,13 @@ for (const nome of readdirSync(DIR)) {
   const dir = join(DIR, nome);
   if (!statSync(dir).isDirectory()) continue;
   for (const f of readdirSync(dir)) {
+    // Arquivo de TESTE nao vai para o Deno — ele roda no vitest, que resolve os
+    // imports de verdade. Aqui o `tsc` roda com `--noResolve` (de proposito, para
+    // nao baixar os imports remotos do Deno), entao qualquer `import` local dele
+    // vira "nome nao encontrado" e este portao acusaria um erro que nao existe em
+    // producao. O `tsc -p tsconfig.app.json` do `npm test` ja typecheca esses
+    // arquivos com resolucao completa.
+    if (f.endsWith(".test.ts") || f.endsWith(".test.tsx")) continue;
     if (f.endsWith(".ts")) alvos.push(join(dir, f));
   }
 }

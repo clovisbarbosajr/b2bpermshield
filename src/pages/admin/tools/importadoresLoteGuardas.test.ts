@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 // `src/pages/admin/estoqueUpdateCondicional.test.ts`.
 // @ts-expect-error
 import { readFileSync } from "node:fs";
-import { fatiaEntre } from "@/test/fatia";
+import { fatiaEntre, fatiaAPartirDe } from "@/test/fatia";
 
 // TESTE DE FIACAO, pelo mesmo motivo do `estoqueUpdateCondicional.test.ts`: as
 // guardas moram DENTRO de componentes de pagina, e importar o modulo arrastaria
@@ -115,9 +115,10 @@ describe("ImportProductVariants nao promete coluna que a tabela nao tem", () => 
 // ---------------------------------------------------------------------------
 describe("ImportOrders: pedido orfao", () => {
   const fonte = readFileSync("src/pages/admin/tools/ImportOrders.tsx", "utf8");
-  const ramoErro = fonte.slice(
-    fonte.indexOf("if (itensError) {"),
-    fonte.indexOf("} else {", fonte.indexOf("if (itensError) {")),
+  const ramoErro = fatiaEntre(
+    fonte,
+    "if (itensError) {",
+    "} else {",
   );
 
   it("apaga o pedido quando os itens falham", () => {
