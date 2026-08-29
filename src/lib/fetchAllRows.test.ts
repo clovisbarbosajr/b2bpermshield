@@ -171,6 +171,34 @@ describe("fetchAllRows", () => {
   // problema foi outro (rede, JWT), quem chama precisa do `code` do PostgREST —
   // e `new Error(error.message)` apagava esse code. Sem `causa`, um blip de rede
   // vira "essa coluna nao existe" e a tela perde uma feature em silencio.
+  // A CONDICAO DE FIM OLHA A PAGINA CRUA, e nao quantas linhas entraram em `out`.
+  //
+  // Buraco que uma mutacao sobreviveu: com o dedupe, uma pagina CHEIA que traga
+  // uma repetida contribui `chunk - 1` linhas novas. Se o fim fosse decidido por
+  // isso, a leitura pararia ali e a tabela sairia TRUNCADA em silencio — no
+  // cenario exato que o dedupe existe para tratar.
+  it("pagina cheia COM repetida nao encerra a leitura", async () => {
+    const total = 2500;
+    const todas = linhas(total);
+    let pagina = 0;
+    const out = await fetchAllRows<{ id: string }>((from, to) => {
+      const fatia = todas.slice(from, to + 1);
+      // Na pagina 0, a ultima linha vira uma repeticao da primeira: a pagina
+      // continua CHEIA (1000 itens), mas so 999 sao novas.
+      if (pagina === 0 && fatia.length === 1000) fatia[999] = todas[0];
+      pagina++;
+      return Promise.resolve({ data: fatia, error: null });
+    }, { chunk: 1000 });
+
+    // 2500 lidas, menos a que a pagina 0 nao entregou (`id-000999` foi
+    // sobrescrita pela repetida) = 2499 distintas. O que importa e que passou
+    // das 1000: a leitura NAO parou na primeira pagina.
+    expect(out.length, "encerrou cedo — a tabela sairia truncada sem erro nenhum")
+      .toBeGreaterThan(1000);
+    expect(out.length).toBe(2499);
+    expect(new Set(out.map((r) => r.id)).size, "e sem duplicata").toBe(out.length);
+  });
+
   it("preserva o erro cru do PostgREST em `causa`", async () => {
     const cru = { message: 'column "eta_fonte" does not exist', code: "42703", details: null };
     const erro: any = await fetchAllRows(() => Promise.resolve({ data: null, error: cru }))

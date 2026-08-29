@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { classificaReenvio, montaMensagem, textoDoLog, adminResolve, motivoHttp } from "@/lib/reenvioPlacar";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -283,139 +284,61 @@ const OrderDetail = () => {
       return;
     }
 
-    const results = await Promise.allSettled(calls.map((c) => c.p));
-    // `setResending(false)` fica no FIM, e nao aqui.
+    // `try/finally`: o botao TEM que voltar, inclusive se algo aqui dentro lancar.
     //
-    // Enquanto tudo abaixo era sincrono, as tres atualizacoes caiam num render so
-    // e nao havia estado intermediario visivel. Com o `await motivoHttp(...)` no
-    // meio, soltar o botao aqui deixava a tela num estado clicavel: modal aberto,
-    // caixas marcadas, "Send" habilitado — e um clique ali dispara um segundo
-    // `handleResend` inteiro, duplicando o que ja saiu. A leitura do corpo nao tem
-    // teto de tempo (o AbortController do `invoke` ja foi limpo), entao a janela
-    // pode durar o quanto a conexao ruim quiser.
-    // `skipped` E FALHA, e o PLACAR importa mais que a palavra.
+    // Este trecho ja travou o Resend para sempre. Com `setResending(false)` solto
+    // no fim e um `throw` no meio, `handleResend` — que esta pendurado direto no
+    // `onClick`, sem catch — virava unhandled rejection: `disabled={resending}`
+    // ficava ligado ate F5, sem toast e sem log, DEPOIS de os e-mails terem saido.
+    // O operador nao tinha como saber se enviou.
     //
-    // O `send-email` responde `{ skipped: true }` com HTTP 200 e SEM `error` quando
-    // bloqueia. O filtro so olhava `error`, entao envio recusado caia no `else` e a
-    // tela dizia "Order confirmation re-sent." — o staff acreditava ter reenviado e
-    // o cliente nunca recebia.
-    //
-    // QUANDO ISSO COMECOU: nao foi com a correcao do `force` em 28/ago, como uma
-    // versao anterior deste comentario afirmava. O ramo `travaErro` do mesmo `if`
-    // NUNCA olhou `force`, e ha outros caminhos que devolvem `skipped` sem
-    // consultar privilegio nenhum — pedido mais velho que o limite retroativo
-    // (padrao 7 dias), teto de e-mail por hora, envio pausado. Todos alcancaveis
-    // por ADMIN, e desde antes. A mudanca de 28/ago so acrescentou mais um caminho
-    // (o interruptor mestre, para manager/warehouse).
-    //
-    // SAO ATE TRES CHAMADAS INDEPENDENTES, uma por destinatario, e o bloqueio e
-    // decidido DENTRO de cada uma — o teto por hora derruba a terceira e deixa as
-    // duas primeiras passarem. Por isso o resultado e um PLACAR, e nao um sim/nao:
-    // dizer "nothing was sent" com dois e-mails entregues seria a mesma mentira na
-    // direcao oposta.
-    const bloqueado = (r: any) => r.status === "fulfilled" && r.value?.data?.skipped === true;
-    const falhou = (r: any) => r.status === "rejected" || r.value?.error || r.value?.data?.error || bloqueado(r);
-    const naoForam = results.filter(falhou);
-    const foram = results.length - naoForam.length;
-    // Quem falhou, pelo indice: `allSettled` preserva a ordem de `calls`.
-    const quemFalhou = results.map((r, i) => (falhou(r) ? calls[i].quem : null)).filter(Boolean);
-    // E quem ficou INCERTO, separado de quem o servidor recusou.
-    //
-    // Nomear todos os que falharam na frase "could not confirm" era a mentira ao
-    // contrario: com o cliente recusado por teto de e-mail (o servidor gravou
-    // `failed` no mesmo instante) e o admin perdido por queda de rede, a tela
-    // mandava NAO reenviar por medo de duplicar — e o cliente nunca recebia. Pior,
-    // a mesma frase rotulava um nome como "failed" e "pode ter saido".
-    const quemIncerto = results.map((r, i) => (incerto(r) ? calls[i].quem : null)).filter(Boolean);
+    // E o `finally` fica no FIM de proposito. Soltar o botao logo apos o
+    // `allSettled`, como ja esteve, deixa a tela clicavel durante o `await` da
+    // leitura do corpo da resposta — modal aberto, caixas marcadas — e um clique
+    // ali dispara um segundo envio inteiro.
+    try {
+      const results = await Promise.allSettled(calls.map((c) => c.p));
 
-    // "NAO DEU PARA CONFIRMAR" NAO E "NAO FOI ENVIADO".
-    //
-    // `invoke` NUNCA rejeita: o catch dele devolve `{data:null, error}`. Quando a
-    // rede cai depois que o servidor ja entregou o e-mail ao provedor, o erro e um
-    // `FunctionsFetchError` — e o servidor, nesse mesmo instante, ja gravou
-    // `notification_log` com status `sent`. Dizer "Nothing was sent" ali empurra o
-    // operador a reenviar, e o cliente recebe duas confirmacoes. Nao ha
-    // idempotencia no `send-email` para segurar a segunda.
-    const incerto = (r: any) => r.value?.error?.name === "FunctionsFetchError";
+      // A classificacao e o texto moram em `lib/reenvioPlacar`, com teste que
+      // EXECUTA. Aqui ficou so a orquestracao. O motivo esta la em cima do
+      // arquivo: a versao inline deste bloco ja mentiu em tres direcoes, e a
+      // quarta foi um `const` usado antes da declaracao — que `tsc`, eslint e
+      // teste de regex sobre a fonte, todos, deixaram passar.
+      const placar = classificaReenvio(results as any[], calls.map((c) => c.quem));
 
-    // O MOTIVO REAL DE UM ERRO HTTP SO EXISTE NO CORPO DA RESPOSTA.
-    //
-    // Em qualquer status fora de 2xx o functions-js lanca ANTES de ler o corpo, e
-    // devolve `data: null` — entao `value.data.error` e sempre nulo aqui e sobrava
-    // `error.message`, que e a string fixa "Edge Function returned a non-2xx status
-    // code". 403 de permissao, 502 de provedor caido e 400 de config errada viravam
-    // a mesma frase inutil. O corpo esta em `error.context`, um Response ainda nao
-    // lido — e `value.response` e o MESMO objeto, entao ele e lido UMA vez so.
-    const motivoHttp = async (err: any): Promise<string | null> => {
-      const ctx = err?.context;
-      if (!ctx || typeof ctx.json !== "function" || ctx.bodyUsed) return null;
-      try {
-        const corpo = await ctx.json();
-        return typeof corpo?.error === "string" ? corpo.error : null;
-      } catch {
-        return null;   // 502 de gateway responde HTML, nao JSON
+      if (placar.naoForam.length) {
+        const primeiro: any = placar.naoForam[0];
+        const motivoBloqueio = primeiro?.value?.data?.skipped
+          ? (primeiro.value.data.reason ?? "the email channel or this notification is turned off")
+          : null;
+        const msg = motivoBloqueio
+          || primeiro?.value?.data?.error
+          || (await motivoHttp(primeiro?.value?.error))
+          || primeiro?.value?.error?.message
+          || "unknown error";
+        toast.error(montaMensagem({
+          ...placar, msg, pedirAdmin: adminResolve(motivoBloqueio, msg),
+        }));
+      } else {
+        toast.success("Order confirmation re-sent.");
       }
-    };
 
-    if (naoForam.length) {
-      const primeiro: any = naoForam[0];
-      const motivoBloqueio = primeiro?.value?.data?.skipped
-        ? (primeiro.value.data.reason ?? "the email channel or this notification is turned off")
-        : null;
-      const msg = motivoBloqueio
-        || primeiro?.value?.data?.error
-        || (await motivoHttp(primeiro?.value?.error))
-        || primeiro?.value?.error?.message
-        || "unknown error";
-      // A saida "peca a um admin" SO vale para o interruptor mestre e os
-      // `email_on_*`. Para limite de idade, teto por hora ou envio pausado, nenhum
-      // canal esta desligado e o admin repetindo leva o mesmo bloqueio — a frase
-      // mandaria o operador atras de um conserto que nao existe.
-      const adminResolve = !!motivoBloqueio && /master switch|notification.*(disabled|off)/i.test(msg);
-      const placar = foram > 0
-        ? `Sent ${foram} of ${results.length} — failed: ${quemFalhou.join(", ")}. `
-        // "Nothing was sent" so quando NENHUMA das falhas foi incerta: com um
-        // incerto no meio, o e-mail pode ter saido e a frase seria falsa.
-        : quemIncerto.length ? "" : "Nothing was sent. ";
-      const aviso = quemIncerto.length
-        ? `Could not confirm ${quemIncerto.join(", ")} — the email may have gone out. Check the notification log before re-sending. `
-        : "";
-      toast.error(`${placar}${aviso}${msg}${adminResolve ? " — ask an admin to turn the channel on." : ""}`);
-    } else {
-      toast.success("Order confirmation re-sent.");
+      // FECHA O MODAL SEMPRE QUE ALGO SAIU, e nao so no sucesso total. Deixando
+      // aberto com a selecao intacta, o caminho natural do operador diante de
+      // "falhou" e apertar Resend de novo — e quem JA recebeu recebe outra vez.
+      //
+      // E limpa a selecao junto, no mesmo ramo: com `foram === 0` nao ha duplicata
+      // a evitar, o modal fica aberto para retentar, e apagar o endereco digitado
+      // em "To email" seria so atrito.
+      if (placar.foram > 0) {
+        setResendOpen(false);
+        setResend({ customer: false, admin: false, other: false, otherEmail: "" });
+      }
+
+      log("updated", "order", order.id, textoDoLog(String(order.numero || order.id), placar));
+    } finally {
+      setResending(false);
     }
-
-    // FECHA O MODAL SEMPRE QUE ALGO SAIU, e nao so no sucesso total.
-    //
-    // Deixando aberto com a selecao intacta, o caminho natural do operador diante
-    // de "falhou" e apertar Resend de novo — e ai os destinatarios que JA
-    // receberam recebem outra vez. Duplicar e-mail para o cliente e pior que
-    // fecha-lo e ele reabrir.
-    //
-    // E LIMPA A SELECAO JUNTO. Fechar nao bastava: o estado `resend` so e escrito
-    // pelos checkboxes e nunca era resetado, entao reabrir trazia as MESMAS caixas
-    // marcadas — depois de um envio parcial ("Sent 1 of 2"), o proximo Send
-    // reenviava para quem ja tinha recebido.
-    //
-    // So no ramo `foram > 0`, e de proposito: quando NADA saiu nao ha duplicata a
-    // evitar, o modal fica aberto e apagar o endereco que o operador digitou em
-    // "To email" seria so atrito no meio de uma tentativa que ele vai repetir.
-    if (foram > 0) {
-      setResendOpen(false);
-      setResend({ customer: false, admin: false, other: false, otherEmail: "" });
-    }
-
-    // O LOG DE ATIVIDADE NAO PODE AFIRMAR ENVIO QUE NAO HOUVE. Ele ficava fora do
-    // if/else e gravava "Resent order #N confirmation" mesmo com tudo bloqueado —
-    // contradizendo o `notification_log`, que o servidor grava com status `failed`
-    // no mesmo instante. E o log persiste; o toast some.
-    log(
-      "updated", "order", order.id,
-      naoForam.length === 0
-        ? `Resent order #${order.numero || order.id} confirmation`
-        : `Resend order #${order.numero || order.id}: ${foram} of ${results.length} sent, failed: ${quemFalhou.join(", ")}`,
-    );
-    setResending(false);
   };
 
   const handleSave = async (goBack = false) => {
