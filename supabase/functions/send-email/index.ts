@@ -23,9 +23,14 @@ import { PDFDocument, StandardFonts, rgb, PDFFont } from "npm:pdf-lib@1.17.1";
 // diferentes da funcao.
 const AUTENTICACAO = new Set(["password_reset", "magic_link", "request_magic_link", "set_password"]);
 
-// Conta nao confirmada cuja senha sera invalidada — mas SO depois de o e-mail
-// sair. Ver o bloco "SQUAT DE PRE-REGISTRO" mais abaixo.
-let squatParaInvalidar: { uid: string; email: string } | null = null;
+// `squatParaInvalidar` MORAVA AQUI, no escopo de MODULO, e isso era um defeito
+// grave: o isolate de uma Edge Function e REAPROVEITADO entre requisicoes, e a
+// variavel nunca era zerada no inicio de uma. Requisicao A gravava o uid dela; a
+// requisicao B, concorrente, chegava ao bloco final, encontrava o valor de A ainda
+// la e INVALIDAVA A SENHA DA CONTA ERRADA — de alguem que nao pediu nada.
+//
+// Agora ela e declarada DENTRO do handler (ver `Deno.serve` abaixo), entao cada
+// requisicao tem a sua e nao existe estado atravessando chamadas.
 
 
 interface PdfOrderItem { sku: string; name: string; qty: number; price: number; total: number; }
@@ -702,6 +707,12 @@ const emSegundoPlano = (p: Promise<unknown>) => {
 };
 
 Deno.serve(async (req) => {
+  // POR REQUISICAO, nunca no modulo. Conta nao confirmada cuja senha sera
+  // invalidada — mas SO depois de o e-mail sair. Ver o bloco "SQUAT DE
+  // PRE-REGISTRO" mais abaixo, e a nota no topo do arquivo sobre por que isto nao
+  // pode voltar para o escopo de modulo.
+  let squatParaInvalidar: { uid: string; email: string } | null = null;
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -816,33 +827,6 @@ Deno.serve(async (req) => {
     // clientes migrados que não têm senha) É um email de AUTH — estava faltando
     // aqui, então o interruptor mestre o bloqueava e o cliente não conseguia logar,
     // recebendo {success:true} sem email nenhum (falha invisível).
-    const AUTH_TYPES = new Set(["password_reset", "magic_link", "request_magic_link", "set_password", "admin_alert", "raw"]);
-    // `travaErro` NAO aceita `force`: o `force` existe para o admin passar por cima
-    // de um OFF que ele mesmo escolheu, nao por cima de "nao sei o que esta ligado".
-    if (!AUTH_TYPES.has(type) && (travaErro || (emailChannelOff && body.force !== true))) {
-      const motivo = travaErro ?? "skip: email channel is OFF (master switch)";
-      await adminClient.from("notification_log").insert({
-        event: type, channel: "email", recipient: "-",
-        status: "failed", error: motivo, payload: {},
-      });
-      return new Response(JSON.stringify({
-        skipped: true, blocked: true,
-        reason: travaErro ?? "email channel disabled (master switch)",
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-    // force=true: admin escolheu enviar MESMO com a notificação desabilitada
-    // (ex.: aprovar cliente com canal de email OFF — sem isso a conta ficava
-    // impossível de ativar por email). Só afeta os checks email_on_*.
-    const force = body.force === true;
-
-    // ── SEGURANÇA: tipos privilegiados (email 100% arbitrário / links de auth)
-    //    só admin ou cron. Sem isto, qualquer um com a anon key (que está no
-    //    bundle do front) usava `raw` como relay de spam/phishing pelo seu domínio,
-    //    ou disparava set_password/magic_link com link forjado.
-    // `admin_alert` também é arbitrário (to/subject/html do body) -> privilegiado.
-    // `toOverride` (usado pelo "Resend" da tela de pedido) manda o email de
-    // pedido pra um destinatário ARBITRÁRIO — por isso exige admin, igual aos
-    // tipos privilegiados. Sem isso viraria relay de spam com a anon key.
     // ── Contexto do chamador (computado UMA vez, reusado nas travas abaixo) ──
     const authHeader = req.headers.get("Authorization") ?? "";
     const cronSecret = Deno.env.get("CRON_SECRET");
@@ -869,6 +853,57 @@ Deno.serve(async (req) => {
       }
     }
     const isPrivilegedCaller = viaCron || viaService || isAdmin;
+
+    const AUTH_TYPES = new Set(["password_reset", "magic_link", "request_magic_link", "set_password", "admin_alert", "raw"]);
+    // O `force` EXIGE chamador privilegiado, e isto e a correcao de 28/ago/2026.
+    //
+    // O comentario logo abaixo sempre disse "admin escolheu enviar mesmo com a
+    // notificacao desabilitada" — mas o codigo nao exigia nada: `body.force !== true`
+    // era avaliado aqui, e `isPrivilegedCaller` so era calculado 49 linhas DEPOIS.
+    // Qualquer um com a anon key (que esta no bundle do front) mandava
+    // `force: true` e passava por cima do INTERRUPTOR MESTRE do canal de email.
+    //
+    // Ou seja: a torneira que existe por causa dos 1.508 SMS de 25/ago podia ser
+    // ignorada por quem abrisse o devtools. O bloco de contexto do chamador subiu
+    // para antes desta linha justamente para fechar isso.
+    //
+    // `travaErro` continua NAO aceitando `force` nem de admin: o `force` passa por
+    // cima de um OFF que alguem escolheu, nao por cima de "nao sei o que esta
+    // ligado".
+    const forcePermitido = body.force === true && isPrivilegedCaller;
+    if (!AUTH_TYPES.has(type) && (travaErro || (emailChannelOff && !forcePermitido))) {
+      // A mensagem distingue os dois casos: sem isso, um `force` recusado por
+      // falta de permissao ficava indistinguivel de "canal desligado", e quem
+      // fosse investigar nao veria a tentativa.
+      const motivo = travaErro
+        ?? (body.force === true
+          ? "skip: email channel is OFF (master switch) — `force` ignored, caller is not admin/cron/service"
+          : "skip: email channel is OFF (master switch)");
+      await adminClient.from("notification_log").insert({
+        event: type, channel: "email", recipient: "-",
+        status: "failed", error: motivo, payload: {},
+      });
+      return new Response(JSON.stringify({
+        skipped: true, blocked: true,
+        reason: travaErro ?? "email channel disabled (master switch)",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    // force=true: admin escolheu enviar MESMO com a notificação desabilitada
+    // (ex.: aprovar cliente com canal de email OFF — sem isso a conta ficava
+    // impossível de ativar por email). Só afeta os checks email_on_*.
+    //
+    // Mesma exigencia do interruptor mestre acima: sem `isPrivilegedCaller`,
+    // qualquer chamador com a anon key desligava as travas `email_on_*` sozinho.
+    const force = forcePermitido;
+
+    // ── SEGURANÇA: tipos privilegiados (email 100% arbitrário / links de auth)
+    //    só admin ou cron. Sem isto, qualquer um com a anon key (que está no
+    //    bundle do front) usava `raw` como relay de spam/phishing pelo seu domínio,
+    //    ou disparava set_password/magic_link com link forjado.
+    // `admin_alert` também é arbitrário (to/subject/html do body) -> privilegiado.
+    // `toOverride` (usado pelo "Resend" da tela de pedido) manda o email de
+    // pedido pra um destinatário ARBITRÁRIO — por isso exige admin, igual aos
+    // tipos privilegiados. Sem isso viraria relay de spam com a anon key.
 
     // ── SEGURANÇA 1: tipos privilegiados (email 100% arbitrário / links de auth)
     //    e `toOverride` (destino arbitrário do Resend) só admin/cron/service.
