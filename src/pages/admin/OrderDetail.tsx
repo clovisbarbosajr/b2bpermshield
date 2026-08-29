@@ -374,14 +374,19 @@ const OrderDetail = () => {
     // de "falhou" e apertar Resend de novo — e ai os destinatarios que JA
     // receberam recebem outra vez. Duplicar e-mail para o cliente e pior que
     // fecha-lo e ele reabrir.
-    if (foram > 0) setResendOpen(false);
-
-    // LIMPA A SELECAO. Fechar o modal nao bastava: o estado `resend` so e escrito
+    //
+    // E LIMPA A SELECAO JUNTO. Fechar nao bastava: o estado `resend` so e escrito
     // pelos checkboxes e nunca era resetado, entao reabrir trazia as MESMAS caixas
-    // marcadas. Com um envio parcial ("Sent 1 of 2"), o proximo Send reenviava para
-    // quem ja tinha recebido. O estado inicial e tudo desmarcado, entao voltar a ele
-    // nao tira nada de ninguem.
-    setResend({ customer: false, admin: false, other: false, otherEmail: "" });
+    // marcadas — depois de um envio parcial ("Sent 1 of 2"), o proximo Send
+    // reenviava para quem ja tinha recebido.
+    //
+    // So no ramo `foram > 0`, e de proposito: quando NADA saiu nao ha duplicata a
+    // evitar, o modal fica aberto e apagar o endereco que o operador digitou em
+    // "To email" seria so atrito no meio de uma tentativa que ele vai repetir.
+    if (foram > 0) {
+      setResendOpen(false);
+      setResend({ customer: false, admin: false, other: false, otherEmail: "" });
+    }
 
     // O LOG DE ATIVIDADE NAO PODE AFIRMAR ENVIO QUE NAO HOUVE. Ele ficava fora do
     // if/else e gravava "Resent order #N confirmation" mesmo com tudo bloqueado —

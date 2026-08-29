@@ -72,9 +72,13 @@ describe("Resend do pedido: placar, modal e log", () => {
     expect(bloco).toMatch(/\(await motivoHttp\(primeiro\?\.value\?\.error\)\)/);
   });
 
-  it("limpa a selecao depois de enviar", () => {
+  it("limpa a selecao quando algo saiu — e SO entao", () => {
     expect(bloco, "reabrir com as caixas marcadas duplica para quem ja recebeu")
       .toMatch(/setResend\(\{ customer: false, admin: false, other: false, otherEmail: "" \}\)/);
+    // Junto com o fechar, no mesmo ramo. Com `foram === 0` nao ha duplicata a
+    // evitar e apagar o "To email" digitado so atrapalha quem vai tentar de novo.
+    expect(bloco).toMatch(
+      /if \(foram > 0\) \{\s+setResendOpen\(false\);\s+setResend\(\{ customer: false/);
   });
 
   it("`skipped` conta como falha — senao envio bloqueado vira sucesso", () => {
@@ -98,7 +102,7 @@ describe("Resend do pedido: placar, modal e log", () => {
   // dizendo que nada saiu = operador reenvia para quem ja recebeu.
   it("fecha o modal quando ALGO saiu, nao so no sucesso total", () => {
     expect(bloco, "modal preso aberto faz o retry duplicar o que ja foi enviado")
-      .toMatch(/if \(foram > 0\) setResendOpen\(false\)/);
+      .toMatch(/if \(foram > 0\) \{\s+setResendOpen\(false\);/);
   });
 
   it("o log de atividade nao afirma reenvio que nao houve", () => {
