@@ -4,7 +4,7 @@ import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
+import { Upload, Download, CheckCircle, XCircle, SkipForward } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
@@ -12,7 +12,11 @@ import { fetchAllRows } from "@/lib/fetchAllRows";
 const TEMPLATE_HEADERS = ["customer_email", "product_sku", "quantity", "price", "status", "po_number", "delivery_date"];
 const TEMPLATE_ROW = ["john@acme.com", "PROD-001", "10", "45.90", "submitted", "PO-2024-001", "2024-12-31"];
 
-type Result = { row: number; key: string; status: "ok" | "error"; message: string };
+// `skip` e um TERCEIRO desfecho, e nao um "ok" nem um "error": o pedido ja existia
+// e nada foi feito. Juntar com qualquer um dos dois mentiria no relatorio — "ok"
+// contaria como importado o que nao foi, e "error" mandaria o operador investigar
+// um comportamento correto.
+type Result = { row: number; key: string; status: "ok" | "error" | "skip"; message: string };
 
 type OrderGroup = {
   customerEmail: string;
@@ -225,6 +229,47 @@ const ImportOrders = () => {
       const total = subtotal;
       const quantidadeTotal = items.reduce((sum, it) => sum + it.quantidade, 0);
 
+      // JA IMPORTADO? So da para saber quando ha `po_number`.
+      //
+      // O defeito: rodar a mesma planilha duas vezes criava os pedidos de novo. E
+      // o caminho para isso e comum — o relatorio marca `partial` quando alguma
+      // linha falha, o operador corrige o arquivo e reimporta o TODO, porque nao
+      // ha como reimportar so a linha que faltou.
+      //
+      // `po_number` e a unica identidade que a planilha carrega. Sem ele, dois
+      // pedidos iguais do mesmo cliente sao indistinguiveis de um pedido repetido
+      // de verdade — e recusar seria pior que duplicar. Por isso a checagem so
+      // roda quando a coluna vem preenchida, e o relatorio diz isso.
+      //
+      // TETO CONHECIDO: e checagem no cliente, nao UNIQUE no banco. Dois
+      // operadores subindo a mesma planilha ao mesmo tempo passam os dois. O
+      // conserto definitivo e `UNIQUE (cliente_id, po_number)` em `pedidos`, que
+      // exige SQL e decisao do dono (pedido sem PO teria que virar NULL, nao "").
+      if (group.poNumber) {
+        const { data: jaExiste, error: checagemErr } = await supabase
+          .from("pedidos")
+          .select("id, numero")
+          .eq("cliente_id", clienteId)
+          .eq("po_number", group.poNumber)
+          .limit(1)
+          .maybeSingle();
+        if (checagemErr) {
+          // NAO cria as cegas: seguir aqui e exatamente o caminho que duplica.
+          res.push({
+            row: group.rows[0].rowNum, key, status: "error",
+            message: `Could not check whether this PO was already imported, so nothing was created: ${checagemErr.message}`,
+          });
+          continue;
+        }
+        if (jaExiste) {
+          res.push({
+            row: group.rows[0].rowNum, key, status: "skip",
+            message: `PO ${group.poNumber} already imported for this customer (order #${jaExiste.numero ?? jaExiste.id}) — skipped`,
+          });
+          continue;
+        }
+      }
+
       // Insert pedido
       const pedidoPayload: Record<string, unknown> = {
         cliente_id: clienteId,
@@ -344,6 +389,8 @@ const ImportOrders = () => {
       // 199 — e mentia so no caso em que ele mais precisaria dele.
       const okOrd = res.filter((r) => r.status === "ok").length;
       const errOrd = res.filter((r) => r.status === "error").length;
+      // `skip` fica de fora dos dois: nao entrou nada e nao houve falha.
+      const skipOrd = res.filter((r) => r.status === "skip").length;
       supabase.from("import_logs").insert({
         tipo: "orders", arquivo_nome: file.name,
         // `total = sucesso + erro` fecha por construcao: erro e o que sobra.
@@ -351,13 +398,17 @@ const ImportOrders = () => {
         // status — ele conta ITENS DE RELATORIO, nao linhas de CSV, e misturar as
         // duas unidades foi o defeito das duas versoes anteriores.
         registros_total: rows.length,
-        registros_erro: rows.length - linhasOk,
+        registros_erro: Math.max(0, rows.length - linhasOk - skipOrd),
         registros_sucesso: linhasOk,
         // `failed` SO quando nada entrou. Marcar `failed` com 30 pedidos vivos
-        // no banco e perigoso de um jeito especifico: esta tela NAO tem
-        // idempotencia — nao ha UNIQUE nem checagem por `po_number` — entao o
-        // dono le "falhou", roda de novo, e duplica os 30. `partial` e a verdade
-        // e e o que faz ele conferir antes de repetir.
+        // no banco e perigoso de um jeito especifico: o dono le "falhou", roda de
+        // novo, e duplica os 30. `partial` e a verdade e e o que faz ele conferir
+        // antes de repetir.
+        //
+        // Desde 28/ago ha checagem por `po_number` antes de criar, entao a
+        // reimportacao PULA o que ja entrou — mas so nas linhas que trazem PO.
+        // Linha sem `po_number` continua duplicando, e por isso este `partial`
+        // segue importando.
         status: (abortou && okOrd === 0) ? "failed" : errOrd === 0 ? "success" : "partial",
       } as any).then(() => {}, () => {});
     }
@@ -414,6 +465,9 @@ const ImportOrders = () => {
             <div className="flex gap-3 text-xs">
               <span className="text-green-400">{results.filter((r) => r.status === "ok").length} ok</span>
               <span className="text-destructive">{results.filter((r) => r.status === "error").length} errors</span>
+              {results.some((r) => r.status === "skip") && (
+                <span className="text-muted-foreground">{results.filter((r) => r.status === "skip").length} already imported</span>
+              )}
             </div>
           </div>
           <Table>
@@ -430,7 +484,11 @@ const ImportOrders = () => {
                 <TableRow key={`${r.row}-${idx}`}>
                   <TableCell className="text-muted-foreground text-xs">{r.row}</TableCell>
                   <TableCell className="text-sm">{r.key}</TableCell>
-                  <TableCell>{r.status === "ok" ? <CheckCircle className="h-4 w-4 text-green-400" /> : <XCircle className="h-4 w-4 text-destructive" />}</TableCell>
+                  <TableCell>{
+                    r.status === "ok" ? <CheckCircle className="h-4 w-4 text-green-400" />
+                    : r.status === "skip" ? <SkipForward className="h-4 w-4 text-muted-foreground" />
+                    : <XCircle className="h-4 w-4 text-destructive" />
+                  }</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{r.message}</TableCell>
                 </TableRow>
               ))}
