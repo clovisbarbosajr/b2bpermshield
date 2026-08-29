@@ -206,13 +206,25 @@ const InventoryAdjustment = () => {
       // A coluna "New Quantity" e a quantidade CONTADA, valor absoluto — por isso
       // nao da para trocar por `estoque_total = estoque_total + N`, que resolveria
       // a corrida sem filtro se a tela pedisse um delta.
+      // `.lte("estoque_reservado", q)` NO MESMO STATEMENT, junto com o filtro de
+      // `estoque_total`.
+      //
+      // A checagem de reservado acima e feita sobre o SELECT, e o gatilho de
+      // reserva (20260623000000:41) escreve SO em `estoque_reservado` — invisivel
+      // para o filtro de `estoque_total`. Um checkout entre o SELECT e este UPDATE
+      // passava batido: gravava-se 20 com 25 reservadas e
+      // `estoque_total - estoque_reservado` ficava NEGATIVO. Nao vende a mais (a
+      // reserva exige saldo), mas o produto TRAVA e para de vender ate alguem
+      // notar — e ninguem e avisado.
       const { data: gravado, error } = await supabase.from("produtos")
         .update({ estoque_total: q }).eq("id", p.id).eq("estoque_total", p.estoque_total)
+        .lte("estoque_reservado", q)
         .select("id").maybeSingle();
       if (error) { failed.push(`${p.nome}: ${error.message}`); continue; }
-      // Sem erro e sem linha = o `id` casou (veio da propria grade) e o
-      // `estoque_total` nao. Nada foi escrito nesta linha, entao ela vai para
-      // `failed` — o card diz que a quantidade digitada continua na tabela, e aqui
+      // Sem erro e sem linha = o `id` casou (veio da propria grade) e um dos dois
+      // filtros nao: ou o `estoque_total` mudou, ou uma reserva nova passou de `q`
+      // entre o SELECT e o UPDATE. Nada foi escrito nesta linha, entao ela vai
+      // para `failed` — o card diz que a quantidade digitada continua na tabela, e aqui
       // isso e verdade.
       if (!gravado) { failed.push(`${p.nome}: stock changed while saving — this line was not written`); continue; }
       // Histórico de estoque (mesma tabela que o ajuste unitário da tela Inventory usa).
@@ -403,7 +415,15 @@ const InventoryAdjustment = () => {
                     <TableCell className="text-xs text-muted-foreground">{catPath(p.categoria_id)}</TableCell>
                     <TableCell className="text-right">{p.estoque_total}</TableCell>
                     <TableCell className="text-right">
+                      {/* `disabled={saving}`: so o BOTAO tinha a trava. O laco faz
+                          4 idas ao servidor por linha, em serie — 40 produtos sao
+                          ~160 round-trips, minutos de tela aberta. Quem redigitasse
+                          uma linha JA gravada nesse lote perdia o numero: a
+                          limpeza de estado remove os ids que entraram, levando
+                          junto o que foi digitado depois. Contagem fisica nao pode
+                          sumir em silencio. */}
                       <Input type="number" min={0} value={newQty[p.id] ?? ""} placeholder="—"
+                        disabled={saving}
                         onChange={(e) => setNewQty((prev) => ({ ...prev, [p.id]: e.target.value }))}
                         className="h-8 w-28 ml-auto text-right" />
                     </TableCell>

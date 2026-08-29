@@ -39,18 +39,52 @@ const Coupons = () => {
     // nascia MORTO — nenhum cliente conseguia usar, e nada na tela indicava isso.
     const codigo = form.codigo.trim();
     if (!codigo) { toast.error("Code is required"); return; }
+
+    // VALOR DENTRO DA FAIXA QUE O SERVIDOR ACEITA.
+    //
+    // O servidor CLAMPA (`LEAST(GREATEST(_d,0), NEW.subtotal)`, 20260826030000),
+    // a tela NAO — e a divergencia nao vira desconto errado, vira checkout
+    // QUEBRADO para o cliente. Com 150% e subtotal 100: o banco cobra ~frete, a
+    // tela calcula -50, e a guarda de preco do Checkout barra o pedido com "The
+    // price changed while you were checking out" — mensagem que nao tem nada a
+    // ver com a causa, e que o admin nao tem como ligar ao cupom que ele criou.
+    //
+    // Negativo e pior: a guarda so dispara quando o banco cobra MAIS, entao o
+    // cliente ve "Discount -$20" com um total INFLADO e paga o inflado, sem que
+    // nada barre.
+    const valor = Number(form.valor);
+    if (!Number.isFinite(valor) || valor < 0) {
+      toast.error("Value must be zero or more."); return;
+    }
+    if (form.tipo === "percentual" && valor > 100) {
+      toast.error("A percentage coupon cannot be over 100%."); return;
+    }
+
     setSaving(true);
-    // `data_fim` e uma data ("2026-08-10") gravada numa coluna com hora: virava
-    // 00:00 e as duas validacoes (`data_fim >= now()` no trigger e no checkout)
-    // matavam o cupom na VIRADA do dia 10 — um dia inteiro antes do que o admin
-    // configurou. Grava o fim do dia. `data_inicio` continua 00:00, que e o certo.
-    const fimDoDia = form.data_fim ? `${form.data_fim}T23:59:59` : null;
-    const payload = { ...form, codigo, valor: Number(form.valor), // `|| null` transformava ZERO em "ilimitado", em silencio: o admin digitava 0,
+    // AS DATAS VAO COM O FUSO DO ADMIN, e nao cruas.
+    //
+    // `data_inicio`/`data_fim` sao `timestamptz`, e a sessao do PostgREST e UTC:
+    // uma string sem offset ("2026-08-10T23:59:59") era lida como 23:59:59 UTC.
+    // Numa loja no leste dos EUA isso e 18:59 LOCAL — o cupom com fim "10/ago"
+    // morria as 19h do dia 10. E `data_inicio: "2026-08-10"` virava 00:00 UTC, ou
+    // seja 20h do dia 9: a promocao de amanha ficava valendo hoje a noite.
+    //
+    // A correcao anterior (que ligou o `T23:59:59`) resolveu o dia inteiro de
+    // diferenca e deixou as ~5 horas de fuso. Anexar o offset local fecha as duas
+    // pontas, e `data_fim >= now()` (comparacao de INSTANTE) passa a bater com o
+    // que o admin viu no calendario.
+    const comFuso = (data: string, hora: string) => {
+      const d = new Date(`${data}T${hora}`);          // interpretado no fuso local
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    };
+    const inicio = form.data_inicio ? comFuso(form.data_inicio, "00:00:00") : null;
+    const fimDoDia = form.data_fim ? comFuso(form.data_fim, "23:59:59") : null;
+    const payload = { ...form, codigo, valor, // `|| null` transformava ZERO em "ilimitado", em silencio: o admin digitava 0,
     // o campo limpava, e o cupom virava sem limite. E o BANCO trata 0 como
     // esgotado (`uso_atual < uso_maximo` com 0 e falso), entao os dois
     // DISCORDAVAM — a tela aplicava o desconto e o servidor recusava, o que hoje
     // faz a guarda de preco barrar o pedido com uma mensagem que nao explica.
-    uso_maximo: form.uso_maximo ?? null, data_inicio: form.data_inicio || null, data_fim: fimDoDia };
+    uso_maximo: form.uso_maximo ?? null, data_inicio: inicio, data_fim: fimDoDia };
     const { error } = editing
       ? await supabase.from("coupons").update(payload).eq("id", editing.id)
       : await supabase.from("coupons").insert(payload);
@@ -73,7 +107,7 @@ const Coupons = () => {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent><DialogHeader><DialogTitle>{editing ? "Edit Coupon" : "New Coupon"}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div><Label>Code</Label><Input value={form.codigo} onChange={e => setForm({ ...form, codigo: e.target.value.toUpperCase() })} /></div>
-          <div className="grid grid-cols-2 gap-3"><div><Label>Type</Label><Select value={form.tipo} onValueChange={v => setForm({ ...form, tipo: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentual">Percentage</SelectItem><SelectItem value="fixo">Fixed</SelectItem></SelectContent></Select></div><div><Label>Value</Label><Input type="number" step="0.01" value={form.valor} onChange={e => setForm({ ...form, valor: parseFloat(e.target.value) || 0 })} /></div></div>
+          <div className="grid grid-cols-2 gap-3"><div><Label>Type</Label><Select value={form.tipo} onValueChange={v => setForm({ ...form, tipo: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="percentual">Percentage</SelectItem><SelectItem value="fixo">Fixed</SelectItem></SelectContent></Select></div><div><Label>Value</Label><Input type="number" step="0.01" min={0} max={form.tipo === "percentual" ? 100 : undefined} value={form.valor} onChange={e => setForm({ ...form, valor: parseFloat(e.target.value) || 0 })} /></div></div>
           <div>
             <Label>Max Uses</Label>
             <Input type="number" min={0} value={form.uso_maximo ?? ""} onChange={e => {
