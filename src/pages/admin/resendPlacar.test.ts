@@ -82,8 +82,10 @@ describe("Resend do pedido: o que so a tela faz", () => {
     // nome era o mesmo defeito da linha acima, so que uma linha abaixo.
     expect(corpo, "sem `console.error(msg, erro)` a excecao se perde")
       .toMatch(/console\.error\([^)]*,\s*\w+\s*\)/);
-    // E a frase nao pode AFIRMAR envio: o catch tambem alcanca o caso em que
-    // tudo foi recusado e nada saiu.
+    // ALFINETE na frase que ja esteve aqui, e so isso: o catch alcanca o caso em
+    // que tudo foi recusado e nada saiu, e dizer "the emails were sent" ali seria
+    // mentira. Nao e regra contra afirmar entrega — "your messages went out"
+    // passaria por esta assercao. Impede o revert literal, nao a classe.
     expect(corpo, "com tudo recusado, dizer que os e-mails sairam e mentira")
       .not.toMatch(/emails were sent/i);
   });
