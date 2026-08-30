@@ -45,6 +45,38 @@ describe("`fetchAllRows`: quem pagina precisa trazer `id`", () => {
     });
   }
 
+  it("as leituras que SOMAM: contagem de produto por categoria, e quantidade do pedido", () => {
+    // Estas duas o aviso do `fetchAllRows` revelou, e nao sao "duplicata
+    // inofensiva": as duas SOMAM. `Categorias` faz `counts[cat] = ... + 1` (badge
+    // de produtos por categoria inflado) e `Pedidos` faz `qtyMap[ped] = ... +
+    // quantidade`, que vira a coluna de quantidade da lista de pedidos. Linha de
+    // fronteira servida duas vezes = numero plausivel e errado.
+    expect(semComentario("src/pages/admin/Categorias.tsx"))
+      .toContain('from("produtos").select("id, categoria_id").eq("ativo", true)');
+    expect(semComentario("src/pages/admin/Pedidos.tsx"))
+      .toContain('.select("id, pedido_id, produto_id, quantidade, sku, backorder")');
+  });
+
+  it("e as leituras onde a duplicata seria inofensiva tambem trazem `id`", () => {
+    // Aqui o consumo e Map/Set/first-wins, entao duplicata nao mudaria o
+    // resultado. Trazem `id` mesmo assim por um motivo pratico: um aviso com
+    // falso positivo para de ser lido, e foi o aviso que achou as duas de cima.
+    // A alternativa — uma flag "sem dedupe, de proposito" — custaria mais codigo
+    // e criaria um jeito de mentir no dia em que o consumo virasse uma soma.
+    const alvos: [string, string][] = [
+      ["src/pages/admin/ProductExport.tsx", '.select("id, produto_id, preco, tabela_preco_id, tabelas_preco(nome, ativo)")'],
+      ["src/pages/admin/ProductExport.tsx", 'from("tabela_preco_itens").select("id, produto_id, preco")'],
+      ["src/pages/admin/ProductExport.tsx", 'from("produto_acesso").select("id, produto_id")'],
+      ["src/pages/admin/Clientes.tsx", '.select("id, cliente_id, privacy_group_id")'],
+      ["src/pages/admin/Clientes.tsx", 'from("pedidos").select("id, cliente_id, created_at")'],
+      ["src/pages/admin/tools/ImportCustomers.tsx", 'from("clientes").select("id, email")'],
+      ["src/pages/portal/Catalogo.tsx", 'from("produto_variantes").select("id, produto_id")'],
+    ];
+    for (const [arquivo, trecho] of alvos) {
+      expect(semComentario(arquivo), `${arquivo}: o dedupe voltou a ficar desligado`).toContain(trecho);
+    }
+  });
+
   it("Dashboard, Produtos e ProducaoEntrada tambem", () => {
     expect(semComentario("src/pages/admin/Dashboard.tsx"))
       .toContain('.select("id, created_at, total, subtotal, status")');
@@ -87,9 +119,16 @@ describe("Relatorios: o numero exibido nao pode ser outra coisa", () => {
     expect(src, "a agregacao voltou a ser chaveada pelo nome").not.toContain("map[catName]");
     expect(src, "a agregacao deixou de ser por id").toContain("map[catId][d.getMonth()]");
     expect(src, "o rotulo deixou de desambiguar pelo caminho da arvore")
-      .toContain("categoryPath(categories as any, catId)");
+      .toContain("categoryPath(categories as any, id)");
     expect(src, "a leitura de categorias nao traz `parent_id`, entao o caminho fica raso")
       .toContain('from("categorias").select("id, nome, parent_id")');
+    // O CAMINHO ainda empata entre irmas de mesmo nome sob o mesmo pai — dado
+    // legal aqui (o UNIQUE de 20260827010000 cobre so `b2bwave_id`). Sem
+    // desempate, voltavam duas linhas indistinguiveis e com `key` repetida.
+    expect(src, "sumiu o desempate por id quando o caminho empata")
+      .toContain("vezes[caminhoDe(catId)] > 1");
+    expect(src, "a linha voltou a ser chaveada pelo rotulo, que pode repetir")
+      .toContain("<TableRow key={r.id}>");
   });
 
   it("o CSV nao discorda da tela: status e data", () => {
@@ -182,6 +221,17 @@ describe("TabelasPreco: copia inteira, cascata contada e escrita confirmada", ()
     // a regua ficava meio-aplicada e a retentativa refazia o mesmo delete.
     expect(f(), "o delete em massa voltou a mandar todos os ids de uma vez")
       .toContain("removes.slice(i, i + 100)");
+    // E a mensagem de falha parcial diz ATE ONDE FOI: com erro num lote do meio,
+    // o upsert e os lotes anteriores JA foram commitados, e um `error.message`
+    // cru nao deixava o admin saber que parte dos precos ja tinha sumido.
+    expect(f(), "a falha parcial voltou a nao dizer quanto ja foi gravado")
+      .toContain("then stopped:");
+    expect(f(), "sumiu o contador de lotes que a mensagem usa").toContain("lotesFeitos");
+    // E o upsert so entra na conta se ELE tiver passado: quando e o upsert que
+    // falha, o laco de delete nem roda e a mensagem dizia "Saved 5 of 5, then
+    // stopped" com ZERO gravado — invertendo o fato que ela existe para contar.
+    expect(f(), "a contagem voltou a somar o upsert que falhou")
+      .toContain("(upsertOk ? upserts.length : 0)");
   });
 });
 

@@ -80,7 +80,7 @@ const AdminProductExport = () => {
         // (`b2bwave-sync:1822`), entao isso acontece sem ninguem fazer nada aqui.
         const allItems = await fetchAllRows<any>((from, to) =>
           supabase.from("tabela_preco_itens")
-            .select("produto_id, preco, tabela_preco_id, tabelas_preco(nome, ativo)")
+            .select("id, produto_id, preco, tabela_preco_id, tabelas_preco(nome, ativo)")
             .order("id", { ascending: true }).range(from, to));
         // CHAVE PELO ID, e nao pelo nome. `tabelas_preco.nome` nao tem UNIQUE, e o
         // proprio `handleDuplicate` gera `"<nome> (copy)"` sem contador — duas
@@ -118,7 +118,7 @@ const AdminProductExport = () => {
         priceListNames = [selectedPriceList];
         rotulos = { [selectedPriceList]: viva.nome || selectedPriceList };
         const items = await fetchAllRows<any>((from, to) =>
-          supabase.from("tabela_preco_itens").select("produto_id, preco")
+          supabase.from("tabela_preco_itens").select("id, produto_id, preco")
             .eq("tabela_preco_id", selectedPriceList)
             .order("id", { ascending: true }).range(from, to));
         priceMap[selectedPriceList] = {};
@@ -135,7 +135,7 @@ const AdminProductExport = () => {
           // gravado no campo de nome. Filtrar so por nome perdia esses produtos
           // do export, calado.
           const access = await fetchAllRows<any>((from, to) =>
-            supabase.from("produto_acesso").select("produto_id")
+            supabase.from("produto_acesso").select("id, produto_id")
               .or(`privacy_group_id.eq.${valorOr(pg.id)},grupo_nome.eq.${valorOr(pg.nome)},grupo_nome.eq.${valorOr(pg.id)}`)
               .order("id", { ascending: true }).range(from, to));
           const accessIds = new Set((access ?? []).map((a: any) => a.produto_id));

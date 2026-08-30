@@ -92,7 +92,7 @@ const AdminPedidos = () => {
           const batch = ids.slice(i, i + 200);
           const items = await fetchAllRows<any>((f, t) => supabase
             .from("pedido_itens")
-            .select("pedido_id, produto_id, quantidade, sku, backorder")
+            .select("id, pedido_id, produto_id, quantidade, sku, backorder")
             .in("pedido_id", batch).order("id", { ascending: true }).range(f, t) as any);
           items.forEach((it: any) => {
             qtyMap[it.pedido_id] = (qtyMap[it.pedido_id] ?? 0) + (it.quantidade ?? 0);

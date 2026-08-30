@@ -224,8 +224,13 @@ describe("Categorias: escrita confirmada, cascata contada, ordem que anda", () =
       .toContain('.eq("id", c.id).select("id")');
     expect(src, "`Sort` voltou a gravar ordem sem confirmar a linha")
       .toContain('.eq("id", sorted[i].id).select("id")');
-    expect(src, "sumiu a recusa de quem nao tem permissao para reordenar")
-      .toContain("Nothing was reordered");
+    // A recusa do Move precisa nomear as DUAS causas de zero-linhas (RLS, e
+    // irmao apagado por outro admin no meio): acusar so permissao mandava o
+    // admin ao lugar errado numa reordenacao que em boa parte foi gravada.
+    expect(src, "sumiu a recusa quando parte da reordenacao nao aplicou")
+      .toContain("Part of the reorder did not apply");
+    expect(src, "a recusa do Move voltou a acusar uma causa so")
+      .toContain("no longer exists, or you do not have permission to change categories");
     expect(src, "sumiu a recusa de quem nao tem permissao para ordenar")
       .toContain("Nothing was sorted");
   });
@@ -272,5 +277,91 @@ describe("Options: escrita confirmada e estado que nao envelhece", () => {
     expect(src, "o delete parou de contar produto_opcoes").toContain('from("produto_opcoes")');
     expect(src, "falha ao contar deixou de recusar o delete")
       .toMatch(/if \(cErr\)[\s\S]{0,160}?return;/);
+  });
+});
+
+describe("Produtos: a lista nao pode mentir sobre o que gravou nem apagar as cascatas em silencio", () => {
+  const f = () => semComentario("src/pages/admin/Produtos.tsx");
+
+  it("os dois selects da lista gravam pelo bloqueio otimista, e nao com update cru", () => {
+    // TRES defeitos colapsavam aqui:
+    // 1. UPDATE barrado por RLS afeta ZERO linhas e devolve `error: null` — o
+    //    warehouse mudava status/Active, a tela pintava o valor novo, nada gravou.
+    // 2. Sem `admin_rev`, mudar status pela lista e salvar uma ficha ja aberta
+    //    DESFAZIA a mudanca da lista, e os dois caminhos diziam "salvo".
+    // 3. A ficha usava `gravarComToken` e a lista nao — ter duas garantias
+    //    diferentes para a MESMA coluna foi o que produziu (2).
+    const src = f();
+    expect(src, "a lista voltou a gravar sem o bloqueio otimista")
+      .toContain('gravarComToken(supabase, "produtos"');
+    // Nenhum `update()` cru sobre `produtos` pode voltar a existir nesta tela.
+    expect(src, "voltou um update direto em produtos, fora do gravarComToken")
+      .not.toMatch(/from\("produtos"\)[\s\S]{0,60}?\.update\(/);
+    // E o `rev` novo tem que voltar para o estado local, senao o SEGUNDO clique na
+    // mesma linha bate em token velho e acusa um colega que nao existe.
+    expect(src, "o rev novo nao volta para o estado local")
+      .toMatch(/admin_rev: r\.rev/);
+    // Os quatro desfechos de `gravarComToken` sao distintos de proposito. Tratar
+    // so o erro deixava `conflito` cair no caminho de sucesso.
+    for (const t of ["conflito", "recusado", "incerto"]) {
+      expect(src, `o desfecho \`${t}\` deixou de ser tratado`).toContain(`r.tipo === "${t}"`);
+    }
+  });
+
+  it("o delete conta as cascatas irrecuperaveis, recusa se nao contar, e confirma a linha", () => {
+    // "Delete this product?" escondia DOZE cascatas. Nove delas (galeria,
+    // arquivos, descontos, preco por cliente, relacionados, opcoes, regras de
+    // status, e as DUAS de privacidade) sao digitadas aqui e o sync do B2BWave
+    // nao as devolve.
+    const src = f();
+    const del = src.match(/const handleDelete = async \(e: React\.MouseEvent[\s\S]{0,4000}?\n  \};/);
+    expect(del, "nao achei o handleDelete").toBeTruthy();
+    for (const t of [
+      "produto_imagens", "produto_descontos", "produto_precos_cliente",
+      "produto_acesso", "produto_cliente_acesso", "produto_variantes",
+    ]) {
+      // `contar("X")`, e nao so `"X"`: os mesmos seis nomes aparecem no TIPO do
+      // parametro logo acima, entao procurar a string solta lia a anotacao e nao a
+      // chamada. Medido: apagar `contar("produto_precos_cliente")` passava verde.
+      expect(del![0], `o delete parou de contar ${t}`).toContain(`contar("${t}")`);
+    }
+    expect(del![0], "falha ao contar deixou de recusar o delete")
+      .toMatch(/if \(erro\) \{[\s\S]{0,200}?return;/);
+    // DELETE barrado por RLS tambem afeta zero linhas em silencio — e o
+    // `activity_logs` aceita INSERT de warehouse, entao ficava gravada, com o nome
+    // real dele, uma delecao que nunca aconteceu.
+    expect(del![0], "o delete voltou a nao confirmar a linha").toContain('.select("id")');
+    const guarda = del![0].indexOf("if (!apagado)");
+    const registro = del![0].indexOf('log("deleted"');
+    expect(guarda, "sumiu a guarda de zero linhas apagadas").toBeGreaterThan(-1);
+    expect(registro, "nao achei o registro no activity_logs").toBeGreaterThan(-1);
+    expect(guarda, "o log de auditoria e escrito antes de confirmar que apagou")
+      .toBeLessThan(registro);
+    // A guarda tem que ABORTAR: comparar posicao nao mata o mutante que apaga o
+    // `return`. Foi exatamente esse mutante que sobreviveu em `Categorias`.
+    const bloco = del![0].match(/if \(!apagado\) \{[\s\S]{0,300}?\n    \}/);
+    expect(bloco, "nao achei o corpo da guarda").toBeTruthy();
+    expect(bloco![0], "a guarda nao interrompe mais o fluxo").toMatch(/return;/);
+    // FK e protecao, nao erro para despejar cru na cara do admin.
+    expect(del![0], "o erro de FK voltou a ser despejado cru").toContain('"23503"');
+  });
+
+  it("a paginacao usa a pagina LIMITADA nos quatro pontos", () => {
+    // Apagar/desativar a unica linha da ultima pagina reduzia `totalPages`, a barra
+    // inteira desmontava (esta sob `totalPages > 1`) e a fatia virava vazia: "No
+    // products found" sem botao de voltar, so F5. `paginaValida` tem teste que
+    // EXECUTA em `paginacao.test.ts` — este aqui so cobra que a tela a use.
+    const src = f();
+    expect(src, "a tela parou de limitar a pagina").toContain("paginaValida(page, totalPages)");
+    // Os quatro pontos: a fatia, os botoes de anterior/proximo, a lista de numeros
+    // e o realce do botao atual. Deixar UM em `page` reabre o beco pela metade.
+    expect(src, "a fatia voltou a usar a pagina nao limitada")
+      .toMatch(/filtered\.slice\(\(pageOk - 1\)/);
+    expect(src, "os numeros da barra voltaram a usar a pagina nao limitada")
+      .toContain("paginasVisiveis(pageOk, totalPages)");
+    expect(src, "as setas voltaram a usar a pagina nao limitada")
+      .toMatch(/disabled=\{pageOk <= 1\}/);
+    expect(src, "as setas voltaram a usar a pagina nao limitada")
+      .toMatch(/disabled=\{pageOk >= totalPages\}/);
   });
 });

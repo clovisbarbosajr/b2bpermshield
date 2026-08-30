@@ -98,7 +98,13 @@ describe("as quatro telas usam a chave por numero", () => {
   ];
   it.each(TELAS)("%s", (tela) => {
     const fonte = readFileSync(tela, "utf-8");
-    expect(fonte, `${tela} nao usa paginasVisiveis`).toContain("paginasVisiveis(page, totalPages)");
+    // `page` OU a versao limitada. `Produtos.tsx` passou a limitar no render
+    // (`pageOk = Math.min(page, Math.max(1, totalPages))`) porque apagar a unica
+    // linha da ultima pagina desmontava a barra inteira — `totalPages > 1` virava
+    // falso — e a tela ficava em "No products found" sem botao de voltar. Exigir
+    // literalmente `page` aqui reprovava a correcao.
+    expect(fonte, `${tela} nao usa paginasVisiveis`)
+      .toMatch(/paginasVisiveis\((page|pageOk), totalPages\)/);
     // Uma fatia por lista de paginacao (o portal tem duas, topo e rodape). Cortar
     // pelo proprio `.map(` evita o recorte a mao que ja ficou verde e parou de
     // proteger tres vezes neste projeto — ver `src/test/fatia.ts`. O portal chama

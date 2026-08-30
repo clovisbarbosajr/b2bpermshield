@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { paginasVisiveis } from "./paginacao";
+import { paginasVisiveis, paginaValida } from "./paginacao";
 
 const numeros = (r: (number | "...")[]) => r.filter((x): x is number => typeof x === "number");
 
@@ -88,5 +88,44 @@ describe("paginasVisiveis", () => {
   it("total invalido devolve lista vazia em vez de quebrar a tela", () => {
     expect(paginasVisiveis(1, 0)).toEqual([]);
     expect(paginasVisiveis(1, NaN)).toEqual([]);
+  });
+});
+
+describe("paginaValida: o beco sem saida depois de apagar a ultima linha", () => {
+  // O CENARIO REAL, medido: 26 produtos, PAGE_SIZE 25, admin na pagina 2 (uma
+  // linha). Apaga essa linha -> 25 produtos -> totalPages 1. Sem o limite, a
+  // fatia era `slice(25, 50)` = vazio e a barra sumia (esta sob `totalPages > 1`).
+  it("volta para a ultima pagina que existe", () => {
+    expect(paginaValida(2, 1)).toBe(1);
+    expect(paginaValida(9, 3)).toBe(3);
+  });
+
+  it("nao mexe na pagina quando ela existe", () => {
+    expect(paginaValida(1, 1)).toBe(1);
+    expect(paginaValida(2, 5)).toBe(2);
+    expect(paginaValida(5, 5)).toBe(5);
+  });
+
+  // `Math.min(page, totalPages)` sozinho devolveria 0 com a lista vazia, e a
+  // fatia viraria `slice(-25, 0)` — as ULTIMAS 25 linhas, nao as primeiras.
+  // Este assert e o que mata essa versao.
+  it("lista vazia devolve pagina 1, nunca 0", () => {
+    expect(paginaValida(1, 0)).toBe(1);
+    expect(paginaValida(7, 0)).toBe(1);
+  });
+
+  // A fatia calculada com o resultado tem que cair dentro da lista. Sem o limite
+  // este loop devolve vazio para os casos de page > totalPages.
+  it("a fatia resultante nunca fica vazia com lista nao vazia", () => {
+    const TAM = 25;
+    for (const total of [1, 26, 51, 100]) {
+      for (const page of [1, 2, 3, 9, 40]) {
+        const totalPages = Math.ceil(total / TAM);
+        const ok = paginaValida(page, totalPages);
+        const fatia = Array.from({ length: total }, (_, i) => i)
+          .slice((ok - 1) * TAM, ok * TAM);
+        expect(fatia.length, `total=${total} page=${page}`).toBeGreaterThan(0);
+      }
+    }
   });
 });

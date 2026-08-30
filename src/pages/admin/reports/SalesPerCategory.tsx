@@ -76,9 +76,22 @@ const SalesPerCategory = () => {
       map[catId][d.getMonth()] = (map[catId][d.getMonth()] || 0) + i.subtotal;
     });
 
+    // O CAMINHO ainda pode empatar: duas categorias IRMAS de mesmo nome sob o
+    // MESMO pai dao caminho identico, e isso e dado legal aqui — o UNIQUE de
+    // `20260827010000` cobre so `b2bwave_id`, e o comentario dele diz que
+    // categoria nativa do app pode repetir. Sem desempate, as duas voltariam a
+    // ficar indistinguiveis na tela e no CSV (e com `key` de React repetida).
+    // Desempate pelo id, o mesmo que o `ProductExport` usa nas reguas.
+    const caminhoDe = (id: string) =>
+      categoryPath(categories as any, id) || catNameMap[id] || "Uncategorized";
+    const vezes: Record<string, number> = {};
+    Object.keys(map).forEach((id) => { if (id) vezes[caminhoDe(id)] = (vezes[caminhoDe(id)] ?? 0) + 1; });
+
     return Object.entries(map)
       .map(([catId, monthData]) => ({
-        category: catId ? (categoryPath(categories as any, catId) || catNameMap[catId] || "Uncategorized") : "Uncategorized",
+        id: catId || "sem-categoria",
+        category: !catId ? "Uncategorized"
+          : vezes[caminhoDe(catId)] > 1 ? `${caminhoDe(catId)} (${catId.slice(0, 8)})` : caminhoDe(catId),
         ...Object.fromEntries(months.map((_, idx) => [`m${idx}`, monthData[idx] || 0])),
         total: Object.values(monthData).reduce((a, b) => a + b, 0),
       }))
@@ -121,7 +134,7 @@ const SalesPerCategory = () => {
               {reportData.length === 0 ? (
                 <TableRow><TableCell colSpan={14} className="text-center text-muted-foreground py-8">No data.</TableCell></TableRow>
               ) : reportData.map((r: any) => (
-                <TableRow key={r.category}>
+                <TableRow key={r.id}>
                   <TableCell className="text-primary sticky left-0 bg-card">{r.category}</TableCell>
                   {months.map((_, i) => <TableCell key={i} className="text-right text-xs">{r[`m${i}`] > 0 ? formatCurrency(r[`m${i}`]) : "—"}</TableCell>)}
                   <TableCell className="text-right font-bold">{formatCurrency(r.total)}</TableCell>

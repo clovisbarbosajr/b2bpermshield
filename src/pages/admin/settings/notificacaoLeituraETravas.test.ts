@@ -21,16 +21,42 @@ const ler = (arquivo: string) => readFileSync(new URL(arquivo, import.meta.url),
 describe("NotificacoesLog: falha de leitura nao vira 'nada foi enviado'", () => {
   const fonte = ler("./NotificacoesLog.tsx");
 
-  it("le o error do select de notification_log", () => {
-    const select = fonte.match(/const \{[^}]*\} = await sb\.from\('notification_log'\)[^;]*;/);
-    expect(select, "nao achei o select de notification_log").toBeTruthy();
-    expect(select![0]).toMatch(/const \{ data, error \}/);
-    expect(fonte).toMatch(/if \(error\) \{ setErro\(error\.message\)/);
+  // A tela passou a fazer DUAS leituras (entrega × registro de sistema, que grava
+  // `channel = '-'` e nunca foi tentativa de envio) em vez de uma so `.limit(200)`
+  // cega. A invariante nao mudou — falha de leitura NAO pode virar "nada foi
+  // enviado" — mas o formato do `const { data, error }` deixou de existir, entao o
+  // assert antigo passou a procurar uma forma que a correcao removeu.
+  it("as duas leituras de notification_log alimentam o erro, e nenhuma e descartada", () => {
+    const leituras = fonte.match(/sb\.from\('notification_log'\)/g) ?? [];
+    expect(leituras.length, "nao achei as leituras de notification_log").toBe(2);
+    // O que importa: o `error` de QUALQUER uma das duas vira banner. Descartar o
+    // da segunda deixava a lista de sistema vazia afirmando que nao ha registro.
+    expect(fonte, "o error das duas leituras nao alimenta o banner")
+      .toMatch(/entregas\.error \?\? diagnostico\.error/);
+    expect(fonte, "a falha deixou de virar banner").toMatch(/if \(falha\) \{ setErro\(falha\.message\)/);
+    // E TEM QUE ESVAZIAR AS DUAS LISTAS na falha: manter a lista velha na tela sob
+    // um banner de erro e a mesma mentira com outra roupa.
+    expect(fonte, "a falha nao esvazia as duas listas")
+      .toMatch(/setErro\(falha\.message\); setEnvios\(\[\]\); setSistema\(\[\]\);/);
+  });
+
+  it("a resposta atrasada nao sobrescreve a mais nova nem apaga o banner de erro", () => {
+    // Ha um botao "Atualizar". Dois cliques com rede lenta: a leitura VELHA
+    // bem-sucedida chegando depois de uma que falhou apagava o banner e mostrava
+    // dados — exatamente a mentira que esta tela existe para impedir.
+    expect(fonte, "sumiu a guarda de ordem das cargas").toMatch(/const cargaSeq = useRef\(0\)/);
+    expect(fonte, "a carga nao reivindica mais o proprio numero")
+      .toMatch(/const minha = \+\+cargaSeq\.current/);
+    // A comparacao tem que vir DEPOIS do await e ABORTAR.
+    const guarda = fonte.match(/if \(minha !== cargaSeq\.current\) return;/);
+    expect(guarda, "a guarda de ordem nao aborta mais a carga velha").toBeTruthy();
+    expect(fonte.indexOf("await Promise.all"), "a guarda de ordem esta antes do await — nao guarda nada")
+      .toBeLessThan(fonte.indexOf("if (minha !== cargaSeq.current) return;"));
   });
 
   it("o ramo de erro vem antes do estado vazio", () => {
     const erro = fonte.indexOf(") : erro ? (");
-    const vazio = fonte.indexOf(") : logs.length === 0 ? (");
+    const vazio = fonte.indexOf("envios.length === 0 ? (");
     expect(erro, "nao achei o ramo de erro").toBeGreaterThan(-1);
     expect(vazio, "nao achei o estado vazio").toBeGreaterThan(-1);
     expect(erro).toBeLessThan(vazio);

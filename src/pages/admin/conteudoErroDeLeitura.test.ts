@@ -34,12 +34,28 @@ const telas = [
   // categories yet" com a leitura falhada, e a lista vazia ainda desarmava a
   // guarda de ciclo (`parentesProibidos`).
   { arquivo: "./Categorias.tsx", tabela: "categorias" },
+  // `Produtos` entrou com forma DIFERENTE: ela le por `fetchAllRows`, que LANCA
+  // em vez de devolver `{ data, error }`. Exigir `const { data, error }` dela
+  // reprovaria a correcao certa — o `catch` E a leitura do erro. O que as duas
+  // formas tem em comum, e o que este teste cobra, e o `setLoadError` ser
+  // alimentado pela falha, ser limpo no sucesso, e o ramo de erro vir antes do
+  // texto de estado vazio.
+  { arquivo: "./Produtos.tsx", tabela: "produtos", forma: "lanca" },
 ];
 
 describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () => {
-  for (const { arquivo, tabela } of telas) {
+  for (const { arquivo, tabela, forma } of telas as Array<{ arquivo: string; tabela: string; forma?: "lanca" }>) {
     it(`${arquivo}: le o error do select de ${tabela} e o trata`, () => {
       const fonte = ler(arquivo);
+      if (forma === "lanca") {
+        // `fetchAllRows` LANCA em vez de devolver `{ data, error }`. O equivalente
+        // do assert abaixo e existir um `catch` que ALIMENTA o `loadError` — sem
+        // ele o erro morre num `console.error` e a tela volta a afirmar que nao
+        // existe nada. O `[\s\S]{0,300}?` cobre o corpo do catch com folga.
+        expect(fonte, `nao achei a leitura de ${tabela}`).toContain(`.from("${tabela}")`);
+        expect(fonte, "o catch da leitura nao alimenta o `loadError`")
+          .toMatch(/\} catch \([\s\S]{0,300}?setLoadError\(/);
+      } else {
       // `[\s\S]{0,40}?` entre o `from` e o `select`: `Categorias` quebra a cadeia
       // em varias linhas, e exigir os dois colados so casava o estilo de uma
       // linha so.
@@ -52,8 +68,14 @@ describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () =
       // Duas formas equivalentes no repo: `if (error) { setLoadError(error.message) }`
       // e `setLoadError(error ? error.message : null)`. O que importa e o `error`
       // ALIMENTAR o estado — exigir uma das duas reprovava a outra.
+      //
+      // FICA DENTRO DO `else`: na forma que LANCA, a variavel do catch nao se
+      // chama `error`, e o assert equivalente ja foi feito acima contra o `catch`.
+      // Deixa-lo compartilhado exigia renomear a variavel do catch so para agradar
+      // o teste — teste ditando nome de variavel e teste errado.
       expect(fonte, "o `error` da leitura nao alimenta o `loadError`")
         .toMatch(/setLoadError\(\s*error/);
+      }
       // E O CAMINHO DE SUCESSO TEM QUE LIMPAR. Sem isto, depois de uma falha
       // transitoria o "Try again" recarrega os dados mas o card de erro nunca sai
       // — o ramo de erro vem antes do conteudo, entao a tela fica travada no erro
@@ -81,7 +103,10 @@ describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () =
       // Duas formas de abrir o ramo de erro: `) : loadError ? (` nas telas de
       // card, e `{loadError ? (` dentro da celula da tabela.
       const erroJsx = jsx.search(/[:{]\s*loadError \? \(/);
-      const textoVazio = jsx.search(/No [a-z ]+ yet/);
+      // Duas redacoes no repo: "No banners yet" e "No products found". Exigir so
+      // a primeira nao achava o estado vazio de `Produtos`, e o assert de ordem
+      // passava a comparar contra -1 — verde sem proteger nada.
+      const textoVazio = jsx.search(/No [a-z ]+ (yet|found)/);
       expect(erroJsx, "nao achei o ramo de erro na renderizacao").toBeGreaterThan(-1);
       expect(textoVazio, "nao achei o texto de estado vazio").toBeGreaterThan(-1);
       expect(erroJsx, "a tela imprime 'nao existe nada' antes de conferir o erro de leitura")

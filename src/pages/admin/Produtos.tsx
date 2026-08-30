@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { paginasVisiveis } from "@/lib/paginacao";
+import { paginasVisiveis, paginaValida } from "@/lib/paginacao";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { descendantIds } from "@/lib/categoryTree";
 import AdminLayout from "@/components/layouts/AdminLayout";
@@ -15,6 +15,7 @@ import { Plus, Pencil, Search, Image as ImageIcon, Eye, X, ChevronLeft, ChevronR
 import { toast } from "sonner";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { categoryTreeOptions } from "@/lib/categoryTree";
+import { gravarComToken } from "@/lib/gravarComToken";
 
 const PAGE_SIZE = 25;
 
@@ -31,6 +32,9 @@ type Produto = {
   estoque_total: number; estoque_reservado: number; categoria_id: string | null;
   imagem_url: string | null; status_produto: string | null; preco_msrp: number | null;
   custo: number | null; created_at: string; updated_at: string;
+  // O `select("*")` sempre trouxe esta coluna; faltava DECLARA-LA para os dois
+  // handlers da lista poderem usar o mesmo bloqueio otimista da ficha.
+  admin_rev: number;
 };
 type Categoria = { id: string; nome: string; parent_id: string | null; ordem?: number | null };
 type Brand = { id: string; nome: string };
@@ -50,6 +54,12 @@ const AdminProdutos = () => {
   const [filters, setFilters] = useState({ ...emptyFilters });
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  // O `catch` ja toastava, mas o toast do sonner dura 6 s e a TABELA continuava
+  // afirmando "No products found" para sempre. Quem chega na tela dez segundos
+  // depois — ou com a aba em segundo plano — le catalogo vazio e acredita.
+  // `produtos.sku` deixou de ser UNIQUE (decisao do clone, `20260708140000`),
+  // entao recadastrar duplica sem nenhuma barreira.
+  const [loadError, setLoadError] = useState<string | null>(null);
   // Price lists for columns
   const [priceLists, setPriceLists] = useState<any[]>([]);
   // Map produto_id -> Set de privacy_group_id (para o filtro de privacy group)
@@ -71,6 +81,7 @@ const AdminProdutos = () => {
           // Traz o ID do grupo, não só o nome — ver o mapa abaixo.
           fetchAllRows<any>((f, t) => supabase.from("produto_acesso").select("id, produto_id, privacy_group_id, grupo_nome").order("id", { ascending: true }).range(f, t) as any),
         ]);
+        setLoadError(null);
         setProdutos(p);
         setCategorias(c);
         setBrands(b);
@@ -93,6 +104,7 @@ const AdminProdutos = () => {
         // Antes o erro era engolido e a tela dizia "No products found", igual a
         // catálogo vazio — o admin concluía que tinha perdido os produtos.
         console.error(e);
+        setLoadError(e?.message ?? String(e));
         toast.error("Could not load products. Please try again.");
       } finally {
         setLoading(false);
@@ -134,32 +146,126 @@ const AdminProdutos = () => {
   });
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // BECO SEM SAIDA: `page` nao era limitado depois de uma escrita. Com 26 produtos
+  // (`page = 2`), apagar a unica linha da pagina 2 deixava `totalPages = 1` — e a
+  // barra inteira esta sob `totalPages > 1`, entao ela DESMONTAVA. `paginated`
+  // virava `[]` e a tela dizia "No products found" sem nenhum botao de voltar.
+  // Sair de la exigia F5.
+  //
+  // O mesmo beco pelo outro caminho: o filtro nasce em "Active", entao desativar a
+  // ultima linha da ultima pagina tem exatamente o mesmo efeito.
+  //
+  // Derivado no render, e nao um `setPage` em efeito: efeito corrige DEPOIS de ter
+  // renderizado a tela vazia uma vez, e ainda precisaria de dependencia certa.
+  const pageOk = paginaValida(page, totalPages);
+  const paginated = filtered.slice((pageOk - 1) * PAGE_SIZE, pageOk * PAGE_SIZE);
 
   const fmtDate = (d: string) => {
     const dt = new Date(d);
     return `${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}/${dt.getFullYear()} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
   };
 
-  const handleStatusChange = async (productId: string, newStatus: string) => {
-    const { error } = await supabase.from("produtos").update({ status_produto: newStatus }).eq("id", productId);
-    if (error) { toast.error(error.message); return; }
-    setProdutos(prev => prev.map(p => p.id === productId ? { ...p, status_produto: newStatus } : p));
+  // OS DOIS SELECTS DA LISTA GRAVAVAM SEM CONFERIR QUE GRAVARAM, e isso encobria
+  // tres defeitos de uma vez:
+  //
+  // 1. UPDATE barrado por RLS afeta ZERO linhas e devolve `error: null` — a tela
+  //    pintava o valor novo sobre uma escrita que nao houve.
+  // 2. Sem `admin_rev`, mudar o status pela lista e depois salvar uma ficha que ja
+  //    estava aberta DESFAZIA a mudanca da lista, e os dois caminhos diziam
+  //    "salvo" (`status_produto` e `ativo` estao no payload do `ProductEdit`).
+  // 3. A ficha ja usava `gravarComToken`; a lista, nao. Ter dois caminhos de
+  //    escrita para a mesma coluna com garantias diferentes e o que produziu (2).
+  //
+  // Um so bloco resolve os tres: mesmo bloqueio otimista da ficha, e o `rev` novo
+  // volta para o estado local para o proximo clique da mesma linha funcionar.
+  const gravarNaLista = async (productId: string, patch: Partial<Produto>) => {
+    const produto = produtos.find(p => p.id === productId);
+    if (!produto) return;
+    const r = await gravarComToken(supabase, "produtos", productId, patch, produto.admin_rev);
+    if (r.tipo === "conflito") {
+      toast.error("Someone else changed this product while this page was open. Nothing was saved — reload to see the current values.");
+      return;
+    }
+    if (r.tipo === "recusado") { toast.error("Not saved: " + r.mensagem); return; }
+    if (r.tipo === "incerto") {
+      toast.error("Lost connection — it is not possible to tell whether this was saved. Reload and check before trying again.");
+      return;
+    }
+    setProdutos(prev => prev.map(p => p.id === productId ? { ...p, ...patch, admin_rev: r.rev } : p));
   };
 
-  const handleActiveChange = async (productId: string, newActive: string) => {
-    const ativo = newActive === "Active";
-    const { error } = await supabase.from("produtos").update({ ativo }).eq("id", productId);
-    if (error) { toast.error(error.message); return; }
-    setProdutos(prev => prev.map(p => p.id === productId ? { ...p, ativo } : p));
-  };
+  const handleStatusChange = (productId: string, newStatus: string) =>
+    gravarNaLista(productId, { status_produto: newStatus });
+
+  const handleActiveChange = (productId: string, newActive: string) =>
+    gravarNaLista(productId, { ativo: newActive === "Active" });
 
   const handleDelete = async (e: React.MouseEvent, productId: string) => {
     e.stopPropagation();
-    if (!confirm("Delete this product?")) return;
     const produto = produtos.find(p => p.id === productId);
-    const { error } = await supabase.from("produtos").delete().eq("id", productId);
-    if (error) { toast.error(error.message); return; }
+
+    // O confirm era "Delete this product?" e escondia DOZE cascatas. Nove delas
+    // (galeria, arquivos, descontos, preco por cliente, relacionados, opcoes,
+    // regras de status, e as DUAS tabelas de privacidade) sao digitadas aqui e o
+    // sync do B2BWave nao as devolve — sao irrecuperaveis.
+    //
+    // O conjunto de fato apagavel e "produto sem venda" (`pedido_itens` e
+    // `producao_pedidos` barram o resto por FK), que e exatamente a populacao que
+    // o admin apaga por engano de cadastro — e a que tem galeria, desconto e
+    // liberacao recem-digitados.
+    //
+    // Se a contagem falhar, RECUSAR: nao da para avisar do estrago que nao se
+    // conseguiu medir. Mesmo molde do `PrivacyGroups.handleDelete`.
+    // Nome de tabela LITERAL, e nao `t: string`: o cliente do Supabase e tipado
+    // pelo schema, entao `string` derruba o overload e o `tsc` acusa. Digitar
+    // errado aqui vira erro de compilacao, que e o ponto.
+    const contar = (t: "produto_imagens" | "produto_descontos" | "produto_precos_cliente"
+      | "produto_acesso" | "produto_cliente_acesso" | "produto_variantes") =>
+      supabase.from(t).select("produto_id", { count: "exact", head: true }).eq("produto_id", productId);
+    const [img, desc, precoCli, acesso, acessoCli, variantes] = await Promise.all([
+      contar("produto_imagens"), contar("produto_descontos"),
+      contar("produto_precos_cliente"), contar("produto_acesso"),
+      contar("produto_cliente_acesso"), contar("produto_variantes"),
+    ]);
+    const erro = img.error || desc.error || precoCli.error || acesso.error || acessoCli.error || variantes.error;
+    if (erro) {
+      toast.error("Could not check what depends on this product — nothing was deleted: " + erro.message);
+      return;
+    }
+
+    if (!confirm(
+      `Delete "${produto?.nome ?? productId}"?\n\n` +
+      `This permanently deletes, together with the product:\n` +
+      `• ${img.count ?? 0} image(s)\n` +
+      `• ${desc.count ?? 0} quantity discount(s)\n` +
+      `• ${precoCli.count ?? 0} customer-specific price(s)\n` +
+      `• ${acesso.count ?? 0} privacy group permission(s)\n` +
+      `• ${acessoCli.count ?? 0} customer permission(s)\n` +
+      `• ${variantes.count ?? 0} variant(s), with their prices\n\n` +
+      `Only the product itself comes back from the B2BWave sync. Everything above ` +
+      `was entered here and cannot be recovered. This cannot be undone.`
+    )) return;
+
+    // `.select("id")`: DELETE barrado por RLS tambem afeta zero linhas em silencio
+    // — o warehouse via o X na tela (a rota so exige `view_products`), clicava, a
+    // linha sumia do React, o toast dizia "Product deleted", e o `activity_logs`
+    // gravava com o nome dele uma delecao que nunca aconteceu. Era pior do que log
+    // ausente: era log falso na tabela que o admin consulta para saber quem apagou.
+    const { data: apagado, error } = await supabase
+      .from("produtos").delete().eq("id", productId).select("id").maybeSingle();
+    if (error) {
+      // O FK de `pedido_itens`/`producao_pedidos` esta CERTO: ele protege o
+      // historico. So faltava traduzir — o toast despejava
+      // `pedido_itens_produto_id_fkey` na cara do admin.
+      toast.error(error.code === "23503"
+        ? "This product is used by existing orders or production and cannot be deleted. Set it to Inactive instead."
+        : "Could not delete: " + error.message);
+      return;
+    }
+    if (!apagado) {
+      toast.error("Nothing was deleted — you do not have permission to delete products.");
+      return;
+    }
     setProdutos(prev => prev.filter(p => p.id !== productId));
     toast.success("Product deleted");
     log("deleted", "product", productId, produto?.nome);
@@ -260,7 +366,7 @@ const AdminProdutos = () => {
       {/* Pagination */}
       {!loading && totalPages > 1 && (
         <div className="flex items-center gap-1 mb-3">
-          <Button variant="outline" size="icon" className="h-7 w-7" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          <Button variant="outline" size="icon" className="h-7 w-7" disabled={pageOk <= 1} onClick={() => setPage(pageOk - 1)}>
             <ChevronLeft className="h-3 w-3" />
           </Button>
           {/* `paginasVisiveis` no lugar da janela fixa. A antiga mostrava sempre
@@ -268,16 +374,16 @@ const AdminProdutos = () => {
               tinham botao. E o item rotulado `...` era um Button que levava para
               `totalPages - 1` — clicar nas reticencias jogava o admin na
               penultima pagina sem avisar. Agora `...` e texto. */}
-          {paginasVisiveis(page, totalPages).map((n, i) =>
+          {paginasVisiveis(pageOk, totalPages).map((n, i) =>
             n === "..." ? (
               <span key={`e${i}`} className="px-1 text-xs text-muted-foreground select-none">...</span>
             ) : (
-              <Button key={n} variant={page === n ? "default" : "outline"} size="icon" className="h-7 w-7 text-xs" onClick={() => setPage(n)}>
+              <Button key={n} variant={pageOk === n ? "default" : "outline"} size="icon" className="h-7 w-7 text-xs" onClick={() => setPage(n)}>
                 {n}
               </Button>
             ),
           )}
-          <Button variant="outline" size="icon" className="h-7 w-7" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          <Button variant="outline" size="icon" className="h-7 w-7" disabled={pageOk >= totalPages} onClick={() => setPage(pageOk + 1)}>
             <ChevronRight className="h-3 w-3" />
           </Button>
         </div>
@@ -313,7 +419,16 @@ const AdminProdutos = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {paginated.length === 0 ? (
+              {loadError ? (
+                <TableRow><TableCell colSpan={8} className="text-center py-8">
+                  <p className="text-destructive">Could not load the product list.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    This does NOT mean the catalog is empty — the products could not be read. Do not re-create anything.
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+                  <Button variant="outline" size="sm" className="mt-3" onClick={() => window.location.reload()}>Try again</Button>
+                </TableCell></TableRow>
+              ) : paginated.length === 0 ? (
                 <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No products found</TableCell></TableRow>
               ) : paginated.map((p) => (
                 <TableRow key={p.id} className="cursor-pointer hover:bg-muted/50" onClick={() => navigate(`/admin/products/${p.id}`)}>

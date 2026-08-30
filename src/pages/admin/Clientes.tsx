@@ -127,7 +127,7 @@ const AdminClientes = () => {
       //   `if (!ultimo) return false` e escondem essa gente.
       try {
         const vinculos = await fetchAllRows<any>((from, to) =>
-          supabase.from("cliente_privacy_groups").select("cliente_id, privacy_group_id")
+          supabase.from("cliente_privacy_groups").select("id, cliente_id, privacy_group_id")
             .order("id", { ascending: true }).range(from, to));
         const porCliente: Record<string, string[]> = {};
         vinculos.forEach((v: any) => {
@@ -136,7 +136,7 @@ const AdminClientes = () => {
         setGruposPorCliente(porCliente);
 
         const orders = await fetchAllRows<any>((from, to) =>
-          supabase.from("pedidos").select("cliente_id, created_at")
+          supabase.from("pedidos").select("id, cliente_id, created_at")
             .order("created_at", { ascending: false }).order("id", { ascending: true })
             .range(from, to));
         const map: Record<string, string> = {};

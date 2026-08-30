@@ -169,7 +169,7 @@ const Catalogo = () => {
         // pai — exatamente o pedido errado que este bloco existe para impedir.
         try {
           const linhas = await fetchAllRows<{ produto_id: string }>((from, to) =>
-            supabase.from("produto_variantes").select("produto_id")
+            supabase.from("produto_variantes").select("id, produto_id")
               .eq("ativo", true)
               .in("produto_id", idsVisiveis.slice(i, i + LOTE))
               .order("id", { ascending: true }).range(from, to));

@@ -251,6 +251,11 @@ const AdminTabelasPreco = () => {
         .upsert(upserts, { onConflict: "tabela_preco_id,produto_id" });
       error = r.error;
     }
+    // Se quem falhou foi o PROPRIO upsert, nada dele foi gravado. Contar
+    // `upserts.length` incondicionalmente fazia a mensagem de falha parcial dizer
+    // "Saved 5 of 5, then stopped" com ZERO no banco — a mensagem existe para
+    // contar o que foi feito, e inverteria justamente esse fato.
+    const upsertOk = !error;
     // O DELETE VAI EM LOTES DE 100.
     //
     // O filtro `in.(...)` viaja na QUERY STRING, e o encoder do postgrest-js nem
@@ -261,13 +266,25 @@ const AdminTabelasPreco = () => {
     // continuava suja e a retentativa refazia o mesmo delete gigante — nunca
     // saia do lugar sozinho. O lote de 100 e o mesmo que o sync usa
     // (`b2bwave-sync:1441`).
+    let lotesFeitos = 0;
     for (let i = 0; !error && i < removes.length; i += 100) {
       const r = await supabase.from("tabela_preco_itens").delete()
         .eq("tabela_preco_id", selectedTabela.id).in("produto_id", removes.slice(i, i + 100));
       error = r.error;
+      if (!error) lotesFeitos++;
     }
     setSavingPrices(false);
-    if (error) { toast.error(error.message); return; }
+    if (error) {
+      // DIZ ATE ONDE FOI. Quando o erro cai num lote do meio, o upsert e os lotes
+      // anteriores JA foram commitados: o admin lia uma mensagem crua de rede e
+      // nao tinha como saber que parte dos precos ja tinha sido apagada. Molde do
+      // `sortAlphabetically` do `Categorias` ("the first N were reordered").
+      // Repetir o Save e seguro — upsert e delete convergem —, e por isso as
+      // linhas continuam marcadas como pendentes de proposito.
+      const feitos = (upsertOk ? upserts.length : 0) + Math.min(lotesFeitos * 100, removes.length);
+      toast.error(`Saved ${feitos} of ${dirtyIds.length} change(s), then stopped: ${error.message} — nothing was lost, click Save again to finish.`);
+      return;
+    }
     setOrigPrices({ ...editingPrices });
     toast.success(`${dirtyIds.length} price(s) saved`);
   };

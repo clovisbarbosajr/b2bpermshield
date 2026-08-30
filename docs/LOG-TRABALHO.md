@@ -4305,3 +4305,138 @@ ficam na renomeada com o preco do dia do rename, para sempre.
 
 `INICIADO` — cetico sobre os 8, com pedido explicito de separar o que da para
 corrigir sozinho do que e decisao do dono.
+
+`FEITO` — **cetico sobre os 12 achados da leva, e sobre os 8 do `TabelasPreco`.**
+Dos 12: confirmados 8, derrubados 4. Os derrubados valem tanto quanto os
+confirmados, entao ficam registrados: o `saving` preso no `Estoque` NAO existe (o
+postgrest-js converte todo rejeito em `{data, error}`, e o `log()` do
+`useActivityLog` tem try/catch proprio — nao ha caminho de throw); o guarda de
+zero-linhas do `Options` esta honesto, porque `/admin/options` e `requiredRole
+admin` e a policy tambem, entao o caso de RLS que o `Categorias` sofria nao e
+alcancavel ali; o cabecalho marcado do CSV nao quebra round-trip nenhum, porque o
+importador real (`Ferramentas`) usa nome de coluna do BANCO e o CSV do
+`ProductExport` nao tem importador neste codigo; e o embed `null` do
+`tabelas_preco` nao acontece para nenhum papel que alcance aquela rota.
+
+`FEITO` — **as correcoes**, todas com mutante que reprova:
+
+`Estoque`: a leva anterior tinha trocado o refetch por patch de `payload.new` em
+memoria. Parecia so performance e nao era: a publicacao de `produtos` esta fixada
+em `(id, estoque_total, estoque_reservado)`, e esta tela EXIBE e BUSCA por
+`nome`/`sku` — renomear um produto no `ProductEdit` (ou pelo sync) nunca chegava
+na grade, e procurar pelo nome novo nao achava a linha. E sumia o refetch, que era
+quem reparava resposta atrasada. Voltou a recarregar, agora com debounce de 300ms
+(mantem o ganho: uma leitura por rajada, e nao 40) e com contador de carga no
+`fetchData`, que vale para os seis chamadores e nao so para o do realtime.
+
+`Categorias`: o ramo de troca de `ordem` saiu inteiro. Ele so estava certo quando
+os dois vizinhos tinham `ordem` distinta entre si E do resto — com `Z(0), A(1),
+B(1)`, clicar "down" em Z passava pela guarda de empate do par e movia DUAS casas,
+porque a releitura ordena por `(ordem, nome)`. A regra virou funcao pura
+(`lib/ordemCategorias.ts`) com teste que EXECUTA, e nao regex: o assert antigo
+exigia literalmente `swapCat.ordem === cat.ordem`, ou seja, a suite verde estava
+travando a forma que continha o defeito. `moveCategory` e `sortAlphabetically`
+ganharam `.select("id")` — sem isso, para manager e warehouse (que alcancam esta
+tela por `view_products`, mas cuja escrita a RLS admin-only recusa calada) o Move
+era no-op MUDO e o Sort dizia "Categories sorted alphabetically" com ZERO linhas
+gravadas. E o `fetchData` passou a paginar: a lista truncada nao so exibia errado,
+ela REESCREVIA `ordem` por cima do que leu.
+
+`Options`: a forma funcional consertava o array velho e nao o INDICE velho. Com a
+lixeira nunca desabilitada, dois cliques com rede lenta faziam o segundo filtro
+rodar sobre o array ja encurtado: sumia da tela a linha VIVA e ficava a que ja
+tinha sido apagada — e o Save seguinte acusava "removed elsewhere", culpando outro
+admin pelo clique do proprio operador. Passou a filtrar pela REFERENCIA da linha,
+que e a regra que o `handleSave` do mesmo arquivo ja seguia.
+
+`ProductExport`: o desempate de rotulo so comparava reguas entre si. Como
+`exportToCSV` e chamado sem `columns`, as colunas saem de `Object.keys(row)` — uma
+regua chamada `product_sku` nao virava duas colunas, virava UMA, com o preco por
+cima do SKU; uma chamada `length` sumia do CSV, sobrescrita pelo `Object.assign`.
+E o ramo de regua especifica passou a conferir `ativo` na hora do export: o
+dropdown filtra, mas e carregado uma vez no mount, e o sync desativa regua sozinho.
+
+`TabelasPreco` (tela nunca auditada): `handleDuplicate` lia sem `id`, e como o
+`fetchAllRows` deduplica por `linha.id`, a protecao ficava desligada exatamente
+ali — uma insercao concorrente duplicava a linha de fronteira, o insert violava o
+`UNIQUE` e sobrava uma regua ATIVA e VAZIA na grade. O delete passou a contar as
+quatro cascatas antes de perguntar (a pior e silenciosa: `clientes` com
+`SET NULL`, cada cliente amarrado passando a comprar pelo preco de balcao sem nada
+aparecer na ficha dele). As tres escritas ganharam `.select("id")`. E a limpeza de
+precos foi para lotes de 100 — o `in.(...)` viaja na query string, ~37 bytes por
+uuid, e ~200 precos ja batiam em 414 com o upsert JA commitado.
+
+Relatorios (13 telas + o painel): o `id` entrou em ONZE leituras paginadas que o
+liam sem ele — oito de `pedido_itens`, mais `Dashboard`, `Produtos` e
+`ProducaoEntrada`. E a causa raiz foi tratada onde todos passam: `fetchAllRows`
+agora AVISA, uma vez por leitura, que o dedupe esta desligado. Sem isso, o unico
+jeito de descobrir era ler `select` por `select` — e foi assim que onze chamadores
+passaram batido. O `InventoryControl` era a unica tela com filtro de data ainda
+parseando "YYYY-MM-DD" como UTC (as cinco irmas duplicavam `+ "T00:00:00"` na mao,
+e foi a duplicacao que deixou a sexta escapar; agora usa o helper testado).
+`SalesPerCategory` agregava por NOME de categoria, somando numa linha so duas
+"Accessories" de pais diferentes. Os CSVs do `OrdersSummary` e do
+`CustomerActivity` discordavam da tela — status cru (`recebido` no arquivo,
+"Submitted" na tela) e data ISO trocando o DIA. E os cards de resumo do
+`OrdersSummary` e do `PaymentActivity` ficavam FORA do ramo de `loading`,
+mostrando "$0.00" como numero final em TODA abertura.
+
+Verificacao: `npm test` **605/605 em 58 arquivos**, `tsc` limpo, `npm run build`
+ok, migrations/sql/edge ok. **22 mutantes plantados nesta rodada, 22 mortos.**
+
+`INICIADO` — segunda rodada de cacador, agora sobre as PROPRIAS correcoes acima.
+
+`FEITO` — **verificacao da leva ja commitada (b6739e6), saida real**: `tsc --noEmit`
+exit 0; `npm test` = 194 migrations OK, 197 .sql OK, 16 edge OK, e
+**605 testes em 58 arquivos, todos passando** (4,35s). Arvore limpa fora deste log.
+
+`INICIADO` — segunda rodada de cacador, sobre as PROPRIAS correcoes de b6739e6,
+em dois recortes: A = `Categorias`/`ordemCategorias`/`Estoque`/`Options`;
+B = `TabelasPreco`/`ProductExport`/`fetchAllRows`/relatorios.
+
+`INICIADO` — em paralelo, auditoria das duas telas com ZERO mencao no log ate hoje:
+`settings/ProductStatusRules` e `settings/NotificacoesLog` (esta ultima so leitura,
+sem nenhuma proposta de mexer em notificacao). Ficam para depois, fora do recorte
+dos cacadores em voo: `reports/CustomersPerformance`, `reports/OrderSummaryByStatus`,
+`reports/OrdersPerMonth` e `reports/OrderRepsPerformance`. As telas de auth
+(`CustomerLogin`, `LoginLanding`, `PendingApproval`, `RecuperarSenha`,
+`ResetPassword`) NAO entram: fluxo de autenticacao e do dono.
+
+`FEITO` — **auditoria de `settings/ProductStatusRules` e `settings/NotificacoesLog`.**
+`ProductStatusRules` saiu LIMPA: sao 28 linhas estaticas, sem estado e sem I/O, e a
+unica coisa que poderia estar errada — a aba para onde ela manda o operador — existe
+mesmo (`ProductEdit.tsx:912`, editor em 1396-1414).
+
+`NotificacoesLog`: 4 achados, todos de EXIBICAO (o backend grava a informacao certa;
+a tela e que a colapsa). Os dois graves sao da mesma familia — a tela mente sobre o
+que aconteceu com a notificacao, e e nela que se decide se um envio precisa ser
+refeito. (a) `status !== 'sent'` vira badge vermelho "falhou", mas o `dispatch.ts`
+grava SKIP DELIBERADO com o mesmo `status:"failed"`, distinguindo so pelo prefixo
+`skip:` no campo `error` — com o WhatsApp desligado no interruptor mestre (politica
+SMS-only), a tela pinta de vermelho centenas de recusas que sao o comportamento
+correto. (b) o `b2bwave-sync` usa a MESMA tabela como barramento de auditoria
+(`preco_em_branco_na_origem`, `produto_sumiu_da_origem`, `pedido_fantasma_apagado`,
+...) com `channel:"-"`, e o `.limit(200)` nao filtra nada: um ciclo de sync com 300
+diagnosticos expulsa TODOS os envios reais da janela, sob um cabecalho que diz
+"Ultimos 200 envios". (c) RLS negando devolve 200 + `[]`, e a tela afirma "Nenhuma
+notificacao enviada ainda". (d) `load()` sem guarda de ordem.
+
+`INICIADO` — cetico sobre os 4, antes de qualquer correcao. Nada aqui mexe em
+disparo: a tela e somente leitura e nenhuma correcao proposta toca no `dispatch.ts`.
+
+`FEITO` — **cacador do recorte A** (`Estoque`, `Categorias`, `Options`,
+`ordemCategorias`): 8 achados sobre as PROPRIAS correcoes. Os tres graves:
+(E1) a guarda de ordem que entrou no `Estoque` protege a escrita mas nao o erro —
+uma carga NOVA que falha marca o toast e apaga o `loading`, enquanto a carga ANTIGA
+bem-sucedida e descartada pela guarda; sem empty-state no `TableBody`, o admin fica
+olhando inventario VAZIO por tempo indeterminado, que e exatamente o sintoma que a
+guarda dizia prevenir. (C1) a guarda de ordem NAO foi levada para o `Categorias`, e
+a paginacao nova alargou a janela: resposta atrasada repinta a arvore antiga, e o
+proximo clique usa esse array velho como entrada da reindexacao — gravando no banco
+uma ordem que ninguem pediu. (O1) a lixeira do `Options` nao e `disabled={saving}`:
+apagar durante o Save uma linha que o laco JA inseriu nao emite DELETE nenhum
+(o id real so e aplicado depois do laco, entao ela ainda e `temp-`), a tela diz
+"Value removed", e o valor sobrevive no banco e volta na proxima abertura.
+A funcao pura `reordenarIrmaos` e seu teste passaram sem achado.
+
+`INICIADO` — cetico sobre os 8.

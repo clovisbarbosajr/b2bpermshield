@@ -93,7 +93,7 @@ const ImportCustomers = () => {
     const existingEmails = new Set<string>();
     try {
       const todos = await fetchAllRows<{ email: string | null }>((from, to) =>
-        supabase.from("clientes").select("email")
+        supabase.from("clientes").select("id, email")
           .order("id", { ascending: true }).range(from, to));
       for (const c of todos) {
         if (c.email) existingEmails.add(String(c.email).trim().toLowerCase());

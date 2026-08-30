@@ -56,3 +56,25 @@ export function paginasVisiveis(
   paginas.push(totalPages);
   return paginas;
 }
+
+/**
+ * Limita a pagina atual ao total existente.
+ *
+ * POR QUE ISTO EXISTE: `page` e estado, `totalPages` e derivado da lista. Apagar
+ * (ou desativar) a unica linha da ultima pagina reduz `totalPages` e deixa `page`
+ * apontando para o vazio. Como a barra de paginacao inteira esta sob
+ * `totalPages > 1`, ela DESMONTA junto — a tela mostra "No products found" sem
+ * nenhum botao de voltar, e o admin so sai de la com F5.
+ *
+ * Aconteceu em `Produtos.tsx` pelos dois caminhos de escrita: `handleDelete` e
+ * `handleActiveChange` (o filtro nasce em "Active", entao desativar a ultima linha
+ * da ultima pagina produz o mesmo beco).
+ *
+ * Derivado no render, e nao um `setPage` em efeito: efeito corrige DEPOIS de ja
+ * ter renderizado a tela vazia uma vez.
+ *
+ * Lista vazia -> pagina 1 (e nao 0): a paginacao do repo e 1-based.
+ */
+export function paginaValida(page: number, totalPages: number): number {
+  return Math.min(page, Math.max(1, totalPages));
+}

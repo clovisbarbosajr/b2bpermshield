@@ -378,7 +378,12 @@ const AdminCategorias = () => {
       return;
     }
     if (escritas.some((r) => !r.data?.length)) {
-      toast.error("Nothing was reordered — you do not have permission to change categories.");
+      // Zero linhas sem erro tem DUAS causas, e a mensagem nao pode escolher uma:
+      // a RLS recusando calada, ou um dos irmaos ter sido apagado por outro admin
+      // entre a leitura e a escrita. No segundo caso as outras N-1 escritas
+      // PASSARAM, e acusar falta de permissao mandaria o admin ao lugar errado.
+      // Formula igual a do `handleDelete` deste mesmo arquivo.
+      toast.error("Part of the reorder did not apply — a category no longer exists, or you do not have permission to change categories. The list was reloaded.");
     }
   };
 
@@ -427,8 +432,8 @@ const AdminCategorias = () => {
       try {
         // `produtos` cresce sem limite com o catalogo e o PostgREST corta em 1000
         // linhas SEM erro: uma leitura so ja subcontava as categorias do fim.
-        const rows = await fetchAllRows<{ categoria_id: string | null }>((from, to) =>
-          supabase.from("produtos").select("categoria_id").eq("ativo", true)
+        const rows = await fetchAllRows<{ id: string; categoria_id: string | null }>((from, to) =>
+          supabase.from("produtos").select("id, categoria_id").eq("ativo", true)
             .order("id", { ascending: true }).range(from, to));
         const counts: Record<string, number> = {};
         rows.forEach((p) => { if (p.categoria_id) counts[p.categoria_id] = (counts[p.categoria_id] || 0) + 1; });
