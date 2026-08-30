@@ -5489,3 +5489,24 @@ de outro admin apagar a linha entre o snapshot e a escrita, e o `idPorEmail` de
 `ImportCustomers` e um snapshot que envelhece durante o lote. Nada disso e
 observavel sem escrever no banco real, que a regra proibe sem OK explicito. Segue
 na lista do dono, com o combinado de identificacao e limpeza ainda pendente.
+
+---
+
+## 30/ago, janela seguinte — fila vazia
+
+`FEITO` — nada a fazer. Fila conferida item a item: (1) checagem de integracao e
+(2) commit+push ja fechados em `18d2396`; (3) a classe "escrita que nao confirma
+linha afetada" foi varrida inteira, sem residuo; (4) as telas sem teste que sobram
+sao as 9 de autenticacao, as 3 de notificacao, `settings/B2BWaveSync`, as 4 telas
+mortas fora do menu e `Index`/`NotFound` — todas proibidas por regra do dono.
+Arvore limpa e `main` alinhado com `origin/main`.
+
+VERIFICACAO, saida real (HEAD `3ea28bc`, sem mudanca minha):
+```
+npm test    OK — 194 migrations / 197 .sql / 16 edge functions
+            Test Files 69 passed (69) / Tests 749 passed (749)
+```
+
+Nenhum trabalho inventado. Segue pendente so o que depende do dono: o OK para o
+teste de estresse concorrente contra banco real (com combinado de identificacao e
+limpeza).
