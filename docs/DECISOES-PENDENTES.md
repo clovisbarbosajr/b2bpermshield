@@ -1,5 +1,13 @@
 # Decisões pendentes do dono — varredura de 30/ago/2026
 
+> **Estado em 30/ago, fim do dia.** O dono rodou o diagnóstico e o **bloco 1 do
+> SQL** (índice de `tax_rules`, os dois `CHECK` de percentual, os três índices de
+> nome, e o gatilho anti-ciclo de `categorias`). Os itens **A2, A3, B4 (parcial) e
+> B6 estão RESOLVIDOS** — ficam abaixo só como registro.
+>
+> Ficou de fora, e continua pendente: o índice único de `tabelas_preco.nome`.
+> Ver a seção **A5**, acrescentada depois.
+
 Tudo aqui é o que **eu não posso decidir nem executar sozinho**: exige SQL no
 banco, mexe em RLS/permissão, ou é regra de produto.
 
@@ -272,3 +280,68 @@ quando nada foi gravado. O que falta é decidir se ele deveria estar naquelas te
    (`fc6316f`). De agora em diante commito por caminho explícito.
 
 2. **A mensagem do commit `3a09338` diz 682 testes; eram 681.**
+
+---
+
+## A5. As três réguas de preço duplicadas (achado de 30/ago, PARCIALMENTE resolvido)
+
+O índice único de `tabelas_preco.nome` não pôde entrar: havia **três nomes
+duplicados**, somando sete réguas.
+
+| Nome | Régua | Clientes | Itens (antes) |
+|---|---|---|---|
+| Contractor's Price | `99a1286d` | **22** | 321 |
+| Contractor's Price | `fe3ffa94` | 0 | 330 |
+| Retail | `cfe462c7` | **9** | 321 |
+| Retail | `f96c87c3` | **3** | 330 |
+| `Wholesale Price ` (espaço no fim) | `b5337cf5` | **34** | 317 |
+| `Wholesale Price ` (espaço no fim) | `1ec16984` | 0 | 326 |
+| `Wholesale Price` | `47c1aa7b` | 0 | 0 |
+
+### Como isso aconteceu
+
+O sync do B2BWave casa régua por `pl.nome.toLowerCase()` — **sem `trim`**
+(`b2bwave-sync/index.ts:1138` e `:1819`). Duas réguas têm espaço no fim do nome,
+então `"wholesale price "` e `"wholesale price"` são chaves DIFERENTES para o sync,
+e ele inseriu uma cópia em vez de reconhecer a existente.
+
+E o mapa de preços é *last-wins* sobre um `select` **sem `order`**: com duas réguas
+na mesma chave, o preço vai para uma delas de forma indefinida entre execuções. É a
+assinatura do 321-vs-330 — uma foi alimentada por um tempo, a ordem de leitura
+virou, e a outra passou a receber.
+
+### O que foi verificado
+
+- **Divergência de preço entre as cópias: ZERO.** Todo produto presente nas duas
+  tem o mesmo valor. Nenhum cliente pagou errado.
+- A cópia menor era **subconjunto** da maior: faltavam 9 produtos em cada par, e os
+  clientes estavam justamente na menor. Para esses 9 produtos eles caíam em
+  `produtos.preco` — o preço de balcão, mais caro.
+
+### O que foi feito
+
+`INSERT` aditivo copiando os 27 itens faltantes (9 × 3) para as réguas onde os
+clientes estão. Nada apagado, nenhum preço alterado. Confirmado depois: 330 / 330 /
+326 nas três réguas com cliente.
+
+### O que continua pendente — decisão da Jessika
+
+1. **Qual régua de cada par sobrevive**, e o que fazer com a outra. Apagar muda o
+   preço de gente real (`clientes.tabela_preco_id` é `ON DELETE SET NULL`, então
+   quem apontava para a apagada cai no preço de balcão).
+2. **`Wholesale Price` sem espaço (`47c1aa7b`)**: 0 clientes, 0 itens. Parece lixo,
+   mas não apago sem confirmação.
+3. **Os nomes com espaço no fim** precisam ser aparados de qualquer jeito — a tela
+   já apara desde 30/ago, mas as linhas existentes não foram tocadas.
+
+Só depois disso o índice único pode entrar:
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS tabelas_preco_nome_uniq
+  ON public.tabelas_preco (lower(btrim(nome)));
+```
+
+**Conserto de raiz, independente da decisão acima:** o sync deveria casar por
+`btrim(lower(nome))` e ordenar a leitura, senão a duplicata volta a nascer sozinha.
+Isso é código de edge function — preciso do seu OK para mexer, e o deploy tem que
+ser pedido no chat do Lovable.

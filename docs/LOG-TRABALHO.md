@@ -4720,3 +4720,49 @@ Fila intacta e inalterada para a proxima janela com o repositorio parado:
 (1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
 (3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — a REVER
 quando a outra sessao terminar, ja que ela esta cobrindo esse terreno agora.
+
+---
+
+## 30/ago — fim da varredura (sessao interativa)
+
+FEITO. Onze commits. 691 testes verdes em 64 arquivos, tsc limpo, build ok,
+check-edge ok. Cobertura: 70 das 89 telas com guarda de regressao.
+
+Sete rodadas de caçador+cetico. Cada uma das seis primeiras achou defeito nas
+correcoes da anterior — a maioria em guardas MINHAS que passavam verdes sem
+proteger nada.
+
+### SQL que o dono rodou
+
+Diagnostico voltou limpo em tudo, menos `tabelas_preco.nome` (3 nomes duplicados,
+7 reguas). Rodou o bloco 1:
+- `UNIQUE` em `tax_rules (tax_class_id, tax_customer_group_id)`;
+- `CHECK 0..100` em `tax_rates.percentual` e `representantes.comissao_percentual`;
+- `UNIQUE` em `lower(btrim(nome))` de `privacy_groups`, `product_statuses`, `brands`;
+- gatilho anti-ciclo em `categorias.parent_id`, de qualquer profundidade.
+
+### As reguas duplicadas
+
+O sync casa regua por `nome.toLowerCase()` SEM `trim`, e duas se chamam
+`"Wholesale Price "` com espaco no fim — dai a copia. O mapa de precos e
+last-wins sobre `select` sem `order`, entao o preco ia para uma delas de forma
+indefinida entre execucoes.
+
+Verificado: divergencia de preco entre as copias = ZERO. Ninguem pagou errado.
+Mas a copia menor era subconjunto da maior, e os clientes estavam na MENOR: 9
+produtos sem preco de regua, caindo no preco de balcao.
+
+Conserto aditivo rodado pelo dono: 27 itens (9 x 3) copiados para as reguas onde
+os clientes estao. Nada apagado, nenhum preco alterado. Confirmado: 330/330/326.
+
+### PENDENTE — esperando a Jessika
+
+Tudo em `docs/DECISOES-PENDENTES.md`. NAO EXECUTAR nada de la sem ela.
+
+O indice unico de `tabelas_preco.nome` continua fora: decidir qual regua de cada
+par sobrevive muda o preco de gente real (`ON DELETE SET NULL` joga o cliente no
+preco de balcao).
+
+Conserto de raiz que depende de OK do dono: o sync deveria casar por
+`btrim(lower(nome))` e ordenar a leitura, senao a duplicata nasce de novo sozinha.
+E edge function — deploy tem que ser pedido no chat do Lovable.
