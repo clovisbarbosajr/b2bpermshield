@@ -4617,3 +4617,29 @@ caçador das seis telas de `settings` sem guarda.
 
 DECISOES DO DONO acumuladas (SQL e regra de negocio) — batelada ao fim, conforme
 combinado. Nao executar nada disso sozinho.
+
+`AGUARDANDO` — **13:50-13:52, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Quinto registro seguido.
+
+Prova, nao suposicao. `ProductStatuses.tsx` gravado as 13:50:44, **14 segundos**
+antes da minha primeira checagem. Em 90 segundos de amostragem de 15 em 15s a
+arvore suja subiu de 8 para 11 arquivos, com tres que eu nao toquei aparecendo ao
+vivo: `AdminLayout.tsx` e `settings/Profile.tsx` (~13:51:50) e `App.tsx`
+(~13:52:05). HEAD parado em `0b57d7d` (`test(estresse): 50 admins simultaneos`,
+13:44:31) com 11 arquivos por cima e' o retrato de uma leva alheia em andamento.
+
+Detalhe que importa: `settings/Profile.tsx` e `AdminLayout.tsx` sao telas de
+`settings` — o item **3/4** da minha fila. A outra sessao esta cobrindo esse
+terreno agora; abrir em paralelo produziria dois conjuntos de guardas para as
+mesmas telas e conflito garantido nos mesmos arquivos.
+
+Nao commitei, nao empurrei e nao plantei mutante nenhum, pelo mesmo motivo dos
+quatro registros anteriores e com o mesmo precedente concreto: em `d10367d` um
+`add -A` alheio gravou em HEAD um mutante que eu tinha plantado de proposito. Com
+outra sessao escrevendo, mutante meu vira armadilha para ela e `npm test` meu mede
+a arvore dela, nao a minha.
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — a REVER
+quando a outra sessao terminar, ja que ela abriu esse terreno.

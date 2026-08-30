@@ -252,7 +252,9 @@ const App = () => (
                 * Os links nao aparecem em menu nem tela nenhuma. A descricao promete 'acesso rapido para clientes', e nenhuma pagina do portal consulta a tabela.
                 * PARA VOLTAR: o layout do portal (ou o painel do cliente) teria que ler `quick_links` e renderizar, com um mapeamento do campo `icone`.
                 *
-                * Ja estava fora do menu; isto fecha o link direto.
+                * NAO estava fora do menu — a afirmacao anterior aqui era falsa nos
+                * tres casos. Os itens sairam do `AdminLayout.tsx` em 30/ago, junto
+                * com o `<Link>` de `settings/Profile.tsx`.
                 * <Route path="/admin/settings/quick-links" element={<A><QuickLinks /></A>} />
                 */}
               <Route path="/admin/settings/product-statuses" element={<A><ProductStatuses /></A>} />
@@ -264,7 +266,9 @@ const App = () => (
                 * As unidades cadastradas aqui nao sao usadas. `produtos.unidade_venda` e digitacao LIVRE (um campo de texto no ProductEdit) ou vem do sync do B2BWave — sem nenhuma ligacao com esta tabela. Cuidado com a armadilha: existe `produtos.unidade_medida_id`, mas ela aponta para `product_options`, NAO para `measurement_units`, e tambem nao e lida por ninguem.
                 * PARA VOLTAR: trocar o campo de texto de `unidade_venda` no ProductEdit por uma lista alimentada por `measurement_units`.
                 *
-                * Ja estava fora do menu; isto fecha o link direto.
+                * NAO estava fora do menu — a afirmacao anterior aqui era falsa nos
+                * tres casos. Os itens sairam do `AdminLayout.tsx` em 30/ago, junto
+                * com o `<Link>` de `settings/Profile.tsx`.
                 * <Route path="/admin/settings/measurement-unit" element={<A><MeasurementUnit /></A>} />
                 */}
               <Route path="/admin/settings/company-activities" element={<A><CompanyActivities /></A>} />
@@ -272,7 +276,9 @@ const App = () => (
                 * Os campos definidos aqui nao aparecem em formulario nenhum — nem checkout, nem cadastro, nem produto. E NAO EXISTE tabela de valores: mesmo que a tela renderizasse os campos, nao haveria onde gravar a resposta.
                 * PARA VOLTAR: criar `extra_field_values (extra_field_id, entidade, entidade_id, valor)` e um componente que consulte `extra_fields` por `view_location` em cada formulario.
                 *
-                * Ja estava fora do menu; isto fecha o link direto.
+                * NAO estava fora do menu — a afirmacao anterior aqui era falsa nos
+                * tres casos. Os itens sairam do `AdminLayout.tsx` em 30/ago, junto
+                * com o `<Link>` de `settings/Profile.tsx`.
                 * <Route path="/admin/settings/extra-fields" element={<A><ExtraFields /></A>} />
                 */}
               {/* TELA REMOVIDA em 25/ago/2026 — nao fazia nada.

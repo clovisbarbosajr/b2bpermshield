@@ -157,13 +157,13 @@ const adminNavEntries: NavEntry[] = [
       { to: "/admin/settings/payment-options", icon: CreditCard, label: "Payment Options" },
       { to: "/admin/settings/shipping-options", icon: Truck, label: "Shipping Options" },
       { to: "/admin/settings/edit-password", icon: Lock, label: "Edit Password" },
-      { to: "/admin/settings/quick-links", icon: Link2, label: "Quick Links" },
+      // REMOVIDO 30/ago: rota comentada em `App.tsx`, item continuava aqui -> 404.
       { to: "/admin/settings/product-statuses", icon: Layers, label: "Product Statuses" },
       { to: "/admin/settings/product-status-rules", icon: ListOrdered, label: "Product Status Rules" },
       { to: "/admin/settings/privacy-groups", icon: Shield, label: "Privacy Groups" },
       { to: "/admin/settings/coupons", icon: Percent, label: "Coupons" },
       { to: "/admin/settings/sales-tax", icon: Receipt, label: "Sales Tax" },
-      { to: "/admin/settings/measurement-unit", icon: Ruler, label: "Measurement Unit" },
+      // REMOVIDO 30/ago: rota comentada em `App.tsx`, item continuava aqui -> 404.
       { to: "/admin/settings/company-activities", icon: Building2, label: "Company Activities" },
       { to: "/admin/settings/users", icon: Users, label: "Users" },
       { to: "/admin/settings/warehouse", icon: Package, label: "Warehouse Settings" },
@@ -178,7 +178,14 @@ const adminNavEntries: NavEntry[] = [
       // OAuth no sistema. Mas o comentario de la afirmava "ja estava fora do menu",
       // e nao estava: os dois itens continuavam aqui, levando a rota inexistente.
       // Quem clicasse caia no 404 sem entender por que.
-      { to: "/admin/settings/extra-fields", icon: Database, label: "Extra Fields" },
+      // REMOVIDO 30/ago, junto com Quick Links e Measurement Unit: as tres rotas
+      // estavam comentadas no `App.tsx` e os tres itens continuavam neste array,
+      // levando ao 404 — EXATAMENTE o erro que o comentario logo acima documenta
+      // ter sido cometido com "Oauth Applications" e "API Keys". Corrigiram dois e
+      // deixaram tres, na mesma lista, imediatamente abaixo da explicacao.
+      //
+      // Havia ainda um quarto caminho: `settings/Profile.tsx` tinha um `<Link>`
+      // visivel para `extra-fields`.
       { to: "/admin/settings/b2bwave-sync", icon: RefreshCw, label: "B2B Wave Sync" },
     ],
   },

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { paginaValida } from "@/lib/paginacao";
 import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
@@ -75,7 +76,19 @@ const CustomersPerformance = () => {
   }, [orders, customers, dateFrom, dateTo, nameFilter]);
 
   const totalPages = Math.ceil(reportData.length / PAGE_SIZE);
-  const paginated = reportData.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // `paginaValida` nos TRES pontos, e nao `setPage(1)` nos dois inputs de data.
+  //
+  // O filtro de nome resetava a pagina; os dois `<Input type="date">` nao. Admin
+  // na pagina 5 de 12, aplica um intervalo que reduz para 50 linhas: `totalPages`
+  // vira 2, `page` continua 5. A fatia fica vazia ("No data available."), o
+  // contador imprime "101–50 of 50" — um numero que nao existe — e `page ===
+  // totalPages` e falso, entao o Next fica HABILITADO e leva para a pagina 6, 7,
+  // 8, sem teto. Voltar exige tres cliques em Previous.
+  //
+  // Limitar aqui fecha o buraco para qualquer filtro futuro, e nao so para os
+  // dois de data. Era a unica tela paginada de `reports/` sem essa protecao.
+  const pageOk = paginaValida(page, totalPages);
+  const paginated = reportData.slice((pageOk - 1) * PAGE_SIZE, pageOk * PAGE_SIZE);
 
   const handleExport = () => {
     exportToCSV(reportData, "customers_performance", [
@@ -134,10 +147,10 @@ const CustomersPerformance = () => {
       )}
       {totalPages > 1 && (
         <div className="mt-3 flex items-center justify-between text-sm text-muted-foreground">
-          <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, reportData.length)} of {reportData.length}</span>
+          <span>{(pageOk - 1) * PAGE_SIZE + 1}–{Math.min(pageOk * PAGE_SIZE, reportData.length)} of {reportData.length}</span>
           <div className="flex gap-1">
-            <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</Button>
-            <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(page + 1)}>Next</Button>
+            <Button variant="outline" size="sm" disabled={pageOk <= 1} onClick={() => setPage(pageOk - 1)}>Previous</Button>
+            <Button variant="outline" size="sm" disabled={pageOk >= totalPages} onClick={() => setPage(pageOk + 1)}>Next</Button>
           </div>
         </div>
       )}

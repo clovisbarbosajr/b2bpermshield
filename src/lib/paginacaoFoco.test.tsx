@@ -119,17 +119,29 @@ describe("as quatro telas usam a chave por numero", () => {
     // por controle, nas tres telas que nao sao `Produtos`. `page` so pode aparecer
     // na declaracao do estado, nos `setPage(1)` de filtro, e na linha do proprio
     // `paginaValida`; em qualquer controle de paginacao tem que ser `pageOk`.
+    //
+    // `exige`: o laco `for (const m of todas)` e VACUAMENTE VERDE quando o regex
+    // nao casa nada. Medido: extrair o offset para um `const inicio = (page - 1) *
+    // PAGE_SIZE` — refatoracao natural — devolvia o beco inteiro sem uma falha
+    // sequer. Onde o controle e obrigatorio, o teste cobra que ele EXISTA.
     const controles = [
-      { re: /\.slice\(\((page|pageOk) - 1\) \* PAGE_SIZE/, qual: "a fatia da pagina" },
-      { re: /\.range\(\((page|pageOk) - 1\) \* PAGE_SIZE/, qual: "o range da busca" },
-      { re: /disabled=\{(page|pageOk) <= 1\}/, qual: "a seta anterior (disabled)" },
-      { re: /disabled=\{(page|pageOk) >= totalPages\}/, qual: "a seta proxima (disabled)" },
-      { re: /setPage\((?:Math\.\w+\(1, |Math\.\w+\(totalPages, )?(page|pageOk) [-+] 1\)/, qual: "o alvo das setas" },
+      { re: /\.slice\(\((page|pageOk) - 1\) \* PAGE_SIZE/, qual: "a fatia da pagina", exige: false },
+      { re: /\.range\(\((page|pageOk) - 1\) \* PAGE_SIZE/, qual: "o range da busca", exige: false },
+      { re: /disabled=\{(page|pageOk) <= 1\}/, qual: "a seta anterior (disabled)", exige: false },
+      { re: /disabled=\{(page|pageOk) >= totalPages\}/, qual: "a seta proxima (disabled)", exige: false },
+      { re: /setPage\((?:Math\.\w+\(1, |Math\.\w+\(totalPages, )?(page|pageOk) [-+] 1\)/, qual: "o alvo das setas", exige: true },
+      // Toda tela paginada FATIA ou BUSCA por pagina — uma das duas, sempre. Se as
+      // duas sumirem, o offset foi para outro lugar e este teste parou de ver.
+      { re: /(?:\.slice|\.range)\(\((page|pageOk) - 1\) \* PAGE_SIZE/, qual: "o corte da pagina (fatia ou range)", exige: true },
     ];
-    for (const { re, qual } of controles) {
+    for (const { re, qual, exige } of controles) {
       // Casa TODAS as ocorrencias: o portal tem duas barras (topo e rodape), e
       // cobrir so a primeira deixava a de baixo com o defeito.
       const todas = [...fonte.matchAll(new RegExp(re.source, "g"))];
+      if (exige) {
+        expect(todas.length, `${tela}: nao achei ${qual} — o offset saiu para outro lugar e esta guarda parou de ver`)
+          .toBeGreaterThan(0);
+      }
       for (const m of todas) {
         expect(m[1], `${tela}: ${qual} voltou a usar a pagina nao limitada`).toBe("pageOk");
       }

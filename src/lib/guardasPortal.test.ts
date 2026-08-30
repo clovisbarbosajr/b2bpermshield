@@ -293,6 +293,25 @@ describe("Checkout: a tela nao pode afirmar um total que o cartao vai desmentir"
       .toContain("(cpo.error ?? cso.error)!.message");
     expect(src, "o erro de atribuicao nao alimenta mais o loadError")
       .toContain("setLoadError(erroAtribuicao ??");
+    // A CONDICAO, E NAO SO O VALOR DO RAMO. Medido: derrubar metade da condicao
+    // (`cpo.error ?` em vez de `cpo.error || cso.error ?`) deixava a falha de
+    // leitura de UMA das duas voltar a ser silenciosa, com a suite inteira verde —
+    // porque os asserts acima olham so o que o ternario DEVOLVE. Mesma classe de
+    // guarda frouxa que a rodada anterior encontrou, reintroduzida na guarda que a
+    // substituiu.
+    expect(src, "a condicao do erro de atribuicao voltou a olhar so uma das duas leituras")
+      .toContain("erroAtribuicao = cpo.error || cso.error ?");
+    expect(src, "a condicao do erro de frete/pagamento voltou a olhar so uma das duas")
+      .toContain("(ship.error || pay.error ?");
+    // E A TERCEIRA LEITURA DO MESMO EFEITO. Ela ficava 70 linhas acima e tambem
+    // descartava o `error`: numa RE-EXECUCAO (troca de impersonacao, ou o refresh
+    // de token trocando o OBJETO `user`), `cliente` fica null, os dois `Set` ficam
+    // vazios, e `clienteId` ainda guarda o cliente ANTERIOR — entao o `!clienteId`
+    // do submit nao barra e o pedido sai sem frete.
+    expect(src, "a leitura do cliente voltou a descartar o error")
+      .toContain("const { data: cliente, error: clienteErr } = await clienteQuery;");
+    expect(src, "o erro da leitura do cliente nao vira erro de tela")
+      .toMatch(/if \(clienteErr\) \{[\s\S]{0,120}?return;/);
     // NENHUM `return` ENTRE A MARCACAO DO ERRO E O BLOCO DE IMPOSTO. A versao
     // anterior deste assert era um regex que exigia `.message);` colado ao
     // `return` — e a linha real termina em `: null));`. Ou seja: ele NUNCA pôde

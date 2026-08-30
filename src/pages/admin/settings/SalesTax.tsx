@@ -20,7 +20,9 @@ const SalesTax = () => {
   const [loading, setLoading] = useState(true);
   // O toast do sonner dura 6 s; a TELA continuava afirmando que nao ha regra de
   // imposto nenhuma, e o admin recriava as que ja existiam. Pior: com `classes`
-  // vazio, "New Sales Tax rate" grava `tax_class_id: ""`.
+  // vazio, "New Sales Tax rate" manda `tax_class_id: ""` e o Postgres recusa
+  // com 22P02 — o admin leva a mensagem crua do banco em vez de saber que a tela
+  // nao conseguiu ler.
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Dialogs
@@ -51,7 +53,8 @@ const SalesTax = () => {
     ]);
     // Erro de leitura calado pintava a tela de "nao ha nenhuma regra de imposto"
     // — e o admin recriava as regras que ja existiam. Pior: com `classes` vazio,
-    // o botao "New Sales Tax rate" grava `tax_class_id: ""`.
+    // o botao "New Sales Tax rate" manda `tax_class_id: ""` e leva 22P02
+    // cru na cara. NAO grava: a coluna e `uuid NOT NULL`.
     const erro = c.error ?? g.error ?? r.error ?? ru.error;
     setLoadError(erro ? erro.message : null);
     if (erro) {

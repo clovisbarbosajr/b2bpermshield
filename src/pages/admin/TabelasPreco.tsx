@@ -327,7 +327,12 @@ const AdminTabelasPreco = () => {
     <AdminLayout>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="font-display text-2xl font-semibold">Price Lists</h2>
-        <Button onClick={openNew} className="gap-1"><Plus className="h-4 w-4" /> New Price List</Button>
+        {/* `disabled` com a leitura falhada: o banner ao lado diz "Do not create a new
+            one", mas so aconselhar nao basta. `tabelas_preco.nome` nao tem UNIQUE, e
+            o sync do B2BWave casa por nome minusculo em `Map` com last-write-wins —
+            a regua duplicada faz o preco ir para a errada, de forma indefinida entre
+            execucoes. */}
+        <Button onClick={openNew} disabled={!!loadError} className="gap-1"><Plus className="h-4 w-4" /> New Price List</Button>
       </div>
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>

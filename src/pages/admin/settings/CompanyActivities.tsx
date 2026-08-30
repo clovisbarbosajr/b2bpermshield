@@ -21,15 +21,32 @@ const CompanyActivities = () => {
   const [editing, setEditing] = useState<any>(null);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchData = async () => {
-    // We only want unique type names — use tipo as the activity category name
-    const { data } = await supabase
+    // FILTRO EM MEMORIA, e nao `.is("customer_name", null)` no servidor.
+    //
+    // A coluna e `customer_name text DEFAULT ''` (`20260319151113:23`) e o insert
+    // desta tela manda so `{ tipo }` — entao o Postgres grava a STRING VAZIA, que
+    // `IS NULL` nao casa. Toda atividade criada aqui nascia invisivel para a
+    // propria tela: o admin salvava, via "Created", a lista voltava identica, e
+    // recriava o mesmo nome N vezes. Nao havia como editar nem apagar nenhuma.
+    //
+    // A tela funcionava para o que veio do sync porque `b2bwave-sync/index.ts:3467`
+    // grava `a.customer_name || null` — NULL de verdade.
+    //
+    // `!a.customer_name` cobre os DOIS casos de uma vez e conserta tambem as
+    // linhas ja gravadas. A tabela e minuscula (o sync deduplica por `tipo`),
+    // entao filtrar em memoria nao custa nada — e o `or` do PostgREST com string
+    // vazia e caso de borda de quoting.
+    const { data, error } = await supabase
       .from("company_activities")
       .select("*")
-      .is("customer_name", null)        // activity TYPES have no customer attached
       .order("tipo");
-    setActivities(data ?? []);
+    // Sem isto, falha de leitura virava "No company activities yet" com um botao
+    // de criar do lado — e o operador recriava o que ja existia.
+    setLoadError(error ? error.message : null);
+    setActivities(error ? [] : (data ?? []).filter((a: any) => !a.customer_name));
     setLoading(false);
   };
 
@@ -107,7 +124,17 @@ const CompanyActivities = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {activities.length === 0 ? (
+            {loadError ? (
+              <TableRow>
+                <TableCell colSpan={2} className="text-center py-8">
+                  <p className="text-destructive">Could not load the company activities.</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    This does NOT mean there are none — they could not be read. Do not re-create anything.
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+                </TableCell>
+              </TableRow>
+            ) : activities.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={2} className="text-center py-8 text-muted-foreground">
                   No company activities yet. Click "+ New company activity" to add one.
@@ -154,7 +181,10 @@ const CompanyActivities = () => {
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="e.g. Distributor, Contractor, Retailer"
-                onKeyDown={e => e.key === "Enter" && handleSave()}
+                // `!saving`: o `disabled` do botao nao alcanca o Enter. A auto-repeticao da
+                // tecla disparava `handleSave` varias vezes antes de o dialogo fechar, e
+                // cada uma fazia seu proprio insert — sem UNIQUE em `tipo` para barrar.
+                onKeyDown={e => { if (e.key === "Enter" && !saving) handleSave(); }}
                 autoFocus
               />
             </div>

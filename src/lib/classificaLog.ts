@@ -39,8 +39,11 @@ const FALHA_DISFARCADA_DE_SKIP = [
 ];
 
 // Linhas que são PANE, e não diagnóstico de rotina. Sem isto elas caíam em
-// `sistema` e iam para a tabela secundária, teto de 50 linhas, legendada "não são
-// notificação".
+// `sistema` e ficavam CINZA, indistinguíveis de trava de rotina.
+//
+// A classificação NÃO move linha entre as duas tabelas — a separação de baldes é
+// por `channel = -`, como o rodapé deste arquivo explica. Estas continuam na
+// tabela secundária; o que muda é a cor e, com ela, a chance de alguém olhar.
 //
 // `dispatch.ts:180` (e `notify-dispatch/index.ts:83`) — não deu para ler
 // `notification_channels`. É pane TOTAL de notificação, e o comentário no próprio

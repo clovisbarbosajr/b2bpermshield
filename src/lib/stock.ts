@@ -62,6 +62,26 @@ export type StockStatus = { nome: string; permite_comprar?: boolean | null };
  * de casar e vira decoração: nada bate, e como a regra é conservadora
  * ("não achou, não bloqueia"), ela simplesmente nunca dispara.
  */
+// OS SEIS NOMES SAO CHAVE DE SISTEMA, e nao rotulo livre.
+//
+// `produtos.status_produto` guarda o codigo em portugues; `product_statuses.nome`
+// guarda o rotulo em ingles; e NAO EXISTE FK entre os dois. Todo o casamento e
+// por NOME, e os tres consumidores falham ABRINDO quando nao acham:
+//   `stock.ts:112`             -> `statusMap.get(...) ?? true`
+//   `Catalogo.tsx:267` e `:433` -> `?? { permite_comprar: true, permite_visualizar: true }`
+//   `fn_item_produto_valido`    -> denylist, `LIMIT 1`, nao achou = deixa passar
+//
+// Renomear "Sold Out" na tela de Product Statuses devolve ao catalogo, comprável,
+// todo produto que o admin tirou de venda DE PROPOSITO com estoque em caixa (fim
+// de linha, reservado, problema de qualidade). Apagar o status faz o mesmo.
+//
+// A tela avisa antes de renomear/apagar um destes seis. Fechar de verdade exige
+// decisao do dono — proteger as seis linhas no banco, ou trocar
+// `produtos.status_produto` por FK — e esta na batelada de perguntas.
+export const NOMES_DE_SISTEMA = [
+  "available", "not available", "sold out", "pre-order", "limited stock", "discontinued",
+];
+
 const NAME_MAP: Record<string, string> = {
   disponivel: "available",
   indisponivel: "not available",

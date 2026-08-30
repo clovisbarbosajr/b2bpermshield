@@ -33,24 +33,47 @@ import { gravacaoRecusadaComCerteza } from "./gravacaoRecusada";
  */
 export type ResultadoGravacao =
   | { tipo: "ok"; rev: number }
-  | { tipo: "conflito" }
+  // `porFiltroExtra`: zero linhas com o TOKEN ainda valendo — quem barrou foi a
+  // condicao extra do chamador, e nao outro admin.
+  | { tipo: "conflito"; porFiltroExtra?: boolean }
   | { tipo: "recusado"; mensagem: string }
   | { tipo: "incerto"; mensagem: string };
 
+/**
+ * `filtroExtra` deixa o chamador acrescentar CONDICOES ao mesmo statement.
+ *
+ * Existe por um caso concreto: `ProductEdit` grava `estoque_total` e precisa da
+ * mesma trava que `Estoque.tsx:178` e `InventoryAdjustment.tsx:221` ja aplicam —
+ * `.lte("estoque_reservado", novaQtd)`. O gatilho de reserva escreve SO em
+ * `estoque_reservado`, invisivel para o `admin_rev`: entre o carregamento da ficha
+ * e o Save um checkout reserva mais unidades, o token continua valendo, e o save
+ * grava um `estoque_total` MENOR que o reservado. O produto TRAVA (o proprio
+ * gatilho passa a recusar toda reserva nova), nao se recupera sozinho, e nao ha
+ * CHECK no banco segurando isso.
+ *
+ * Tem que ir no MESMO statement: ler-decidir-gravar reabre a corrida no meio.
+ *
+ * O preco disso e que zero linha deixa de ter causa unica — pode ser o token OU o
+ * filtro extra. Por isso o desfecho `conflito` ganhou `porFiltroExtra`, para o
+ * chamador poder dizer a verdade em vez de acusar um colega que nao existe.
+ */
 export async function gravarComToken(
   sb: any,
   tabela: string,
   id: string,
   payload: Record<string, any>,
   rev: number,
+  filtroExtra?: (q: any) => any,
 ): Promise<ResultadoGravacao> {
-  const { data, error, status } = await sb
+  let q = sb
     .from(tabela)
     // O incremento vai no MESMO statement do filtro. Separar em dois (ler, decidir,
     // gravar) reabre a corrida no meio.
     .update({ ...payload, admin_rev: rev + 1 })
     .eq("id", id)
-    .eq("admin_rev", rev)
+    .eq("admin_rev", rev);
+  if (filtroExtra) q = filtroExtra(q);
+  const { data, error, status } = await q
     .select("admin_rev")
     .maybeSingle();
 
@@ -59,8 +82,16 @@ export async function gravarComToken(
       ? { tipo: "recusado", mensagem: error.message }
       : { tipo: "incerto", mensagem: error.message };
   }
-  // `maybeSingle()` sem erro e sem linha = o filtro nao casou. Como o `id` veio da
-  // propria tela, o que nao casou foi o token.
-  if (!data) return { tipo: "conflito" };
+  // `maybeSingle()` sem erro e sem linha = algum filtro nao casou. Como o `id` veio
+  // da propria tela, sobra o token — ou o `filtroExtra`, quando existe. Uma leitura
+  // a mais separa os dois: sem ela, a trava de estoque acusaria um colega que nao
+  // existe ("outro admin gravou no meio"), e o admin recarregaria a ficha para ver
+  // exatamente o mesmo numero.
+  if (!data) {
+    if (!filtroExtra) return { tipo: "conflito" };
+    const { data: atual } = await sb.from(tabela).select("admin_rev").eq("id", id).maybeSingle();
+    // Token ainda de pe => quem barrou foi o filtro extra.
+    return { tipo: "conflito", porFiltroExtra: !!atual && (atual as any).admin_rev === rev };
+  }
   return { tipo: "ok", rev: (data as any).admin_rev ?? rev + 1 };
 }

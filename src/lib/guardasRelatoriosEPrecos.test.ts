@@ -398,8 +398,18 @@ describe("Coupons e TabelasPreco: erro de leitura e FK traduzido", () => {
     // segundo clique cria uma regua a mais com ~2 mil linhas de preco. `useState`
     // nao serve — a leitura cairia depois de um await.
     expect(src, "sumiu a trava por ref do duplicar").toContain("if (duplicandoRef.current) return;");
+    // ANTES DO PRIMEIRO AWAIT, e nao so "as duas linhas juntas". Medido: mover o
+    // par inteiro para depois do insert da regua mantinha a adjacencia e nao
+    // travava nada — o segundo clique voltava a criar a regua com ~2 mil linhas.
+    // A guarda irma de `Produtos` ja comparava posicao; esta nao comparava.
     expect(src, "a trava e marcada depois de algum await")
       .toMatch(/if \(duplicandoRef\.current\) return;\s*\n\s*duplicandoRef\.current = true;/);
+    const marca = src.indexOf("duplicandoRef.current = true;");
+    const primeiroAwait = src.indexOf("await", src.indexOf("const handleDuplicate"));
+    expect(marca, "nao achei a marcacao da trava").toBeGreaterThan(-1);
+    expect(primeiroAwait, "nao achei o primeiro await do handleDuplicate").toBeGreaterThan(-1);
+    expect(marca, "a trava e marcada DEPOIS do primeiro await — nao trava nada")
+      .toBeLessThan(primeiroAwait);
     expect(src, "a trava nunca e liberada — o botao morre ate o F5")
       .toMatch(/finally \{[\s\S]{0,200}?duplicandoRef\.current = false;/);
   });

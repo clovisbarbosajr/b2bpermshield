@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NOMES_DE_SISTEMA } from "@/lib/stock";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -13,14 +14,20 @@ import { Plus, Pencil, Trash2, Check, X } from "lucide-react";
 const ProductStatuses = () => {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ nome: "", cor: "#6b7280", ordem: 0, ativo: true, permite_visualizar: true, permite_comprar: true });
   const [saving, setSaving] = useState(false);
 
   const fetchData = async () => {
-    const { data } = await supabase.from("product_statuses").select("*").order("ordem");
-    setItems(data ?? []); setLoading(false);
+    const { data, error } = await supabase.from("product_statuses").select("*").order("ordem");
+    // Sem isto, falha de leitura virava lista vazia — e a acao de recuperacao
+    // (recriar "Sold Out") gerava DUAS linhas com o mesmo nome, que e o defeito
+    // vizinho: navegador (`Map`, ultima vence) e banco (`LIMIT 1` sem `ORDER BY`)
+    // podem decidir coisas opostas para o mesmo produto.
+    setLoadError(error ? error.message : null);
+    setItems(error ? [] : (data ?? [])); setLoading(false);
   };
   useEffect(() => { fetchData(); }, []);
 
@@ -32,17 +39,46 @@ const ProductStatuses = () => {
   };
 
   const handleSave = async () => {
-    setSaving(true);
-    if (editing) {
-      const { error } = await supabase.from("product_statuses").update(form).eq("id", editing.id);
-      if (error) { toast.error(error.message); setSaving(false); return; }
-      toast.success("Status updated");
-    } else {
-      const { error } = await supabase.from("product_statuses").insert(form);
-      if (error) { toast.error(error.message); setSaving(false); return; }
-      toast.success("Status created");
+    const nome = form.nome.trim();
+    if (!nome) { toast.error("Name is required"); return; }
+
+    // RENOMEAR UM DOS SEIS QUEBRA O CASAMENTO POR NOME, e a quebra e silenciosa
+    // nos tres consumidores de uma vez. Mesmo motivo do aviso no delete.
+    const eraDeSistema = editing && NOMES_DE_SISTEMA.includes(String(editing.nome).trim().toLowerCase());
+    if (eraDeSistema && nome.toLowerCase() !== String(editing.nome).trim().toLowerCase()) {
+      if (!confirm(
+        `Rename "${editing.nome}" to "${nome}"?\n\n` +
+        `Products are matched to this status BY NAME, and every check fails open. ` +
+        `After the rename, every product currently marked "${editing.nome}" goes back on the ` +
+        `storefront, orderable — including items you deliberately took off sale while ` +
+        `still holding stock.`
+      )) return;
     }
-    setSaving(false); setDialogOpen(false); fetchData();
+
+    // Nome duplicado: navegador (`Map`, ultima vence) e banco (`LIMIT 1` sem
+    // `ORDER BY`) podem decidir coisas opostas para o mesmo produto. Nao ha UNIQUE
+    // no banco — esta checagem fecha o caso do dia a dia, nao a corrida.
+    const repetido = items.find((i: any) =>
+      String(i.nome).trim().toLowerCase() === nome.toLowerCase() && i.id !== editing?.id);
+    if (repetido) {
+      toast.error(
+        `There is already a status named "${repetido.nome}". Two statuses with the same name ` +
+        `make the storefront and the order check disagree about the same product.`
+      );
+      return;
+    }
+
+    setSaving(true);
+    const payload = { ...form, nome };
+    // `.select("id")`: UPDATE que casa zero linhas volta 204 com `error: null`.
+    const { data, error } = editing
+      ? await supabase.from("product_statuses").update(payload).eq("id", editing.id).select("id").maybeSingle()
+      : await supabase.from("product_statuses").insert(payload).select("id").maybeSingle();
+    setSaving(false);
+    if (error) { toast.error(error.message); return; }
+    if (!data) { toast.error("Nothing was saved — this status no longer exists. Reload the page."); setDialogOpen(false); fetchData(); return; }
+    toast.success(editing ? "Status updated" : "Status created");
+    setDialogOpen(false); fetchData();
   };
 
   const BoolIcon = ({ val }: { val: boolean }) => val ? <Check className="h-4 w-4 text-green-500" /> : <X className="h-4 w-4 text-destructive" />;
@@ -73,16 +109,38 @@ const ProductStatuses = () => {
               {items.map(r => (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium text-primary">{r.nome}</TableCell>
-                  <TableCell>{r.permite_visualizar ? <Check className="h-4 w-4 text-green-500" /> : ""}</TableCell>
+                  {/* `BoolIcon` como a coluna vizinha: celula em BRANCO numa coluna booleana
+                      le-se como "sem dado", e esta e justamente a coluna que esconde o
+                      produto da loja. */}
+                  <TableCell><BoolIcon val={r.permite_visualizar ?? true} /></TableCell>
                   <TableCell><BoolIcon val={r.permite_comprar ?? true} /></TableCell>
                   <TableCell className="text-right space-x-1">
                     <Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button>
                     <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
-                      if (!confirm("Delete this status?")) return;
-                      // Status em uso por produto tem FK: sem checar, o clique nao
-                      // fazia nada e a linha continuava ali, sem explicacao.
-                      const { error } = await supabase.from("product_statuses").delete().eq("id", r.id);
+                      // NAO EXISTE FK. O comentario anterior aqui afirmava que
+                      // "status em uso por produto tem FK" — e falso, e era
+                      // justamente essa frase que fazia o revisor pular o defeito:
+                      // `produtos.status_produto` e `text`, e os tres consumidores
+                      // falham ABRINDO quando o nome nao casa.
+                      //
+                      // Apagar "Sold Out" devolve ao catalogo, comprável, todo
+                      // produto que o admin tirou de venda de proposito com estoque
+                      // em caixa.
+                      const deSistema = NOMES_DE_SISTEMA.includes(String(r.nome).trim().toLowerCase());
+                      if (!confirm(
+                        `Delete "${r.nome}"?\n\n` +
+                        (deSistema
+                          ? `THIS IS A BUILT-IN STATUS. Products are matched to it BY NAME, and every check ` +
+                            `fails open: deleting it puts every product currently marked "${r.nome}" back on ` +
+                            `the storefront, orderable — including items you deliberately took off sale ` +
+                            `while still holding stock.\n\n`
+                          : ``) +
+                        `This cannot be undone.`
+                      )) return;
+                      const { data: apagado, error } = await supabase
+                        .from("product_statuses").delete().eq("id", r.id).select("id").maybeSingle();
                       if (error) { toast.error("Could not delete: " + error.message); return; }
+                      if (!apagado) { toast.error("Nothing was deleted — this status no longer exists."); fetchData(); return; }
                       fetchData();
                     }}><Trash2 className="h-4 w-4" /></Button>
                   </TableCell>
@@ -113,7 +171,11 @@ const ProductStatuses = () => {
             </div>
             <div className="space-y-1">
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.ativo} onChange={e => setForm({ ...form, ativo: e.target.checked })} /> Active</label>
-              <p className="text-xs text-muted-foreground pl-6">Inactive statuses stay in the list but are no longer offered when editing a product.</p>
+              {/* O texto anterior afirmava que status inativo "nao e mais oferecido ao
+                  editar um produto". Falso: o dropdown do ProductEdit e uma lista FIXA
+                  de seis, que nunca consulta esta tabela — `ativo` nao e lido por
+                  ninguem. */}
+              <p className="text-xs text-muted-foreground pl-6">Not used yet: the product form still offers the six built-in statuses regardless of this checkbox.</p>
             </div>
             <Button onClick={handleSave} disabled={saving} className="w-full">{saving ? "Saving..." : "Save"}</Button>
           </div>

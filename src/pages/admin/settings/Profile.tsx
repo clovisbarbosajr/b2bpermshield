@@ -1132,12 +1132,9 @@ const SettingsProfile = () => {
                   onChange={(e) => update("meta_title_homepage", e.target.value)}
                 />
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Add Extra Fields at Order Confirm and Customer Details</p>
-                <Link to="/admin/settings/extra-fields" className="text-primary underline text-sm">
-                  Extra fields
-                </Link>
-              </div>
+              {/* REMOVIDO 30/ago: a rota de `extra-fields` esta comentada em
+                  `App.tsx`, entao este link caia no 404. Era o quarto caminho para
+                  a mesma tela morta, alem dos tres itens do menu. */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
                   <Label>App Code</Label>

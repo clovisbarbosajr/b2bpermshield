@@ -125,7 +125,23 @@ const Checkout = () => {
         ? supabase.from("clientes").select(cols).eq("id", impersonatedCustomer.id).maybeSingle()
         : supabase.from("clientes").select(cols).eq("user_id", user!.id).maybeSingle();
 
-      const { data: cliente } = await clienteQuery;
+      // A TERCEIRA LEITURA DO MESMO EFEITO. As duas de baixo ja falham fechado; esta
+      // continuava descartando o `error`, e numa RE-EXECUCAO isso reabre o pedido
+      // com frete gratis pela terceira porta.
+      //
+      // No primeiro mount e inofensivo: `clienteId` fica null e `handleSubmit`
+      // barra com "Client not found". Mas as deps sao `[user, impersonatedCustomer]`
+      // — trocar a impersonacao (ou o refresh de token trocar o OBJETO `user`)
+      // reexecuta. Se a leitura falhar ai, `cliente` fica null, `acctId` fica null,
+      // os dois `Set` ficam vazios, `canSee` derruba toda opcao `privado` que a RLS
+      // liberou, e `erroAtribuicao` nem chega a ser calculado (o bloco e pulado).
+      // `clienteId` ainda guarda o cliente ANTERIOR, entao o `!clienteId` do submit
+      // nao barra: pedido fechado sem frete, `shipping_costs := 0`.
+      const { data: cliente, error: clienteErr } = await clienteQuery;
+      if (clienteErr) {
+        setLoadError(clienteErr.message);
+        return;
+      }
 
       if (cliente) {
         setClienteId(cliente.id);

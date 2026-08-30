@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import type { TablesUpdate } from "@/integrations/supabase/types";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,37 @@ const CustomerEdit = () => {
   const [selectedPaymentOptions, setSelectedPaymentOptions] = useState<string[]>([]);
   const [selectedShippingOptions, setSelectedShippingOptions] = useState<string[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
+
+  /**
+   * Grava um campo do funcionario e CONFIRMA que a linha foi afetada.
+   *
+   * Os tres toggles da tabela de contatos (Confirm orders, Full history, e o
+   * badge Active/Inactive) faziam `.update(...).eq("id", ...)` sem `.select()`.
+   * UPDATE barrado por RLS afeta ZERO linhas e devolve 204 com `error: null` — a
+   * tela marcava o checkbox e o banco nao mudava.
+   *
+   * E ha papel real que cai nisso: `/admin/customers/:id` exige so
+   * `view_customers` (`App.tsx:190`), que o WAREHOUSE tem (`permissions.ts:72`),
+   * enquanto no banco ele so tem `Warehouse read clientes ... FOR SELECT`. Ou
+   * seja: ele abre a ficha, marca "Confirm orders" — o que libera o funcionario a
+   * COMPRAR — e nada acontece, com a tela dizendo que sim.
+   *
+   * O Save principal ja estava coberto por `gravarComToken`; eram so estes tres
+   * que ficaram de fora. Um helper porque o mesmo defeito em tres copias diverge.
+   */
+  // `TablesUpdate<"clientes">`: o tipo vem do proprio schema, entao escrever um
+  // campo que nao existe na tabela vira erro de compilacao — e nao gravacao
+  // silenciosamente ignorada.
+  const gravarNoContato = async (id: string, patch: TablesUpdate<"clientes">) => {
+    const { data, error } = await supabase
+      .from("clientes").update(patch).eq("id", id).select("id").maybeSingle();
+    if (error) { toast.error("Could not save: " + error.message); return false; }
+    if (!data) {
+      toast.error("Nothing was saved — you do not have permission to change this employee, or the record no longer exists.");
+      return false;
+    }
+    return true;
+  };
   const [contactForm, setContactForm] = useState({ nome: "", email: "", can_confirm_order: false, can_view_full_history: false });
   const [addingContact, setAddingContact] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
@@ -521,7 +553,9 @@ const CustomerEdit = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div><Label>Specify activity</Label><Input /></div>
+                  {/* REMOVIDO 30/ago: era um `<Input />` sem `value`, sem `onChange` e sem
+                  coluna correspondente em `clientes`. O admin digitava, salvava,
+                  lia "Customer saved" e o texto sumia no reload. */}
                 </div>
                 <div><Label>Email</Label><Input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
                 <div className="flex gap-2">
@@ -761,9 +795,13 @@ const CustomerEdit = () => {
               </TableBody>
             </Table>
             <Button size="sm" className="mt-3 gap-1" onClick={async () => {
-              const { data } = await supabase.from("enderecos").insert({
+              // O `error` era descartado: para quem a RLS barra (o warehouse alcanca
+              // esta tela por `view_customers`), o botao simplesmente nao fazia nada,
+              // em silencio.
+              const { data, error } = await supabase.from("enderecos").insert({
                 cliente_id: cliente.id, logradouro: "", cidade: "", estado: "", cep: ""
               }).select().single();
+              if (error) { toast.error("Could not add the address: " + error.message); return; }
               if (data) setEnderecos(prev => [...prev, data]);
             }}>
               <Plus className="h-4 w-4" /> Add Address
@@ -974,16 +1012,14 @@ const CustomerEdit = () => {
                             pedido" é justamente o que libera o funcionário a comprar. */}
                         <Checkbox checked={ct.can_confirm_order} onCheckedChange={async (v) => {
                           const val = v === true;
-                          const { error } = await supabase.from("clientes").update({ can_confirm_order: val }).eq("id", ct.id);
-                          if (error) { toast.error("Could not change permission: " + error.message); return; }
+                          if (!await gravarNoContato(ct.id, { can_confirm_order: val })) return;
                           setContacts(prev => prev.map(c => c.id === ct.id ? { ...c, can_confirm_order: val } : c));
                         }} />
                       </TableCell>
                       <TableCell className="text-center">
                         <Checkbox checked={ct.can_view_full_history} onCheckedChange={async (v) => {
                           const val = v === true;
-                          const { error } = await supabase.from("clientes").update({ can_view_full_history: val }).eq("id", ct.id);
-                          if (error) { toast.error("Could not change permission: " + error.message); return; }
+                          if (!await gravarNoContato(ct.id, { can_view_full_history: val })) return;
                           setContacts(prev => prev.map(c => c.id === ct.id ? { ...c, can_view_full_history: val } : c));
                         }} />
                       </TableCell>
@@ -991,8 +1027,7 @@ const CustomerEdit = () => {
                         <Badge variant={ct.ativo ? "default" : "secondary"} className="cursor-pointer"
                           onClick={async () => {
                             const next = ct.ativo ? "inativo" : "ativo";
-                            const { error } = await supabase.from("clientes").update({ status: next, is_active: !ct.ativo }).eq("id", ct.id);
-                            if (error) { toast.error("Could not change status: " + error.message); return; }
+                            if (!await gravarNoContato(ct.id, { status: next, is_active: !ct.ativo })) return;
                             setContacts(prev => prev.map(c => c.id === ct.id ? { ...c, ativo: !c.ativo } : c));
                           }}>
                           {ct.ativo ? "Active" : "Inactive"}

@@ -459,6 +459,8 @@ const ProductEdit = () => {
       preco: form.preco, custo: form.custo, preco_msrp: form.preco_msrp,
       peso: form.peso, comprimento: form.comprimento, largura: form.largura, altura: form.altura,
       quantidade_minima: form.quantidade_minima, quantidade_maxima: form.quantidade_maxima,
+      // NOTA: a guarda de reservado nao cabe no payload — ela e um filtro no
+      // UPDATE. Ver `guardaReservado` logo abaixo do payload.
       estoque_total: form.estoque_total, rastrear_estoque: form.rastrear_estoque,
       permitir_backorder: form.permitir_backorder, quantidade_caixa: form.quantidade_caixa,
       status_produto: form.status_produto, data_disponibilidade: form.data_disponibilidade || null,
@@ -558,7 +560,15 @@ const ProductEdit = () => {
         return;
       }
       const revAtual = revRef.current;
-      const r = await gravarComToken(supabase, "produtos", productId, payload, revAtual);
+      // `filtroExtra` com a MESMA trava de `Estoque.tsx:178` e
+      // `InventoryAdjustment.tsx:221`, que esta tela nao tinha: o gatilho de reserva
+      // escreve SO em `estoque_reservado`, invisivel para o `admin_rev`. Entre
+      // carregar a ficha e clicar Save, um checkout reserva mais unidades; o token
+      // continua valendo e o save gravava um `estoque_total` MENOR que o reservado.
+      // O produto TRAVA — o proprio gatilho passa a recusar toda reserva nova — e
+      // nao se recupera sozinho. Nao ha CHECK no banco segurando isso.
+      const r = await gravarComToken(supabase, "produtos", productId, payload, revAtual,
+        (q: any) => q.lte("estoque_reservado", form.estoque_total));
       if (r.tipo === "recusado") {
         // O PostgREST respondeu com `code`: a transacao abortou, nada foi escrito e
         // o token da tela continua valendo. Corrigir o campo e salvar de novo
@@ -583,7 +593,12 @@ const ProductEdit = () => {
         // APAGADO (`Produtos.tsx` deleta). Acusar de "salvou" quem apagou seria
         // mentira, e a acao que o admin toma e a mesma nos dois casos.
         setSaving(false);
-        toast.error("Nothing was saved: this product was changed or removed by someone else while you had it open. Reload the page before saving again.");
+        // `porFiltroExtra`: o token AINDA vale, entao nao foi colega nenhum — foi a
+        // trava de estoque reservado. Dizer "someone else saved" aqui mandaria o
+        // admin recarregar a ficha para ver exatamente o mesmo numero.
+        toast.error(r.porFiltroExtra
+          ? `Nothing was saved: there are more units reserved by open orders than the quantity you entered (${form.estoque_total}). Raise the quantity or wait for those orders to be fulfilled.`
+          : "Nothing was saved: this product was changed or removed by someone else while you had it open. Reload the page before saving again.");
         return;
       }
       revRef.current = r.rev;
@@ -1180,7 +1195,7 @@ const ProductEdit = () => {
             </CardHeader>
             <CardContent>
               {assignedOptions.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">No options assigned. Click "Add Option" to assign one (max 2).</p>
+                <p className="text-sm text-muted-foreground py-8 text-center">No options assigned. Click "Add Option" to assign one.</p>
               ) : (
                 <div className="space-y-2">
                   {assignedOptions.map((o, i) => (
@@ -1458,7 +1473,19 @@ const ProductEdit = () => {
                     { label: "Grant access to specific customers", sel: accGrant, set: setAccGrant },
                     { label: "Exclude customers from accessing product", sel: accExclude, set: setAccExclude },
                   ] as const).map(({ label, sel, set }) => {
-                    const available = clientes.filter((c) => !sel.includes(c.id));
+                    // EXCLUSAO COMPARTILHADA entre as duas listas. Cada Select
+                    // filtrava so a PROPRIA lista, entao o mesmo cliente entrava em
+                    // Grant e em Exclude com dois cliques — e `produto_cliente_acesso`
+                    // tem `UNIQUE(produto_id, cliente_id)`.
+                    //
+                    // O estrago era esta ordem: `produtos` commita; `delOrFail`
+                    // APAGA todas as linhas de acesso por cliente do produto e
+                    // commita; o insert manda grant+exclude num statement so,
+                    // estoura 23505 e lanca. Fica ZERO linha no banco, a tela segue
+                    // mostrando as duas listas em memoria, e o toast diz "Failed to
+                    // save per-customer access" — nao "apaguei tudo". Reenviar falha
+                    // igual, para sempre. Um F5 consolida.
+                    const available = clientes.filter((c) => !accGrant.includes(c.id) && !accExclude.includes(c.id));
                     return (
                       <div key={label}>
                         <p className="text-xs text-muted-foreground mb-1">{label}</p>

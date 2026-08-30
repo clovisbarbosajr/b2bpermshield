@@ -426,8 +426,12 @@ describe("Produtos: os dois selects da mesma linha nao se atropelam", () => {
       .toBeLessThan(espera);
     // LIBERADA EM `finally`: se `gravarComToken` lancar, sem isso a linha fica
     // morta ate o F5.
+    // O `finally` tem que DEVOLVER o Set novo. Medido: trocar `return n` por
+    // `return prev` — um token — mantem a linha travada para sempre, os dois
+    // selects mortos ate o F5, e passava verde porque a guarda so procurava o
+    // `n.delete(productId)`.
     expect(grava, "a trava nunca e liberada — a linha fica morta ate o F5")
-      .toMatch(/finally \{[\s\S]{0,200}?n\.delete\(productId\)/);
+      .toMatch(/finally \{[\s\S]{0,250}?n\.delete\(productId\); return n;/);
     // E OS DOIS SELECTS TEM QUE HONRAR A TRAVA. Cobrir so um deixa o par
     // atropelando pelo outro lado.
     const desabilita = src.match(/disabled=\{salvando\.has\(p\.id\)\}/g) ?? [];
