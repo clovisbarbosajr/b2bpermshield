@@ -218,11 +218,25 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
       if (existing) {
         return prev.map((i) => {
           if (cartKey(i) !== key) return i;
-          const want = i.quantidade + pedido;
-          // só limita pelo disponível quando ele é número > 0 (não rebaixa backorder/pré-venda)
-          const qtd = (typeof i.estoque_disponivel === "number" && i.estoque_disponivel > 0)
-            ? Math.min(want, i.estoque_disponivel) : want;
-          return { ...i, quantidade: qtd };
+          // NAO CLAMPA MAIS PELO `estoque_disponivel` DA LINHA — mesmo motivo, e a
+          // mesma correcao, do `updateQuantity` logo abaixo. Este ramo tinha o
+          // agravante de clampar por `i.estoque_disponivel` (o FOSSIL gravado no
+          // localStorage quando o item entrou) enquanto IGNORAVA o
+          // `item.estoque_disponivel` fresco que o chamador acabou de calcular. E
+          // o `{ ...i, quantidade }` nunca atualizava o fossil, entao ele valia
+          // para sempre naquela linha.
+          //
+          // Cenario medido: cliente poe 2 unidades com estoque 2. Deposito repoe
+          // 500. Ele abre a ficha, que exibe "500 available", digita 50 e clica
+          // "Add to order": `want = 52`, `Math.min(52, 2)` — a linha continuava
+          // com 2, e o toast de `ProdutoDetalhe.tsx:289` dizia "added to order"
+          // assim mesmo.
+          //
+          // Cai neste ramo: ProdutoDetalhe, "move from saved for later", os dois
+          // re-order (portal/Pedidos e PedidoDetalhe) e o Catalogo para produto
+          // COM variante. Quem sabe o estoque de verdade e o `checkCartStock`,
+          // que rele produto e variante a cada 10s e trava o botao NEXT.
+          return { ...i, quantidade: i.quantidade + pedido };
         });
       }
       // Primeira inserção também respeita estoque/mínimo (antes entrava cru, podia

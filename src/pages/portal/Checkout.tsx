@@ -50,7 +50,7 @@ function loadStripeScript(): Promise<void> {
 }
 
 const Checkout = () => {
-  const { items, total, clearCart } = useCart();
+  const { items, total, clearCart, updatePrice } = useCart();
   const { user, impersonatedCustomer } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -80,6 +80,9 @@ const Checkout = () => {
   // guarda barraria TODOS os pedidos. Falha de leitura nossa nao pode virar
   // checkout parado — entao a guarda so vale quando o imposto foi lido de fato.
   const [taxLookupOk, setTaxLookupOk] = useState(true);
+  // Falha ao montar a tela (frete/pagamento). Ver a guarda que a alimenta: sem
+  // ela, "nao consegui ler" ficava identico a "esta loja nao cobra frete".
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [salesTax, setSalesTax] = useState(0);
   const [couponCode, setCouponCode] = useState("");
   const [coupon, setCoupon] = useState<any>(null);
@@ -205,7 +208,7 @@ const Checkout = () => {
       const canSee = (o: any, allowed: Set<string>) => !o.privado || allowed.has(o.id);
 
       // Frete e pagamento em PARALELO (eram 2 buscas sequenciais).
-      const [{ data: ship }, { data: pay }] = await Promise.all([
+      const [ship, pay] = await Promise.all([
         supabase.from("shipping_options").select("*").eq("ativo", true).order("ordem"),
         // Colunas EXPLICITAS: `select("*")` trazia `gateway_config`, onde a tela do
         // admin permite guardar CHAVE SECRETA do gateway. A RLS e por linha, nao por
@@ -213,8 +216,26 @@ const Checkout = () => {
         // pagamento. O checkout nunca precisou desse campo.
         supabase.from("payment_options").select("id, nome, descricao, instrucoes, ativo, privado, ordem").eq("ativo", true).order("ordem"),
       ]);
-      setShippingOptions((ship ?? []).filter((s: any) => s.show_to_customers !== false && canSee(s, allowedShip)));
-      setPaymentOptions((pay ?? []).filter((p: any) => canSee(p, allowedPay)));
+      // FALHA FECHADO. Os dois `error` eram descartados e o `?? []` transformava
+      // falha de leitura em "esta loja nao tem opcao de frete": os dois blocos
+      // somem do JSX (estao sob `.length > 0`), indistinguiveis de loja sem frete.
+      //
+      // O cliente entao fechava o pedido sem escolher frete, `shipping_option_id`
+      // ia `null`, e `fn_pedido_total_appside` gravava `shipping_costs := 0`.
+      // Pedido valido, com frete gratis que ninguem autorizou, e nenhuma mensagem
+      // em lugar nenhum. Basta um 500 momentaneo do PostgREST no mount — e esta e
+      // busca unica, sem retry.
+      //
+      // Mesma classe de erro que este arquivo ja corrigiu em `applyCoupon`, na
+      // validacao de estoque do submit e no `resolveEnderecoEntregaId`; frete e
+      // pagamento tinham ficado de fora.
+      if (ship.error || pay.error) {
+        setLoadError((ship.error ?? pay.error)!.message);
+        return;
+      }
+      setLoadError(null);
+      setShippingOptions((ship.data ?? []).filter((s: any) => s.show_to_customers !== false && canSee(s, allowedShip)));
+      setPaymentOptions((pay.data ?? []).filter((p: any) => canSee(p, allowedPay)));
 
       // Compute tax using rules: match customer's tax_customer_group_id
       if (cliente) {
@@ -682,6 +703,39 @@ const Checkout = () => {
     const recalcShipping = calcShippingCost(recalcSubtotal);
     const recalcGrossTotal = recalcSubtotal - recalcDiscount + recalcTax + recalcShipping;
 
+    // O BOTAO PROMETIA UM VALOR E O CARTAO COBRAVA OUTRO.
+    //
+    // `PAY $X` usa `grossTotal`, derivado de `total` — a soma dos precos GRAVADOS
+    // no carrinho quando cada item entrou. Nada nunca atualiza esses precos: o
+    // `Carrinho` exibe `item.preco` do localStorage, e so o "move to cart" do
+    // saved-for-later rele. A cobranca usa `finalTotal`, lido do banco depois dos
+    // gatilhos. E a guarda de preco la embaixo compara `finalTotal` com
+    // `recalcGrossTotal` — NUNCA com o que a tela mostrou. Ela protege contra
+    // "banco discorda do recalculo" e e cega para "recalculo discorda do que o
+    // cliente leu".
+    //
+    // Cenario: carrinho de $500 montado ontem, botao diz `PAY $500.00`. O admin
+    // sobe o preco. No submit `getProductPrice` devolve o preco novo, o banco
+    // concorda, a guarda passa — cartao cobrado $600, sem uma linha de aviso.
+    //
+    // REPRECIFICA A TELA E PEDE RECONFIRMACAO, em vez de so endurecer a guarda:
+    // endurecer sozinho prenderia o cliente num laco, porque o carrinho nunca
+    // reprecifica por conta propria e ele veria a mesma recusa para sempre.
+    // Aqui o segundo clique passa, sobre o numero que ele acabou de ler.
+    //
+    // So quando SOBE: preco que caiu cobra menos do que foi prometido, e nao ha
+    // por que interromper o cliente por isso.
+    if (recalcGrossTotal - grossTotal > 0.03) {
+      for (const i of recalculated) updatePrice(cartKey(i as any), i.preco, i.quantidade);
+      toast.error(
+        `The total changed from $${grossTotal.toFixed(2)} to $${recalcGrossTotal.toFixed(2)} — ` +
+        `prices were updated while you were checking out. Nothing was charged and no order was ` +
+        `placed. Please review the new total and confirm again.`
+      );
+      setLoading(false);
+      return;
+    }
+
     // Pedido minimo por cliente. Confere contra o subtotal RECALCULADO (preco
     // atual do banco), nao contra o que a tela somou — carrinho velho pode ter
     // preco desatualizado e passar por pouco.
@@ -1016,6 +1070,21 @@ const Checkout = () => {
       <Card className="p-6 max-w-3xl bg-card/80 backdrop-blur-sm">
         <h2 className="text-2xl font-bold mb-6">Confirm Order</h2>
 
+        {/* ANTES DO FORMULARIO, e nao um toast: com a leitura falhada os blocos de
+            frete e pagamento simplesmente NAO APARECEM (estao sob `.length > 0`),
+            e o cliente fecharia o pedido com frete zero sem nunca saber que havia
+            uma escolha a fazer. */}
+        {loadError && (
+          <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+            <p className="font-medium text-destructive">Could not load the shipping and payment options.</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Please reload before placing this order — otherwise it would be submitted without a shipping method.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => window.location.reload()}>Try again</Button>
+          </div>
+        )}
+
         <div className="mb-6">
           <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Delivery Address</h3>
           <Select value={enderecoId} onValueChange={handleEnderecoChange}>
@@ -1204,12 +1273,24 @@ const Checkout = () => {
               <span>-${discount.toFixed(2)}</span>
             </div>
           )}
-          {salesTax > 0 && (
+          {/* `!taxLookupOk` PRECISA DE LINHA PROPRIA. A condicao era `salesTax > 0`:
+              com a leitura do imposto falhada, `taxRate` fica 0, `salesTax` fica 0
+              e a linha inteira SUMIA — sem imposto, sem aviso, com o total logo
+              abaixo impresso como numero definitivo. Enquanto isso o banco resolve
+              a mesma consulta com `LIMIT 1` e cobra a aliquota de verdade.
+              O `Carrinho` (`Carrinho.tsx:463-469`) ja fazia o certo: `—` e aviso.
+              O Checkout, que e onde o dinheiro sai, nao tinha copiado. */}
+          {!taxLookupOk ? (
+            <div className="flex items-center justify-between text-sm">
+              <span>Sales Tax</span>
+              <span className="text-destructive">—</span>
+            </div>
+          ) : salesTax > 0 ? (
             <div className="flex items-center justify-between text-sm">
               <span>Sales Tax ({taxRate}%)</span>
               <span>${salesTax.toFixed(2)}</span>
             </div>
-          )}
+          ) : null}
           {shippingCost > 0 && (
             <div className="flex items-center justify-between text-sm">
               <span>Shipping</span>
@@ -1218,8 +1299,15 @@ const Checkout = () => {
           )}
           <div className="flex items-center justify-between font-bold pt-1 border-t">
             <span>Gross total</span>
-            <span className="text-lg">${grossTotal.toFixed(2)}</span>
+            <span className="text-lg">{taxLookupOk ? `$${grossTotal.toFixed(2)}` : "—"}</span>
           </div>
+          {!taxLookupOk && (
+            <p className="pt-1 text-xs text-destructive">
+              Sales tax could not be calculated, so this total is not final. Card payment is
+              unavailable until it can be — please send the order and we will confirm the total,
+              or reload to try again.
+            </p>
+          )}
         </div>
 
         <div className="space-y-4 mb-6">
@@ -1251,11 +1339,17 @@ const Checkout = () => {
         )}
         <div className="flex items-center justify-end gap-3">
           <Button variant="ghost" onClick={() => navigate("/portal/carrinho")}>BACK</Button>
-          <Button onClick={handleSubmit} disabled={loading || (payByCard && !stripeReady) || outOfStock.length > 0}>
+          {/* CARTAO BLOQUEADO com o imposto por ler. `taxLookupOk` era usado num
+              lugar so — para DESLIGAR a guarda de preco (linha ~836) —, entao o
+              unico efeito de nao saber o imposto era remover a protecao contra
+              cobrar a mais. O botao continuava prometendo `PAY $X` e cobrando
+              `finalTotal`, que ja vem do banco COM o imposto. Pedido sem cartao
+              continua liberado: ali o valor e confirmado antes de cobrar. */}
+          <Button onClick={handleSubmit} disabled={loading || (payByCard && (!stripeReady || !taxLookupOk)) || outOfStock.length > 0}>
             {loading
               ? payByCard ? "Processing payment..." : "Sending..."
               : payByCard
-              ? `PAY $${grossTotal.toFixed(2)}`
+              ? taxLookupOk ? `PAY $${grossTotal.toFixed(2)}` : "TOTAL UNAVAILABLE"
               : "SEND ORDER"}
           </Button>
         </div>

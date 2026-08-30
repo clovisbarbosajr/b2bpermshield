@@ -265,3 +265,98 @@ describe("ProdutoDetalhe: status ilegivel nao vira afirmacao", () => {
       .toContain("setStatusInfo({ permite_comprar: true, nome: statusName })");
   });
 });
+
+describe("Checkout: a tela nao pode afirmar um total que o cartao vai desmentir", () => {
+  const fonte = () => readFileSync("src/pages/portal/Checkout.tsx", "utf-8");
+
+  it("frete e pagamento falham FECHADO", () => {
+    // Os dois `error` eram descartados e o `?? []` transformava falha de leitura em
+    // "esta loja nao tem frete": os dois blocos somem do JSX (estao sob
+    // `.length > 0`). O cliente fechava o pedido sem escolher frete,
+    // `shipping_option_id` ia null, e o banco gravava `shipping_costs := 0`.
+    // Frete gratis que ninguem autorizou, sem mensagem em lugar nenhum, a partir
+    // de um 500 momentaneo no mount — busca unica, sem retry.
+    const src = fonte();
+    expect(src, "os dois error voltaram a ser descartados na desestruturacao")
+      .not.toMatch(/const \[\{ data: ship \}, \{ data: pay \}\]/);
+    expect(src, "a falha de frete/pagamento deixou de virar erro de tela")
+      .toMatch(/if \(ship\.error \|\| pay\.error\) \{[\s\S]{0,200}?return;/);
+    // E TEM QUE APARECER NO RENDER. Estado de erro que ninguem desenha e igual a
+    // erro engolido — foi assim que `Brands.tsx` passou meses quebrada.
+    expect(src, "o loadError do checkout nao e renderizado")
+      .toMatch(/\{loadError && \(/);
+  });
+
+  it("imposto por ler nao vira total definitivo nem cobranca no cartao", () => {
+    // `taxLookupOk` era usado num lugar SO: para desligar a guarda de preco. A tela
+    // nao mudava em nada — com a leitura falhada `taxRate` fica 0, `salesTax` fica
+    // 0, a linha "Sales Tax" SUMIA (estava sob `salesTax > 0`), o total era
+    // impresso como definitivo e o botao dizia `PAY $X`. Enquanto isso o banco
+    // resolve a mesma consulta com `LIMIT 1` e cobra a aliquota de verdade.
+    //
+    // Alcancavel sem falha de rede: `tax_rules` nao tem UNIQUE em
+    // `(tax_class_id, tax_customer_group_id)`, e duas regras para o mesmo par
+    // fazem o `.maybeSingle()` errar.
+    const src = fonte();
+    expect(src, "a linha de imposto voltou a depender so de `salesTax > 0`")
+      .toMatch(/\{!taxLookupOk \? \(/);
+    expect(src, "o gross total voltou a ser impresso como definitivo")
+      .toMatch(/taxLookupOk \? `\$\$\{grossTotal\.toFixed\(2\)\}` : "—"/);
+    // O BOTAO E O QUE COBRA. Sem isto o resto e so decoracao: a tela mostrava `—`
+    // e o cartao seguia sendo debitado em `finalTotal`.
+    expect(src, "o cartao voltou a poder cobrar com o imposto por ler")
+      .toMatch(/payByCard && \(!stripeReady \|\| !taxLookupOk\)/);
+  });
+
+  it("total que subiu reprecifica a tela e pede reconfirmacao ANTES de criar o pedido", () => {
+    // `PAY $X` usa `grossTotal` (precos gravados no carrinho quando o item entrou;
+    // nada nunca os atualiza). A cobranca usa `finalTotal`, do banco. A guarda
+    // existente compara `finalTotal` com `recalcGrossTotal` — nunca com o que a
+    // tela mostrou.
+    //
+    // REPRECIFICAR e parte da correcao, nao enfeite: so endurecer a guarda
+    // prenderia o cliente num laco, porque o carrinho nao reprecifica sozinho e
+    // ele veria a mesma recusa para sempre.
+    const src = fonte();
+    const bloco = src.match(/if \(recalcGrossTotal - grossTotal > 0\.03\) \{[\s\S]{0,900}?\n    \}/);
+    expect(bloco, "sumiu a comparacao com o total que a TELA mostrou").toBeTruthy();
+    expect(bloco![0], "a tela nao e mais reprecificada — o cliente fica preso no laco")
+      .toContain("updatePrice(");
+    expect(bloco![0], "a guarda nao interrompe mais o submit").toMatch(/return;/);
+    // ANTES do INSERT do pedido. Depois nao adianta: o cupom ja foi consumido
+    // atomicamente no BEFORE INSERT e o estoque ja foi reservado.
+    const guarda = src.indexOf("if (recalcGrossTotal - grossTotal > 0.03)");
+    const insert = src.indexOf('.from("pedidos")');
+    expect(insert, "nao achei o insert do pedido").toBeGreaterThan(-1);
+    expect(guarda, "a reconfirmacao passou a acontecer DEPOIS de criar o pedido")
+      .toBeLessThan(insert);
+  });
+});
+
+describe("CartContext: o estoque fossil do localStorage nao decide mais quantidade", () => {
+  const fonte = () => readFileSync("src/contexts/CartContext.tsx", "utf-8");
+
+  it("o ramo de linha existente do addItem nao clampa pelo fossil", () => {
+    // `i.estoque_disponivel` e gravado quando o item ENTRA e nunca e atualizado —
+    // nem pelo watcher de 10s, nem por re-adicionar (`{...i, quantidade}` mantem o
+    // valor velho). Cliente poe 2 com estoque 2, deposito repoe 500, ele digita 50
+    // na ficha que exibe "500 available": `Math.min(52, 2)` deixava a linha em 2, e
+    // o toast dizia "added to order" assim mesmo.
+    //
+    // Mesmo defeito que `updateQuantity` ja tinha removido, com 10 linhas de
+    // comentario explicando — o `addItem` tinha ficado para tras.
+    // `fatiaEntre` e nao `slice` a mao: recorte manual com marcador ausente
+    // devolve -1 e pega quase o arquivo inteiro — o `estoque_disponivel` do ramo
+    // de PRIMEIRA insercao (que e legitimo) entraria na fatia e o assert passaria
+    // a reprovar codigo correto. `fatiaSemGuarda.test.ts` reprova o recorte manual.
+    //
+    // SEM COMENTARIO: o proprio comentario que explica a correcao contem a
+    // palavra `estoque_disponivel`, e sem descontar isso o assert reprovava a
+    // correcao por causa do texto que a documenta.
+    const semComentario = fonte().replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    const ramo = fatiaEntre(semComentario, "const existing = prev.find", "});", 40);
+    expect(ramo, "voltou o clamp pelo estoque fossil da linha do carrinho")
+      .not.toContain("estoque_disponivel");
+    expect(ramo, "a soma da quantidade sumiu").toContain("i.quantidade + pedido");
+  });
+});
