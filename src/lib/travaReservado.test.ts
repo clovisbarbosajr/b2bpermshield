@@ -46,7 +46,18 @@ describe("travaDeReservadoSeAplica", () => {
   });
 
   it("status normal com backorder desligado continua travando", () => {
-    for (const s of ["disponivel", "esgotado", "estoque_limitado", "indisponivel", null, undefined]) {
+    // OS TRES COM `pre` FIXAM O LIMITE SUPERIOR. Sem eles, o teste so provava que
+    // a regex nao era ESTREITA demais — uma frouxa (`/pre|encomenda/`) passava
+    // 691/691, e ai `premium` ou `pre_lancamento` virariam isentos SEM que o banco
+    // os isente (nenhum dos tres `LIKE` casa). O produto ficaria sem trava de
+    // reservado: o defeito original da serie, ao contrario.
+    //
+    // Alcancavel: `product_statuses` e editavel em Settings, e `status_produto`
+    // esta no allow-list do PUT da edge `api`, que aceita texto livre.
+    for (const s of [
+      "disponivel", "esgotado", "estoque_limitado", "indisponivel", null, undefined,
+      "premium", "pre_lancamento", "preco_sob_consulta",
+    ]) {
       expect(travaDeReservadoSeAplica({ ...base, statusProduto: s }), String(s)).toBe(true);
     }
   });
