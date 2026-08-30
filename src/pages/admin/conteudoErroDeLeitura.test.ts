@@ -67,7 +67,7 @@ describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () =
         // existe nada. O `[\s\S]{0,300}?` cobre o corpo do catch com folga.
         expect(fonte, `nao achei a leitura de ${tabela}`).toContain(`.from("${tabela}")`);
         // SEM COMENTARIO na medida da distancia: o `catch` de `Estoque` tem um
-        // bloco de dezoito linhas explicando o defeito, e a janela de 300 chars
+        // bloco longo explicando o defeito, e a janela de 300 chars
         // contava o comentario como se fosse codigo — a guarda reprovava a
         // correcao por causa do texto que a documenta.
         const semCom = fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
@@ -132,6 +132,20 @@ describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () =
       expect(textoVazio, "nao achei o texto de estado vazio").toBeGreaterThan(-1);
       expect(erroJsx, "a tela imprime 'nao existe nada' antes de conferir o erro de leitura")
         .toBeLessThan(textoVazio);
+
+      // NA FORMA `&& (`, A ORDEM NAO BASTA. Com `? (` a exclusao mutua e estrutural:
+      // um ramo OU o outro. Com `&&` os dois podem renderizar JUNTOS, e ai a tela
+      // mostra o banner vermelho E "No products found" ao mesmo tempo — que e
+      // literalmente "leitura que falha vira 'nao existe nada'", o nome deste
+      // arquivo. Medido: apagar o `!loadError &&` do estado vazio de `Estoque`
+      // passava 704/704.
+      //
+      // Entao, onde o ramo de erro usa `&&`, o estado vazio tem que estar guardado
+      // por `!loadError`.
+      if (/[:{]\s*loadError && \(/.test(jsx)) {
+        expect(jsx, `${arquivo}: o ramo de erro usa \`&&\`, entao o estado vazio precisa de \`!loadError\` — senao os dois aparecem juntos`)
+          .toMatch(/!loadError && [^\n]*\.length === 0/);
+      }
     });
   }
 
@@ -165,7 +179,16 @@ describe("a lista de telas nao fica para tras", () => {
         // tambem aparece em guarda de negocio (`InventoryAdjustment.tsx:338`), e
         // isso acusava tela correta de estar fora da lista.
         const jsx = fatiaDoRender(fonte);
-        return /const \[loadError/.test(fonte) && /\.length === 0 \s*(\?|&&)/.test(jsx);
+        // E O TEXTO DE "NAO EXISTE NADA" TAMBEM, e nao so o `.length === 0`.
+        //
+        // A invariante deste arquivo e sobre a tela AFIRMAR que nao ha conteudo.
+        // Um `.length === 0` que produz outra coisa — em `ProductExport` ele avisa
+        // que o filtro de privacidade nao esta disponivel — nao faz essa afirmacao,
+        // e acusar a tela de estar fora da lista mandava corrigir o que nao esta
+        // errado. Falso positivo cansa a rede e faz a proxima pessoa ignora-la.
+        return /const \[loadError/.test(fonte)
+          && /\.length === 0 \s*(\?|&&)/.test(jsx)
+          && /No [a-z ]+ (yet|found)/.test(jsx);
       });
     const cobertas = new Set(telas.map((t) => t.arquivo.replace("./", "")));
     const faltando = candidatas.filter((n: string) => !cobertas.has(n));

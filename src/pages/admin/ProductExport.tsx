@@ -35,15 +35,23 @@ const AdminProductExport = () => {
       supabase.from("categorias").select("id, nome").eq("ativo", true).order("nome"),
       supabase.from("privacy_groups").select("id, nome").eq("ativo", true).order("nome"),
     ]).then(([pl, cat, pg]) => {
-      // OS TRES `error` ERAM DESCARTADOS, e um deles falha SEMPRE para dois papeis:
-      // `privacy_groups` so tem policy de admin (a de anon foi derrubada em
-      // `20260802140000:55`), e esta tela e alcancavel por manager e warehouse
-      // (`view_products`). Eles viam o seletor "Privacy group" com so o
-      // placeholder, como se a empresa nao tivesse grupo nenhum.
+      // OS TRES `error` ERAM DESCARTADOS. Isto cobre falha de REDE; nao cobre o
+      // caso de RLS, e a versao anterior deste comentario afirmava que cobria.
       //
-      // E o filtro e FAIL-OPEN mais abaixo (`if (pg)`): sem lista, o filtro nao e
-      // aplicado e o export sai COMPLETO. Bloquear o export com a leitura falhada e
-      // o que impede isso de virar vazamento.
+      // RLS em SELECT FILTRA LINHA, nao gera erro: `privacy_groups` so tem policy
+      // de admin (a de anon caiu em `20260802140000:55`), entao manager e warehouse
+      // — que alcancam esta tela por `view_products` — recebem `data: []` com
+      // `error: null`. O `loadError` fica NULL e a guarda nunca dispara justamente
+      // para os dois papeis que o comentario nomeava.
+      //
+      // Por isso a lista vazia e tratada SEPARADAMENTE, por conteudo, logo abaixo:
+      // nao da para distinguir "nao existe grupo nenhum" de "seu papel nao ve os
+      // grupos", e as duas leituras levam a exports diferentes.
+      //
+      // (A versao anterior tambem citava um fail-open em `if (pg)`. Nao existe:
+      // `selectedPrivacyGroup` so e escrito pelo `<Select>` alimentado por
+      // `privacyGroups`, entao com a lista vazia nada e selecionado e o
+      // `if (selectedPrivacyGroup)` de cima ja e falso.)
       const err = pl.error ?? cat.error ?? pg.error;
       setLoadError(err ? err.message : null);
       setPriceLists(pl.data ?? []);
@@ -290,6 +298,17 @@ const AdminProductExport = () => {
               {privacyGroups.map(pg => <SelectItem key={pg.id} value={pg.id}>{pg.nome}</SelectItem>)}
             </SelectContent>
           </Select>
+          {/* Lista vazia tem DUAS leituras indistinguiveis daqui — "nao existe
+              grupo cadastrado" e "seu papel nao enxerga os grupos" (a RLS de
+              `privacy_groups` e admin-only, e esta tela e alcancavel por
+              `view_products`). O export sem filtro sai COMPLETO nos dois casos;
+              quem clica precisa saber em qual deles esta. */}
+          {!loadError && privacyGroups.length === 0 && (
+            <p className="mt-1 text-xs text-destructive">
+              No privacy groups are visible to you. Either none exist, or your role cannot see them —
+              in both cases this export will not be narrowed by privacy group.
+            </p>
+          )}
         </div>
         <Button onClick={handleExport} disabled={exporting} className="bg-primary">
           {exporting ? "Exporting..." : "Export"}

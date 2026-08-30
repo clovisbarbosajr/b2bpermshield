@@ -109,7 +109,7 @@ const ExportsLog = () => {
                     <TableCell className="text-right">{r.registros ?? 0}</TableCell>
                     <TableCell><Badge variant={r.status === "concluido" || r.status === "Finished" ? "default" : "secondary"}>{r.status ?? "Finished"}</Badge></TableCell>
                     {/* COLUNA "Download" REMOVIDA. `arquivo_url` nunca e populada: o
-                        unico gravador de `export_logs` (`ProductExport.tsx:193`) nao
+                        unico gravador de `export_logs` (`ProductExport.tsx, no `handleExport``) nao
                         manda a coluna, e o export e blob no navegador — nao existe
                         arquivo guardado para a URL apontar. Era um botao que, por
                         construcao, mostrava "—" em 100% das linhas.

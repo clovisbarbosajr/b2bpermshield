@@ -507,6 +507,13 @@ describe("ProductExport: o unico caminho de saida de dados do sistema", () => {
       .toContain("const err = pl.error ?? cat.error ?? pg.error;");
     expect(src, "da para exportar com o filtro de privacidade por ler")
       .toMatch(/if \(loadError\) \{[\s\S]{0,300}?return;/);
+    // E O CASO DE RLS, que o `loadError` NAO cobre: SELECT barrado por RLS filtra
+    // LINHA e nao gera erro, entao manager e warehouse recebem `data: []` com
+    // `error: null` e `loadError` fica NULL. Lista vazia tem duas leituras
+    // indistinguiveis daqui — "nao existe grupo" e "seu papel nao ve os grupos" —
+    // e o export sem filtro sai completo nas duas.
+    expect(src, "a lista de grupos vazia voltou a ser silenciosa para quem a RLS esconde")
+      .toContain("{!loadError && privacyGroups.length === 0 && (");
   });
 
   it("zero linha nao vira toast verde nem linha no log", () => {
@@ -533,7 +540,14 @@ describe("Options: o UPDATE do pai confirma a linha", () => {
     const src = semComentario("src/pages/admin/Options.tsx");
     expect(src, "o update do pai voltou a nao confirmar a linha")
       .toContain('from("product_options").update(form as any).eq("id", editing.id).select("id").maybeSingle()');
-    expect(src, "o zero linhas do update do pai voltou a ser ignorado")
-      .toMatch(/if \(!gravado\) \{[\s\S]{0,300}?return;/);
+    // ANCORADO NO TEXTO DO TOAST, e nao num `return;` qualquer dentro de 300
+    // chars: depois de tirar comentarios, o regex antigo casava o
+    // `if (idsNovos.size === 0) return;` de OUTRA funcao, 286 chars adiante — passava
+    // por 14 caracteres. Medido: a guarda sem `return` sobrevivia, e o fluxo seguia
+    // gravando os valores e terminava em "Option updated", com erro e sucesso na
+    // mesma tela.
+    const bloco = src.match(/if \(!gravado\) \{[\s\S]*?Reload the page\."\);[\s\S]{0,200}?\n      \}/);
+    expect(bloco, "sumiu o corpo da guarda de zero linhas do update do pai").toBeTruthy();
+    expect(bloco![0], "o zero linhas do update do pai voltou a ser ignorado").toMatch(/return;/);
   });
 });
