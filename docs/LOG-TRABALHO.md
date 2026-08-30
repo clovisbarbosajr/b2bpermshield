@@ -5461,3 +5461,31 @@ npm test                Test Files 69 passed (69) / Tests 749 passed (749)
                         OK — 194 migrations / 197 .sql / 16 edge functions
 npm run build           built ok (unico aviso: chunk de 2.19 MB, preexistente)
 ```
+
+`FEITO` — **commit + push: `18d2396`**, 11 arquivos, `ec8f98f..18d2396 main -> main`.
+`git status` limpo, `main` alinhado com `origin/main`.
+
+## Fila para a proxima janela
+
+1. ~~checagem de integracao do diff agregado~~ **FEITA** na leva anterior.
+2. ~~commit + push~~ **FEITO** — `18d2396`.
+3. ~~achados que nao dependem do dono~~ **FEITOS** — a classe "escrita que nao
+   confirma linha afetada" foi varrida inteira: 6 sites, mais o defeito de
+   cardinalidade e o de normalizacao que a varredura revelou em `ImportCustomers`.
+4. **telas ainda nao auditadas: ZERO das que sao minhas para mexer.** Continua
+   valendo o levantamento da leva passada — o que sobra sao as 9 de autenticacao,
+   as 3 de notificacao, `settings/B2BWaveSync`, as 4 telas mortas fora do menu e
+   `Index`/`NotFound`, todas fora do meu alcance por regra do dono.
+
+Nada de novo herdado desta leva: o cacador da rodada 4 voltou sem defeito, e as
+duas ressalvas que ele registrou (INSERT com `error: null` e `data` vazio,
+inalcancavel no PostgREST; e a staleness inerente de qualquer read-then-write) ele
+proprio classificou como residuo conhecido, nao como correcao pendente.
+
+`BLOQUEADO` — **teste de estresse concorrente continua sem rodar, pelo mesmo motivo
+da leva anterior, e agora com mais superficie exposta.** As funcoes desta leva sao
+JUSTAMENTE as que so quebram com paralelismo: a guarda inteira existe para o caso
+de outro admin apagar a linha entre o snapshot e a escrita, e o `idPorEmail` de
+`ImportCustomers` e um snapshot que envelhece durante o lote. Nada disso e
+observavel sem escrever no banco real, que a regra proibe sem OK explicito. Segue
+na lista do dono, com o combinado de identificacao e limpeza ainda pendente.
