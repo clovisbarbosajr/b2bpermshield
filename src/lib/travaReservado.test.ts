@@ -40,11 +40,20 @@ describe("travaDeReservadoSeAplica", () => {
     for (const s of [
       "pre_venda", "pre-venda", "pre-order", "Pre-Order", "encomenda",
       "prevenda", "pre venda", "pre  venda", "pre order", "preorder",
-      // AS DUAS ULTIMAS FIXAM A POSICAO. Todas as anteriores casam no indice 0, e
-      // o `LIKE` do banco tem `%` na frente — casa em QUALQUER posicao. Sem elas,
-      // uma regex ancorada (`/^pre.*venda|.../`) passava 691/691, e a tela travaria
-      // o save de um produto `em_pre_venda` que o banco isenta.
+      // AS QUATRO ABAIXO FIXAM A POSICAO NOS DOIS LADOS. O `LIKE` do banco tem `%`
+      // na FRENTE e no FIM, entao ele casa a palavra-chave em qualquer posicao.
+      //
+      // As duas primeiras dao PREFIXO: sem elas, uma regex ancorada no comeco
+      // (`/^pre.*venda|.../`) passava 691/691 e a tela travaria o save de um
+      // `em_pre_venda` que o banco isenta.
+      //
+      // As duas ultimas dao SUFIXO, e essa metade tinha ficado de fora: TODAS as
+      // outras terminam exatamente na palavra-chave, entao o espelho do mutante
+      // acima (`/pre.*venda$|...|encomenda$/`) tambem passava 691/691. Ancorar uma
+      // regex e o instinto de aperto mais comum que existe, e ele erra dos dois
+      // lados.
       "em_pre_venda", "produto pre-venda",
+      "pre-venda lote 2", "encomenda especial",
       // E a quebra de linha, que o `%` casa e o `.` do JS so casa com a flag `s`.
       "pre\nvenda",
     ]) {
