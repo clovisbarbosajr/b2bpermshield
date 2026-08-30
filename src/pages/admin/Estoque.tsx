@@ -20,6 +20,10 @@ const AdminEstoque = () => {
   const [produtos, setProdutos] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  // Falha de leitura. NAO limpa `produtos`: numa tela de inventario, apagar a
+  // grade por causa de um refetch falho tira do operador o pouco que ele tinha.
+  // O que ela precisa saber e que os numeros na tela sao de ANTES.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<any>(null);
   const [novaQtd, setNovaQtd] = useState(0);
   const [motivo, setMotivo] = useState("");
@@ -49,10 +53,23 @@ const AdminEstoque = () => {
       const data = await fetchAllRows<any>((f, t) => supabase.from("produtos")
         .select("id, nome, sku, estoque_total, estoque_reservado").order("nome").order("id", { ascending: true }).range(f, t) as any);
       if (minha !== cargaSeq.current) return;
+      setLoadError(null);
       setProdutos(data);
     } catch (e: any) {
       if (minha !== cargaSeq.current) return;
       console.error(e);
+      // O comentario acima dizia que a tela "mostra o erro em vez de virar lista
+      // vazia" — mas so havia o toast, que dura segundos. Duas consequencias, e a
+      // segunda e a cara:
+      //
+      // 1a carga: `produtos` fica `[]` e a tabela renderiza cabecalho e CORPO VAZIO,
+      // sem uma palavra, indistinguivel de "nao ha produto cadastrado".
+      //
+      // REFETCH (realtime com debounce, ou o `fetchData()` do fim do ajuste): a
+      // grade JA esta carregada e `produtos` fica INTACTO — Total, Reserved e
+      // Available seguem exibindo os numeros anteriores, sem nada indicando que
+      // estao velhos. O operador decide reposicao em cima deles.
+      setLoadError(e?.message ?? String(e));
       toast.error("Could not load stock. Please try again.");
     } finally {
       if (minha === cargaSeq.current) setLoading(false);
@@ -60,6 +77,7 @@ const AdminEstoque = () => {
   };
 
   useEffect(() => { fetchData(); }, []);
+
 
   // Estoque AO VIVO: refaz a lista quando produtos mudam (ex.: item comprado reserva/baixa).
   useEffect(() => {
@@ -234,6 +252,22 @@ const AdminEstoque = () => {
               <TableRow><TableHead>SKU</TableHead><TableHead>Product</TableHead><TableHead className="text-center">Total</TableHead><TableHead className="text-center">Reserved</TableHead><TableHead className="text-center">Available</TableHead><TableHead /></TableRow>
             </TableHeader>
             <TableBody>
+              {loadError && (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-4">
+                    <p className="text-destructive font-medium">Could not read the stock — the numbers below are from the last successful load.</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Do not decide replenishment on them. {loadError}
+                    </p>
+                    <Button variant="outline" size="sm" className="mt-2" onClick={() => { setLoading(true); fetchData(); }}>Try again</Button>
+                  </TableCell>
+                </TableRow>
+              )}
+              {!loadError && filtered.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">No products found</TableCell>
+                </TableRow>
+              )}
               {filtered.map((p) => (
                 <TableRow key={p.id}>
                   <TableCell className="font-mono text-xs">{p.sku}</TableCell>

@@ -13,7 +13,8 @@ const ExportsLog = () => {
   const [imports, setImports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("exports");
-  const [erro, setErro] = useState<string | null>(null);
+  const [erroExports, setErroExports] = useState<string | null>(null);
+  const [erroImports, setErroImports] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -24,7 +25,14 @@ const ExportsLog = () => {
       // Os dois `error` eram descartados: qualquer falha pintava "No exports yet." /
       // "No imports yet." — indistinguivel de "nunca exportaram nada", numa tela de
       // AUDITORIA. Era a unica tela do lote sem nenhum tratamento de erro.
-      setErro(e.error || i.error ? (e.error ?? i.error)!.message : null);
+      // UM ERRO POR ABA. Um `erro` compartilhado fazia a aba que carregou CERTO
+      // esconder as linhas que leu — se `export_logs` falhasse e `import_logs`
+      // voltasse com 100 linhas, a aba Imports dizia "Could not read the log" e
+      // escondia as 100. Numa tela de auditoria, esconder o que se conseguiu ler e
+      // o pior desfecho possivel. E o banner dizia "logs" no plural para a falha de
+      // uma so.
+      setErroExports(e.error ? e.error.message : null);
+      setErroImports(i.error ? i.error.message : null);
       setExports(e.error ? [] : (e.data ?? []));
       setImports(i.error ? [] : (i.data ?? []));
       setLoading(false);
@@ -41,13 +49,16 @@ const ExportsLog = () => {
 
   return (
     <AdminLayout>
-      {erro && (
+      {(erroExports || erroImports) && (
         <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
-          <p className="font-medium text-destructive">Could not load the logs.</p>
+          <p className="font-medium text-destructive">
+            {erroExports && erroImports ? "Could not load the logs."
+              : erroExports ? "Could not load the exports log." : "Could not load the imports log."}
+          </p>
           <p className="mt-1 text-sm text-muted-foreground">
             This does NOT mean nothing was exported or imported — the log could not be read.
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">{erro}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{erroExports ?? erroImports}</p>
           <Button variant="outline" size="sm" className="mt-3" onClick={() => window.location.reload()}>Try again</Button>
         </div>
       )}
@@ -87,7 +98,7 @@ const ExportsLog = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {erro ? (
+                {erroExports ? (
                   <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Could not read the log — see the message above.</TableCell></TableRow>
                 ) : exports.length === 0 ? (
                   <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No exports yet.</TableCell></TableRow>
@@ -125,7 +136,7 @@ const ExportsLog = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {erro ? (
+                {erroImports ? (
                   <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Could not read the log — see the message above.</TableCell></TableRow>
                 ) : imports.length === 0 ? (
                   <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No imports yet.</TableCell></TableRow>

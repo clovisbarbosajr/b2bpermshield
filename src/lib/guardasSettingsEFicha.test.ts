@@ -338,11 +338,20 @@ describe("logs de import/export: falha de leitura nao vira 'nunca aconteceu nada
 
   it("ExportsLog: as duas abas leem o error, e o corte silencioso saiu", () => {
     const src = semComentario("src/pages/admin/tools/ExportsLog.tsx");
+    // UM ERRO POR ABA, e nao um compartilhado: o `erro` unico fazia a aba que
+    // carregou CERTO esconder as linhas que leu.
     expect(src, "os dois error voltaram a ser descartados")
-      .toContain("setErro(e.error || i.error ?");
+      .toContain("setErroExports(e.error ? e.error.message : null)");
+    expect(src, "o erro da aba de imports voltou a ser descartado")
+      .toContain("setErroImports(i.error ? i.error.message : null)");
+    expect(src, "as duas abas voltaram a olhar o mesmo erro")
+      .not.toMatch(/const \[erro, setErro\]/);
     expect(src, "falha de leitura voltou a preencher as listas")
       .toContain("setExports(e.error ? [] : (e.data ?? []))");
-    expect(src, "o erro nao e renderizado").toContain("{erro && (");
+    expect(src, "o erro nao e renderizado").toContain("{(erroExports || erroImports) && (");
+    // E CADA ABA olha o SEU: cobrir so o banner deixava a aba boa escondendo o que leu.
+    expect(src, "a aba de exports voltou a olhar o erro da outra").toContain("{erroExports ? (");
+    expect(src, "a aba de imports voltou a olhar o erro da outra").toContain("{erroImports ? (");
     // O `Select` nao era tamanho de pagina — nao ha paginacao aqui. Ele cortava
     // `slice(0, pageSize)` sobre linhas ja limitadas em 100: com o padrao 25, as
     // linhas 26 a 100 ficavam invisiveis nas DUAS abas, sem controle nenhum para
@@ -464,5 +473,67 @@ describe("Categorias: a mesma falha-aberta do delete de produto", () => {
       .toMatch(/if \(role !== "admin"\) \{[\s\S]{0,400}?return;/);
     expect(src, "o botao de apagar voltou a ficar ativo para quem o handler recusa")
       .toContain('disabled={role !== "admin"}');
+  });
+});
+
+describe("ProductExport: o unico caminho de saida de dados do sistema", () => {
+  const f = () => semComentario("src/pages/admin/ProductExport.tsx");
+
+  it("o insert no log de auditoria le o error, e avisa quando nao registrou", () => {
+    // O resultado nem era desestruturado. E ele falha SEMPRE para dois papeis: a
+    // unica policy de `export_logs` e `FOR ALL USING (has_role admin)`, e sem
+    // `WITH CHECK` o Postgres usa o `USING` tambem no INSERT — manager e warehouse
+    // levam 42501. Como a rota exige so `view_products`, os dois exportavam o
+    // catalogo inteiro e o log ficava sem uma linha.
+    //
+    // `ProductExport` e o UNICO gravador de `export_logs` em todo o repositorio,
+    // entao a tela `Exports Log` dizia "No exports yet." com toda honestidade.
+    const src = f();
+    expect(src, "o erro do log de export voltou a cair no chao")
+      .toContain('const { error: logErr } = await supabase');
+    expect(src, "quem exportou nao fica sabendo que o download nao entrou na auditoria")
+      .toMatch(/if \(logErr\) \{[\s\S]{0,300}?NOT recorded in the audit log/);
+  });
+
+  it("os tres filtros leem o error, e o export para com eles por ler", () => {
+    // `privacy_groups` so tem policy de admin (a de anon foi derrubada em
+    // `20260802140000:55`): manager e warehouse recebiam lista VAZIA com
+    // `error: null` e viam o seletor como se nao houvesse grupo nenhum.
+    //
+    // E o filtro e FAIL-OPEN mais abaixo (`if (pg)`): sem lista, ele nao e aplicado
+    // e o export sai COMPLETO — produto que o filtro deveria ter tirado vai junto.
+    const src = f();
+    expect(src, "os tres error dos filtros voltaram a ser descartados")
+      .toContain("const err = pl.error ?? cat.error ?? pg.error;");
+    expect(src, "da para exportar com o filtro de privacidade por ler")
+      .toMatch(/if \(loadError\) \{[\s\S]{0,300}?return;/);
+  });
+
+  it("zero linha nao vira toast verde nem linha no log", () => {
+    // `exportToCSV` faz `if (!data.length) return` — sai sem baixar e sem avisar.
+    // Sem esta guarda: nenhum arquivo, toast VERDE "0 products exported", e uma
+    // linha "Products / 0 / concluido" no log de uma exportacao que nunca existiu.
+    const src = f();
+    const guarda = src.indexOf("if (!rows.length)");
+    const log = src.indexOf('from("export_logs")');
+    expect(guarda, "sumiu a guarda de zero linhas").toBeGreaterThan(-1);
+    expect(log, "nao achei o insert do log").toBeGreaterThan(-1);
+    expect(guarda, "a guarda roda DEPOIS do log — a linha fantasma ja foi gravada")
+      .toBeLessThan(log);
+    expect(src.slice(guarda, guarda + 300), "a guarda nao interrompe o export").toMatch(/return;/);
+  });
+});
+
+describe("Options: o UPDATE do pai confirma a linha", () => {
+  it("nao diz 'Option updated' sobre zero linhas", () => {
+    // Era o unico write do arquivo sem confirmacao — o de `option_values`, dez
+    // linhas abaixo, ganhou a guarda no mesmo commit com o argumento de que zero
+    // linhas volta `data: null, error: null`. Com outro admin apagando a opcao no
+    // meio, e a opcao sem valores, o laco de baixo nem rodava para revelar.
+    const src = semComentario("src/pages/admin/Options.tsx");
+    expect(src, "o update do pai voltou a nao confirmar a linha")
+      .toContain('from("product_options").update(form as any).eq("id", editing.id).select("id").maybeSingle()');
+    expect(src, "o zero linhas do update do pai voltou a ser ignorado")
+      .toMatch(/if \(!gravado\) \{[\s\S]{0,300}?return;/);
   });
 });

@@ -47,6 +47,13 @@ const telas = [
   // quatro `Map` por nome do sync do B2BWave passam a resolver para uma das duas
   // de forma indefinida.
   { arquivo: "./TabelasPreco.tsx", tabela: "tabelas_preco" },
+  // `Estoque` entrou na forma que LANCA (le por `fetchAllRows`). Ela e o caso mais
+  // caro desta lista: o banner NAO limpa a grade, porque numa tela de inventario
+  // apagar os numeros por causa de um refetch falho tira do operador o pouco que
+  // ele tinha. O que ele precisa saber e que os numeros sao de ANTES — sem isso,
+  // um refetch falho deixava Total/Reserved/Available exibindo o estado anterior
+  // sem nada indicando, e a reposicao era decidida em cima deles.
+  { arquivo: "./Estoque.tsx", tabela: "produtos", forma: "lanca" },
 ];
 
 describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () => {
@@ -59,7 +66,12 @@ describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () =
         // ele o erro morre num `console.error` e a tela volta a afirmar que nao
         // existe nada. O `[\s\S]{0,300}?` cobre o corpo do catch com folga.
         expect(fonte, `nao achei a leitura de ${tabela}`).toContain(`.from("${tabela}")`);
-        expect(fonte, "o catch da leitura nao alimenta o `loadError`")
+        // SEM COMENTARIO na medida da distancia: o `catch` de `Estoque` tem um
+        // bloco de dezoito linhas explicando o defeito, e a janela de 300 chars
+        // contava o comentario como se fosse codigo — a guarda reprovava a
+        // correcao por causa do texto que a documenta.
+        const semCom = fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+        expect(semCom, "o catch da leitura nao alimenta o `loadError`")
           .toMatch(/\} catch \([\s\S]{0,300}?setLoadError\(/);
       } else {
       // `[\s\S]{0,40}?` entre o `from` e o `select`: `Categorias` quebra a cadeia
@@ -106,9 +118,12 @@ describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () =
       // SO O JSX: `search` no arquivo inteiro pegava ocorrencia de helper acima
       // do `return (`.
       const jsx = fatiaDoRender(fonte);
-      // Duas formas de abrir o ramo de erro: `) : loadError ? (` nas telas de
-      // card, e `{loadError ? (` dentro da celula da tabela.
-      const erroJsx = jsx.search(/[:{]\s*loadError \? \(/);
+      // TRES formas de abrir o ramo de erro no repo: `) : loadError ? (` nas telas
+      // de card, `{loadError ? (` dentro da celula da tabela, e `{loadError && (`
+      // onde o erro NAO substitui o conteudo — que e o caso de `Estoque`, em que a
+      // grade continua na tela de proposito, com o aviso de que os numeros sao de
+      // antes. Exigir so as duas primeiras reprovava a terceira, que esta certa.
+      const erroJsx = jsx.search(/[:{]\s*loadError (\? \(|&& \()/);
       // Duas redacoes no repo: "No banners yet" e "No products found". Exigir so
       // a primeira nao achava o estado vazio de `Produtos`, e o assert de ordem
       // passava a comparar contra -1 — verde sem proteger nada.

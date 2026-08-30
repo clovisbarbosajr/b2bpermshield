@@ -27,6 +27,7 @@ const AdminProductExport = () => {
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedPrivacyGroup, setSelectedPrivacyGroup] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -34,6 +35,17 @@ const AdminProductExport = () => {
       supabase.from("categorias").select("id, nome").eq("ativo", true).order("nome"),
       supabase.from("privacy_groups").select("id, nome").eq("ativo", true).order("nome"),
     ]).then(([pl, cat, pg]) => {
+      // OS TRES `error` ERAM DESCARTADOS, e um deles falha SEMPRE para dois papeis:
+      // `privacy_groups` so tem policy de admin (a de anon foi derrubada em
+      // `20260802140000:55`), e esta tela e alcancavel por manager e warehouse
+      // (`view_products`). Eles viam o seletor "Privacy group" com so o
+      // placeholder, como se a empresa nao tivesse grupo nenhum.
+      //
+      // E o filtro e FAIL-OPEN mais abaixo (`if (pg)`): sem lista, o filtro nao e
+      // aplicado e o export sai COMPLETO. Bloquear o export com a leitura falhada e
+      // o que impede isso de virar vazamento.
+      const err = pl.error ?? cat.error ?? pg.error;
+      setLoadError(err ? err.message : null);
       setPriceLists(pl.data ?? []);
       setCategories(cat.data ?? []);
       setPrivacyGroups(pg.data ?? []);
@@ -41,6 +53,12 @@ const AdminProductExport = () => {
   }, []);
 
   const handleExport = async () => {
+    // Nao exporta com os filtros por ler: o de privacidade e fail-open, entao um
+    // export feito assim sai com produto que o filtro deveria ter tirado.
+    if (loadError) {
+      toast.error("Could not load the export filters — reload the page before exporting, or the file may include products that should have been filtered out.");
+      return;
+    }
     setExporting(true);
     try {
       // PAGINADO. Antes era um `.select()` solto: o PostgREST corta em 1000
@@ -189,13 +207,48 @@ const AdminProductExport = () => {
         return row;
       });
 
-      // Log export
-      await supabase.from("export_logs").insert({ tipo: "Products", status: "concluido", registros: rows.length });
+      // `exportToCSV` faz `if (!data.length) return` — sai sem baixar nada e sem
+      // avisar. Sem esta guarda, um filtro de privacidade que nao casa com a
+      // categoria escolhida produzia: nenhum arquivo, toast VERDE "0 products
+      // exported", e uma linha "Products / 0 / concluido" no log de uma exportacao
+      // que nunca existiu. A entrada ja trata o caso igual (`No products found`).
+      if (!rows.length) {
+        toast.error("No products matched these filters — nothing was exported.");
+        setExporting(false);
+        return;
+      }
+
+      // ESTE E O UNICO CAMINHO DE SAIDA DE DADOS DO SISTEMA, e o unico gravador de
+      // `export_logs` — nada em `supabase/functions/` escreve nessa tabela.
+      //
+      // O resultado nem era desestruturado: o `error` caia no chao. E ele falha
+      // SEMPRE para dois papeis — a unica policy e
+      // `"Admins can manage export_logs" FOR ALL USING (has_role admin)`, e sem
+      // `WITH CHECK` o Postgres usa o `USING` tambem no INSERT, entao manager e
+      // warehouse levam 42501. Como a rota exige so `view_products`, os dois
+      // exportavam o catalogo inteiro e o log ficava sem uma linha.
+      //
+      // A tela `Exports Log` foi endurecida nesta mesma leva para nunca dizer
+      // "nunca exportaram nada" quando nao consegue LER — e dizia isso com toda
+      // honestidade, porque o registro nunca chegou a existir. Fechou a mentira do
+      // lado do leitor e deixou o lado do escritor aberto.
+      //
+      // Nao da para consertar isso so no front (a policy e do dono, e ja esta na
+      // batelada). O que a tela PODE fazer e parar de esconder: quem exportou fica
+      // sabendo que aquele download nao entrou na auditoria.
+      const { error: logErr } = await supabase
+        .from("export_logs").insert({ tipo: "Products", status: "concluido", registros: rows.length });
 
       const plLabel = selectedPriceList === "all" ? "All-PriceLists" : priceLists.find(p => p.id === selectedPriceList)?.nome || "PriceList";
       const catLabel = selectedCategory === "all" ? "All-Categories" : categories.find(c => c.id === selectedCategory)?.nome || "Category";
       exportToCSV(rows, `${catLabel}-${plLabel}`);
       toast.success(`${rows.length} products exported`);
+      if (logErr) {
+        toast.error(
+          "This export was NOT recorded in the audit log: " + logErr.message +
+          " — the file was downloaded, but there is no trace of it in Exports Log."
+        );
+      }
     } catch (err: any) {
       toast.error(err.message);
     }

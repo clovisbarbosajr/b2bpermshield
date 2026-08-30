@@ -84,8 +84,19 @@ const AdminOptions = () => {
       // criava uma SEGUNDA opcao.
       setEditing(data);
     } else {
-      const { error } = await supabase.from("product_options").update(form as any).eq("id", editing.id);
+      // `.select("id")`: o UPDATE do PAI era o unico write deste arquivo sem
+      // confirmacao de linha — o de `option_values`, dez linhas abaixo, ganhou a
+      // guarda no mesmo commit, com o argumento de que zero linhas volta
+      // `data: null, error: null`. Sem ela, outro admin apagando a opcao no meio
+      // fazia a tela dizer "Option updated" (e, se a opcao nao tivesse valores, o
+      // laco de baixo nem rodava para revelar).
+      const { data: gravado, error } = await supabase.from("product_options").update(form as any).eq("id", editing.id).select("id").maybeSingle();
       if (error) { toast.error(error.message); setSaving(false); return; }
+      if (!gravado) {
+        toast.error("Nothing was saved — this option no longer exists. Reload the page.");
+        setSaving(false); setEditing(null); fetchData();
+        return;
+      }
       optionId = editing.id;
     }
 
