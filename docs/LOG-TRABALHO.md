@@ -4643,3 +4643,80 @@ Fila intacta e inalterada para a proxima janela com o repositorio parado:
 (1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
 (3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — a REVER
 quando a outra sessao terminar, ja que ela abriu esse terreno.
+
+`AGUARDANDO` — **14:10-14:16, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Sexto registro seguido, e o unico em que a prova chegou por
+COMMIT ALHEIO caindo dentro da minha janela de amostragem.
+
+Prova, nao suposicao. Abri as 14:10:55 com HEAD em `3a09338` (14:07:11) e um unico
+arquivo sujo, `CustomerEdit.tsx` — parecia parada. Nao era. Duas amostragens
+seguidas (100s + 150s) ficaram imoveis e, no quinto tick da segunda, as ~14:14:30,
+**HEAD virou `fc6316f`** (`fix(customeredit): restaura a guarda de zero linhas que
+um git add -A varreu junto`) e a arvore limpou sozinha: o arquivo sujo era trabalho
+em voo da outra sessao, e ela o commitou debaixo de mim. Cadencia de commits
+confirmada em ~6 min: 14:01:59, 14:07:11, 14:14:32.
+
+Depois disso a arvore voltou a se mexer ao vivo, sujos de 0 para 3 em 50 segundos:
+`stock.ts` + `lib/travaReservado.test.ts` gravados no MESMO segundo (14:15:27) —
+par correcao+teste sendo escrito na minha frente — e `ProductEdit.tsx` as 14:16:00.
+
+Detalhe que importa para a fila: `ProductEdit` e' exatamente o cacador que o proprio
+log desta manha registrou como **EM VOO**, e `stock.ts` e' caminho de estoque, ou
+seja, terreno dos achados do item **3**. Abrir em paralelo produziria dois conjuntos
+de guardas para o mesmo arquivo e conflito garantido.
+
+Nao commitei, nao empurrei e nao plantei mutante nenhum, pelo mesmo motivo dos cinco
+registros anteriores e com o mesmo precedente concreto: em `d10367d` um `add -A`
+alheio gravou em HEAD um mutante que eu tinha plantado de proposito — e `fc6316f`,
+o commit que acabou de entrar, e' a outra sessao consertando exatamente esse tipo de
+estrago. Com ela escrevendo, mutante meu vira armadilha para ela e `npm test` meu
+mede a arvore dela, nao a minha.
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — a REVER
+quando a outra sessao terminar, ja que ela esta cobrindo esse terreno agora.
+
+`AGUARDANDO` — **14:30-14:37, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Setimo registro seguido, e o que quase me enganou.
+
+Prova, nao suposicao. Abri as 14:30:55 com HEAD em `f7204f7` (14:20:57) e a arvore
+**limpa** — so o meu proprio `LOG-TRABALHO.md` sujo. Nos seis registros anteriores
+a arvore estava suja; aqui nao estava. Parecia a janela parada que eu esperava.
+
+Nao era. Duas coisas denunciaram antes de eu abrir a fila. Primeira: sete arquivos
+com mtime de 14:28-14:31 — `ProductEdit.tsx` gravado as 14:30:51, **4 segundos**
+antes da minha primeira checagem — e mesmo assim `git status` limpo. Arquivo
+reescrito sem diff resultante e' assinatura de ciclo plantar-mutante-e-reverter ou
+de rodada de teste, nao de repositorio parado. Segunda: a cadencia de commits da
+outra sessao vinha em ~6 min (14:01:59, 14:07:11, 14:14:32, 14:20:57), e as 14:32
+ja fazia 12 min sem commit — leva em andamento, nao leva encerrada.
+
+Amostrei de 20 em 20s por 2 minutos: **tudo imovel**, sujos parados em 1. Se eu
+tivesse parado a amostragem ali, teria concluido "parou" e aberto a fila em cima
+dela. Estendi para mais ~4 minutos de 25 em 25s e a arvore acordou: sujos subiram
+de 1 para 4 as 14:34:37 e para 6 as 14:35:03, `ProductEdit.tsx` foi reescrito
+**tres vezes** na minha frente (14:34:14, 14:35:12, 14:35:45), `stock.ts`,
+`travaReservado.test.ts`, `guardasSettingsEFicha.test.ts`, `paginacaoFoco.test.tsx`,
+`gravarComToken.ts` e `portal/Pedidos.tsx` mudaram junto, e `dist/` foi
+reconstruido as 14:36:23. Isso e' ciclo editar-testar-buildar ao vivo.
+
+Licao que fica registrada para os proximos runs: **arvore limpa nao e' prova de
+parada, e 2 minutos de silencio nao e' prova de parada.** O silencio de 14:31-14:34
+foi so o intervalo entre duas edicoes. Amostragem curta produz falso "parou".
+
+Detalhe que importa para a fila: `ProductEdit.tsx`, `stock.ts` e
+`guardasSettingsEFicha.test.ts` sao exatamente os itens **3 e 4** da minha lista —
+os achados de estoque/produto e as telas de `settings`. A outra sessao esta em cima
+desse terreno agora.
+
+Nao commitei, nao empurrei e nao plantei mutante nenhum, pelo mesmo motivo dos seis
+registros anteriores e com o mesmo precedente concreto: em `d10367d` um `add -A`
+alheio gravou em HEAD um mutante que eu tinha plantado de proposito, e `fc6316f` e'
+a outra sessao consertando esse mesmo tipo de estrago. Com ela escrevendo, mutante
+meu vira armadilha para ela e `npm test` meu mede a arvore dela, nao a minha.
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — a REVER
+quando a outra sessao terminar, ja que ela esta cobrindo esse terreno agora.
