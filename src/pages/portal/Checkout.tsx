@@ -197,13 +197,25 @@ const Checkout = () => {
       // aparecem pra todos. Sub-usuário herda as atribuições da conta do pai.
       const acctId = (cliente as any)?.parent_customer_id ?? cliente?.id ?? null;
       let allowedPay = new Set<string>(), allowedShip = new Set<string>();
+      // A MESMA FALHA-ABERTO DE FRETE, PELA PORTA AO LADO. Estas duas leituras
+      // descartavam o `error`, e o `?? []` deixava os dois `Set` vazios — o que faz
+      // `canSee` derrubar TODA opcao `privado` que a RLS ja tinha liberado. Sem
+      // frete na tela, `shippingId` fica "", `shipping_option_id` vai null, e
+      // `fn_pedido_total_appside` grava `shipping_costs := 0`. Com `loadError`
+      // null, sem card vermelho e com o botao habilitado: o pedido de frete gratis
+      // inteiro, sem nem o aviso que a guarda de baixo passou a dar.
+      //
+      // Com so PARTE das opcoes privadas caindo, o dano e o cliente escolher a
+      // opcao errada sem saber que a dele sumiu.
+      let erroAtribuicao: string | null = null;
       if (acctId) {
-        const [{ data: cpo }, { data: cso }] = await Promise.all([
+        const [cpo, cso] = await Promise.all([
           supabase.from("cliente_payment_options").select("payment_option_id").eq("cliente_id", acctId),
           supabase.from("cliente_shipping_options").select("shipping_option_id").eq("cliente_id", acctId),
         ]);
-        allowedPay = new Set((cpo ?? []).map((x: any) => x.payment_option_id));
-        allowedShip = new Set((cso ?? []).map((x: any) => x.shipping_option_id));
+        erroAtribuicao = cpo.error || cso.error ? (cpo.error ?? cso.error)!.message : null;
+        allowedPay = new Set((cpo.data ?? []).map((x: any) => x.payment_option_id));
+        allowedShip = new Set((cso.data ?? []).map((x: any) => x.shipping_option_id));
       }
       const canSee = (o: any, allowed: Set<string>) => !o.privado || allowed.has(o.id);
 
@@ -236,7 +248,7 @@ const Checkout = () => {
       // definitivo com o imposto nunca consultado — exatamente o cenario que a
       // outra correcao desta leva existe para impedir, alcancado pelo caminho que
       // esta correcao criou. Quem impede o pedido de sair e o botao, la embaixo.
-      setLoadError(ship.error || pay.error ? (ship.error ?? pay.error)!.message : null);
+      setLoadError(erroAtribuicao ?? (ship.error || pay.error ? (ship.error ?? pay.error)!.message : null));
       setShippingOptions((ship.data ?? []).filter((s: any) => s.show_to_customers !== false && canSee(s, allowedShip)));
       setPaymentOptions((pay.data ?? []).filter((p: any) => canSee(p, allowedPay)));
 
@@ -710,8 +722,11 @@ const Checkout = () => {
     //
     // `PAY $X` usa `grossTotal`, derivado de `total` — a soma dos precos GRAVADOS
     // no carrinho quando cada item entrou. Eles so sao atualizados quando o
-    // cliente MEXE no item: `Catalogo` reprecifica em segundo plano ao adicionar e
-    // ao mudar a quantidade, e o "move to cart" do saved-for-later rele. Carrinho
+    // Eles so sao atualizados por TRES caminhos: `Catalogo` reprecifica em segundo
+    // plano ao adicionar e ao mudar a quantidade por la, e o "move to cart" do
+    // saved-for-later rele. Mexer na quantidade DENTRO do Carrinho nao reprecifica
+    // — aquele caminho chama so `updateQuantity` —, que e justamente onde o cliente
+    // cruza faixa de desconto por quantidade. Carrinho
     // parado nao reprecifica nunca — o `Carrinho` exibe `item.preco` do
     // localStorage. A cobranca usa `finalTotal`, lido do banco depois dos
     // gatilhos. E a guarda de preco la embaixo compara `finalTotal` com

@@ -38,19 +38,35 @@ const FALHA_DISFARCADA_DE_SKIP = [
   'skip: checagem de teto indisponivel:', // dispatch.ts:48 — a RPC nem respondeu
 ];
 
-// Linhas de `channel = '-'` que são PANE, e não diagnóstico de rotina. Sem isto
-// elas caíam em `sistema` e iam para a tabela secundária, teto de 50 linhas,
-// legendada "não são notificação".
-const PANE_SEM_CANAL = [
-  // `dispatch.ts:180` — não deu para ler `notification_channels`. É pane total, e
-  // o comentário no próprio dispatch diz que a linha existe justamente para que
-  // ela NÃO fique invisível na tela.
-  'falha ao ler notification_channels:',
-  // `dispatch.ts:190`, ramo de erro do `bloqueioPorIdade`: "nao foi possivel
-  // checar o pedido X" e "numero X corresponde a N pedidos — ambiguo". A barreira
-  // barrou por não conseguir decidir, não porque o pedido era velho.
-  'BLOQUEADO — nao foi possivel checar',
-  'BLOQUEADO — numero',
+// Linhas que são PANE, e não diagnóstico de rotina. Sem isto elas caíam em
+// `sistema` e iam para a tabela secundária, teto de 50 linhas, legendada "não são
+// notificação".
+//
+// `dispatch.ts:180` (e `notify-dispatch/index.ts:83`) — não deu para ler
+// `notification_channels`. É pane TOTAL de notificação, e o comentário no próprio
+// dispatch diz que a linha existe justamente para que ela não fique invisível.
+const PANE_LEITURA = 'falha ao ler notification_channels:';
+
+// O `BLOQUEADO — ` do `bloqueioPorIdade` carrega DOIS tipos de motivo, e só um
+// deles é política:
+//
+//   política   "…dias (limite N) — nada retroativo"  e  "marcado como nao-notificavel"
+//   indecidível "…sem order_id — recusado", "…nao encontrado — recusado",
+//               "…sem data — recusado", "numero X corresponde a N pedidos — ambiguo,
+//               recusado", "nao foi possivel checar o pedido X: <erro do banco>"
+//
+// A LISTA É DA POLÍTICA, e não das falhas: assim um motivo indecidível NOVO nasce
+// vermelho em vez de nascer cinza. Nesta tela o default seguro é aparecer.
+//
+// O caso caro: um chamador que pare de passar `order_id` mata TODA notificação de
+// pedido, para sempre, e a versão anterior chamava isso de rotina — na mesma vala
+// dos diagnósticos de sync, com teto de 50 linhas e sem `alertAdmin`.
+//
+// Travessão U+2014, o mesmo byte do `dispatch.ts` (conferido com `cat -A`).
+const BLOQUEIO = 'BLOQUEADO — ';
+const BLOQUEIO_DE_POLITICA = [
+  'nada retroativo',        // o pedido É velho: a barreira funcionou de propósito
+  'marcado como nao-notificavel',
 ];
 
 export function classificaLog(l: { status: string; channel: string; error: string | null }): ClasseLog {
@@ -59,7 +75,11 @@ export function classificaLog(l: { status: string; channel: string; error: strin
   // ANTES do teste de `skip:`: estas linhas TÊM o prefixo, e é exatamente por
   // isso que passavam por recusa deliberada.
   if (FALHA_DISFARCADA_DE_SKIP.some((p) => err.startsWith(p))) return 'falhou';
-  if (PANE_SEM_CANAL.some((p) => err.startsWith(p))) return 'falhou';
+  if (err.startsWith(PANE_LEITURA)) return 'falhou';
+  // Todo `BLOQUEADO — ` é falha, MENOS os dois desfechos de política.
+  if (err.startsWith(BLOQUEIO)) {
+    return BLOQUEIO_DE_POLITICA.some((p) => err.includes(p)) ? 'sistema' : 'falhou';
+  }
   if (err.startsWith('skip:')) return 'recusado';
   if (l.channel === '-') return 'sistema';
   return 'falhou';

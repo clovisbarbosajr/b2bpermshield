@@ -41,6 +41,12 @@ const telas = [
   // alimentado pela falha, ser limpo no sucesso, e o ramo de erro vir antes do
   // texto de estado vazio.
   { arquivo: "./Produtos.tsx", tabela: "produtos", forma: "lanca" },
+  // `TabelasPreco` entrou quando ganhou o `loadError`: sem ele a tela exibia o
+  // card "No price lists yet" com um botao "Create Price List" do lado, e
+  // `tabelas_preco.nome` nao tem UNIQUE — recriar duplica sem barreira, e os
+  // quatro `Map` por nome do sync do B2BWave passam a resolver para uma das duas
+  // de forma indefinida.
+  { arquivo: "./TabelasPreco.tsx", tabela: "tabelas_preco" },
 ];
 
 describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () => {

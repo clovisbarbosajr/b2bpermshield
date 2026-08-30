@@ -71,7 +71,14 @@ const AdminProdutos = () => {
   // Travar os selects da linha e mais honesto que enfileirar: o admin ve que a
   // primeira mudanca ainda esta indo. `setState` antes do primeiro `await` ja
   // esta comitado quando o proximo evento discreto e despachado.
-  const [salvandoId, setSalvandoId] = useState<string | null>(null);
+  //
+  // `Set`, E NAO UM SLOT UNICO. Com um `string | null`, clicar na linha B com a
+  // gravacao da linha A ainda em voo sobrescrevia o slot e DESTRAVAVA a linha A
+  // no meio do caminho — reabrindo exatamente o falso conflito que esta trava veio
+  // fechar. Medido em execucao: t=50ms linha A travada, t=60ms destravada com a
+  // gravacao de A ainda no ar; o clique seguinte em A lia o `admin_rev` velho e a
+  // tela acusava "Someone else changed this product".
+  const [salvando, setSalvando] = useState<Set<string>>(new Set());
   // Price lists for columns
   const [priceLists, setPriceLists] = useState<any[]>([]);
   // Map produto_id -> Set de privacy_group_id (para o filtro de privacy group)
@@ -193,9 +200,16 @@ const AdminProdutos = () => {
   const gravarNaLista = async (productId: string, patch: Partial<Produto>) => {
     const produto = produtos.find(p => p.id === productId);
     if (!produto) return;
-    setSalvandoId(productId);
-    const r = await gravarComToken(supabase, "produtos", productId, patch, produto.admin_rev);
-    setSalvandoId(null);
+    // Forma funcional nos dois: dois cliques em linhas diferentes no mesmo tick
+    // liam o mesmo `salvando` da closure e um sobrescreveria o outro.
+    setSalvando(prev => new Set(prev).add(productId));
+    let r: Awaited<ReturnType<typeof gravarComToken>>;
+    try {
+      r = await gravarComToken(supabase, "produtos", productId, patch, produto.admin_rev);
+    } finally {
+      // `finally`: se `gravarComToken` lancar, sem isto a linha fica morta ate o F5.
+      setSalvando(prev => { const n = new Set(prev); n.delete(productId); return n; });
+    }
     if (r.tipo === "conflito") {
       toast.error("Someone else changed this product while this page was open. Nothing was saved — reload to see the current values.");
       return;
@@ -497,7 +511,7 @@ const AdminProdutos = () => {
                     <Select
                       value={p.status_produto || "disponivel"}
                       onValueChange={v => handleStatusChange(p.id, v)}
-                      disabled={salvandoId === p.id}
+                      disabled={salvando.has(p.id)}
                     >
                       <SelectTrigger className="h-7 text-xs w-32"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -509,7 +523,7 @@ const AdminProdutos = () => {
                     <Select
                       value={p.ativo ? "Active" : "Inactive"}
                       onValueChange={v => handleActiveChange(p.id, v)}
-                      disabled={salvandoId === p.id}
+                      disabled={salvando.has(p.id)}
                     >
                       <SelectTrigger className="h-7 text-xs w-24"><SelectValue /></SelectTrigger>
                       <SelectContent>

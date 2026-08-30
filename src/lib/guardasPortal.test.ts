@@ -279,14 +279,32 @@ describe("Checkout: a tela nao pode afirmar um total que o cartao vai desmentir"
     const src = fonte();
     expect(src, "os dois error voltaram a ser descartados na desestruturacao")
       .not.toMatch(/const \[\{ data: ship \}, \{ data: pay \}\]/);
+    // A MENSAGEM TEM QUE VIR DO ERRO. Medido: trocar `!.message` por um campo que
+    // nao existe (`.details`) deixava a suite inteira verde e o `tsc` limpo — o
+    // banner aparecia com `undefined` no lugar do motivo. Assert de prefixo de
+    // linha nao ve isso; o da expressao inteira, ve.
     expect(src, "a falha de frete/pagamento deixou de virar erro de tela")
-      .toContain("setLoadError(ship.error || pay.error ?");
-    // NAO PODE SER `return`. A primeira versao saia da funcao ali e pulava o bloco
-    // de imposto: `taxRate` ficava 0 e `taxLookupOk` ficava TRUE, entao a tela
-    // imprimia o total como definitivo com o imposto nunca consultado — o cenario
-    // que a guarda irmã existe para impedir, alcancado pelo caminho que esta criou.
-    expect(src, "a guarda de frete voltou a sair da funcao e pular o bloco de imposto")
-      .not.toMatch(/pay\.error\)\!\.message\);\s*\n\s*return;/);
+      .toContain("(ship.error ?? pay.error)!.message");
+    // E AS DUAS LEITURAS DE ATRIBUICAO TAMBEM. Elas ficam 35 linhas acima e
+    // descartavam o `error`: com os dois `Set` vazios, `canSee` derruba toda opcao
+    // `privado` que a RLS ja tinha liberado, `loadError` fica null, o botao fica
+    // habilitado — o pedido de frete gratis inteiro, pela porta ao lado.
+    expect(src, "as leituras de cliente_shipping_options/payment_options voltaram a descartar o error")
+      .toContain("(cpo.error ?? cso.error)!.message");
+    expect(src, "o erro de atribuicao nao alimenta mais o loadError")
+      .toContain("setLoadError(erroAtribuicao ??");
+    // NENHUM `return` ENTRE A MARCACAO DO ERRO E O BLOCO DE IMPOSTO. A versao
+    // anterior deste assert era um regex que exigia `.message);` colado ao
+    // `return` — e a linha real termina em `: null));`. Ou seja: ele NUNCA pôde
+    // falhar, e um `return` acrescentado na linha seguinte (a forma mais natural de
+    // alguem reintroduzir o defeito) passava com a suite inteira verde.
+    //
+    // Sair ali pula o calculo do imposto: `taxRate` fica 0 e `taxLookupOk` fica
+    // TRUE, entao a tela imprime o total como definitivo com o imposto nunca
+    // consultado — o cenario que a guarda irmã existe para impedir.
+    const ateOImposto = fatiaEntre(src, "setLoadError(erroAtribuicao ??", "// Compute tax using rules", 12);
+    expect(ateOImposto, "voltou um `return` entre a marcacao do erro e o calculo do imposto")
+      .not.toContain("return");
     // E TEM QUE APARECER NO RENDER. Estado de erro que ninguem desenha e igual a
     // erro engolido — foi assim que `Brands.tsx` passou meses quebrada.
     expect(src, "o loadError do checkout nao e renderizado")
@@ -395,9 +413,18 @@ describe("CartContext: o estoque fossil do localStorage nao decide mais quantida
     // 50 entrava com 2 no carrinho vazio ("added to order") e ia a 52 no segundo
     // clique, com o mesmo toast. E o clamp silencioso com toast de sucesso e o
     // defeito que o outro ramo acabou de perder.
+    //
+    // O RAMO INTEIRO, e nao a linha do `capped`: manter `const capped = pedido;`
+    // e clampar na linha SEGUINTE (no `qtd`) passava verde com o defeito de volta.
+    // Assert de prefixo de linha nao ve logica empurrada uma linha abaixo.
     const semCom = fonte().replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-    expect(semCom, "o clamp pelo estoque voltou no ramo de primeira insercao")
-      .not.toMatch(/const capped = .*Math\.min/);
+    const primeira = fatiaEntre(semCom, "const capped = pedido;", "return [...prev,", 8);
+    expect(primeira, "o clamp pelo estoque voltou no ramo de primeira insercao")
+      .not.toContain("estoque_disponivel");
+    // `Math.max` e legitimo (piso da quantidade minima); `Math.min` so serve para
+    // teto, e teto por estoque e exatamente o que saiu daqui.
+    expect(primeira, "voltou um teto por estoque no ramo de primeira insercao")
+      .not.toContain("Math.min");
     expect(semCom, "o ramo de primeira insercao nao usa mais a quantidade pedida")
       .toContain("const capped = pedido;");
   });

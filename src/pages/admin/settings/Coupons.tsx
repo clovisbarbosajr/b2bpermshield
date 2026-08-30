@@ -16,6 +16,10 @@ import { Plus, Pencil, Trash2 } from "lucide-react";
 const Coupons = () => {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // O toast dura 6 s; a tabela ficava vazia para sempre. `coupons.codigo` e UNIQUE,
+  // entao recriar da erro de constraint em vez de duplicar — mas o admin responde
+  // errado ao suporte ("esse cupom nao existe") olhando uma tela que nao leu nada.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState({ codigo: "", tipo: "percentual", valor: 0, uso_maximo: null as number | null, data_inicio: "", data_fim: "", ativo: true });
@@ -25,8 +29,9 @@ const Coupons = () => {
     const { data, error } = await supabase.from("coupons").select("*").order("created_at", { ascending: false });
     // Sem ler o erro a tabela vinha VAZIA e a tela dizia, na pratica, "nao ha
     // cupom nenhum" — o admin recriava um codigo que ja existe.
+    setLoadError(error ? error.message : null);
     if (error) toast.error("Could not load coupons: " + error.message);
-    setItems(data ?? []); setLoading(false);
+    setItems(error ? [] : (data ?? [])); setLoading(false);
   };
   useEffect(() => { fetchData(); }, []);
 
@@ -94,11 +99,15 @@ const Coupons = () => {
     // DISCORDAVAM — a tela aplicava o desconto e o servidor recusava, o que hoje
     // faz a guarda de preco barrar o pedido com uma mensagem que nao explica.
     uso_maximo: form.uso_maximo ?? null, data_inicio: inicio, data_fim: fimDoDia };
-    const { error } = editing
-      ? await supabase.from("coupons").update(payload).eq("id", editing.id)
-      : await supabase.from("coupons").insert(payload);
+    // `.select("id")`: UPDATE que casa zero linhas (outro admin apagou o cupom com
+    // este dialogo aberto) volta `error: null` — a tela dizia "Updated" por cima
+    // de nada.
+    const { data, error } = editing
+      ? await supabase.from("coupons").update(payload).eq("id", editing.id).select("id").maybeSingle()
+      : await supabase.from("coupons").insert(payload).select("id").maybeSingle();
     setSaving(false);
     if (error) { toast.error("Could not save: " + error.message); return; }
+    if (!data) { toast.error("Nothing was saved — this coupon no longer exists. Reload the page."); setDialogOpen(false); fetchData(); return; }
     toast.success(editing ? "Updated" : "Created");
     setDialogOpen(false); fetchData();
   };
@@ -109,9 +118,22 @@ const Coupons = () => {
         <div><h2 className="font-display text-2xl font-semibold">Coupons</h2><p className="mt-1 text-sm text-muted-foreground">Create discount coupons for your customers.</p></div>
         <Button onClick={openNew} className="gap-1"><Plus className="h-4 w-4" /> Add Coupon</Button>
       </div>
-      {loading ? <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div> : (
+      {/* O FK de `pedidos.coupon_id` e NO ACTION e esta CERTO: ele protege o
+          historico. Nao ha cascata a avisar — so faltava traduzir o 23503, que
+          chegava cru como `pedidos_coupon_id_fkey` na cara do admin. */}
+      {loadError && (
+        <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-medium text-destructive">Could not load the coupons.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This does NOT mean there are no coupons — they could not be read.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => { setLoading(true); fetchData(); }}>Try again</Button>
+        </div>
+      )}
+      {loading ? <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div> : loadError ? null : (
         <Card><Table><TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Type</TableHead><TableHead>Value</TableHead><TableHead>Usage</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader>
-          <TableBody>{items.map(r => (<TableRow key={r.id}><TableCell className="font-mono font-medium">{r.codigo}</TableCell><TableCell>{r.tipo === "percentual" ? "%" : "$"}</TableCell><TableCell>{r.tipo === "percentual" ? `${r.valor}%` : `$${Number(r.valor).toFixed(2)}`}</TableCell><TableCell>{r.uso_atual ?? 0}{r.uso_maximo != null ? ` / ${r.uso_maximo}` : ""}</TableCell><TableCell><Badge variant={r.ativo ? "default" : "secondary"}>{r.ativo ? "Active" : "Inactive"}</Badge></TableCell><TableCell className="text-right space-x-1"><Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={async () => { if (!confirm(`Delete coupon "${r.codigo}"?`)) return; const { error } = await supabase.from("coupons").delete().eq("id", r.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchData(); }}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></Card>
+          <TableBody>{items.map(r => (<TableRow key={r.id}><TableCell className="font-mono font-medium">{r.codigo}</TableCell><TableCell>{r.tipo === "percentual" ? "%" : "$"}</TableCell><TableCell>{r.tipo === "percentual" ? `${r.valor}%` : `$${Number(r.valor).toFixed(2)}`}</TableCell><TableCell>{r.uso_atual ?? 0}{r.uso_maximo != null ? ` / ${r.uso_maximo}` : ""}</TableCell><TableCell><Badge variant={r.ativo ? "default" : "secondary"}>{r.ativo ? "Active" : "Inactive"}</Badge></TableCell><TableCell className="text-right space-x-1"><Button variant="ghost" size="icon" onClick={() => openEdit(r)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive" onClick={async () => { if (!confirm(`Delete coupon "${r.codigo}"?`)) return; const { error } = await supabase.from("coupons").delete().eq("id", r.id); if (error) { toast.error(error.code === "23503" ? "This coupon is used by existing orders and cannot be deleted. Set it to Inactive instead." : "Could not delete: " + error.message); return; } fetchData(); }}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>))}</TableBody></Table></Card>
       )}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><DialogContent><DialogHeader><DialogTitle>{editing ? "Edit Coupon" : "New Coupon"}</DialogTitle></DialogHeader>
         <div className="space-y-3">

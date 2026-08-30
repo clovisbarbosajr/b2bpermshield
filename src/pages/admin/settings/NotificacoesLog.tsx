@@ -130,7 +130,7 @@ export default function NotificacoesLog() {
                   dispatch (evento desligado, sem canal marcado, sem destinatário
                   ativo) também é gravada com canal `-` e cai aqui. "O evento está
                   desligado e ninguém foi avisado" não é ruído de sync. */}
-              <p className="text-xs text-muted-foreground mb-3">Travas SQL, diagnóstico do sync do B2BWave e recusas de configuração (evento desligado, sem canal marcado, sem destinatário ativo). Nenhuma chegou a ser tentativa de entrega — mas as de configuração explicam por que um aviso esperado não saiu. Últimos {sistema.length}.</p>
+              <p className="text-xs text-muted-foreground mb-3">Travas SQL, diagnóstico do sync, recusas de configuração (evento desligado, sem canal marcado, sem destinatário ativo) e <strong>panes</strong> — estas últimas em vermelho. Nenhuma chegou a ser tentativa de entrega, mas as de configuração explicam por que um aviso esperado não saiu, e uma pane em vermelho aqui significa que nada foi enviado. Últimos {sistema.length}.</p>
               <div className="rounded-lg border border-border overflow-x-auto">
                 <Table>{cabecalho}<TableBody>{linhas(sistema)}</TableBody></Table>
               </div>

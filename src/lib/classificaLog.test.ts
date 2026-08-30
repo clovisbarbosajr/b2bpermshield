@@ -108,9 +108,64 @@ describe("falha de infraestrutura nao pode se disfarcar de recusa deliberada", (
     // Este e o caso legitimo: o pedido E velho, a barreira barrou de proposito.
     // E a trava que sozinha impede o incidente dos 1.508 SMS de se repetir —
     // pinta-la de vermelho todo dia faria o admin parar de olhar.
+    //
+    // TRANSCRITO de `dispatch.ts:109`. A versao anterior deste assert usava uma
+    // frase INVENTADA ("anterior ao corte retroativo") que o backend nunca emite:
+    // ele passava por casar a regra velha (`channel === '-'` sem `skip:`), e teria
+    // continuado verde mesmo se a classificacao do bloqueio real quebrasse.
     expect(classificaLog({
       status: "failed", channel: "-",
-      error: "BLOQUEADO — pedido de 2026-03-11 e anterior ao corte retroativo",
+      error: "BLOQUEADO — pedido 1042 tem 173 dias (limite 3) — nada retroativo",
     })).toBe("sistema");
+  });
+});
+
+describe("os `BLOQUEADO —` indecidiveis tambem sao falha", () => {
+  // A lista e da POLITICA, e nao das falhas: motivo indecidivel NOVO nasce
+  // vermelho em vez de nascer cinza. Nesta tela o default seguro e aparecer.
+  //
+  // Todos TRANSCRITOS de `dispatch.ts:74`, `:94`, `:96`, `:105`.
+  it("evento de pedido sem order_id e falha, nao rotina", () => {
+    // O caso caro: um chamador que pare de passar `order_id` mata TODA
+    // notificacao de pedido, para sempre.
+    expect(classificaLog({
+      status: "failed", channel: "-",
+      error: "BLOQUEADO — evento new_order sem order_id — recusado",
+    })).toBe("falhou");
+  });
+
+  it("pedido que nao deu para verificar e falha", () => {
+    for (const motivo of [
+      "pedido 1042 nao encontrado — recusado",
+      "numero 1042 corresponde a 2 pedidos — ambiguo, recusado",
+      "pedido 1042 sem data — recusado",
+      "nao foi possivel checar o pedido 1042: statement timeout",
+    ]) {
+      expect(classificaLog({ status: "failed", channel: "-", error: "BLOQUEADO — " + motivo }))
+        .toBe("falhou");
+    }
+  });
+
+  it("os DOIS desfechos de politica continuam sendo rotina", () => {
+    // A barreira de idade e a trava que sozinha impede o incidente dos 1.508 SMS
+    // de se repetir. Pinta-la de vermelho todo dia faria o admin parar de olhar.
+    expect(classificaLog({
+      status: "failed", channel: "-",
+      error: "BLOQUEADO — pedido 1042 tem 173 dias (limite 3) — nada retroativo",
+    })).toBe("sistema");
+    expect(classificaLog({
+      status: "failed", channel: "-",
+      error: "BLOQUEADO — pedido 1042 marcado como nao-notificavel",
+    })).toBe("sistema");
+  });
+
+  // Motivo que ninguem classificou tem que cair do lado VISIVEL. Este assert e o
+  // que trava a inversao do padrao: com a lista sendo das falhas, um `BLOQUEADO`
+  // novo virava cinza em silencio.
+  it("um `BLOQUEADO` desconhecido nasce vermelho", () => {
+    expect(classificaLog({
+      status: "failed", channel: "-",
+      error: "BLOQUEADO — motivo que ainda nao existe no backend",
+    })).toBe("falhou");
   });
 });

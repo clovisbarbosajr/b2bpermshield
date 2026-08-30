@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { percentualEmFaixa } from "@/lib/percentual";
 import { Plus, Pencil, Trash2, Check, X } from "lucide-react";
 
 const SalesTax = () => {
@@ -17,6 +18,10 @@ const SalesTax = () => {
   const [rates, setRates] = useState<any[]>([]);
   const [rules, setRules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // O toast do sonner dura 6 s; a TELA continuava afirmando que nao ha regra de
+  // imposto nenhuma, e o admin recriava as que ja existiam. Pior: com `classes`
+  // vazio, "New Sales Tax rate" grava `tax_class_id: ""`.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Dialogs
   const [classDialog, setClassDialog] = useState(false);
@@ -48,7 +53,15 @@ const SalesTax = () => {
     // — e o admin recriava as regras que ja existiam. Pior: com `classes` vazio,
     // o botao "New Sales Tax rate" grava `tax_class_id: ""`.
     const erro = c.error ?? g.error ?? r.error ?? ru.error;
-    if (erro) toast.error("Could not load the tax settings: " + erro.message);
+    setLoadError(erro ? erro.message : null);
+    if (erro) {
+      // NAO segue para os `setX(... ?? [])`: lista vazia sob um banner de erro
+      // ainda e lista vazia, e os dialogos gravam a partir dela.
+      toast.error("Could not load the tax settings: " + erro.message);
+      setClasses([]); setGroups([]); setRates([]); setRules([]);
+      setLoading(false);
+      return;
+    }
     setClasses(c.data ?? []);
     setGroups(g.data ?? []);
     setRates(r.data ?? []);
@@ -123,22 +136,56 @@ const SalesTax = () => {
   const saveRate = async () => {
     setSaving(true);
     const payload = { nome: rateForm.nome, estado: rateForm.estado, regiao: rateForm.estado, percentual: rateForm.percentual, ordem: rateForm.ordem, tax_class_id: (classes.find((c: any) => c.is_default) ?? classes[0])?.id ?? "" };
-    const { error } = editingRate
-      ? await supabase.from("tax_rates").update({ nome: rateForm.nome, estado: rateForm.estado, regiao: rateForm.estado, percentual: rateForm.percentual, ordem: rateForm.ordem }).eq("id", editingRate.id)
-      : await supabase.from("tax_rates").insert(payload);
+    // `.select("id")`: UPDATE que nao acha linha (outro admin apagou a classe no
+    // meio, e o CASCADE levou esta taxa junto) volta `error: null` com zero
+    // linhas — a tela dizia "Updated" por cima de nada. O molde ja estava em
+    // `saveClass`/`saveGroup` neste mesmo arquivo; duas das quatro tinham ficado
+    // de fora, que e a inconsistencia que morde depois.
+    const { data, error } = editingRate
+      ? await supabase.from("tax_rates").update({ nome: rateForm.nome, estado: rateForm.estado, regiao: rateForm.estado, percentual: rateForm.percentual, ordem: rateForm.ordem }).eq("id", editingRate.id).select("id").maybeSingle()
+      : await supabase.from("tax_rates").insert(payload).select("id").maybeSingle();
     setSaving(false);
     if (error) { toast.error("Could not save: " + error.message); return; }
+    if (!data) { toast.error("Nothing was saved — this tax rate no longer exists. Reload the page."); fetchAll(); return; }
     toast.success(editingRate ? "Updated" : "Created");
     setRateDialog(false); fetchAll();
   };
 
   const saveRule = async () => {
+    // DUAS REGRAS PARA O MESMO PAR QUEBRAM O CHECKOUT, E NAO E CASO RARO.
+    //
+    // `tax_rules` nao tem UNIQUE em `(tax_class_id, tax_customer_group_id)`, e o
+    // `Checkout` le a regra com `.maybeSingle()`, que ERRA quando volta mais de
+    // uma linha: `taxLookupOk` vira false, `taxRate` fica 0 e a linha "Sales Tax"
+    // some da tela. O banco, que resolve a mesma consulta com `LIMIT 1` sem
+    // `ORDER BY`, cobra o imposto de verdade.
+    //
+    // O caminho natural para cair nisso: o admin cria "TX 8.25%" e "FL 6%" e
+    // amarra as duas ao mesmo grupo padrao — porque imposto, para ele, e por
+    // estado. So que o calculo IGNORA estado por completo (a regra e por grupo).
+    // Dois cliques, sem erro nenhum, e o checkout passa a mentir.
+    //
+    // A checagem e no cliente e nao substitui o UNIQUE no banco: duas abas ao
+    // mesmo tempo ainda passam. Fecha o caso do dia a dia, que e o que existe.
+    const duplicada = rules.find((r: any) =>
+      r.tax_class_id === ruleForm.tax_class_id &&
+      r.tax_customer_group_id === ruleForm.tax_customer_group_id &&
+      r.id !== editingRule?.id);
+    if (duplicada) {
+      toast.error(
+        "There is already a rule for this tax class and customer group. " +
+        "Two rules for the same pair make the checkout show no sales tax while the order is still taxed. " +
+        "Edit the existing rule instead."
+      );
+      return;
+    }
     setSaving(true);
-    const { error } = editingRule
-      ? await supabase.from("tax_rules").update(ruleForm).eq("id", editingRule.id)
-      : await supabase.from("tax_rules").insert(ruleForm);
+    const { data, error } = editingRule
+      ? await supabase.from("tax_rules").update(ruleForm).eq("id", editingRule.id).select("id").maybeSingle()
+      : await supabase.from("tax_rules").insert(ruleForm).select("id").maybeSingle();
     setSaving(false);
     if (error) { toast.error("Could not save: " + error.message); return; }
+    if (!data) { toast.error("Nothing was saved — this rule no longer exists. Reload the page."); fetchAll(); return; }
     toast.success(editingRule ? "Updated" : "Created");
     setRuleDialog(false); fetchAll();
   };
@@ -152,6 +199,23 @@ const SalesTax = () => {
       <div className="mb-6">
         <h2 className="font-display text-2xl font-semibold">Sales Tax</h2>
       </div>
+
+      {/* ANTES DAS QUATRO TABELAS. Toast dura 6 s; a tela continuava afirmando que
+          nao ha regra de imposto nenhuma, e o admin recriava as que ja existiam —
+          criando exatamente a duplicata que faz o checkout mostrar imposto zero
+          enquanto o banco cobra. E com `classes` vazio, "New Sales Tax rate" grava
+          `tax_class_id: ""`. */}
+      {loadError && (
+        <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-medium text-destructive">Could not load the tax settings.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This does NOT mean there are no tax rules — they could not be read. Do not re-create anything:
+            a duplicate rule makes the checkout show no sales tax while the order is still taxed.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => { setLoading(true); fetchAll(); }}>Try again</Button>
+        </div>
+      )}
 
       {/* Sales Tax Rules */}
       <Card className="mb-6">
@@ -216,8 +280,45 @@ const SalesTax = () => {
                         setEditingClass(c); setClassForm({ nome: c.nome, is_default: c.is_default ?? false }); setClassDialog(true);
                       }}><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
-                        if (!confirm("Delete this tax class?")) return;
-                        const { error } = await supabase.from("tax_classes").delete().eq("id", c.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchAll();
+                        // `tax_rates.tax_class_id` e `tax_rules.tax_class_id` sao
+                        // ON DELETE CASCADE: apagar a classe leva as taxas E as
+                        // regras. E o sync do B2BWave NAO reescreve nada de
+                        // imposto — a perda e permanente.
+                        //
+                        // Se for a classe PADRAO, o gatilho passa a nao achar
+                        // nenhuma (`SELECT id INTO _taxclass ... WHERE is_default`)
+                        // e grava `sales_tax := 0` em TODO pedido seguinte, calado.
+                        // O confirm era "Delete this tax class?".
+                        const [tr, tru] = await Promise.all([
+                          supabase.from("tax_rates").select("id", { count: "exact", head: true }).eq("tax_class_id", c.id),
+                          supabase.from("tax_rules").select("id", { count: "exact", head: true }).eq("tax_class_id", c.id),
+                        ]);
+                        if (tr.error || tru.error) {
+                          toast.error("Could not check what this tax class is used by — nothing was deleted: " + (tr.error ?? tru.error)!.message);
+                          return;
+                        }
+                        if (!confirm(
+                          `Delete "${c.nome}"?
+
+` +
+                          `This permanently deletes, together with the class:
+` +
+                          `• ${tr.count ?? 0} tax rate(s)
+` +
+                          `• ${tru.count ?? 0} tax rule(s)
+
+` +
+                          (c.is_default
+                            ? `THIS IS THE DEFAULT TAX CLASS. With no default, every new order will be saved with sales tax = 0, silently.
+
+`
+                            : ``) +
+                          `Tax settings do not come back from the B2BWave sync. This cannot be undone.`
+                        )) return;
+                        const { data: apagada, error } = await supabase.from("tax_classes").delete().eq("id", c.id).select("id").maybeSingle();
+                        if (error) { toast.error("Could not delete: " + error.message); return; }
+                        if (!apagada) { toast.error("Nothing was deleted — this tax class no longer exists."); fetchAll(); return; }
+                        fetchAll();
                       }}><Trash2 className="h-4 w-4" /></Button>
                     </TableCell>
                   </TableRow>
@@ -277,8 +378,31 @@ const SalesTax = () => {
                         setEditingRate(r); setRateForm({ nome: r.nome || "", estado: r.estado || r.regiao, percentual: Number(r.percentual), ordem: r.ordem ?? 0 }); setRateDialog(true);
                       }}><Pencil className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="icon" className="text-destructive" onClick={async () => {
-                        if (!confirm("Delete this tax rate?")) return;
-                        const { error } = await supabase.from("tax_rates").delete().eq("id", r.id); if (error) { toast.error("Could not delete: " + error.message); return; } fetchAll();
+                        // `tax_rules.tax_rate_id` e ON DELETE CASCADE: apagar a
+                        // taxa apaga as regras que a usam, e o grupo daqueles
+                        // clientes passa a nao ter regra — imposto zero em todo
+                        // pedido deles, sem aviso. Perda permanente (o sync do
+                        // B2BWave nao toca em imposto).
+                        const usos = await supabase.from("tax_rules")
+                          .select("id", { count: "exact", head: true }).eq("tax_rate_id", r.id);
+                        if (usos.error) {
+                          toast.error("Could not check what this rate is used by — nothing was deleted: " + usos.error.message);
+                          return;
+                        }
+                        if (!confirm(
+                          `Delete "${r.nome || r.estado || r.regiao}"?
+
+` +
+                          `This also deletes ${usos.count ?? 0} tax rule(s) that use it. ` +
+                          `Customer groups left without a rule are charged no sales tax, with no warning.
+
+` +
+                          `Tax settings do not come back from the B2BWave sync. This cannot be undone.`
+                        )) return;
+                        const { data: apagada, error } = await supabase.from("tax_rates").delete().eq("id", r.id).select("id").maybeSingle();
+                        if (error) { toast.error("Could not delete: " + error.message); return; }
+                        if (!apagada) { toast.error("Nothing was deleted — this tax rate no longer exists."); fetchAll(); return; }
+                        fetchAll();
                       }}><Trash2 className="h-4 w-4" /></Button>
                     </TableCell>
                   </TableRow>
@@ -322,7 +446,7 @@ const SalesTax = () => {
           <DialogHeader><DialogTitle>{editingRate ? "Edit" : "New"} Tax Rate</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label>Name</Label><Input value={rateForm.nome} onChange={e => setRateForm({ ...rateForm, nome: e.target.value })} /></div>
-            <div><Label>Rate</Label><Input type="number" step="0.1" value={rateForm.percentual} onChange={e => setRateForm({ ...rateForm, percentual: parseFloat(e.target.value) || 0 })} /></div>
+            <div><Label>Rate</Label><Input type="number" min="0" max="100" step="0.1" value={rateForm.percentual} onChange={e => setRateForm({ ...rateForm, percentual: percentualEmFaixa(e.target.value) })} /></div>
             <div><Label>Sort</Label><Input type="number" value={rateForm.ordem} onChange={e => setRateForm({ ...rateForm, ordem: parseInt(e.target.value) || 0 })} /></div>
             <Button onClick={saveRate} disabled={saving} className="w-full">{saving ? "Saving..." : "Save"}</Button>
           </div>

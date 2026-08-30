@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { percentualEmFaixa } from "@/lib/percentual";
 import { Plus, Pencil, Trash2, UserCheck } from "lucide-react";
 
 const AdminRepresentantes = () => {
@@ -54,11 +55,10 @@ const AdminRepresentantes = () => {
   // `<form>`, entao a validacao nativa nunca roda — e o sync do B2BWave grava
   // nesta coluna sem passar por aqui. O `CHECK` no banco fecha as duas portas e
   // e SQL, entao vai na lista do dono.
-  const faixaComissao = (v: string) => {
-    const n = parseFloat(v);
-    if (!Number.isFinite(n)) return 0;
-    return Math.min(100, Math.max(0, n));
-  };
+  // Saiu para `lib/percentual.ts`: o MESMO defeito (`parseFloat(x) || 0` nao pega
+  // negativo) estava aqui e em `SalesTax`, e la ele chega ao imposto do pedido.
+  // Uma copia por tela divergiria; a funcao compartilhada tem teste que EXECUTA.
+  const faixaComissao = (v: string) => percentualEmFaixa(v);
 
   const handleSave = async () => {
     setSaving(true);

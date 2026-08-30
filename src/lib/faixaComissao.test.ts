@@ -1,61 +1,40 @@
-/**
- * A faixa da comissao, EXECUTADA.
- *
- * `comissao_percentual` e multiplicada em `reports/OrderRepsPerformance.tsx:69`
- * (`o.total * (rate / 100)`) e exportada em CSV para o financeiro. O `|| 0` de
- * antes nao pegava negativo (`-5` e truthy) e nao tinha teto: digitar `1500`
- * achando que e valor fixo virava comissao de 15x a receita, gravada sem um pio.
- *
- * A faixa 0..100 nao e invencao — e a do B2BWave, conferida no formulario dele
- * (`admin/sales_reps/new`: `sales_rep[commission]` com `min="0" max="100"
- * step="0.1"`). Somos um clone.
- */
-import { describe, it, expect } from "vitest";
-// @ts-expect-error — tipos do Node fora do tsconfig; em execucao existe.
+// @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
+// o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
+import { describe, it, expect } from "vitest";
 
-// A funcao mora no componente; aqui ela e reexecutada a partir da MESMA fonte,
-// para o teste nao ser uma segunda implementacao do que diz testar.
+// ESTE ARQUIVO ENCOLHEU DE PROPOSITO.
+//
+// Antes ele extraia o corpo de `faixaComissao` de dentro de `Representantes.tsx`
+// por regex e o remontava com `new Function` — o unico jeito de EXERCITAR uma
+// funcao presa num componente. Funcionava, e era fragil: qualquer mudanca de
+// formatacao no arquivo derrubava a extracao, e foi o que aconteceu.
+//
+// A logica saiu para `lib/percentual.ts`, que tem teste que executa de verdade
+// (`percentual.test.ts`) e cobre os dois chamadores — porque o MESMO defeito
+// (`parseFloat(x) || 0` nao pega negativo, `-8.25` e truthy) estava aqui e em
+// `SalesTax`, e la ele chega ao imposto cobrado no pedido.
+//
+// O que sobra aqui e a fiacao: cobrar que a tela use a funcao compartilhada em
+// vez de reintroduzir uma copia.
 const fonte = readFileSync("src/pages/admin/Representantes.tsx", "utf-8");
-const corpo = fonte.match(/const faixaComissao = \(v: string\) => \{[\s\S]*?\n  \};/);
-if (!corpo) throw new Error("nao achei `faixaComissao` em Representantes.tsx");
-// eslint-disable-next-line no-new-func
-const faixaComissao = new Function(
-  `${corpo[0].replace(/: string/, "")} return faixaComissao;`,
-)() as (v: string) => number;
 
-describe("faixaComissao", () => {
-  it("aceita o que esta na faixa, com uma casa decimal", () => {
-    expect(faixaComissao("0")).toBe(0);
-    expect(faixaComissao("7.5")).toBe(7.5);
-    expect(faixaComissao("100")).toBe(100);
-  });
-
-  it("corta acima de 100 — o caso do `1500` digitado como valor fixo", () => {
-    expect(faixaComissao("1500")).toBe(100);
-    expect(faixaComissao("101")).toBe(100);
-  });
-
-  it("corta abaixo de 0 — o `|| 0` de antes deixava passar", () => {
-    // `-5 || 0` devolve -5: comissao negativa abatendo o total no relatorio.
-    expect(faixaComissao("-5")).toBe(0);
-    expect(faixaComissao("-0.1")).toBe(0);
-  });
-
-  it("campo vazio ou lixo vira 0, e nunca NaN", () => {
-    // NaN aqui vira `numeric` invalido no INSERT, ou pior, silencioso.
-    for (const v of ["", "abc", "1,5,5", " "]) {
-      expect(Number.isFinite(faixaComissao(v)), `entrada ${JSON.stringify(v)}`).toBe(true);
-    }
-    expect(faixaComissao("")).toBe(0);
-    expect(faixaComissao("abc")).toBe(0);
-  });
-
-  it("o input declara a mesma faixa do B2BWave", () => {
-    // O `min`/`max` sozinho nao valida (o Input nao esta dentro de um `<form>`),
-    // mas ele e o que o admin VE — divergir dele confundiria mais que ajudaria.
-    expect(fonte, "o input perdeu a faixa 0..100").toMatch(/min="0" max="100" step="0\.1"/);
-    expect(fonte, "o onChange voltou a nao limitar a faixa")
+describe("Representantes: a comissao passa pela faixa compartilhada", () => {
+  it("usa `percentualEmFaixa` e nao uma copia local", () => {
+    expect(fonte, "sumiu o import da funcao compartilhada")
+      .toContain('import { percentualEmFaixa } from "@/lib/percentual"');
+    expect(fonte, "o campo de comissao voltou a nao limitar o valor")
       .toContain("comissao_percentual: faixaComissao(e.target.value)");
+    // O IDIOMA FURADO NAO PODE VOLTAR. `parseFloat(v) || 0` deixa negativo passar,
+    // e `min`/`max` no `<input>` so valida dentro de um `<form>` que faz submit —
+    // este dialogo nao e `<form>`, entao os atributos ali sao decorativos.
+    expect(fonte, "voltou o `parseFloat(...) || 0`, que nao pega negativo")
+      .not.toMatch(/comissao_percentual: parseFloat\([^)]*\) \|\| 0/);
+  });
+
+  it("o campo continua anunciando a faixa que o B2BWave usa", () => {
+    // Conferido ao vivo no B2BWave (do qual este sistema e clone): o campo de
+    // comissao la e `min="0" max="100" step="0.1"`.
+    expect(fonte).toContain('type="number" min="0" max="100" step="0.1"');
   });
 });

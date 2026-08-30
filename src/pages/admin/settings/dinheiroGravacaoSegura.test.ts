@@ -41,7 +41,16 @@ describe("telas de dinheiro: leitura que falha nao vira 'nao existe nada'", () =
   it("SalesTax.tsx: o Promise.all consolida os quatro erros", () => {
     const fonte = ler("./SalesTax.tsx");
     expect(fonte).toMatch(/const erro = c\.error \?\? g\.error \?\? r\.error \?\? ru\.error;/);
-    expect(fonte).toMatch(/if \(erro\) toast\.error\(/);
+    expect(fonte, "o erro consolidado deixou de virar toast").toMatch(/toast\.error\("Could not load the tax settings: " \+ erro\.message\)/);
+    // E TEM QUE PARAR ALI. A versao anterior toastava e SEGUIA para os
+    // `setX(... ?? [])`: lista vazia sob um toast de 6 s ainda e lista vazia, e os
+    // dialogos gravam a partir dela — com `classes` vazio, "New Sales Tax rate"
+    // grava `tax_class_id: ""`.
+    expect(fonte, "a falha de leitura voltou a seguir para o preenchimento das listas")
+      .toMatch(/setClasses\(\[\]\); setGroups\(\[\]\); setRates\(\[\]\); setRules\(\[\]\);[\s\S]{0,60}?return;/);
+    // E o banner tem que existir e ser desenhado: toast some em 6 s, a tela nao.
+    expect(fonte, "o erro de leitura nao alimenta o loadError").toMatch(/setLoadError\(erro \?/);
+    expect(fonte, "o loadError do SalesTax nao e renderizado").toMatch(/\{loadError/);
   });
 });
 

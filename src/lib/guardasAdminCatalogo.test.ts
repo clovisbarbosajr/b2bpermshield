@@ -345,6 +345,13 @@ describe("Produtos: a lista nao pode mentir sobre o que gravou nem apagar as cas
       expect(del![0], `a contagem de \`${v}\` e feita mas nao aparece no confirm`)
         .toContain(`\${${v}.count ?? 0}`);
     }
+    // A FALHA TEM QUE VIR DE QUALQUER UMA DAS TREZE. Medido: trocar
+    // `contagens.find(c => c.error)?.error` por `contagens[0].error` passava
+    // verde — e aí uma regressao de RLS em `estoque_log` faria o confirm imprimir
+    // "0 stock history entries" e o DELETE levar o historico, com a promessa de
+    // "se a contagem falhar, RECUSAR" sem rede nenhuma.
+    expect(del![0], "a falha de contagem voltou a olhar so uma das leituras")
+      .toContain("contagens.find(c => c.error)?.error");
     expect(del![0], "falha ao contar deixou de recusar o delete")
       .toMatch(/if \(erro\) \{[\s\S]{0,200}?return;/);
     // DELETE barrado por RLS tambem afeta zero linhas em silencio — e o
@@ -397,7 +404,13 @@ describe("Produtos: os dois selects da mesma linha nao se atropelam", () => {
     // mandando recarregar. Ninguem tinha mexido: era ele mesmo. E a segunda
     // mudanca era descartada em silencio, com o Select controlado voltando so.
     const src = f();
-    expect(src, "sumiu o estado de linha em voo").toContain("const [salvandoId, setSalvandoId]");
+    // `Set`, E NAO SLOT UNICO. Medido em execucao pelo cetico: com `string | null`,
+    // clicar na linha B com a gravacao de A ainda em voo sobrescrevia o slot e
+    // DESTRAVAVA a linha A no meio do caminho — o clique seguinte em A lia o
+    // `admin_rev` velho e a tela acusava "Someone else changed this product",
+    // reabrindo exatamente o falso conflito que esta trava veio fechar.
+    expect(src, "a trava voltou a ser um slot unico — duas linhas em voo se destravam")
+      .toContain("const [salvando, setSalvando] = useState<Set<string>>");
     // TEM QUE SER MARCADO ANTES DO AWAIT. Depois nao trava nada — e exatamente o
     // erro que `Estoque.tsx` ja tinha cometido e que a guarda irmã deste arquivo
     // cobra la em cima.
@@ -405,17 +418,19 @@ describe("Produtos: os dois selects da mesma linha nao se atropelam", () => {
     // pega quase o arquivo inteiro, e o assert de ordem passa a comparar posicoes
     // de outra funcao. `fatiaSemGuarda.test.ts` reprova o recorte manual.
     const grava = fatiaEntre(src, "const gravarNaLista = async", "};", 30);
-    const marca = grava.indexOf("setSalvandoId(productId)");
+    const marca = grava.indexOf("setSalvando(prev => new Set(prev).add(productId))");
     const espera = grava.indexOf("await gravarComToken");
     expect(marca, "sumiu a marcacao da linha em voo").toBeGreaterThan(-1);
     expect(espera, "nao achei o await da gravacao").toBeGreaterThan(-1);
     expect(marca, "a linha e travada DEPOIS do await — nao trava nada")
       .toBeLessThan(espera);
+    // LIBERADA EM `finally`: se `gravarComToken` lancar, sem isso a linha fica
+    // morta ate o F5.
     expect(grava, "a trava nunca e liberada — a linha fica morta ate o F5")
-      .toContain("setSalvandoId(null)");
+      .toMatch(/finally \{[\s\S]{0,200}?n\.delete\(productId\)/);
     // E OS DOIS SELECTS TEM QUE HONRAR A TRAVA. Cobrir so um deixa o par
     // atropelando pelo outro lado.
-    const desabilita = src.match(/disabled=\{salvandoId === p\.id\}/g) ?? [];
+    const desabilita = src.match(/disabled=\{salvando\.has\(p\.id\)\}/g) ?? [];
     expect(desabilita.length, "um dos dois selects da linha ignora a trava").toBe(2);
   });
 });

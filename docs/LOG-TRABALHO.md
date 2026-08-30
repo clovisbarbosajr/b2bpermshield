@@ -4543,3 +4543,51 @@ Nao commitei, nao empurrei e nao abri nenhum item da fila — pelo mesmo motivo 
 `BLOQUEADO` anterior, e agora com o precedente concreto: em `d10367d` um `add -A`
 alheio gravou em HEAD um mutante que eu tinha plantado. Fila intacta para a
 proxima janela em que o repositorio estiver parado.
+
+`AGUARDANDO` — **13:10-13:12, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Prova, nao suposicao: commit `a269bd7` (`fix(checkout,admin):
+onze defeitos...`) entrou em HEAD as 13:08:18, e a arvore seguiu se mexendo DEPOIS
+disso. Em 90 segundos de amostragem de 15 em 15s, tres arquivos mudaram debaixo de
+mim: `SalesTax.tsx` (13:10:20, depois de novo 13:11:18), `dinheiroGravacaoSegura.test.ts`
+aparecendo do nada as 13:11:06 — um par correcao+teste sendo escrito ao vivo — e
+`Checkout.tsx` as 13:12:16, ja no ultimo tick da amostra.
+
+Nao commitei, nao empurrei e nao abri nenhum item da fila, pelo mesmo motivo dos
+dois registros anteriores e com o mesmo precedente concreto: em `d10367d` um
+`add -A` alheio gravou em HEAD um mutante que eu tinha plantado de proposito. Com
+outra sessao escrevendo, qualquer mutante meu e uma armadilha para ela e qualquer
+`npm test` meu mede a arvore dela, nao a minha.
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas
+(`reports/CustomersPerformance`, `reports/OrderSummaryByStatus`,
+`reports/OrdersPerMonth`, `reports/OrderRepsPerformance`).
+
+`AGUARDANDO` — **13:30-13:32, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Quarto registro seguido, e o mais direto de todos: a arvore se
+mexeu DURANTE a propria amostragem.
+
+Prova, nao suposicao. `TabelasPreco.tsx` gravado as 13:30:25, 33 segundos antes da
+minha primeira checagem. Em 90 segundos de amostragem de 15 em 15s, dois arquivos
+de teste que eu nao toquei — `lib/guardasRelatoriosEPrecos.test.ts` e
+`admin/conteudoErroDeLeitura.test.ts` — foram reescritos as ~13:31:30, e a arvore
+suja passou de 17 para 19 arquivos entre o `git status` de abertura e o de
+fechamento. HEAD parado em `a269bd7` (13:08:18) com 19 arquivos modificados por
+cima e' exatamente o retrato de uma leva alheia em andamento, nao de uma parada.
+
+Detalhe que importa para a fila: `guardasRelatoriosEPrecos.test.ts` e' o item **4**
+da minha lista (as telas de relatorio ainda nao auditadas). A outra sessao esta
+fazendo esse item agora. Abrir ele em paralelo produziria dois conjuntos de
+guardas para as mesmas telas e um conflito garantido no mesmo arquivo.
+
+Nao commitei, nao empurrei e nao plantei mutante nenhum, pelo mesmo motivo dos tres
+registros anteriores e com o mesmo precedente concreto: em `d10367d` um `add -A`
+alheio gravou em HEAD um mutante que eu tinha plantado de proposito. Com outra
+sessao escrevendo, mutante meu vira armadilha para ela e `npm test` meu mede a
+arvore dela, nao a minha.
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas de relatorio ainda nao
+auditadas — a REVER quando a outra sessao terminar, ja que ela abriu esse item.

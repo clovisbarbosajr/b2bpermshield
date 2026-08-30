@@ -107,16 +107,33 @@ describe("as quatro telas usam a chave por numero", () => {
       .toContain("paginaValida(page, totalPages)");
     expect(fonte, `${tela} nao usa paginasVisiveis com a pagina limitada`)
       .toContain("paginasVisiveis(pageOk, totalPages)");
-    // O REALCE E AS SETAS TAMBEM. Medido: com so o `disabled` coberto, tres
-    // mutantes passavam verdes — e o do `onClick` e beco de verdade. Com 51
-    // registros e o admin na pagina 3, apagar a unica linha deixa `pageOk = 2` e
-    // `page = 3`: a seta "anterior" fica habilitada (`pageOk <= 1` e falso), o
-    // clique faz `setPage(3 - 1) = 2`, que ja era a pagina exibida — botao morto.
+    // O REALCE E AS SETAS TAMBEM. Com 51 registros e o admin na pagina 3, apagar
+    // a unica linha deixa `pageOk = 2` e `page = 3`: a seta "anterior" fica
+    // habilitada (`pageOk <= 1` e falso), o clique faz `setPage(3 - 1) = 2`, que
+    // ja era a pagina exibida — botao morto.
     expect(fonte, `${tela}: o realce do botao atual voltou a comparar com a pagina nao limitada`)
       .not.toMatch(/\bpage === n\b/);
-    // Nenhuma seta pode voltar a derivar a pagina nova de `page`.
-    expect(fonte, `${tela}: uma seta voltou a calcular a pagina a partir de \`page\``)
-      .not.toMatch(/setPage\(\(?p\)? => /);
+    // TODA MENCAO A `page` NOS CONTROLES, e nao so a forma funcional. A versao
+    // anterior proibia apenas `setPage(p => ...)`, entao a forma-valor NAO
+    // limitada (`setPage(page - 1)`) passava — e foram SEIS mutantes vivos, um
+    // por controle, nas tres telas que nao sao `Produtos`. `page` so pode aparecer
+    // na declaracao do estado, nos `setPage(1)` de filtro, e na linha do proprio
+    // `paginaValida`; em qualquer controle de paginacao tem que ser `pageOk`.
+    const controles = [
+      { re: /\.slice\(\((page|pageOk) - 1\) \* PAGE_SIZE/, qual: "a fatia da pagina" },
+      { re: /\.range\(\((page|pageOk) - 1\) \* PAGE_SIZE/, qual: "o range da busca" },
+      { re: /disabled=\{(page|pageOk) <= 1\}/, qual: "a seta anterior (disabled)" },
+      { re: /disabled=\{(page|pageOk) >= totalPages\}/, qual: "a seta proxima (disabled)" },
+      { re: /setPage\((?:Math\.\w+\(1, |Math\.\w+\(totalPages, )?(page|pageOk) [-+] 1\)/, qual: "o alvo das setas" },
+    ];
+    for (const { re, qual } of controles) {
+      // Casa TODAS as ocorrencias: o portal tem duas barras (topo e rodape), e
+      // cobrir so a primeira deixava a de baixo com o defeito.
+      const todas = [...fonte.matchAll(new RegExp(re.source, "g"))];
+      for (const m of todas) {
+        expect(m[1], `${tela}: ${qual} voltou a usar a pagina nao limitada`).toBe("pageOk");
+      }
+    }
     // Uma fatia por lista de paginacao (o portal tem duas, topo e rodape). Cortar
     // pelo proprio `.map(` evita o recorte a mao que ja ficou verde e parou de
     // proteger tres vezes neste projeto — ver `src/test/fatia.ts`. O portal chama

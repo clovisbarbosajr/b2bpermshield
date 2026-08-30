@@ -61,6 +61,24 @@ const Pedidos = () => {
   // tela AFIRMA "No orders found" e o cliente conclui que o historico dele sumiu.
   const [erroLeitura, setErroLeitura] = useState(false);
   const [page, setPage] = useState(1);
+  // DERIVADO AQUI EM CIMA porque a BUSCA precisa dele, e nao so o render.
+  //
+  // Ter `paginaValida` so no render era COSMETICO nesta tela: a paginacao e do
+  // SERVIDOR, a query usava `page` cru, e o clamp mexia apenas no destaque e nas
+  // setas. Com `page` alem do fim o servidor devolvia vazio, nada disparava
+  // refetch (`setPage` nunca era chamado) e a barra sumia pelo `totalPages > 1`.
+  //
+  // Caminho medido: staff na pagina 5 do historico do cliente A troca a
+  // impersonacao para o cliente B, que tem 3 pedidos. O efeito refaz a leitura
+  // (`clienteId` esta nas deps) mas NAO reseta `page` — o reset so existe em
+  // `handleSearch`/`handleClear`. Busca em `range(40,49)`, vazio; `count = 3`,
+  // `totalPages = 1`, barra desmonta: "No orders found" para um cliente que TEM
+  // pedidos, sem botao de saida.
+  //
+  // Buscar por `pageOk` converge sozinho: a primeira leitura devolve o `count`
+  // novo, `pageOk` cai para dentro da faixa e o efeito refaz uma vez.
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const pageOk = paginaValida(page, totalPages);
   const [reordering, setReordering] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -119,7 +137,7 @@ const Pedidos = () => {
         // paginas — o cliente veria o mesmo pedido duas vezes, ou nenhuma.
         .order("created_at", { ascending: false })
         .order("id", { ascending: true })
-        .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+        .range((pageOk - 1) * PAGE_SIZE, pageOk * PAGE_SIZE - 1);
 
       // QUAIS pedidos aparecem e decisao da RLS, nao desta tela. As policies
       // vivas em `pedidos` ja entregam: o pedido proprio (`Clients can read own`),
@@ -160,7 +178,7 @@ const Pedidos = () => {
     };
     fetchOrders();
     return () => { cancelado = true; };
-  }, [clienteId, page, applied, rlsEscopa]);
+  }, [clienteId, pageOk, applied, rlsEscopa]);
 
   const handleSearch = () => {
     setPage(1);
@@ -367,18 +385,11 @@ const Pedidos = () => {
     }
   };
 
-  const totalPages = Math.ceil(total / PAGE_SIZE);
   // JANELA EM VOLTA DA PAGINA ATUAL, e nao as sete primeiras fixas — a regra
   // esta em `lib/paginacao.ts`, com teste, porque as tres telas do admin tinham
   // o mesmo defeito. Com `totalPages === 8` a pagina 8 nao ganhava botao nenhum
   // (o `if` exigia `> 8`); com 20, as paginas 8 a 18 tambem nao. So dava para
   // chegar clicando `>` varias vezes — e sem saber onde se esta indo parar.
-  // `paginaValida`: apagar/desativar a unica linha da ultima pagina reduz
-  // `totalPages`, a barra inteira desmonta (esta sob `totalPages > 1`) e a fatia
-  // fica vazia — beco sem saida, so F5. Ver `paginacao.ts` e o teste que EXECUTA.
-  // Aqui a paginacao e do SERVIDOR (`total` vem de count): com `page` alem do
-  // fim o servidor devolve vazio, e a barra some pelo mesmo `totalPages > 1`.
-  const pageOk = paginaValida(page, totalPages);
   const pageNumbers = () => paginasVisiveis(pageOk, totalPages);
 
   return (

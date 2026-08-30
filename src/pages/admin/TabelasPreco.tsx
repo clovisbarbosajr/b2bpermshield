@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,13 @@ type ItemPreco = { id: string; tabela_preco_id: string; produto_id: string; prec
 const AdminTabelasPreco = () => {
   const [tabelas, setTabelas] = useState<TabelaPreco[]>([]);
   const [loading, setLoading] = useState(true);
+  // O toast dura 6 s; a tela continuava exibindo o card "No price lists yet" com
+  // um botao "Create Price List" do lado. `tabelas_preco.nome` nao tem UNIQUE:
+  // recriar duplica sem barreira, e os quatro `Map` por nome do sync do B2BWave
+  // passam a resolver para uma das duas de forma indefinida — regua que recebe
+  // preco pode trocar entre execucoes.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const duplicandoRef = useRef(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<TabelaPreco | null>(null);
   const [form, setForm] = useState({ nome: "", descricao: "", ativo: true, is_default: false });
@@ -43,7 +50,8 @@ const AdminTabelasPreco = () => {
     setLoading(false);
     // Sem isto, a falha de leitura virava a tela vazia "No price lists yet" —
     // convite a recriar reguas que ja existem.
-    if (error) { toast.error("Could not load price lists: " + error.message); return; }
+    setLoadError(error ? error.message : null);
+    if (error) { toast.error("Could not load price lists: " + error.message); setTabelas([]); return; }
     setTabelas((data as TabelaPreco[]) ?? []);
   };
 
@@ -57,6 +65,14 @@ const AdminTabelasPreco = () => {
   };
 
   const handleSave = async () => {
+    // `NOT NULL` nao barra string vazia, e o dialogo aceitava. Regua sem nome
+    // aparece como linha em branco nos seletores de seis telas — inclusive no de
+    // atribuir cliente. O molde ja estava em `Coupons.handleSave`.
+    const nome = form.nome.trim();
+    if (!nome) { toast.error("Name is required"); return; }
+    // GRAVA O APARADO, e nao `form`: um nome so com espacos passaria a checagem
+    // acima e chegaria ao banco com os espacos, produzindo a mesma linha em branco.
+    const payload = { ...form, nome };
     setSaving(true);
     if (editing) {
       // `.select("id")` de confirmacao: UPDATE que casa ZERO linhas volta 204 com
@@ -64,7 +80,7 @@ const AdminTabelasPreco = () => {
       // por outro admin — a tela dizia "Price list updated" e so o `fetchData`
       // seguinte revelava que a regua nem existia mais.
       const { data: gravado, error } = await supabase.from("tabelas_preco")
-        .update(form).eq("id", editing.id).select("id").maybeSingle();
+        .update(payload).eq("id", editing.id).select("id").maybeSingle();
       if (error) { toast.error(error.message); setSaving(false); return; }
       if (!gravado) {
         toast.error("Nothing was saved — this price list no longer exists. Reload the page.");
@@ -73,7 +89,7 @@ const AdminTabelasPreco = () => {
       }
       toast.success("Price list updated");
     } else {
-      const { data: criado, error } = await supabase.from("tabelas_preco").insert(form).select("id").maybeSingle();
+      const { data: criado, error } = await supabase.from("tabelas_preco").insert(payload).select("id").maybeSingle();
       if (error) { toast.error(error.message); setSaving(false); return; }
       if (!criado) { toast.error("Nothing was created. Try again."); setSaving(false); return; }
       toast.success("Price list created");
@@ -132,6 +148,15 @@ const AdminTabelasPreco = () => {
   // preços custom. Se a cópia dos preços falhar, avisa — a lista fica criada e
   // é só apagar/repetir (nada da lista original é tocado).
   const handleDuplicate = async (t: TabelaPreco) => {
+    // TRAVA POR REF, checada ANTES do primeiro await. O botao era um icone MUDO —
+    // sem `disabled`, sem spinner, sem toast de inicio — e a operacao sao no
+    // minimo quatro idas ao servidor (insert + duas paginas de leitura + insert de
+    // ~2 mil linhas). Segundo clique nessa janela cria uma regua a mais, identica,
+    // com ~2 mil linhas de preco. `setState` nao serve: so vale no proximo render,
+    // e aqui a leitura de `saving` cairia depois de um await.
+    if (duplicandoRef.current) return;
+    duplicandoRef.current = true;
+    try {
     const { data: nova, error } = await supabase.from("tabelas_preco")
       .insert({ nome: `${t.nome} (copy)`, descricao: t.descricao, ativo: t.ativo, is_default: false })
       .select("id").single();
@@ -178,6 +203,11 @@ const AdminTabelasPreco = () => {
     }
     toast.success(`Price list duplicated (${items.length} price(s) copied)`);
     fetchData();
+    } finally {
+      // `finally`: qualquer saida antecipada (os tres `return` de erro acima) ou
+      // um throw sem isto deixava o botao morto ate o F5.
+      duplicandoRef.current = false;
+    }
   };
 
   const openItems = async (t: TabelaPreco) => {
@@ -301,6 +331,16 @@ const AdminTabelasPreco = () => {
       </div>
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>
+      ) : loadError ? (
+        <Card className="flex flex-col items-center justify-center py-16 text-center">
+          <p className="font-medium text-destructive">Could not load the price lists.</p>
+          <p className="mt-1 max-w-md text-sm text-muted-foreground">
+            This does NOT mean there are none — they could not be read. Do not create a new one:
+            price list names are not unique, and a duplicate makes the B2BWave sync target the wrong list.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => { setLoading(true); fetchData(); }}>Try again</Button>
+        </Card>
       ) : tabelas.length === 0 ? (
         <Card className="flex flex-col items-center justify-center py-16 text-center">
           <DollarSign className="h-12 w-12 text-muted-foreground mb-3" />

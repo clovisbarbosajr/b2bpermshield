@@ -221,11 +221,11 @@ describe("TabelasPreco: copia inteira, cascata contada e escrita confirmada", ()
   it("update, insert e delete confirmam a linha", () => {
     const src = f();
     expect(src, "o update voltou a afirmar gravacao que nao houve")
-      .toContain('.update(form).eq("id", editing.id).select("id").maybeSingle()');
+      .toContain('.update(payload).eq("id", editing.id).select("id").maybeSingle()');
     expect(src, "o delete voltou a afirmar remocao que nao houve")
       .toContain('.delete().eq("id", id).select("id").maybeSingle()');
     expect(src, "o insert voltou a nao confirmar")
-      .toContain('.insert(form).select("id").maybeSingle()');
+      .toContain('.insert(payload).select("id").maybeSingle()');
   });
 
   it("a limpeza de precos vai em LOTES, senao a URL estoura", () => {
@@ -273,5 +273,134 @@ describe("Options: remover valor nao pode apagar a linha errada", () => {
       .not.toContain("prev.filter((_, i) => i !== idx)");
     expect(src, "sumiu o filtro por referencia da linha")
       .toContain("setValues((prev: any[]) => prev.filter((x) => x !== v));");
+  });
+});
+
+describe("SalesTax: a tela nao pode criar a configuracao que faz o checkout mentir", () => {
+  const f = () => semComentario("src/pages/admin/settings/SalesTax.tsx");
+
+  it("recusa DUAS regras para o mesmo par (classe, grupo)", () => {
+    // `tax_rules` nao tem UNIQUE em `(tax_class_id, tax_customer_group_id)`, e o
+    // `Checkout` le a regra com `.maybeSingle()`, que ERRA com mais de uma linha:
+    // `taxLookupOk` vira false, `taxRate` fica 0, a linha "Sales Tax" some da
+    // tela. O banco resolve a mesma consulta com `LIMIT 1` e cobra de verdade.
+    //
+    // E o caminho para cair nisso e o NATURAL: o admin cria "TX 8.25%" e "FL 6%"
+    // e amarra as duas ao mesmo grupo padrao, porque imposto para ele e por
+    // estado — so que o calculo ignora estado por completo.
+    const src = f();
+    expect(src, "sumiu a checagem de regra duplicada").toContain("const duplicada = rules.find(");
+    // O par TEM que ser (classe, grupo) — comparar so um dos dois nao acha nada.
+    expect(src, "a checagem de duplicata parou de comparar a classe")
+      .toContain("r.tax_class_id === ruleForm.tax_class_id");
+    expect(src, "a checagem de duplicata parou de comparar o grupo")
+      .toContain("r.tax_customer_group_id === ruleForm.tax_customer_group_id");
+    // E TEM QUE IGNORAR A PROPRIA LINHA em edicao, senao editar uma regra
+    // existente acusa ela mesma de duplicata e nada mais pode ser salvo.
+    expect(src, "a checagem acusa a propria regra em edicao")
+      .toContain("r.id !== editingRule?.id");
+    expect(src, "a duplicata e detectada mas salva assim mesmo")
+      .toMatch(/if \(duplicada\) \{[\s\S]{0,400}?return;/);
+  });
+
+  it("as quatro gravacoes confirmam a linha", () => {
+    // UPDATE que casa zero linhas volta 204 com `error: null`. Duas das quatro
+    // (`saveClass`/`saveGroup`) ja confirmavam; `saveRate`/`saveRule` nao — e o
+    // CASCADE de `tax_classes` torna "outro admin apagou no meio" bem provavel:
+    // um delete de classe leva TODAS as taxas e regras de uma vez.
+    //
+    // Por SUBSTRING, e nao por regex: o regex desta guarda chegou aqui com as
+    // barras comidas (`[sS]` no lugar de `[\s\S]`) e reprovou codigo correto — a
+    // mesma classe de acidente que o cabecalho deste arquivo ja registra.
+    //
+    // Conta CADA uma das oito, e nao "existe um `.select("id")` no arquivo":
+    // deixar uma de fora e exatamente como estava antes (duas telas confirmavam,
+    // duas nao).
+    const src = f();
+    const gravacoes = [
+      '.from("tax_classes").update(classForm).eq("id", editingClass.id).select("id").maybeSingle()',
+      '.from("tax_classes").insert(classForm).select("id").maybeSingle()',
+      '.from("tax_customer_groups").update(groupForm).eq("id", editingGroup.id).select("id").maybeSingle()',
+      '.from("tax_customer_groups").insert(groupForm).select("id").maybeSingle()',
+      '.eq("id", editingRate.id).select("id").maybeSingle()',
+      '.from("tax_rates").insert(payload).select("id").maybeSingle()',
+      '.from("tax_rules").update(ruleForm).eq("id", editingRule.id).select("id").maybeSingle()',
+      '.from("tax_rules").insert(ruleForm).select("id").maybeSingle()',
+    ];
+    for (const g of gravacoes) {
+      expect(src, `esta gravacao voltou a nao confirmar a linha: ${g}`).toContain(g);
+    }
+    // E O ZERO LINHAS TEM QUE SER TRATADO. Confirmar e ignorar o resultado e o
+    // mesmo defeito com uma chamada a mais.
+    const semLinha = src.match(/if \(!data\) \{ toast\.error\(/g) ?? [];
+    expect(semLinha.length, "uma das gravacoes confirma a linha mas ignora o zero")
+      .toBeGreaterThanOrEqual(2);
+  });
+
+  it("o percentual passa pela faixa compartilhada", () => {
+    // `parseFloat(x) || 0` NAO pega negativo. Sem CHECK no banco, aliquota
+    // negativa faz o trigger SUBTRAIR do total — e `Checkout` so imprime a linha
+    // "Sales Tax" quando `salesTax > 0`, entao some dinheiro sem rastro na tela.
+    const src = f();
+    expect(src, "voltou o `parseFloat(...) || 0`, que deixa negativo passar")
+      .not.toMatch(/percentual: parseFloat\([^)]*\) \|\| 0/);
+    expect(src, "sumiu a faixa compartilhada, que tem teste que EXECUTA")
+      .toContain("percentual: percentualEmFaixa(e.target.value)");
+    expect(src).toContain('type="number" min="0" max="100" step="0.1"');
+  });
+
+  it("os deletes contam a cascata e avisam do caso que zera o imposto", () => {
+    const src = f();
+    // Classe: `tax_rates` e `tax_rules` caem em CASCADE, e sem classe padrao o
+    // gatilho grava `sales_tax := 0` em TODO pedido seguinte, calado.
+    expect(src, "o delete de tax_class parou de contar as taxas")
+      .toContain('from("tax_rates").select("id", { count: "exact", head: true }).eq("tax_class_id"');
+    expect(src, "o delete de tax_class parou de contar as regras")
+      .toContain('from("tax_rules").select("id", { count: "exact", head: true }).eq("tax_class_id"');
+    expect(src, "sumiu o aviso de que apagar a classe PADRAO zera o imposto de todo pedido")
+      .toContain("THIS IS THE DEFAULT TAX CLASS");
+    // Taxa: as regras que a usam caem junto, e o grupo daqueles clientes passa a
+    // nao ter regra — imposto zero, sem aviso.
+    expect(src, "o delete de tax_rate parou de contar as regras que caem junto")
+      .toContain('.eq("tax_rate_id", r.id)');
+    // Falha ao contar tem que RECUSAR: nao da para avisar do estrago que nao se
+    // conseguiu medir.
+    expect(src, "falha ao contar deixou de recusar o delete da classe")
+      .toMatch(/if \(tr\.error \|\| tru\.error\) \{[\s\S]{0,250}?return;/);
+    expect(src, "falha ao contar deixou de recusar o delete da taxa")
+      .toMatch(/if \(usos\.error\) \{[\s\S]{0,250}?return;/);
+  });
+});
+
+describe("Coupons e TabelasPreco: erro de leitura e FK traduzido", () => {
+  it("Coupons: o 23503 vira frase, e a gravacao confirma a linha", () => {
+    // O FK de `pedidos.coupon_id` e NO ACTION e esta CERTO: protege o historico.
+    // Nao ha cascata a avisar — so faltava traduzir, porque o toast despejava
+    // `pedidos_coupon_id_fkey` na cara do admin.
+    const src = semComentario("src/pages/admin/settings/Coupons.tsx");
+    expect(src, "o erro de FK voltou a ser despejado cru").toContain('error.code === "23503"');
+    expect(src, "a mensagem nao diz o que fazer").toContain("Set it to Inactive instead");
+    expect(src, "a gravacao voltou a nao confirmar a linha")
+      .toMatch(/from\("coupons"\)[\s\S]{0,200}?\.select\("id"\)/);
+    expect(src, "falha de leitura voltou a preencher a lista").toContain("setItems(error ? [] : (data ?? []))");
+  });
+
+  it("TabelasPreco: nome vazio recusado e duplicar travado por REF", () => {
+    const src = semComentario("src/pages/admin/TabelasPreco.tsx");
+    // `NOT NULL` nao barra string vazia: regua sem nome vira linha em branco nos
+    // seletores de seis telas, inclusive no de atribuir cliente.
+    expect(src, "voltou a aceitar regua sem nome")
+      .toMatch(/const nome = form\.nome\.trim\(\);[\s\S]{0,120}?if \(!nome\)[\s\S]{0,80}?return;/);
+    // E TEM QUE GRAVAR O APARADO. Checar `trim()` e gravar `form` deixava passar
+    // um nome so de espacos, que produz a mesma linha em branco.
+    expect(src, "a gravacao voltou a mandar o nome sem aparar").toContain("const payload = { ...form, nome };");
+    // O botao de duplicar e um icone MUDO e a operacao sao 4+ idas ao servidor:
+    // segundo clique cria uma regua a mais com ~2 mil linhas de preco. `useState`
+    // nao serve — a leitura cairia depois de um await.
+    expect(src, "sumiu a trava por ref do duplicar").toContain("if (duplicandoRef.current) return;");
+    expect(src, "a trava e marcada depois de algum await")
+      .toMatch(/if \(duplicandoRef\.current\) return;\s*\n\s*duplicandoRef\.current = true;/);
+    expect(src, "a trava nunca e liberada — o botao morre ate o F5")
+      .toMatch(/finally \{[\s\S]{0,200}?duplicandoRef\.current = false;/);
   });
 });

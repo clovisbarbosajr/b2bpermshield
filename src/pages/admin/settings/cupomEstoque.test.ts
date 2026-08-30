@@ -14,7 +14,7 @@ describe("Coupons: valor dentro da faixa que o servidor aceita", () => {
   // changed while you were checking out", mensagem que nao tem relacao com a
   // causa. E negativo e pior: a guarda so dispara quando o banco cobra MAIS,
   // entao o cliente ve "Discount -$20" com total inflado e paga o inflado.
-  const save = fatiaEntre(cup, "const codigo = form.codigo.trim()", "const { error } = editing", 60);
+  const save = fatiaEntre(cup, "const codigo = form.codigo.trim()", "const { data, error } = editing", 60);
 
   it("recusa valor negativo", () => {
     expect(save).toMatch(/valor < 0/);
