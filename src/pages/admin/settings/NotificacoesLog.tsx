@@ -125,7 +125,12 @@ export default function NotificacoesLog() {
           {sistema.length > 0 && (
             <div className="mt-8">
               <h2 className="text-sm font-semibold mb-1">Registros do sistema</h2>
-              <p className="text-xs text-muted-foreground mb-3">Travas SQL e diagnóstico do sync do B2BWave. Compartilham a mesma tabela, mas não são notificação: nunca houve canal nem destinatário. Últimos {sistema.length}.</p>
+              {/* A legenda dizia "não são notificação: nunca houve canal nem
+                  destinatário". Metade é falsa: recusa de CONFIGURAÇÃO do próprio
+                  dispatch (evento desligado, sem canal marcado, sem destinatário
+                  ativo) também é gravada com canal `-` e cai aqui. "O evento está
+                  desligado e ninguém foi avisado" não é ruído de sync. */}
+              <p className="text-xs text-muted-foreground mb-3">Travas SQL, diagnóstico do sync do B2BWave e recusas de configuração (evento desligado, sem canal marcado, sem destinatário ativo). Nenhuma chegou a ser tentativa de entrega — mas as de configuração explicam por que um aviso esperado não saiu. Últimos {sistema.length}.</p>
               <div className="rounded-lg border border-border overflow-x-auto">
                 <Table>{cabecalho}<TableBody>{linhas(sistema)}</TableBody></Table>
               </div>

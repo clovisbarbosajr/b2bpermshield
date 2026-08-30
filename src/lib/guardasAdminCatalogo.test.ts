@@ -316,14 +316,34 @@ describe("Produtos: a lista nao pode mentir sobre o que gravou nem apagar as cas
     const src = f();
     const del = src.match(/const handleDelete = async \(e: React\.MouseEvent[\s\S]{0,4000}?\n  \};/);
     expect(del, "nao achei o handleDelete").toBeTruthy();
+    // AS DOZE. A primeira versao desta lista tinha SEIS, enquanto o texto do
+    // confirm afirmava "Everything above was entered here and cannot be
+    // recovered" — um dialogo que jurava, item a item, que nada mais se perdia,
+    // com o DELETE levando fichas tecnicas, opcoes, relacionados, regras de
+    // status, o preco na regua e o historico de estoque. Cada nome aqui e um
+    // `ON DELETE CASCADE` conferido na migration.
     for (const t of [
-      "produto_imagens", "produto_descontos", "produto_precos_cliente",
-      "produto_acesso", "produto_cliente_acesso", "produto_variantes",
+      "produto_imagens", "produto_arquivos", "produto_descontos",
+      "produto_precos_cliente", "produto_acesso", "produto_cliente_acesso",
+      "produto_variantes", "produto_opcoes", "produto_status_regras",
+      "tabela_preco_itens", "estoque_log", "produtos_relacionados",
     ]) {
       // `contar("X")`, e nao so `"X"`: os mesmos seis nomes aparecem no TIPO do
       // parametro logo acima, entao procurar a string solta lia a anotacao e nao a
       // chamada. Medido: apagar `contar("produto_precos_cliente")` passava verde.
       expect(del![0], `o delete parou de contar ${t}`).toContain(`contar("${t}")`);
+    }
+    // O SEGUNDO FK de `produtos_relacionados`. Apagar X remove X das fichas de
+    // OUTROS produtos, estrago que a contagem por `produto_id` nao ve — e que
+    // nenhum dos doze asserts acima pegaria.
+    expect(del![0], "o delete parou de contar os links PARA este produto em outras fichas")
+      .toContain("contarInverso()");
+    // E OS TREZE TEM QUE ENTRAR NO TEXTO DO CONFIRM. Contar e nao mostrar era o
+    // defeito original com outra roupa: o admin so ve o que esta escrito ali.
+    for (const v of ["img", "arq", "desc", "precoCli", "regua", "acesso", "acessoCli",
+                     "variantes", "opcoes", "regras", "estoque", "rel", "relDe"]) {
+      expect(del![0], `a contagem de \`${v}\` e feita mas nao aparece no confirm`)
+        .toContain(`\${${v}.count ?? 0}`);
     }
     expect(del![0], "falha ao contar deixou de recusar o delete")
       .toMatch(/if \(erro\) \{[\s\S]{0,200}?return;/);
@@ -363,5 +383,39 @@ describe("Produtos: a lista nao pode mentir sobre o que gravou nem apagar as cas
       .toMatch(/disabled=\{pageOk <= 1\}/);
     expect(src, "as setas voltaram a usar a pagina nao limitada")
       .toMatch(/disabled=\{pageOk >= totalPages\}/);
+  });
+});
+
+describe("Produtos: os dois selects da mesma linha nao se atropelam", () => {
+  const f = () => semComentario("src/pages/admin/Produtos.tsx");
+
+  it("a linha trava enquanto a gravacao esta em voo", () => {
+    // O `admin_rev` do segundo select vem da closure do render em que ele nasceu.
+    // Admin marca "Sold Out" e, sem esperar, muda Active da MESMA linha: o segundo
+    // carrega o token de antes da primeira gravacao, `gravarComToken` filtra por
+    // ele, zero linhas — e a tela acusa "Someone else changed this product",
+    // mandando recarregar. Ninguem tinha mexido: era ele mesmo. E a segunda
+    // mudanca era descartada em silencio, com o Select controlado voltando so.
+    const src = f();
+    expect(src, "sumiu o estado de linha em voo").toContain("const [salvandoId, setSalvandoId]");
+    // TEM QUE SER MARCADO ANTES DO AWAIT. Depois nao trava nada — e exatamente o
+    // erro que `Estoque.tsx` ja tinha cometido e que a guarda irmã deste arquivo
+    // cobra la em cima.
+    // `fatiaEntre` e nao recorte a mao: marcador ausente devolve -1 e o `slice`
+    // pega quase o arquivo inteiro, e o assert de ordem passa a comparar posicoes
+    // de outra funcao. `fatiaSemGuarda.test.ts` reprova o recorte manual.
+    const grava = fatiaEntre(src, "const gravarNaLista = async", "};", 30);
+    const marca = grava.indexOf("setSalvandoId(productId)");
+    const espera = grava.indexOf("await gravarComToken");
+    expect(marca, "sumiu a marcacao da linha em voo").toBeGreaterThan(-1);
+    expect(espera, "nao achei o await da gravacao").toBeGreaterThan(-1);
+    expect(marca, "a linha e travada DEPOIS do await — nao trava nada")
+      .toBeLessThan(espera);
+    expect(grava, "a trava nunca e liberada — a linha fica morta ate o F5")
+      .toContain("setSalvandoId(null)");
+    // E OS DOIS SELECTS TEM QUE HONRAR A TRAVA. Cobrir so um deixa o par
+    // atropelando pelo outro lado.
+    const desabilita = src.match(/disabled=\{salvandoId === p\.id\}/g) ?? [];
+    expect(desabilita.length, "um dos dois selects da linha ignora a trava").toBe(2);
   });
 });

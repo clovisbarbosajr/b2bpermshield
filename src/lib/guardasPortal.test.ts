@@ -280,11 +280,23 @@ describe("Checkout: a tela nao pode afirmar um total que o cartao vai desmentir"
     expect(src, "os dois error voltaram a ser descartados na desestruturacao")
       .not.toMatch(/const \[\{ data: ship \}, \{ data: pay \}\]/);
     expect(src, "a falha de frete/pagamento deixou de virar erro de tela")
-      .toMatch(/if \(ship\.error \|\| pay\.error\) \{[\s\S]{0,200}?return;/);
+      .toContain("setLoadError(ship.error || pay.error ?");
+    // NAO PODE SER `return`. A primeira versao saia da funcao ali e pulava o bloco
+    // de imposto: `taxRate` ficava 0 e `taxLookupOk` ficava TRUE, entao a tela
+    // imprimia o total como definitivo com o imposto nunca consultado — o cenario
+    // que a guarda irmã existe para impedir, alcancado pelo caminho que esta criou.
+    expect(src, "a guarda de frete voltou a sair da funcao e pular o bloco de imposto")
+      .not.toMatch(/pay\.error\)\!\.message\);\s*\n\s*return;/);
     // E TEM QUE APARECER NO RENDER. Estado de erro que ninguem desenha e igual a
     // erro engolido — foi assim que `Brands.tsx` passou meses quebrada.
     expect(src, "o loadError do checkout nao e renderizado")
       .toMatch(/\{loadError && \(/);
+    // AVISAR NAO BASTA. Sem opcao de frete na tela `shippingId` fica "",
+    // `handleSubmit` nao exige frete, e o banco grava `shipping_costs := 0`: o
+    // cliente ignorava o card vermelho, clicava SEND ORDER, e o pedido saia com
+    // frete gratis — o defeito que esta guarda dizia ter fechado.
+    expect(src, "o botao de enviar voltou a aceitar pedido com a leitura de frete falhada")
+      .toContain("disabled={loading || !!loadError ||");
   });
 
   it("imposto por ler nao vira total definitivo nem cobranca no cartao", () => {
@@ -318,11 +330,31 @@ describe("Checkout: a tela nao pode afirmar um total que o cartao vai desmentir"
     // prenderia o cliente num laco, porque o carrinho nao reprecifica sozinho e
     // ele veria a mesma recusa para sempre.
     const src = fonte();
-    const bloco = src.match(/if \(recalcGrossTotal - grossTotal > 0\.03\) \{[\s\S]{0,900}?\n    \}/);
+    const bloco = src.match(/if \(recalcGrossTotal - grossTotal > 0\.03\) \{[\s\S]{0,1400}?\n    \}/);
     expect(bloco, "sumiu a comparacao com o total que a TELA mostrou").toBeTruthy();
+    // OS TRES ASSERTS ABAIXO NASCERAM DE MUTANTES QUE SOBREVIVERAM. Um
+    // `.toContain("updatePrice(")` solto nao ve argumento nenhum, e cada um dos
+    // tres produz o laco infinito que o comentario da correcao afirma ter evitado.
+    //
+    // 1. TODOS os itens, e nao so um: reprecificar `recalculated[0]` deixa o resto
+    //    do carrinho com preco velho e o segundo clique cai na mesma recusa.
     expect(bloco![0], "a tela nao e mais reprecificada — o cliente fica preso no laco")
-      .toContain("updatePrice(");
+      .toContain("for (const i of recalculated) updatePrice(");
+    // 2. A quantidade tem que ser a do proprio item. `updatePrice` DESCARTA a
+    //    atualizacao quando `quantidadeEsperada` nao bate — um valor impossivel ali
+    //    faz o reprice virar no-op silencioso, e o cliente nunca sai da recusa.
+    expect(bloco![0], "a quantidade passada ao updatePrice nao e a do item — o reprice vira no-op")
+      .toContain("i.preco, i.quantidade)");
+    // 3. O DESCONTO tambem. Sem isto o toast anuncia um total e o painel de Totais
+    //    imprime outro, e o cliente reconfirma contra um numero que nao sera cobrado.
+    expect(bloco![0], "o desconto nao e recalculado — o toast e o painel discordam")
+      .toContain("setDiscount(recalcDiscount)");
     expect(bloco![0], "a guarda nao interrompe mais o submit").toMatch(/return;/);
+    // 4. E TEM QUE DESTRAVAR O BOTAO. Sem `setLoading(false)`, `loading` fica true,
+    //    o botao fica `disabled` para sempre e o cliente literalmente nao consegue
+    //    reconfirmar — o pior dos tres sobreviventes.
+    expect(bloco![0], "o botao nunca destrava — o cliente nao consegue reconfirmar")
+      .toContain("setLoading(false)");
     // ANTES do INSERT do pedido. Depois nao adianta: o cupom ja foi consumido
     // atomicamente no BEFORE INSERT e o estoque ja foi reservado.
     const guarda = src.indexOf("if (recalcGrossTotal - grossTotal > 0.03)");
@@ -358,5 +390,15 @@ describe("CartContext: o estoque fossil do localStorage nao decide mais quantida
     expect(ramo, "voltou o clamp pelo estoque fossil da linha do carrinho")
       .not.toContain("estoque_disponivel");
     expect(ramo, "a soma da quantidade sumiu").toContain("i.quantidade + pedido");
+    // O RAMO DE PRIMEIRA INSERCAO TAMBEM. Deixar so um dos dois clampando fazia o
+    // MESMO botao dar dois resultados: produto com estoque 2 e o cliente digitando
+    // 50 entrava com 2 no carrinho vazio ("added to order") e ia a 52 no segundo
+    // clique, com o mesmo toast. E o clamp silencioso com toast de sucesso e o
+    // defeito que o outro ramo acabou de perder.
+    const semCom = fonte().replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    expect(semCom, "o clamp pelo estoque voltou no ramo de primeira insercao")
+      .not.toMatch(/const capped = .*Math\.min/);
+    expect(semCom, "o ramo de primeira insercao nao usa mais a quantidade pedida")
+      .toContain("const capped = pedido;");
   });
 });

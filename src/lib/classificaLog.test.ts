@@ -51,3 +51,66 @@ describe('classificaLog', () => {
     expect(classificaLog({ status: 'failed', channel: CANAL_SEM_ENVIO, error: null })).toBe('sistema');
   });
 });
+
+describe("falha de infraestrutura nao pode se disfarcar de recusa deliberada", () => {
+  // `podeEnviar` falha FECHADO: quando a RPC `envio_permitido` nao responde,
+  // NADA e enviado. O motivo vira `skips` e e gravado com o mesmo prefixo `skip:`
+  // das recusas de verdade — entao a tela pintava a janela inteira de cinza,
+  // dizendo em negrito no cabecalho que nao e avaria. E esses skips nao entram em
+  // `failures`, logo `alertAdmin` nunca dispara: a tela era o UNICO sinal.
+  //
+  // Linhas TRANSCRITAS do backend (`dispatch.ts:42` e `:48`), nao inventadas.
+  it("teto que nao pode ser checado e FALHA, nao recusa", () => {
+    expect(classificaLog({
+      status: "failed", channel: "sms",
+      error: "skip: checagem de teto falhou: canceling statement due to statement timeout",
+    })).toBe("falhou");
+    expect(classificaLog({
+      status: "failed", channel: "email",
+      error: "skip: checagem de teto indisponivel: fetch failed",
+    })).toBe("falhou");
+  });
+
+  it("o teto atingido de verdade continua sendo recusa", () => {
+    // Esta e a recusa deliberada, e tem que continuar cinza — senao a correcao
+    // acima desfaz o defeito que a funcao veio consertar.
+    expect(classificaLog({ status: "failed", channel: "sms", error: "skip: bloqueado pelo teto" }))
+      .toBe("recusado");
+    expect(classificaLog({ status: "failed", channel: "sms", error: "skip: teto por hora atingido" }))
+      .toBe("recusado");
+    expect(classificaLog({ status: "failed", channel: "sms", error: "skip: channel disabled" }))
+      .toBe("recusado");
+    expect(classificaLog({ status: "failed", channel: "sms", error: "skip: customer has no phone" }))
+      .toBe("recusado");
+  });
+
+  it("pane sem canal e FALHA, nao diagnostico de rotina", () => {
+    // `dispatch.ts:180` — pane total de notificacao. Ia para a tabela secundaria,
+    // teto de 50 linhas, legendada "nao sao notificacao". O comentario no proprio
+    // dispatch diz que a linha existe para NAO ficar invisivel na tela.
+    expect(classificaLog({
+      status: "failed", channel: "-",
+      error: "falha ao ler notification_channels: permission denied for table notification_channels",
+    })).toBe("falhou");
+    // `dispatch.ts:190`, ramo de ERRO do bloqueio por idade — barrou por nao
+    // conseguir decidir, e nao porque o pedido era velho.
+    expect(classificaLog({
+      status: "failed", channel: "-",
+      error: "BLOQUEADO — nao foi possivel checar o pedido 1042: statement timeout",
+    })).toBe("falhou");
+    expect(classificaLog({
+      status: "failed", channel: "-",
+      error: "BLOQUEADO — numero 1042 corresponde a 2 pedidos — ambiguo",
+    })).toBe("falhou");
+  });
+
+  it("a barreira de idade funcionando continua sendo diagnostico", () => {
+    // Este e o caso legitimo: o pedido E velho, a barreira barrou de proposito.
+    // E a trava que sozinha impede o incidente dos 1.508 SMS de se repetir —
+    // pinta-la de vermelho todo dia faria o admin parar de olhar.
+    expect(classificaLog({
+      status: "failed", channel: "-",
+      error: "BLOQUEADO — pedido de 2026-03-11 e anterior ao corte retroativo",
+    })).toBe("sistema");
+  });
+});

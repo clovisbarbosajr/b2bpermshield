@@ -82,10 +82,23 @@ describe("`fetchAllRows`: quem pagina precisa trazer `id`", () => {
       .toContain('.select("id, created_at, total, subtotal, status")');
     expect(semComentario("src/pages/admin/Produtos.tsx"))
       .toContain('.select("id, produto_id, privacy_group_id, grupo_nome")');
-    // Esta e a pior das tres: ordenava por `categoria_id`, coluna NAO unica —
-    // sem `id`, nem ordem estavel havia.
-    expect(semComentario("src/pages/admin/producao/ProducaoEntrada.tsx"))
+    // Esta e a pior das tres: ordena por `categoria_id`, coluna NAO unica.
+    //
+    // E TRAZER `id` NAO CONSERTA A ORDEM — a afirmacao anterior aqui era falsa.
+    // Acrescentar coluna ao `select` nao muda o `ORDER BY` do servidor. Com
+    // empate no `ORDER BY` sob LIMIT/OFFSET o Postgres pode servir a mesma
+    // posicao com linha diferente a cada pagina, e isso PULA linha — que e
+    // justamente o que o dedupe do `fetchAllRows` nao resolve nem finge resolver
+    // (ele so remove repetida). O que conserta e o desempate no `order`.
+    //
+    // Era o unico dos ~55 chamadores de `fetchAllRows` sem coluna unica no
+    // desempate. Linha perdida encolhe `allowedLocs` e esconde produto do
+    // operador de producao; se cair a zero, `restringeLocais` ABRE a tela inteira.
+    const prod = semComentario("src/pages/admin/producao/ProducaoEntrada.tsx");
+    expect(prod, "o select de user_locations parou de trazer `id`")
       .toContain('.select("id, categoria_id")');
+    expect(prod, "sumiu o desempate por coluna unica — a paginacao volta a poder PULAR linha")
+      .toContain('.order("categoria_id", { ascending: true }).order("id", { ascending: true })');
   });
 });
 

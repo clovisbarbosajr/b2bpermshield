@@ -15,7 +15,7 @@ import { ORDER_STATUSES, statusLabel, statusBadge as statusBadgeClass } from "@/
 import { formatOpcao } from "@/lib/variants";
 
 import { getProductPrice } from "@/lib/pricing";
-import { paginasVisiveis } from "@/lib/paginacao";
+import { paginasVisiveis, paginaValida } from "@/lib/paginacao";
 const STATUS_OPTIONS = [{ value: "", label: "Please select..." }, ...ORDER_STATUSES];
 
 const statusBadge = (status: string) => (
@@ -373,7 +373,13 @@ const Pedidos = () => {
   // o mesmo defeito. Com `totalPages === 8` a pagina 8 nao ganhava botao nenhum
   // (o `if` exigia `> 8`); com 20, as paginas 8 a 18 tambem nao. So dava para
   // chegar clicando `>` varias vezes — e sem saber onde se esta indo parar.
-  const pageNumbers = () => paginasVisiveis(page, totalPages);
+  // `paginaValida`: apagar/desativar a unica linha da ultima pagina reduz
+  // `totalPages`, a barra inteira desmonta (esta sob `totalPages > 1`) e a fatia
+  // fica vazia — beco sem saida, so F5. Ver `paginacao.ts` e o teste que EXECUTA.
+  // Aqui a paginacao e do SERVIDOR (`total` vem de count): com `page` alem do
+  // fim o servidor devolve vazio, e a barra some pelo mesmo `totalPages > 1`.
+  const pageOk = paginaValida(page, totalPages);
+  const pageNumbers = () => paginasVisiveis(pageOk, totalPages);
 
   return (
     <PortalLayout>
@@ -422,7 +428,7 @@ const Pedidos = () => {
       {/* Pagination top */}
       {totalPages > 1 && (
         <div className="flex items-center gap-1 mb-3">
-          <button onClick={() => setPage(p => Math.max(1, p - 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">‹</button>
+          <button onClick={() => setPage(Math.max(1, pageOk - 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">‹</button>
           {/* `key={n}`, e nao `key={i}`. Com a janela FIXA de antes, indice e numero
               eram a mesma coisa e o indice servia. Com a janela deslizante o
               indice 5 e "6" antes do clique e "7" depois: por chave de indice o
@@ -438,11 +444,11 @@ const Pedidos = () => {
               <button
                 key={n}
                 onClick={() => setPage(Number(n))}
-                className={`px-2.5 py-1 text-sm rounded ${page === n ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                className={`px-2.5 py-1 text-sm rounded ${pageOk === n ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
               >{n}</button>
             )
           )}
-          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">›</button>
+          <button onClick={() => setPage(Math.min(totalPages, pageOk + 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">›</button>
         </div>
       )}
 
@@ -506,7 +512,7 @@ const Pedidos = () => {
       {/* Pagination bottom */}
       {totalPages > 1 && (
         <div className="flex items-center gap-1 mt-3">
-          <button onClick={() => setPage(p => Math.max(1, p - 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">‹</button>
+          <button onClick={() => setPage(Math.max(1, pageOk - 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">‹</button>
           {/* `key={n}`, e nao `key={i}`. Com a janela FIXA de antes, indice e numero
               eram a mesma coisa e o indice servia. Com a janela deslizante o
               indice 5 e "6" antes do clique e "7" depois: por chave de indice o
@@ -522,11 +528,11 @@ const Pedidos = () => {
               <button
                 key={n}
                 onClick={() => setPage(Number(n))}
-                className={`px-2.5 py-1 text-sm rounded ${page === n ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                className={`px-2.5 py-1 text-sm rounded ${pageOk === n ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
               >{n}</button>
             )
           )}
-          <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">›</button>
+          <button onClick={() => setPage(Math.min(totalPages, pageOk + 1))} className="px-2 py-1 text-sm rounded hover:bg-muted">›</button>
         </div>
       )}
     </PortalLayout>

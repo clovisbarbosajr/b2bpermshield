@@ -60,6 +60,18 @@ const AdminProdutos = () => {
   // `produtos.sku` deixou de ser UNIQUE (decisao do clone, `20260708140000`),
   // entao recadastrar duplica sem nenhuma barreira.
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Linha com gravacao em voo. Os DOIS selects da mesma linha mexem na mesma
+  // ficha, e o `admin_rev` do segundo vem da closure do render em que ele nasceu.
+  // O admin marcava "Sold Out" e, sem esperar, mudava Active da mesma linha
+  // ("esgotou, desativa"): o segundo carregava o token de ANTES da primeira
+  // gravacao, `gravarComToken` filtrava por ele, zero linhas — e a tela acusava
+  // "Someone else changed this product", mandando recarregar. Ninguem tinha
+  // mexido: era ele mesmo. E a segunda mudanca era descartada em silencio.
+  //
+  // Travar os selects da linha e mais honesto que enfileirar: o admin ve que a
+  // primeira mudanca ainda esta indo. `setState` antes do primeiro `await` ja
+  // esta comitado quando o proximo evento discreto e despachado.
+  const [salvandoId, setSalvandoId] = useState<string | null>(null);
   // Price lists for columns
   const [priceLists, setPriceLists] = useState<any[]>([]);
   // Map produto_id -> Set de privacy_group_id (para o filtro de privacy group)
@@ -181,7 +193,9 @@ const AdminProdutos = () => {
   const gravarNaLista = async (productId: string, patch: Partial<Produto>) => {
     const produto = produtos.find(p => p.id === productId);
     if (!produto) return;
+    setSalvandoId(productId);
     const r = await gravarComToken(supabase, "produtos", productId, patch, produto.admin_rev);
+    setSalvandoId(null);
     if (r.tipo === "conflito") {
       toast.error("Someone else changed this product while this page was open. Nothing was saved — reload to see the current values.");
       return;
@@ -216,18 +230,43 @@ const AdminProdutos = () => {
     //
     // Se a contagem falhar, RECUSAR: nao da para avisar do estrago que nao se
     // conseguiu medir. Mesmo molde do `PrivacyGroups.handleDelete`.
+    //
+    // A LISTA TEM QUE SER COMPLETA. A primeira versao contava seis e o texto do
+    // confirm afirmava "Everything above was entered here and cannot be
+    // recovered" — um dialogo que jurava, item a item, que nada mais se perdia,
+    // enquanto o DELETE levava fichas tecnicas, opcoes, relacionados, regras de
+    // status, o preco na regua e o historico de estoque. Cada linha abaixo e um
+    // `ON DELETE CASCADE` real, conferido na migration.
+    //
     // Nome de tabela LITERAL, e nao `t: string`: o cliente do Supabase e tipado
     // pelo schema, entao `string` derruba o overload e o `tsc` acusa. Digitar
     // errado aqui vira erro de compilacao, que e o ponto.
-    const contar = (t: "produto_imagens" | "produto_descontos" | "produto_precos_cliente"
-      | "produto_acesso" | "produto_cliente_acesso" | "produto_variantes") =>
+    type Filha =
+      | "produto_imagens" | "produto_arquivos" | "produto_descontos"
+      | "produto_precos_cliente" | "produto_acesso" | "produto_cliente_acesso"
+      | "produto_variantes" | "produto_opcoes" | "produto_status_regras"
+      | "tabela_preco_itens" | "estoque_log" | "produtos_relacionados";
+    const contar = (t: Filha) =>
       supabase.from(t).select("produto_id", { count: "exact", head: true }).eq("produto_id", productId);
-    const [img, desc, precoCli, acesso, acessoCli, variantes] = await Promise.all([
-      contar("produto_imagens"), contar("produto_descontos"),
-      contar("produto_precos_cliente"), contar("produto_acesso"),
-      contar("produto_cliente_acesso"), contar("produto_variantes"),
-    ]);
-    const erro = img.error || desc.error || precoCli.error || acesso.error || acessoCli.error || variantes.error;
+    // `produtos_relacionados` tem DOIS FKs em cascata: apagar X remove X das fichas
+    // de OUTROS produtos tambem, estrago que a contagem por `produto_id` nao
+    // enxerga. Fica em chamada propria porque o cliente tipado intersecta as
+    // colunas permitidas quando o nome da tabela e uma uniao — `produto_relacionado_id`
+    // nao existe nas outras onze e o `tsc` reprova, corretamente.
+    const contarInverso = () =>
+      supabase.from("produtos_relacionados")
+        .select("produto_relacionado_id", { count: "exact", head: true })
+        .eq("produto_relacionado_id", productId);
+    const [img, arq, desc, precoCli, acesso, acessoCli, variantes, opcoes, regras, regua, estoque, rel, relDe] =
+      await Promise.all([
+        contar("produto_imagens"), contar("produto_arquivos"), contar("produto_descontos"),
+        contar("produto_precos_cliente"), contar("produto_acesso"), contar("produto_cliente_acesso"),
+        contar("produto_variantes"), contar("produto_opcoes"), contar("produto_status_regras"),
+        contar("tabela_preco_itens"), contar("estoque_log"), contar("produtos_relacionados"),
+        contarInverso(),
+      ]);
+    const contagens = [img, arq, desc, precoCli, acesso, acessoCli, variantes, opcoes, regras, regua, estoque, rel, relDe];
+    const erro = contagens.find(c => c.error)?.error;
     if (erro) {
       toast.error("Could not check what depends on this product — nothing was deleted: " + erro.message);
       return;
@@ -237,11 +276,18 @@ const AdminProdutos = () => {
       `Delete "${produto?.nome ?? productId}"?\n\n` +
       `This permanently deletes, together with the product:\n` +
       `• ${img.count ?? 0} image(s)\n` +
+      `• ${arq.count ?? 0} file(s) / spec sheet(s)\n` +
       `• ${desc.count ?? 0} quantity discount(s)\n` +
       `• ${precoCli.count ?? 0} customer-specific price(s)\n` +
+      `• ${regua.count ?? 0} price list entry(ies)\n` +
       `• ${acesso.count ?? 0} privacy group permission(s)\n` +
       `• ${acessoCli.count ?? 0} customer permission(s)\n` +
-      `• ${variantes.count ?? 0} variant(s), with their prices\n\n` +
+      `• ${variantes.count ?? 0} variant(s), with their prices\n` +
+      `• ${opcoes.count ?? 0} product option(s)\n` +
+      `• ${regras.count ?? 0} status rule(s)\n` +
+      `• ${estoque.count ?? 0} stock history entry(ies)\n` +
+      `• ${rel.count ?? 0} related-product link(s) on this product\n` +
+      `• ${relDe.count ?? 0} link(s) to this product on OTHER products' pages\n\n` +
       `Only the product itself comes back from the B2BWave sync. Everything above ` +
       `was entered here and cannot be recovered. This cannot be undone.`
     )) return;
@@ -451,6 +497,7 @@ const AdminProdutos = () => {
                     <Select
                       value={p.status_produto || "disponivel"}
                       onValueChange={v => handleStatusChange(p.id, v)}
+                      disabled={salvandoId === p.id}
                     >
                       <SelectTrigger className="h-7 text-xs w-32"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -462,6 +509,7 @@ const AdminProdutos = () => {
                     <Select
                       value={p.ativo ? "Active" : "Inactive"}
                       onValueChange={v => handleActiveChange(p.id, v)}
+                      disabled={salvandoId === p.id}
                     >
                       <SelectTrigger className="h-7 text-xs w-24"><SelectValue /></SelectTrigger>
                       <SelectContent>

@@ -50,8 +50,16 @@ describe("NotificacoesLog: falha de leitura nao vira 'nada foi enviado'", () => 
     // A comparacao tem que vir DEPOIS do await e ABORTAR.
     const guarda = fonte.match(/if \(minha !== cargaSeq\.current\) return;/);
     expect(guarda, "a guarda de ordem nao aborta mais a carga velha").toBeTruthy();
-    expect(fonte.indexOf("await Promise.all"), "a guarda de ordem esta antes do await — nao guarda nada")
-      .toBeLessThan(fonte.indexOf("if (minha !== cargaSeq.current) return;"));
+    // O ASSERT DE ORDEM SO VALE COM OS DOIS MARCADORES PRESENTES. Se alguem
+    // trocar o `Promise.all` por dois `await` sequenciais, `indexOf` devolve -1,
+    // `-1 < N` passa, e o assert para de verificar o que a mensagem diz — a classe
+    // de guarda falsa que este projeto ja teve varias vezes.
+    const doAwait = fonte.indexOf("await Promise.all");
+    const daGuarda = fonte.indexOf("if (minha !== cargaSeq.current) return;");
+    expect(doAwait, "nao achei o await das duas leituras").toBeGreaterThan(-1);
+    expect(daGuarda, "nao achei a guarda de ordem").toBeGreaterThan(-1);
+    expect(doAwait, "a guarda de ordem esta antes do await — nao guarda nada")
+      .toBeLessThan(daGuarda);
   });
 
   it("o ramo de erro vem antes do estado vazio", () => {

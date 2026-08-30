@@ -98,13 +98,25 @@ describe("as quatro telas usam a chave por numero", () => {
   ];
   it.each(TELAS)("%s", (tela) => {
     const fonte = readFileSync(tela, "utf-8");
-    // `page` OU a versao limitada. `Produtos.tsx` passou a limitar no render
-    // (`pageOk = Math.min(page, Math.max(1, totalPages))`) porque apagar a unica
-    // linha da ultima pagina desmontava a barra inteira — `totalPages > 1` virava
-    // falso — e a tela ficava em "No products found" sem botao de voltar. Exigir
-    // literalmente `page` aqui reprovava a correcao.
-    expect(fonte, `${tela} nao usa paginasVisiveis`)
-      .toMatch(/paginasVisiveis\((page|pageOk), totalPages\)/);
+    // AS QUATRO TELAS LIMITAM. A versao anterior desta guarda aceitava `page` OU
+    // `pageOk`, e com isso deixava passar em silencio as tres telas que ainda nao
+    // tinham sido corrigidas — exatamente o oposto do que uma rede de seguranca
+    // faz. `paginaValida` mora em `paginacao.ts` e tem teste que EXECUTA; aqui so
+    // se cobra que toda tela paginada a use.
+    expect(fonte, `${tela} nao limita a pagina — o beco sem saida da ultima pagina volta`)
+      .toContain("paginaValida(page, totalPages)");
+    expect(fonte, `${tela} nao usa paginasVisiveis com a pagina limitada`)
+      .toContain("paginasVisiveis(pageOk, totalPages)");
+    // O REALCE E AS SETAS TAMBEM. Medido: com so o `disabled` coberto, tres
+    // mutantes passavam verdes — e o do `onClick` e beco de verdade. Com 51
+    // registros e o admin na pagina 3, apagar a unica linha deixa `pageOk = 2` e
+    // `page = 3`: a seta "anterior" fica habilitada (`pageOk <= 1` e falso), o
+    // clique faz `setPage(3 - 1) = 2`, que ja era a pagina exibida — botao morto.
+    expect(fonte, `${tela}: o realce do botao atual voltou a comparar com a pagina nao limitada`)
+      .not.toMatch(/\bpage === n\b/);
+    // Nenhuma seta pode voltar a derivar a pagina nova de `page`.
+    expect(fonte, `${tela}: uma seta voltou a calcular a pagina a partir de \`page\``)
+      .not.toMatch(/setPage\(\(?p\)? => /);
     // Uma fatia por lista de paginacao (o portal tem duas, topo e rodape). Cortar
     // pelo proprio `.map(` evita o recorte a mao que ja ficou verde e parou de
     // proteger tres vezes neste projeto — ver `src/test/fatia.ts`. O portal chama

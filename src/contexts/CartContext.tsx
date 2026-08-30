@@ -232,18 +232,27 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
           // com 2, e o toast de `ProdutoDetalhe.tsx:289` dizia "added to order"
           // assim mesmo.
           //
-          // Cai neste ramo: ProdutoDetalhe, "move from saved for later", os dois
-          // re-order (portal/Pedidos e PedidoDetalhe) e o Catalogo para produto
-          // COM variante. Quem sabe o estoque de verdade e o `checkCartStock`,
+          // Cai neste ramo: ProdutoDetalhe, "move from saved for later" e os dois
+          // re-order (portal/Pedidos e PedidoDetalhe). O CATALOGO NAO: produto com
+          // variante e desviado para a ficha antes do `addItem`
+          // (`Catalogo.tsx:543`), e o ramo de linha existente de la exige
+          // `!variantProductIds.has(p.id)` e usa `updateQuantity`.
+          // Quem sabe o estoque de verdade e o `checkCartStock`,
           // que rele produto e variante a cada 10s e trava o botao NEXT.
           return { ...i, quantidade: i.quantidade + pedido };
         });
       }
-      // Primeira inserção também respeita estoque/mínimo (antes entrava cru, podia
-      // passar do estoque). Só limita pelo disponível quando ele é um número > 0
-      // (não rebaixa backorder/pré-venda, que podem ter disponível 0).
-      const avail = item.estoque_disponivel;
-      const capped = (typeof avail === "number" && avail > 0) ? Math.min(pedido, avail) : pedido;
+      // A PRIMEIRA INSERCAO TAMBEM NAO CLAMPA MAIS. Deixar so este ramo clampando
+      // fazia o MESMO botao dar dois resultados: produto com estoque 2, cliente
+      // digita 50 na ficha — carrinho vazio entra com 2 ("added to order"), clicar
+      // de novo soma para 52 (mesmo toast). E o clamp silencioso com toast de
+      // sucesso e justamente o defeito que o ramo de cima acabou de perder.
+      //
+      // `ProdutoDetalhe` nao clampa no chamador e toasta sucesso incondicional; o
+      // `Catalogo` clampa e avisa ("only N available"). Quem decide de verdade e o
+      // `checkCartStock`, que rele produto e variante frescos, trava o botao NEXT,
+      // e e refeito no submit — com o gatilho do banco como ultimo portao.
+      const capped = pedido;
       const qtd = Math.max(Math.max(1, Math.floor(num(item.quantidade_minima, 1))), capped);
       return [...prev, { ...item, quantidade: qtd, preco: Math.max(0, num(item.preco, 0)) }];
     });

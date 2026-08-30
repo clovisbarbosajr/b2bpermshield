@@ -46,7 +46,14 @@ const ProducaoEntrada = () => {
         const [p, c, ul] = await Promise.all([
           fetchAllRows<Produto>((f, t) => supabase.from("produtos").select("id, nome, sku, categoria_id").eq("ativo", true).order("id", { ascending: true }).range(f, t)),
           fetchAllRows<Categoria>((f, t) => supabase.from("categorias").select("id, nome, parent_id").eq("ativo", true).order("id", { ascending: true }).range(f, t)),
-          fetchAllRows<any>((f, t) => supabase.from("user_locations").select("id, categoria_id").eq("user_id", user?.id ?? "").order("categoria_id", { ascending: true }).range(f, t)),
+          fetchAllRows<any>((f, t) => supabase// `.order("id")` DEPOIS de `categoria_id`: sem desempate por coluna unica, o
+          // Postgres pode servir a mesma posicao com linha diferente a cada pagina
+          // sob LIMIT/OFFSET — isso PULA linha, e pular e o que o dedupe do
+          // `fetchAllRows` nao resolve nem finge resolver. Acrescentar `id` ao
+          // `select` nao muda a ordenacao do servidor; e o `order` que faltava.
+          // Linha perdida aqui encolhe `allowedLocs` e esconde produto do operador;
+          // se cair a zero, `restringeLocais` ABRE a tela inteira.
+          .from("user_locations").select("id, categoria_id").eq("user_id", user?.id ?? "").order("categoria_id", { ascending: true }).order("id", { ascending: true }).range(f, t)),
         ]);
         setProdutos([...p].sort((x, y) => x.nome.localeCompare(y.nome)));
         setCategorias(c);

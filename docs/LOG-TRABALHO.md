@@ -4531,3 +4531,15 @@ agente escrevendo, nao commito nem empurro o que nao e meu.
 
 Verificacao final desta leva: `npm test` = **630/630 em 60 arquivos**, `tsc` limpo,
 194 migrations / 197 .sql / 16 edge OK.
+
+`AGUARDANDO` — **12:54-12:56, run agendado da fila: outra sessao esta ativa, nao
+retomei nada.** Prova, nao suposicao: `Checkout.tsx` com mtime no MESMO segundo da
+minha checagem (12:54:34), tres arquivos (`CartContext`, `guardasPortal.test`,
+`Checkout`) modificados durante um minuto inteiro de amostragem de 10 em 10s,
+`dist/` reconstruido as 12:55:17, arvore ficando limpa as 12:55:40 e o commit
+`848162f` (`fix(checkout)`) aparecendo em HEAD no meio da janela.
+
+Nao commitei, nao empurrei e nao abri nenhum item da fila — pelo mesmo motivo do
+`BLOQUEADO` anterior, e agora com o precedente concreto: em `d10367d` um `add -A`
+alheio gravou em HEAD um mutante que eu tinha plantado. Fila intacta para a
+proxima janela em que o repositorio estiver parado.

@@ -229,11 +229,14 @@ const Checkout = () => {
       // Mesma classe de erro que este arquivo ja corrigiu em `applyCoupon`, na
       // validacao de estoque do submit e no `resolveEnderecoEntregaId`; frete e
       // pagamento tinham ficado de fora.
-      if (ship.error || pay.error) {
-        setLoadError((ship.error ?? pay.error)!.message);
-        return;
-      }
-      setLoadError(null);
+      //
+      // NAO E `return`. A primeira versao desta guarda saia da funcao aqui, e com
+      // isso pulava o bloco de imposto logo abaixo: `taxRate` ficava 0 e
+      // `taxLookupOk` ficava TRUE, entao a tela imprimia o total como numero
+      // definitivo com o imposto nunca consultado — exatamente o cenario que a
+      // outra correcao desta leva existe para impedir, alcancado pelo caminho que
+      // esta correcao criou. Quem impede o pedido de sair e o botao, la embaixo.
+      setLoadError(ship.error || pay.error ? (ship.error ?? pay.error)!.message : null);
       setShippingOptions((ship.data ?? []).filter((s: any) => s.show_to_customers !== false && canSee(s, allowedShip)));
       setPaymentOptions((pay.data ?? []).filter((p: any) => canSee(p, allowedPay)));
 
@@ -706,9 +709,11 @@ const Checkout = () => {
     // O BOTAO PROMETIA UM VALOR E O CARTAO COBRAVA OUTRO.
     //
     // `PAY $X` usa `grossTotal`, derivado de `total` — a soma dos precos GRAVADOS
-    // no carrinho quando cada item entrou. Nada nunca atualiza esses precos: o
-    // `Carrinho` exibe `item.preco` do localStorage, e so o "move to cart" do
-    // saved-for-later rele. A cobranca usa `finalTotal`, lido do banco depois dos
+    // no carrinho quando cada item entrou. Eles so sao atualizados quando o
+    // cliente MEXE no item: `Catalogo` reprecifica em segundo plano ao adicionar e
+    // ao mudar a quantidade, e o "move to cart" do saved-for-later rele. Carrinho
+    // parado nao reprecifica nunca — o `Carrinho` exibe `item.preco` do
+    // localStorage. A cobranca usa `finalTotal`, lido do banco depois dos
     // gatilhos. E a guarda de preco la embaixo compara `finalTotal` com
     // `recalcGrossTotal` — NUNCA com o que a tela mostrou. Ela protege contra
     // "banco discorda do recalculo" e e cega para "recalculo discorda do que o
@@ -727,6 +732,14 @@ const Checkout = () => {
     // por que interromper o cliente por isso.
     if (recalcGrossTotal - grossTotal > 0.03) {
       for (const i of recalculated) updatePrice(cartKey(i as any), i.preco, i.quantidade);
+      // O DESCONTO TAMBEM. `discount` e gravado uma vez no `applyCoupon`, sobre o
+      // subtotal daquele instante, e nenhum efeito o recomputa quando `total`
+      // muda. Sem esta linha o toast anunciava um numero e o painel de Totais logo
+      // abaixo imprimia outro: subtotal 500->600 com cupom de 10% dava
+      // `recalcDiscount` 60 no toast e `discount` 50 na tela. O cliente
+      // reconfirmaria contra um valor que nao e o que sera cobrado — que e
+      // exatamente a premissa desta guarda.
+      setDiscount(recalcDiscount);
       toast.error(
         `The total changed from $${grossTotal.toFixed(2)} to $${recalcGrossTotal.toFixed(2)} — ` +
         `prices were updated while you were checking out. Nothing was charged and no order was ` +
@@ -1339,18 +1352,25 @@ const Checkout = () => {
         )}
         <div className="flex items-center justify-end gap-3">
           <Button variant="ghost" onClick={() => navigate("/portal/carrinho")}>BACK</Button>
-          {/* CARTAO BLOQUEADO com o imposto por ler. `taxLookupOk` era usado num
+          {/* `!!loadError` BLOQUEIA OS DOIS CAMINHOS. So mostrar o card de aviso
+              nao bastava: sem opcao de frete na tela, `shippingId` fica "",
+              `handleSubmit` nao exige frete, e `fn_pedido_total_appside` grava
+              `shipping_costs := 0`. O cliente ignorava o card vermelho, clicava
+              SEND ORDER e o pedido entrava com frete gratis — o defeito que a
+              guarda dizia ter fechado.
+
+              CARTAO BLOQUEADO com o imposto por ler. `taxLookupOk` era usado num
               lugar so — para DESLIGAR a guarda de preco (linha ~836) —, entao o
               unico efeito de nao saber o imposto era remover a protecao contra
               cobrar a mais. O botao continuava prometendo `PAY $X` e cobrando
               `finalTotal`, que ja vem do banco COM o imposto. Pedido sem cartao
               continua liberado: ali o valor e confirmado antes de cobrar. */}
-          <Button onClick={handleSubmit} disabled={loading || (payByCard && (!stripeReady || !taxLookupOk)) || outOfStock.length > 0}>
+          <Button onClick={handleSubmit} disabled={loading || !!loadError || (payByCard && (!stripeReady || !taxLookupOk)) || outOfStock.length > 0}>
             {loading
               ? payByCard ? "Processing payment..." : "Sending..."
               : payByCard
               ? taxLookupOk ? `PAY $${grossTotal.toFixed(2)}` : "TOTAL UNAVAILABLE"
-              : "SEND ORDER"}
+              : loadError ? "RELOAD REQUIRED" : "SEND ORDER"}
           </Button>
         </div>
       </Card>
