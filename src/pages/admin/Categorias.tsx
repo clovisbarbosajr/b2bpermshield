@@ -75,6 +75,9 @@ const CustomerPicker = ({ label, options, selected, onChange }: {
 const AdminCategorias = () => {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
+  // Leitura que falhou NAO e "nao existe categoria": a tela nao pode afirmar
+  // isso, e a lista vazia ainda desarma a guarda de ciclo (`parentesProibidos`).
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Categoria | null>(null);
   const [form, setForm] = useState({ nome: "", descricao: "", parent_id: "", ativo: true, ordem: 0, desconto: 0 });
@@ -100,7 +103,12 @@ const AdminCategorias = () => {
     // Sem isto a tela dizia "No categories yet" quando a LEITURA falhou, e a lista
     // vazia ainda desarmava a guarda de ciclo (`parentesProibidos`). Mantem o que
     // ja estava na tela e avisa.
-    if (error) { toast.error("Could not load categories: " + error.message); return; }
+    if (error) {
+      setLoadError(error.message);
+      toast.error("Could not load categories: " + error.message);
+      return;
+    }
+    setLoadError(null);
     setCategorias((data as Categoria[]) ?? []);
   };
 
@@ -238,8 +246,27 @@ const AdminCategorias = () => {
     };
     let categoriaId = editing?.id;
     if (editing) {
-      const { error } = await supabase.from("categorias").update(payload as any).eq("id", editing.id);
+      // `.select("id")` DE CONFIRMACAO, e o `saveAccess` so roda se a linha foi
+      // mesmo escrita.
+      //
+      // A RLS de `categorias` e admin-only (20260317043654:177), mas a de
+      // `categoria_acesso`/`categoria_cliente_acesso` aceita admin OU MANAGER
+      // (20260622191614:48) — e esta tela e `perm="view_products"`, que manager e
+      // warehouse tem. Sem confirmar, o UPDATE de manager voltava 204 com
+      // `error: null` (nada gravado) e o `saveAccess` logo abaixo, que ela PODE
+      // rodar, apagava todas as concessoes de grupo e de cliente. Com o
+      // formulario dizendo "nao e privada" ele nao reinseria nada: categoria que
+      // continuou PRIVADA no banco, agora com ZERO concessoes — some do catalogo
+      // de todo mundo, e a lista apagada nao existe em lugar nenhum para desfazer.
+      // A tela dizia "Category updated".
+      const { data: gravado, error } = await supabase.from("categorias")
+        .update(payload as any).eq("id", editing.id).select("id").maybeSingle();
       if (error) { toast.error(error.message); setSaving(false); return; }
+      if (!gravado) {
+        toast.error("Nothing was saved — the category no longer exists, or you do not have permission to edit categories. The access settings were left untouched.");
+        setSaving(false);
+        return;
+      }
     } else {
       const { data, error } = await supabase.from("categorias").insert(payload as any).select("id").single();
       if (error) { toast.error(error.message); setSaving(false); return; }
@@ -257,9 +284,49 @@ const AdminCategorias = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this category?")) return;
-    const { error } = await supabase.from("categorias").delete().eq("id", id);
+    // CONTA A CASCATA ANTES DE PERGUNTAR — molde de `PrivacyGroups.handleDelete`,
+    // que ja faz isso com teste (`acessoFalhaFechada.test.ts:69`).
+    //
+    // "Delete this category?" escondia tres efeitos, dois deles de acesso:
+    //   `produtos.categoria_id ON DELETE SET NULL` (20260317043654:102) — e
+    //     `cliente_pode_ver_produto` PULA a checagem quando a categoria e nula
+    //     (20260825280000:185). Apagar categoria PRIVADA torna os produtos dela
+    //     visiveis, com preco, para toda a base de clientes.
+    //   `categorias.parent_id ON DELETE SET NULL` (20260318182853:3) — as filhas
+    //     viram raiz. Fecha o acesso em vez de abrir, mas muda o escopo calado.
+    //   `user_locations.categoria_id ON DELETE CASCADE` (20260619220000:10) — e
+    //     `user_can_see_produto` devolve true quando NAO EXISTE amarracao
+    //     (20260619220000:27). Apagar a categoria de uma localizacao faz o
+    //     usuario amarrado so a ela passar a ver a producao de TODAS.
+    //
+    // Falha ao contar RECUSA o delete: nao da para avisar sobre o que nao se leu.
+    const [prod, filhas, locais] = await Promise.all([
+      supabase.from("produtos").select("id", { count: "exact", head: true }).eq("categoria_id", id),
+      supabase.from("categorias").select("id", { count: "exact", head: true }).eq("parent_id", id),
+      supabase.from("user_locations").select("id", { count: "exact", head: true }).eq("categoria_id", id),
+    ]);
+    if (prod.error || filhas.error || locais.error) {
+      toast.error("Could not check what this category is used by — nothing was deleted. Try again.");
+      return;
+    }
+    const partes: string[] = [];
+    if (prod.count) partes.push(`${prod.count} product(s) will lose their category — private ones become visible to every customer`);
+    if (filhas.count) partes.push(`${filhas.count} subcategory(ies) will become top-level`);
+    if (locais.count) partes.push(`${locais.count} user location assignment(s) will be deleted — those users will see production from EVERY location`);
+    const NL = String.fromCharCode(10);
+    const aviso = partes.length
+      ? ["Delete this category?", "", ...partes.map((p) => "• " + p), "", "This cannot be undone."].join(NL)
+      : "Delete this category?";
+    if (!confirm(aviso)) return;
+
+    const { data: apagado, error } = await supabase.from("categorias")
+      .delete().eq("id", id).select("id").maybeSingle();
     if (error) { toast.error(error.message); return; }
+    if (!apagado) {
+      toast.error("Nothing was deleted — the category no longer exists, or you do not have permission.");
+      fetchData();
+      return;
+    }
     toast.success("Category removed");
     fetchData();
   };
@@ -272,6 +339,26 @@ const AdminCategorias = () => {
 
     const swapIdx = direction === "up" ? idx - 1 : idx + 1;
     const swapCat = siblings[swapIdx];
+
+    // EMPATE EM `ordem` REINDEXA OS IRMAOS, em vez de trocar dois valores iguais.
+    //
+    // `ordem` e `NOT NULL DEFAULT 0` e o formulario de nova categoria parte de 0:
+    // tres categorias criadas por esta tela ficam todas com 0, e a troca gravava
+    // 0 e 0 — as duas escritas PASSAVAM, nenhum toast aparecia, e o botao nao
+    // fazia nada, quantas vezes se clicasse. O sync tambem nao garante ordem
+    // distinta (`parseInt(c.position || c.sort_order || "0") || 0`), entao com um
+    // B2BWave que nao mande `position` a arvore INTEIRA fica assim.
+    if (swapCat.ordem === cat.ordem) {
+      const nova = [...siblings];
+      nova[idx] = swapCat;
+      nova[swapIdx] = cat;
+      const erros = await Promise.all(nova.map((c, i) =>
+        supabase.from("categorias").update({ ordem: i } as any).eq("id", c.id)));
+      fetchData();
+      const errR = erros.find((r) => r.error)?.error;
+      if (errR) toast.error("Could not reorder — the list may be out of order, refresh and try again: " + errR.message);
+      return;
+    }
 
     const [a, b] = await Promise.all([
       supabase.from("categorias").update({ ordem: swapCat.ordem } as any).eq("id", cat.id),
@@ -467,10 +554,45 @@ const AdminCategorias = () => {
                   </TableRow>
                 );
               })}
+              {loadError && flatList.length > 0 && (
+                // O ERRO TAMBEM COM A LISTA CHEIA.
+                //
+                // O outro ponto que mostra `loadError` esta dentro de
+                // `flatList.length === 0`. Mas `fetchData()` roda de novo depois de
+                // salvar, apagar, mover e ordenar: se ESSE refetch falhar com a
+                // lista ja carregada, o estado ficava setado e a tela nao mostrava
+                // nada — a grade seguia exibindo a ordem ANTERIOR e o admin clicava
+                // "Move" de novo em cima de dado velho. Mesmo defeito que o
+                // Catalogo teve.
+                <TableRow>
+                  <TableCell colSpan={6} className="py-3">
+                    <div className="flex items-center gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-2">
+                      <p className="text-sm text-destructive font-medium flex-1">
+                        Could not refresh the list — you may be seeing outdated data. {loadError}
+                      </p>
+                      <Button variant="outline" size="sm"
+                        onClick={() => { setLoading(true); fetchData(); }}>
+                        Try again
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
               {flatList.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
-                    No categories yet.
+                  <TableCell colSpan={6} className="text-center py-10">
+                    {loadError ? (
+                      <div className="text-muted-foreground">
+                        <p className="text-destructive font-medium">Could not load categories</p>
+                        <p className="text-sm mt-1">{loadError}</p>
+                        <Button variant="outline" size="sm" className="mt-3"
+                          onClick={() => { setLoading(true); fetchData(); }}>
+                          Try again
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">No categories yet.</span>
+                    )}
                   </TableCell>
                 </TableRow>
               )}

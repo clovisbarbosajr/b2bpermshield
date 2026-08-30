@@ -17,6 +17,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { categoryPath } from "@/lib/categoryTree";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getProductPrice } from "@/lib/pricing";
+import { valorOr } from "@/lib/postgrestOr";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { toast } from "sonner";
 import { ORDER_STATUSES, statusLabel, canonicalStatus } from "@/lib/orderStatuses";
@@ -428,7 +429,11 @@ const OrderDetail = () => {
     const { data } = await supabase
       .from("produtos")
       .select("id, nome, sku, preco, estoque_total, estoque_reservado, imagem_url, categoria_id")
-      .or(`nome.ilike.%${q}%,sku.ilike.%${q}%`)
+      // O valor vai ENTRE ASPAS: o `or=()` separa por virgula, e o operador
+      // digitando `Acme, Inc` na busca de produto montava uma clausula a mais — o
+      // PostgREST devolvia 400 e a busca morria num toast de parser. Mesmo defeito
+      // que o export de produtos tinha; a correcao mora em `lib/postgrestOr.ts`.
+      .or(`nome.ilike.${valorOr("%" + q + "%")},sku.ilike.${valorOr("%" + q + "%")}`)
       .eq("ativo", true)
       .limit(20);
     setProducts(data ?? []);

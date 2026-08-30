@@ -129,6 +129,17 @@ const AdminOptions = () => {
         ? await supabase.from("option_values").update(payload as any).eq("id", v.id).eq("option_id", optionId).select("id").maybeSingle()
         : await supabase.from("option_values").insert(payload as any).select("id").single();
       if (!existente && gravado?.id) idsNovos.set(v, (gravado as any).id as string);
+      // O `.maybeSingle()` do UPDATE ja estava aqui, mas o resultado so era lido
+      // no ramo do INSERT. UPDATE que casa ZERO linhas devolve `data: null,
+      // error: null` e o laco seguia: outro admin apagou o valor enquanto este
+      // editor estava aberto, o update nao pegou nada, e a tela dizia "Option
+      // updated" com o que ele digitou perdido.
+      if (existente && !error && !gravado) {
+        aplicaIdsNovos();
+        toast.error(`Value "${v.valor || i + 1}" no longer exists — it was removed elsewhere. Reload the option; the first ${i} value(s) were saved.`);
+        setSaving(false);
+        return;
+      }
       if (error) {
         // Aplica os ids ANTES de sair: sao gravacoes que ACONTECERAM, e perde-las
         // aqui e o que criava a duplicata no retry.
@@ -147,7 +158,25 @@ const AdminOptions = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this option and all its values?")) return;
+    // CONTA A CASCATA ANTES DE PERGUNTAR. "Delete this option and all its values?"
+    // nao dizia o principal: `produto_opcoes.option_id ON DELETE CASCADE`
+    // (20260318202244:100) DESATRIBUI a opcao de todo produto que a usa, e nao ha
+    // como saber depois quais eram. Molde de `PrivacyGroups.handleDelete`.
+    //
+    // Falha ao contar RECUSA o delete — nao da para avisar sobre o que nao se leu.
+    const { count, error: cErr } = await supabase
+      .from("produto_opcoes").select("id", { count: "exact", head: true }).eq("option_id", id);
+    if (cErr) {
+      toast.error("Could not check which products use this option — nothing was deleted. Try again.");
+      return;
+    }
+    const NL = String.fromCharCode(10);
+    const aviso = count
+      ? ["Delete this option and all its values?", "",
+         `• ${count} product(s) will lose this option — the assignment cannot be recovered.`,
+         "", "This cannot be undone."].join(NL)
+      : "Delete this option and all its values?";
+    if (!confirm(aviso)) return;
     // Se os valores nao sairem e a opcao sair, sobram orfaos apontando para uma
     // opcao que nao existe mais — e a tela dizia "Option removed" assim mesmo.
     const { error: valErr } = await supabase.from("option_values").delete().eq("option_id", id);
@@ -189,7 +218,12 @@ const AdminOptions = () => {
         return;
       }
     }
-    setValues(values.filter((_, i) => i !== idx));
+    // FORMA FUNCIONAL: o `values` desta closure e o do render ANTERIOR ao await
+    // do delete. Os inputs nao ficam desabilitados durante a ida ao servidor (o
+    // proprio `handleSave` deste arquivo registra isso), entao digitar noutra
+    // linha enquanto o delete roda fazia o array velho voltar por cima — e o
+    // valor antigo era regravado no Save seguinte, sem aviso.
+    setValues((prev: any[]) => prev.filter((_, i) => i !== idx));
     toast.success("Value removed");
   };
 

@@ -58,7 +58,18 @@ export function exportToCSV(data: Record<string, any>[], filename: string, colum
   if (!data.length) return;
 
   const cols = columns || Object.keys(data[0]).map((k) => ({ key: k, label: k }));
-  const header = cols.map((c) => `"${c.label}"`).join(",");
+  // O CABECALHO PASSA PELO MESMO ESCAPE DAS CELULAS.
+  //
+  // `"${c.label}"` nao duplica aspas: um rotulo vindo de dado do admin — o nome
+  // de uma tabela de preco vira nome de coluna em `ProductExport` — com aspa no
+  // meio (`12" Plank Pricing`, e polegada e o dado normal deste negocio) fechava
+  // o campo cedo e DESALINHAVA o cabecalho da linha 3 em diante: as colunas de
+  // preco passavam a ser lidas sob o nome da tabela errada.
+  //
+  // Nenhum chamador atual muda de saida: os relatorios usam rotulo literal e
+  // `Ferramentas` usa nome de coluna do banco — nenhum comeca com `= + - @` nem
+  // tem aspa.
+  const header = cols.map((c) => escaparCelulaCSV(c.label)).join(",");
   const rows = data.map((row) => cols.map((c) => escaparCelulaCSV(row[c.key])).join(","));
 
   const csv = [header, ...rows].join("\n");

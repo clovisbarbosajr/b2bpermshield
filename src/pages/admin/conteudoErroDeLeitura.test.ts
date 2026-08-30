@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 // `tsc --noEmit` do `npm test` nao acha `node:fs`. Em execucao o modulo existe.
 // @ts-expect-error
 import { readFileSync, readdirSync } from "node:fs";
-import { fatiaAPartirDoUltimo } from "@/test/fatia";
+import { fatiaDoRender } from "@/test/fatia";
 
 // TESTE DE FIACAO (montar a tela exigiria `@testing-library/dom`, que nao esta
 // instalado — RTL 16 o tem como peer e o repo nao tem nenhum teste de render).
@@ -30,14 +30,21 @@ const telas = [
   // desta lista foi o que deixou passar.
   { arquivo: "./Brands.tsx", tabela: "brands" },
   { arquivo: "./Representantes.tsx", tabela: "representantes" },
+  // `Categorias` entrou quando ganhou o `loadError`: sem ele a tela dizia "No
+  // categories yet" com a leitura falhada, e a lista vazia ainda desarmava a
+  // guarda de ciclo (`parentesProibidos`).
+  { arquivo: "./Categorias.tsx", tabela: "categorias" },
 ];
 
 describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () => {
   for (const { arquivo, tabela } of telas) {
     it(`${arquivo}: le o error do select de ${tabela} e o trata`, () => {
       const fonte = ler(arquivo);
+      // `[\s\S]{0,40}?` entre o `from` e o `select`: `Categorias` quebra a cadeia
+      // em varias linhas, e exigir os dois colados so casava o estilo de uma
+      // linha so.
       const select = fonte.match(
-        new RegExp(`const \\{[^}]*\\} = await supabase\\.from\\("${tabela}"\\)\\.select\\([^;]*;`),
+        new RegExp(`const \\{[^}]*\\} = await supabase[\\s\\S]{0,20}?\\.from\\("${tabela}"\\)[\\s\\S]{0,40}?\\.select\\([^;]*;`),
       );
       expect(select, `nao achei o select de ${tabela}`).toBeTruthy();
       // Este e o assert que morre se alguem voltar ao `const { data }`.
@@ -61,16 +68,24 @@ describe("telas de conteudo: leitura que falha nao vira 'nao existe nada'", () =
 
     it(`${arquivo}: o ramo de erro vem antes do estado vazio`, () => {
       const fonte = ler(arquivo);
-      // Idem aqui: o estado vazio pode ser ternario ou curto-circuito.
-      // SO O JSX. `search` no arquivo inteiro pegava a primeira ocorrencia em
-      // qualquer lugar — um helper com `banners.length === 0 && !loading` acima do
-      // `return (` reprovava codigo correto. O render comeca no `return (`.
-      const jsx = fatiaAPartirDoUltimo(fonte, "return (");
-      const erroJsx = jsx.indexOf(": loadError ? (");
-      const vazio = jsx.search(/\w+\.length === 0 \s*(\?|&&)/);
+      // A INVARIANTE E SOBRE O TEXTO, e nao sobre o `.length === 0`.
+      //
+      // Nas telas de card o ramo de erro vem ANTES do bloco vazio; na tabela de
+      // `Categorias` ele vem DENTRO dele, antes do texto. As duas formas estao
+      // certas — o que nao pode e a tela IMPRIMIR "No ... yet" quando a leitura
+      // falhou. Comparar com o `.length === 0` reprovava a segunda forma.
+      //
+      // SO O JSX: `search` no arquivo inteiro pegava ocorrencia de helper acima
+      // do `return (`.
+      const jsx = fatiaDoRender(fonte);
+      // Duas formas de abrir o ramo de erro: `) : loadError ? (` nas telas de
+      // card, e `{loadError ? (` dentro da celula da tabela.
+      const erroJsx = jsx.search(/[:{]\s*loadError \? \(/);
+      const textoVazio = jsx.search(/No [a-z ]+ yet/);
       expect(erroJsx, "nao achei o ramo de erro na renderizacao").toBeGreaterThan(-1);
-      expect(vazio, "nao achei o estado vazio na renderizacao").toBeGreaterThan(-1);
-      expect(erroJsx).toBeLessThan(vazio);
+      expect(textoVazio, "nao achei o texto de estado vazio").toBeGreaterThan(-1);
+      expect(erroJsx, "a tela imprime 'nao existe nada' antes de conferir o erro de leitura")
+        .toBeLessThan(textoVazio);
     });
   }
 
@@ -103,7 +118,7 @@ describe("a lista de telas nao fica para tras", () => {
         // O estado vazio conta so se estiver no JSX do render. `.length === 0 &&`
         // tambem aparece em guarda de negocio (`InventoryAdjustment.tsx:338`), e
         // isso acusava tela correta de estar fora da lista.
-        const jsx = fatiaAPartirDoUltimo(fonte, "return (");
+        const jsx = fatiaDoRender(fonte);
         return /const \[loadError/.test(fonte) && /\.length === 0 \s*(\?|&&)/.test(jsx);
       });
     const cobertas = new Set(telas.map((t) => t.arquivo.replace("./", "")));

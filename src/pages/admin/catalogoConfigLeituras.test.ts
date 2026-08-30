@@ -81,7 +81,13 @@ describe("telas de catalogo/config: leitura de tabela que cresce sem limite", ()
       it(`${arquivo}: le "${tabela}" paginando`, () => {
         const trechos = leiturasDe(fonte, tabela);
         expect(trechos.length, `nenhuma leitura de ${tabela} encontrada`).toBeGreaterThan(0);
-        for (const t of trechos) expect(t, t).toContain(".range(from, to)");
+        // CONTAGEM (`head: true`) NAO PRECISA PAGINAR: ela nao devolve linha
+        // nenhuma, so o total no cabecalho `Content-Range` — o corte de 1000 do
+        // PostgREST nao se aplica. Exigir `.range` ali reprovaria a contagem de
+        // cascata que `Categorias.handleDelete` faz antes de perguntar.
+        const queLeemLinhas = trechos.filter((t) => !/head:\s*true/.test(t));
+        expect(queLeemLinhas.length, `nenhuma leitura de linhas de ${tabela}`).toBeGreaterThan(0);
+        for (const t of queLeemLinhas) expect(t, t).toContain(".range(from, to)");
       });
     }
   }

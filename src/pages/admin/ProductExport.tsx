@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { exportToCSV } from "@/lib/export-csv";
 
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { valorOr } from "@/lib/postgrestOr";
 const AdminProductExport = () => {
   const [priceLists, setPriceLists] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -51,33 +52,52 @@ const AdminProductExport = () => {
       if (!products?.length) { toast.error("No products found"); setExporting(false); return; }
 
       // Fetch price list items if specific price list selected
+      // Chaveados por ID da tabela de preco; `rotulos` guarda o nome so para o
+      // cabecalho do CSV.
       let priceMap: Record<string, Record<string, number>> = {};
       let priceListNames: string[] = [];
+      let rotulos: Record<string, string> = {};
 
       if (selectedPriceList === "all") {
         // Paginado pelo mesmo motivo: com varias tabelas de preco, `tabela_preco_itens`
         // passa de 1000 linhas facil, e o corte silencioso zera o preco de parte
         // dos produtos NO CSV — sem nenhum aviso.
+        // `ativo` JUNTO: desativar uma tabela nao apaga os itens dela, e o join
+        // to-one do PostgREST traz a inativa igual. O dropdown ja filtra
+        // `ativo=true` — o ramo "all" ficava incoerente com a propria tela e o CSV
+        // saia com uma coluna de regua MORTA, com preco obsoleto, indistinguivel
+        // das vivas. E o sync do B2BWave desativa sozinho
+        // (`b2bwave-sync:1822`), entao isso acontece sem ninguem fazer nada aqui.
         const allItems = await fetchAllRows<any>((from, to) =>
           supabase.from("tabela_preco_itens")
-            .select("produto_id, preco, tabela_preco_id, tabelas_preco(nome)")
+            .select("produto_id, preco, tabela_preco_id, tabelas_preco(nome, ativo)")
             .order("id", { ascending: true }).range(from, to));
+        // CHAVE PELO ID, e nao pelo nome. `tabelas_preco.nome` nao tem UNIQUE, e o
+        // proprio `handleDuplicate` gera `"<nome> (copy)"` sem contador — duas
+        // reguas de mesmo nome viravam UMA coluna com os precos misturados, linha
+        // a linha, conforme a ordem de leitura. O nome fica so como rotulo.
+        const rotuloDaTabela: Record<string, string> = {};
         (allItems ?? []).forEach((item: any) => {
-          const plName = item.tabelas_preco?.nome || item.tabela_preco_id;
-          if (!priceMap[plName]) priceMap[plName] = {};
-          priceMap[plName][item.produto_id] = item.preco;
-          if (!priceListNames.includes(plName)) priceListNames.push(plName);
+          if (item.tabelas_preco?.ativo === false) return;
+          const plId = item.tabela_preco_id;
+          if (!priceMap[plId]) priceMap[plId] = {};
+          priceMap[plId][item.produto_id] = item.preco;
+          if (!priceListNames.includes(plId)) {
+            priceListNames.push(plId);
+            rotuloDaTabela[plId] = item.tabelas_preco?.nome || plId;
+          }
         });
+        rotulos = rotuloDaTabela;
       } else {
         const pl = priceLists.find(p => p.id === selectedPriceList);
-        const plName = pl?.nome || selectedPriceList;
-        priceListNames = [plName];
+        priceListNames = [selectedPriceList];
+        rotulos = { [selectedPriceList]: pl?.nome || selectedPriceList };
         const items = await fetchAllRows<any>((from, to) =>
           supabase.from("tabela_preco_itens").select("produto_id, preco")
             .eq("tabela_preco_id", selectedPriceList)
             .order("id", { ascending: true }).range(from, to));
-        priceMap[plName] = {};
-        (items ?? []).forEach((item: any) => { priceMap[plName][item.produto_id] = item.preco; });
+        priceMap[selectedPriceList] = {};
+        (items ?? []).forEach((item: any) => { priceMap[selectedPriceList][item.produto_id] = item.preco; });
       }
 
       // If privacy group selected, filter by produto_acesso
@@ -91,7 +111,7 @@ const AdminProductExport = () => {
           // do export, calado.
           const access = await fetchAllRows<any>((from, to) =>
             supabase.from("produto_acesso").select("produto_id")
-              .or(`privacy_group_id.eq.${pg.id},grupo_nome.eq.${pg.nome},grupo_nome.eq.${pg.id}`)
+              .or(`privacy_group_id.eq.${valorOr(pg.id)},grupo_nome.eq.${valorOr(pg.nome)},grupo_nome.eq.${valorOr(pg.id)}`)
               .order("id", { ascending: true }).range(from, to));
           const accessIds = new Set((access ?? []).map((a: any) => a.produto_id));
           filteredProducts = products.filter(p => accessIds.has(p.id));
@@ -106,8 +126,14 @@ const AdminProductExport = () => {
           product_name: p.nome,
           product_desc: p.descricao || "",
         };
-        priceListNames.forEach(plName => {
-          row[plName] = priceMap[plName]?.[p.id] ?? "";
+        priceListNames.forEach(plId => {
+          // O ROTULO vai para o cabecalho; a CHAVE continua sendo o id, entao duas
+          // reguas de mesmo nome viram duas colunas em vez de uma misturada. Se os
+          // rotulos empatarem, o id desempata — o CSV nao pode ter duas colunas
+          // com o mesmo cabecalho.
+          const nome = rotulos[plId] || plId;
+          const repetido = priceListNames.filter((o) => (rotulos[o] || o) === nome).length > 1;
+          row[repetido ? `${nome} (${plId.slice(0, 8)})` : nome] = priceMap[plId]?.[p.id] ?? "";
         });
         Object.assign(row, {
           length: p.comprimento || "",

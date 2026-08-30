@@ -72,3 +72,30 @@ export function fatiaAPartirDoUltimo(fonte: string, de: string): string {
   expect(i, `marcador inicial nao encontrado: ${de}`).toBeGreaterThan(-1);
   return fonte.slice(i);
 }
+
+/**
+ * O JSX do RENDER de uma tela — do `return (` que abre o layout ate o fim.
+ *
+ * Duas tentativas anteriores erraram, e as duas foram pegas por assercao que
+ * passou a comparar posicao errada:
+ *
+ *   `fatiaAPartirDoUltimo(fonte, "return (")` — em `Categorias.tsx` o ULTIMO
+ *   `return (` esta dentro do callback de `flatList.map(...)`, entao a fatia
+ *   comecava no MEIO do JSX. Passava por acaso.
+ *
+ *   `/^  return \(/m` — casa tambem o `return (` de um sub-componente
+ *   declarado no mesmo arquivo (o `Field` de `Categorias.tsx`), que vem ANTES.
+ *
+ * O marcador confiavel destas telas e o layout: toda tela de admin abre com
+ * `<AdminLayout>` e toda do portal com `<PortalLayout>`. E o comentario sai
+ * antes — senao um texto citado numa explicacao ("a tela dizia 'No categories
+ * yet'") casa como se fosse JSX.
+ */
+export function fatiaDoRender(fonte: string): string {
+  const codigo = fonte
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  const i = codigo.search(/return \(\s*<(Admin|Portal)Layout[ >]/);
+  expect(i, "nao achei o `return (` que abre o AdminLayout/PortalLayout").toBeGreaterThan(-1);
+  return codigo.slice(i);
+}

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { escaparCelulaCSV } from "./export-csv";
+// @ts-expect-error — tipos do Node fora do tsconfig; em execucao existe.
+import { readFileSync } from "node:fs";
 
 // INJECAO DE FORMULA NO CSV EXPORTADO.
 //
@@ -78,5 +80,24 @@ describe("escaparCelulaCSV: prefixo anti-formula", () => {
     for (const mau of ["+1+1", "-1+A2", "+SUM(A1:A9)", "-2+3+cmd|' /C calc'!A0"]) {
       expect(String(c(mau)), `deixou passar formula: ${mau}`).toMatch(/^"'/);
     }
+  });
+});
+
+describe("o CABECALHO passa pelo mesmo escape das celulas", () => {
+  // `"${c.label}"` nao duplicava aspas. `ProductExport` poe o nome da tabela de
+  // preco como nome de coluna, e num negocio de piso a polegada e dado normal:
+  // `12" Plank Pricing` fechava o campo cedo e DESALINHAVA o cabecalho da linha 3
+  // em diante — as colunas de preco passavam a ser lidas sob o nome da tabela
+  // errada.
+  const fonte = readFileSync("src/lib/export-csv.ts", "utf-8");
+
+  it("o header usa `escaparCelulaCSV`", () => {
+    expect(fonte, "o cabecalho voltou a montar as aspas na mao")
+      .toMatch(/const header = cols\.map\(\(c\) => escaparCelulaCSV\(c\.label\)\)/);
+  });
+
+  it("rotulo com aspa sai escapado, e nao quebra o campo", () => {
+    const A = String.fromCharCode(34);
+    expect(escaparCelulaCSV(`12${A} Plank Pricing`)).toBe(`${A}12${A}${A} Plank Pricing${A}`);
   });
 });

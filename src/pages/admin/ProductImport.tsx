@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Upload, Download, Info } from "lucide-react";
 // Em vez de fingir que importa, esta tela direciona para os fluxos reais.
 const AdminProductImport = () => {
   const navigate = useNavigate();
+  const { role } = useAuth();
   return (
     <AdminLayout>
       <div className="mb-6">
@@ -34,9 +36,21 @@ const AdminProductImport = () => {
           <p className="mb-4 text-sm text-muted-foreground">
             Upload a CSV to create/update products in bulk.
           </p>
+          {/* SO PARA ADMIN. Esta pagina e `view_products`, que manager e warehouse
+              tem — mas `/admin/ferramentas` e admin puro. Para eles o clique caia
+              no `Navigate to="/"` do `ProtectedRoute` e o `LoginLanding` devolvia
+              para `/admin`: teleporte silencioso, sem uma palavra. O card de
+              Export ao lado FUNCIONA para os tres papeis, entao a pagina continua
+              util — o que nao pode e o botao prometer o que a rota nega. */}
+          {role !== "admin" ? (
+            <p className="text-sm text-muted-foreground">
+              Bulk import is available to administrators only.
+            </p>
+          ) : (
           <Button onClick={() => navigate("/admin/ferramentas")} className="gap-1">
             <Upload className="h-4 w-4" /> Go to Import Tools
           </Button>
+          )}
         </Card>
 
         <Card className="p-5">

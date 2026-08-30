@@ -4182,3 +4182,74 @@ pode ser adicionado pelas duas telas, mas fecha no checkout se ja estiver no
 carrinho. E alcancavel sem erro nenhum: o admin de status permite apagar ou
 renomear aquela linha sem guarda. Corrigir numa tela so criaria uma terceira
 opiniao — e decisao do dono, nas tres pontas.
+
+## 2026-08-30 — Grupo H: Estoque, Import/Export, Categorias e Options
+
+**Estoque.** O compare-and-swap do ajuste nao travava `estoque_reservado`. O
+gatilho de reserva escreve SO nessa coluna (20260623000000:41), invisivel ao
+filtro de `estoque_total`: produto 10 com 8 reservadas, o admin digita 8, e entre
+o SELECT e o UPDATE um checkout reserva mais 2 — o CAS passava e gravava 8 com 10
+reservadas, `disponivel` NEGATIVO. O produto TRAVA (o proprio gatilho recusa toda
+reserva nova) e nao se recupera sozinho: com o pedido concluido o total baixa
+junto e o negativo fica. Nao ha CHECK no banco. A tela irma
+(`InventoryAdjustment.tsx:221`) ja tinha a clausula, com o comentario explicando —
+e o teste que vigia as DUAS nao exigia ela.
+
+Junto: `setSaving(true)` ficava atras do `await` da releitura, entao dois cliques
+no mesmo tick passavam os dois e o segundo dizia "nothing was saved" DEPOIS de o
+primeiro ter gravado; virou trava por `useRef`. E o realtime era `event: "*"` +
+`fetchData()`: salvar 40 linhas no InventoryAdjustment disparava 40 recargas da
+tabela inteira. UPDATE agora aplica `payload.new` em memoria, como o Catalogo.
+
+**Categorias — o mais grave da leva.** A RLS de `categorias` e admin-only
+(20260317043654:177), mas a de `categoria_acesso`/`categoria_cliente_acesso`
+aceita admin OU MANAGER (20260622191614:48) — e a tela e `perm="view_products"`,
+que manager e warehouse tem, com item no menu. O update do manager voltava 204 com
+`error: null` (nada gravado) e o `saveAccess` logo abaixo, que ela PODE rodar,
+apagava todas as concessoes de grupo e de cliente. Com o formulario dizendo "nao e
+privada", nada era reinserido: categoria que continuou PRIVADA no banco, agora com
+ZERO concessoes — some do catalogo de todo mundo, e a lista apagada nao existe em
+lugar nenhum para desfazer. A tela dizia "Category updated".
+
+E o `handleDelete` perguntava so "Delete this category?", escondendo tres
+cascatas, duas de acesso: `produtos.categoria_id ON DELETE SET NULL` e
+`cliente_pode_ver_produto` PULA a checagem quando a categoria e nula — apagar
+categoria privada torna os produtos dela visiveis para toda a base; e
+`user_locations.categoria_id ON DELETE CASCADE` com `user_can_see_produto`
+devolvendo true quando NAO EXISTE amarracao — apagar a categoria de uma
+localizacao faz quem estava amarrado so a ela ver a producao de TODAS. Agora conta
+antes de perguntar e RECUSA se nao conseguir contar (molde do `PrivacyGroups`).
+
+**Export.** O ramo "All" incluia regua DESATIVADA (desativar nao apaga os itens, e
+o sync do B2BWave desativa sozinho): o CSV saia com uma coluna de preco obsoleto
+indistinguivel das vivas. O `priceMap` era chaveado pelo NOME, que nao tem UNIQUE —
+duas reguas de mesmo nome viravam UMA coluna com os precos misturados. E o filtro
+de grupo de privacidade montava o `.or()` por interpolacao: `Dealers, Northeast`
+quebrava o export num toast de parser, e um valor com clausula colada reescrevia o
+filtro que existe para nao trazer produto de outro grupo. Virou
+`lib/postgrestOr.ts`, com teste — e o segundo chamador cru (`OrderDetail:431`, a
+busca de produto do pedido) foi junto.
+
+**Cabecalho do CSV.** `export-csv.ts` protegia as celulas e nao o cabecalho:
+`ProductExport` poe o nome da regua como nome de coluna, e num negocio de piso
+`12" Plank Pricing` fechava o campo cedo e DESALINHAVA o cabecalho da linha 3 em
+diante — as colunas de preco passavam a ser lidas sob o nome da tabela errada.
+
+**Comissao — respondido pelo B2BWave.** Fui ao formulario dele
+(`admin/sales_reps/new`): `min="0" max="100" step="0.1"`. Adotei a faixa de la, com
+teste que executa. Nao precisou de decisao.
+
+**Duas rodadas de cacador/cetico**, 17 achados nas proprias correcoes. O que mais
+vale registrar: tres guardas novas podiam perder o `return` com a suite VERDE — a
+assercao comparava a POSICAO do `if` com a do `saveAccess`, e nao que a guarda
+ABORTA. Com o `return` fora, o toast "Nothing was saved" aparecia e o `saveAccess`
+rodava assim mesmo: a catastrofe inteira, passando no teste que a nomeia.
+
+E o `fatiaAPartirDoUltimo(fonte, "return (")` que eu tinha escrito pegava, em
+`Categorias.tsx`, o `return (` de dentro do `flatList.map(...)` — a fatia comecava
+no MEIO do JSX e passava por acaso. Virou `fatiaDoRender`, ancorado no
+`<AdminLayout>`/`<PortalLayout>` e com comentario removido antes (um texto citado
+numa explicacao casava como se fosse JSX).
+
+Verificacao: `npm test` 576/576 em 56 arquivos, `tsc` limpo, `npm run build` ok,
+`check-edge` ok. ~25 mutantes plantados nas duas rodadas; todos reprovam a suite.

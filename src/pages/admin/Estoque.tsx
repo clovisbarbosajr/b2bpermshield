@@ -50,7 +50,26 @@ const AdminEstoque = () => {
   useEffect(() => {
     const channel = supabase
       .channel("admin-estoque-produtos")
-      .on("postgres_changes", { event: "*", schema: "public", table: "produtos" }, () => fetchData())
+      // UPDATE e aplicado NO LUGAR, sem refetch — o mesmo que
+      // `portal/Catalogo.tsx:296` ja faz.
+      //
+      // Com `() => fetchData()` em `event: "*"`, salvar 40 linhas no
+      // `InventoryAdjustment` ou uma rodada do sync disparava 40 recargas da
+      // tabela inteira. E, sem guarda de ordem, a resposta de uma recarga ANTIGA
+      // podia chegar por ultimo e deixar estoque velho na grade.
+      //
+      // A publicacao de `produtos` esta fixada em `id, estoque_total,
+      // estoque_reservado` (20260828010000) — exatamente o que esta tela usa.
+      // INSERT e DELETE continuam recarregando: ali a lista muda de tamanho.
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "produtos" }, (payload: any) => {
+        const n = payload.new;
+        if (!n?.id) return;
+        setProdutos((prev) => prev.map((p) => (p.id === n.id
+          ? { ...p, estoque_total: n.estoque_total ?? p.estoque_total, estoque_reservado: n.estoque_reservado ?? p.estoque_reservado }
+          : p)));
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "produtos" }, () => fetchData())
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "produtos" }, () => fetchData())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
@@ -80,76 +99,105 @@ const AdminEstoque = () => {
     else setLogs(data ?? []);
   };
 
+  // TRAVA POR REF, e nao por estado. `setSaving(true)` so vale no proximo
+  // render, e o `disabled={saving}` fica atras do `await` da releitura: dois
+  // cliques no mesmo tick liam `saving === false` os dois. O segundo caia no
+  // compare-and-swap e mostrava "Stock changed while saving — nothing was
+  // saved" DEPOIS de o primeiro ter gravado — o ajuste funcionou e o admin lia
+  // que nao, e ia refazer.
+  const ajustandoRef = useRef(false);
+
   const handleAjuste = async () => {
-    if (!selected) return;
-    // Validações que faltavam aqui e que a OUTRA tela de estoque
-    // (`InventoryAdjustment.tsx:101,189`) já fazia — duas telas gravando a mesma
-    // coluna com regras opostas. Não há CHECK no banco segurando isso.
-    if (!Number.isFinite(novaQtd) || novaQtd < 0) {
-      toast.error("Quantity cannot be negative.");
-      return;
-    }
-    // Relê o estoque AGORA: o diálogo trabalha com um retrato tirado no `openAjuste`,
-    // e o update é ABSOLUTO. Se um pedido foi concluído com o diálogo aberto, salvar
-    // sem mudar nada regravava o valor velho e DESFAZIA a baixa.
-    const { data: atual, error: reErr } = await supabase.from("produtos")
-      .select("estoque_total, estoque_reservado").eq("id", selected.id).maybeSingle();
-    if (reErr || !atual) { toast.error("Could not re-read current stock. Try again."); return; }
-    if (atual.estoque_total !== selected.estoque_total) {
-      toast.error(`Stock changed to ${atual.estoque_total} while this window was open (was ${selected.estoque_total}). Reopen the adjustment.`);
+    if (ajustandoRef.current) return;
+    ajustandoRef.current = true;
+    try {
+      if (!selected) return;
+      // Validações que faltavam aqui e que a OUTRA tela de estoque
+      // (`InventoryAdjustment.tsx:101,189`) já fazia — duas telas gravando a mesma
+      // coluna com regras opostas. Não há CHECK no banco segurando isso.
+      if (!Number.isFinite(novaQtd) || novaQtd < 0) {
+        toast.error("Quantity cannot be negative.");
+        return;
+      }
+      // Relê o estoque AGORA: o diálogo trabalha com um retrato tirado no `openAjuste`,
+      // e o update é ABSOLUTO. Se um pedido foi concluído com o diálogo aberto, salvar
+      // sem mudar nada regravava o valor velho e DESFAZIA a baixa.
+      const { data: atual, error: reErr } = await supabase.from("produtos")
+        .select("estoque_total, estoque_reservado").eq("id", selected.id).maybeSingle();
+      if (reErr || !atual) { toast.error("Could not re-read current stock. Try again."); return; }
+      if (atual.estoque_total !== selected.estoque_total) {
+        toast.error(`Stock changed to ${atual.estoque_total} while this window was open (was ${selected.estoque_total}). Reopen the adjustment.`);
+        setSelected(null);
+        fetchData();
+        return;
+      }
+      const reservado = atual.estoque_reservado ?? 0;
+      if (novaQtd < reservado) {
+        toast.error(`There are ${reservado} unit(s) already reserved by open orders — the total cannot be lower than that.`);
+        return;
+      }
+      setSaving(true);
+      // O UPDATE vem PRIMEIRO e é checado: antes, o estoque_log e o activity log
+      // eram gravados mesmo quando o update falhava (RLS/rede) e a tela dizia
+      // "Stock updated" — o histórico registrava um ajuste que nunca aconteceu.
+      // O filtro pelo valor lido vai no MESMO statement do update. A releitura acima
+      // so ESTREITA a janela: entre o SELECT e o UPDATE ainda cabe a baixa de um
+      // pedido concluido, e o update ABSOLUTO a desfazia em silencio. Molde de
+      // `src/lib/gravarProdutoComToken.ts`.
+      // O dialogo pede a quantidade nova ABSOLUTA, entao `estoque_total + N` — que
+      // dispensaria o filtro — nao serve aqui.
+      const { data: gravado, error: updErr } = await supabase.from("produtos")
+        .update({ estoque_total: novaQtd }).eq("id", selected.id).eq("estoque_total", selected.estoque_total)
+        // `.lte("estoque_reservado", novaQtd)` JUNTO — a tela irma
+        // (`InventoryAdjustment.tsx:221`) ja tinha, esta ficou de fora.
+        //
+        // O gatilho de reserva escreve SO em `estoque_reservado`
+        // (20260623000000:41), invisivel para o filtro de `estoque_total`:
+        // produto 10 com 8 reservadas, o admin digita 8 (passa na checagem acima,
+        // `8 >= 8`), e entre o SELECT e o UPDATE um checkout reserva mais 2. O
+        // compare-and-swap passava e gravava 8 com 10 reservadas —
+        // `estoque_total - estoque_reservado` NEGATIVO.
+        //
+        // Nao vende a mais (a reserva exige saldo), mas o produto TRAVA: o
+        // proprio gatilho passa a recusar toda reserva nova, e ninguem e avisado.
+        // E nao se recupera sozinho — com o pedido CONCLUIDO o total baixa junto
+        // e o negativo fica. Nao ha CHECK no banco segurando isso.
+        .lte("estoque_reservado", novaQtd)
+        .select("id").maybeSingle();
+      if (updErr) {
+        setSaving(false);
+        toast.error("Failed to update stock: " + updErr.message);
+        return;
+      }
+      // Sem erro e sem linha: o `id` casou e o `estoque_total` nao. NADA foi escrito,
+      // e nada abaixo pode rodar — o estoque_log e o activity log registrariam um
+      // ajuste que nunca aconteceu, e a tela diria "Stock updated".
+      if (!gravado) {
+        setSaving(false);
+        toast.error("Stock changed while saving — nothing was saved. Reopen the adjustment.");
+        setSelected(null);
+        fetchData();
+        return;
+      }
+      // O histórico também é checado: sem isso, um insert barrado deixava o ajuste
+      // aplicado e o History sem registro — buraco silencioso na auditoria.
+      const { error: logErr } = await supabase.from("estoque_log").insert({
+        produto_id: selected.id, quantidade_anterior: selected.estoque_total,
+        quantidade_nova: novaQtd, motivo: motivo || null, usuario_id: user?.id ?? null,
+      });
+      if (logErr) toast.warning("Stock saved, but the history entry failed: " + logErr.message);
+      // Também no Activity Logs (Settings → Activity Logs), com detalhes.
+      log("updated", "inventory", selected.id, selected.sku ? `${selected.nome} (${selected.sku})` : selected.nome, {
+        qty_before: selected.estoque_total, qty_after: novaQtd,
+        difference: novaQtd - selected.estoque_total, memo: motivo || null,
+      });
+      setSaving(false);
+      toast.success("Stock updated");
       setSelected(null);
       fetchData();
-      return;
+    } finally {
+      ajustandoRef.current = false;
     }
-    const reservado = atual.estoque_reservado ?? 0;
-    if (novaQtd < reservado) {
-      toast.error(`There are ${reservado} unit(s) already reserved by open orders — the total cannot be lower than that.`);
-      return;
-    }
-    setSaving(true);
-    // O UPDATE vem PRIMEIRO e é checado: antes, o estoque_log e o activity log
-    // eram gravados mesmo quando o update falhava (RLS/rede) e a tela dizia
-    // "Stock updated" — o histórico registrava um ajuste que nunca aconteceu.
-    // O filtro pelo valor lido vai no MESMO statement do update. A releitura acima
-    // so ESTREITA a janela: entre o SELECT e o UPDATE ainda cabe a baixa de um
-    // pedido concluido, e o update ABSOLUTO a desfazia em silencio. Molde de
-    // `src/lib/gravarProdutoComToken.ts`.
-    // O dialogo pede a quantidade nova ABSOLUTA, entao `estoque_total + N` — que
-    // dispensaria o filtro — nao serve aqui.
-    const { data: gravado, error: updErr } = await supabase.from("produtos")
-      .update({ estoque_total: novaQtd }).eq("id", selected.id).eq("estoque_total", selected.estoque_total)
-      .select("id").maybeSingle();
-    if (updErr) {
-      setSaving(false);
-      toast.error("Failed to update stock: " + updErr.message);
-      return;
-    }
-    // Sem erro e sem linha: o `id` casou e o `estoque_total` nao. NADA foi escrito,
-    // e nada abaixo pode rodar — o estoque_log e o activity log registrariam um
-    // ajuste que nunca aconteceu, e a tela diria "Stock updated".
-    if (!gravado) {
-      setSaving(false);
-      toast.error("Stock changed while saving — nothing was saved. Reopen the adjustment.");
-      setSelected(null);
-      fetchData();
-      return;
-    }
-    // O histórico também é checado: sem isso, um insert barrado deixava o ajuste
-    // aplicado e o History sem registro — buraco silencioso na auditoria.
-    const { error: logErr } = await supabase.from("estoque_log").insert({
-      produto_id: selected.id, quantidade_anterior: selected.estoque_total,
-      quantidade_nova: novaQtd, motivo: motivo || null, usuario_id: user?.id ?? null,
-    });
-    if (logErr) toast.warning("Stock saved, but the history entry failed: " + logErr.message);
-    // Também no Activity Logs (Settings → Activity Logs), com detalhes.
-    log("updated", "inventory", selected.id, selected.sku ? `${selected.nome} (${selected.sku})` : selected.nome, {
-      qty_before: selected.estoque_total, qty_after: novaQtd,
-      difference: novaQtd - selected.estoque_total, memo: motivo || null,
-    });
-    setSaving(false);
-    toast.success("Stock updated");
-    setSelected(null);
-    fetchData();
   };
 
   const filtered = produtos.filter((p) => p.nome.toLowerCase().includes(search.toLowerCase()) || (p.sku ?? "").toLowerCase().includes(search.toLowerCase()));
