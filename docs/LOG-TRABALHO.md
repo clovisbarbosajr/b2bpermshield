@@ -4440,3 +4440,53 @@ apagar durante o Save uma linha que o laco JA inseriu nao emite DELETE nenhum
 A funcao pura `reordenarIrmaos` e seu teste passaram sem achado.
 
 `INICIADO` — cetico sobre os 8.
+
+`FEITO` — **segunda rodada: cacador e cetico sobre as PROPRIAS correcoes.** Cinco
+achados, e o cetico foi util nos dois sentidos.
+
+Derrubou o mais alarmante: o debounce do `Estoque` de fato nao tem teto, entao uma
+rodada de sync escrevendo em fluxo continuo segura a leitura o sync inteiro — mas
+grade parada nao gera escrita errada. O `handleAjuste` rele o estoque do banco,
+compara com o retrato do dialogo, e o UPDATE ainda leva o compare-and-swap mais o
+`.lte` do reservado no mesmo statement: com dado velho na tela o admin recebe
+"Stock changed while this window was open", que e o comportamento certo. Fica
+staleness visual durante o sync, que resolve sozinho 300ms depois do ultimo
+evento. Custo aceito, e nao defeito.
+
+Derrubou tambem a PROVA do achado sobre o aviso novo do `fetchAllRows`: o cacador
+disse que `npm test` ja imprimia a mensagem, e nao imprime — o teste faz spy em
+`console.warn`, e `grep -c` na saida da suite devolve 0. Conferi antes de agir.
+
+Mas o cacador estava certo no fundo, e o cetico melhorou o achado: das nove
+leituras que o aviso pegaria, sete sao mesmo inofensivas (o consumo e Map, Set ou
+first-wins) e **duas eram bug de verdade, que o aviso acabou de revelar** —
+`Categorias` faz `counts[cat] = ... + 1` para o badge de produtos por categoria, e
+`Pedidos` faz `qtyMap[ped] = ... + quantidade`, que vira a coluna de quantidade da
+lista de pedidos. Nas duas, linha de fronteira servida duas vezes = numero
+plausivel e errado. As nove ganharam `id`: e menos codigo que uma flag de opt-out,
+CONSERTA as duas em vez de cala-las, e nao cria um jeito de mentir no dia em que
+um consumo virar soma.
+
+E o cetico achou um defeito na minha propria correcao da mensagem de falha
+parcial do `TabelasPreco`: eu somava `upserts.length` incondicionalmente, entao
+quando quem falhava era o PROPRIO upsert (o laco de delete nem roda) a mensagem
+dizia "Saved 5 of 5 change(s), then stopped" com ZERO gravado — invertendo o fato
+que ela existe para contar.
+
+Os outros dois confirmados foram corrigidos: a recusa do Move acusava sempre falta
+de permissao, quando zero-linhas tambem acontece com um irmao apagado por outro
+admin no meio (formula agora igual a do `handleDelete`); e o `SalesPerCategory`
+ganhou desempate por id e `key={r.id}`, porque duas categorias IRMAS de mesmo nome
+sob o mesmo pai dao caminho identico — e o UNIQUE de `20260827010000` cobre so
+`b2bwave_id`, entao isso e dado legal aqui.
+
+Verificacao: `npm test` **630/630 em 60 arquivos**, `tsc` limpo, `npm run build`
+ok. 9 mutantes nesta rodada, 9 mortos.
+
+**Nota de ambiente:** durante toda esta leva OUTRA sessao trabalhou no mesmo
+repositorio (`Produtos.tsx`, `NotificacoesLog.tsx`, `paginacao.ts`,
+`classificaLog.ts`) e commitou/empurrou duas vezes por cima do meu trabalho em
+andamento. Nao toquei em nenhum arquivo dela. Em um momento a suite ficou vermelha
+com dois testes de notificacao no meio da edicao dela — o que INVALIDOU uma rodada
+de mutantes minha, porque suite vermelha marca todo mutante como morto. Refiz a
+rodada mirando so os meus arquivos de teste, com checagem de base verde antes.
