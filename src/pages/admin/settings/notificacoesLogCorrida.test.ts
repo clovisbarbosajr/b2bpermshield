@@ -127,12 +127,17 @@ describe("NotificacoesLog: o envio real nao pode ser afogado pelo diagnostico", 
 });
 
 describe("NotificacoesLog: guarda de ordem no load", () => {
-  it("leitura VELHA que deu certo nao apaga o erro da leitura mais NOVA", async () => {
-    // Carga 1 (mount): lenta e bem-sucedida. Carga 2 (clique): rapida e falha.
-    // A 2 e a vigente; quando a 1 finalmente volta, ela nao pode escrever nada.
-    let resolveVelha: (v: any) => void = () => {};
-    const velha = new Promise<any>((r) => { resolveVelha = r; });
-    h.envios = [velha, Promise.resolve({ data: null, error: { message: "rede caiu" } })];
+  // A direcao que importa e esta, e nao a inversa: se a carga VELHA falha e
+  // chega por ultimo, ela escreve o banner de erro POR CIMA de uma leitura nova
+  // que deu certo. A tela passa a dizer "nao consegui ler o historico" sobre uma
+  // leitura que funcionou, e o operador conclui que esta cego bem na hora em que
+  // nao esta. (A direcao inversa — velha bem-sucedida chegando por ultimo — fica
+  // MASCARADA pelo `erro` ja setado, que faz a tela nem renderizar a tabela;
+  // por isso ela nao serve de mutante e nao esta testada aqui.)
+  it("leitura VELHA que falhou nao sobrescreve a leitura NOVA que deu certo", async () => {
+    let rejeitaVelha: (v: any) => void = () => {};
+    const velha = new Promise<any>((r) => { rejeitaVelha = r; });
+    h.envios = [velha, Promise.resolve({ data: [ENVIO_REAL], error: null })];
     h.sistema = [Promise.resolve({ data: [], error: null }), Promise.resolve({ data: [], error: null })];
 
     caixa = document.createElement("div");
@@ -140,10 +145,10 @@ describe("NotificacoesLog: guarda de ordem no load", () => {
     raiz = createRoot(caixa);
     await act(async () => { raiz!.render(createElement(NotificacoesLog)); });
     await atualizar();
-    expect(texto()).toContain("Não consegui ler o histórico");
+    expect(texto()).toContain("+15559998888");
 
-    await act(async () => { resolveVelha({ data: [ENVIO_REAL], error: null }); });
-    expect(texto(), "a resposta atrasada apagou o aviso de falha de leitura").toContain("Não consegui ler o histórico");
-    expect(texto()).not.toContain("+15559998888");
+    await act(async () => { rejeitaVelha({ data: null, error: { message: "rede caiu" } }); });
+    expect(texto(), "a resposta atrasada que falhou apagou a leitura boa").not.toContain("Não consegui ler o histórico");
+    expect(texto()).toContain("+15559998888");
   });
 });
