@@ -4490,3 +4490,44 @@ andamento. Nao toquei em nenhum arquivo dela. Em um momento a suite ficou vermel
 com dois testes de notificacao no meio da edicao dela — o que INVALIDOU uma rodada
 de mutantes minha, porque suite vermelha marca todo mutante como morto. Refiz a
 rodada mirando so os meus arquivos de teste, com checagem de base verde antes.
+
+`FEITO` — **`NotificacoesLog` corrigido** (3 dos 4 achados; o cetico DERRUBOU o de
+RLS: `has_role()` le `user_roles`, a MESMA tabela de onde o `AuthContext` tira o
+papel, entao `role === "admin"` na UI implica a linha existir — o caminho nao e
+alcancavel). Nada aqui toca disparo: a tela e somente leitura e o `dispatch.ts`
+nao foi aberto.
+
+`lib/classificaLog.ts` (funcao pura + 8 testes): `status` so tem "sent" e "failed"
+em todo o backend, e "failed" carrega TRES coisas opostas — recusa deliberada
+(prefixo `skip:`, `dispatch.ts:283`), trava SQL/diagnostico de sync (`channel='-'`,
+sem prefixo nenhum) e falha real de provider. O cetico achou o buraco da correcao
+obvia: filtrar so por `error LIKE 'skip:%'` conserta menos da METADE, porque as
+travas SQL gravam texto livre. O que todas as nao-entregas tem em comum e
+`channel = '-'`, e e por ai que a classificacao vai.
+
+A tela: dois baldes em vez de um `.limit(200)` cego (`neq/eq` em `channel`), guarda
+de ordem no `load()`, e o motivo saiu do `title=` para uma COLUNA — tooltip de
+hover nao existe em toque e nao aparece em varredura visual, entao a conclusao
+errada ja tinha sido tirada antes de alguem passar o mouse.
+
+**3 mutantes, 3 mortos** — mas o terceiro so depois de consertar o TESTE. O caso de
+corrida que eu tinha escrito passava COM e SEM a guarda: com `erro` setado a tela
+nao renderiza a tabela, entao a lista obsoleta ficava invisivel para o assert. Ele
+travava a forma, nao o defeito — o mesmo vicio do `d96777c`. A direcao que machuca
+e a inversa (velha que FALHOU chegando por ultimo, apagando leitura boa) e e essa
+que esta testada agora. Commit `e561a07`.
+
+`BLOQUEADO` — **outra sessao esta escrevendo neste repositorio AGORA.** Detectado
+as 12:48: 15 arquivos que eu nao toquei apareceram modificados durante a leva
+(`paginacao`, `Produtos`, `Clientes`, `Pedidos`, `SalesPerCategory`, `Catalogo`,
+`ImportCustomers`...), com mtime de segundos atras, e dois commits alheios
+(`d10367d`, `b9e8b10`) entraram no meio do meu trabalho.
+
+O estrago concreto: `d10367d` varreu a arvore com `add -A` no exato instante em que
+`classificaLog.ts` estava MUTADO para verificacao — **o commit gravou em HEAD o
+defeito que eu tinha plantado de proposito**, com as duas linhas de classificacao
+removidas. Restaurado em `46afe69`. Parei aqui conforme a regra da fila: com outro
+agente escrevendo, nao commito nem empurro o que nao e meu.
+
+Verificacao final desta leva: `npm test` = **630/630 em 60 arquivos**, `tsc` limpo,
+194 migrations / 197 .sql / 16 edge OK.
