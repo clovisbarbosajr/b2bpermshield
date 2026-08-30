@@ -256,6 +256,16 @@ export function travaDeReservadoSeAplica(p: {
   // passar como "nao isento", divergindo do gatilho. Hoje o `statusOptions` do
   // admin so grava `pre_venda`, mas a edge `api` tem `status_produto` na allow-list
   // do PUT e aceita texto livre.
-  if (/pre.*venda|pre.*order|encomenda/.test(s)) return false;
+  // FLAG `s`. O `%` do `LIKE` casa QUALQUER caractere, inclusive quebra de linha;
+  // o `.` do JS, sem esta flag, exclui os quatro terminadores (LF, CR, U+2028,
+  // U+2029). Medido por varredura de todo codepoint ate U+2FFF: eram as UNICAS
+  // oito divergencias entre a regex e os tres `LIKE` do gatilho. Com `pre\nvenda`
+  // o banco isentava e a tela travava o save — a regressao da rodada 4, de novo.
+  //
+  // Patologico (ninguem digita rotulo com quebra de linha), mas alcancavel: a edge
+  // `api` tem `status_produto` no allow-list do PUT e nao valida o valor, e JSON
+  // carrega `\n`. E o comentario acima afirma equivalencia com o `LIKE`: sem a
+  // flag, a afirmacao seria falsa.
+  if (/pre.*venda|pre.*order|encomenda/s.test(s)) return false;
   return true;
 }

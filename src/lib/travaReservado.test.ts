@@ -40,6 +40,13 @@ describe("travaDeReservadoSeAplica", () => {
     for (const s of [
       "pre_venda", "pre-venda", "pre-order", "Pre-Order", "encomenda",
       "prevenda", "pre venda", "pre  venda", "pre order", "preorder",
+      // AS DUAS ULTIMAS FIXAM A POSICAO. Todas as anteriores casam no indice 0, e
+      // o `LIKE` do banco tem `%` na frente — casa em QUALQUER posicao. Sem elas,
+      // uma regex ancorada (`/^pre.*venda|.../`) passava 691/691, e a tela travaria
+      // o save de um produto `em_pre_venda` que o banco isenta.
+      "em_pre_venda", "produto pre-venda",
+      // E a quebra de linha, que o `%` casa e o `.` do JS so casa com a flag `s`.
+      "pre\nvenda",
     ]) {
       expect(travaDeReservadoSeAplica({ ...base, statusProduto: s }), s).toBe(false);
     }
