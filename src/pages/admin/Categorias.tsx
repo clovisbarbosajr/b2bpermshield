@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { descendantIds } from "@/lib/categoryTree";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { reordenarIrmaos } from "@/lib/ordemCategorias";
 import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Check, Monitor, Lock, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
@@ -94,11 +95,21 @@ const AdminCategorias = () => {
   const fetchData = async () => {
     // Mostrar também categorias inativas no admin (antes o filtro ativo=true
     // escondia permanentemente uma categoria desativada — bug D6).
-    const { data, error } = await supabase
-      .from("categorias")
-      .select("*")
-      .order("ordem")
-      .order("nome");
+    // PAGINA. O `.select("*")` solto corta em 1000 linhas sem erro, e este mesmo
+    // arquivo ja pagina `clientes` e `produtos` pelo mesmo motivo. Com a lista
+    // truncada nao e so a exibicao que fica errada: `moveCategory` e
+    // `sortAlphabetically` REESCREVEM `ordem` por cima do que leram, e o irmao
+    // que ficou fora do corte volta a colidir. O `.order("id")` desempata para o
+    // `range` ser deterministico.
+    let data: Categoria[] | null = null;
+    let error: { message: string } | null = null;
+    try {
+      data = await fetchAllRows<Categoria>((from, to) => supabase
+        .from("categorias").select("*")
+        .order("ordem").order("nome").order("id", { ascending: true }).range(from, to) as any);
+    } catch (e: any) {
+      error = { message: e?.message ?? String(e) };
+    }
     setLoading(false);
     // Sem isto a tela dizia "No categories yet" quando a LEITURA falhou, e a lista
     // vazia ainda desarmava a guarda de ciclo (`parentesProibidos`). Mantem o que
@@ -337,38 +348,38 @@ const AdminCategorias = () => {
     if (direction === "up" && idx <= 0) return;
     if (direction === "down" && idx >= siblings.length - 1) return;
 
-    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-    const swapCat = siblings[swapIdx];
-
-    // EMPATE EM `ordem` REINDEXA OS IRMAOS, em vez de trocar dois valores iguais.
+    // SEMPRE REINDEXA os irmaos — nunca troca dois valores de `ordem`.
     //
-    // `ordem` e `NOT NULL DEFAULT 0` e o formulario de nova categoria parte de 0:
-    // tres categorias criadas por esta tela ficam todas com 0, e a troca gravava
-    // 0 e 0 — as duas escritas PASSAVAM, nenhum toast aparecia, e o botao nao
-    // fazia nada, quantas vezes se clicasse. O sync tambem nao garante ordem
-    // distinta (`parseInt(c.position || c.sort_order || "0") || 0`), entao com um
-    // B2BWave que nao mande `position` a arvore INTEIRA fica assim.
-    if (swapCat.ordem === cat.ordem) {
-      const nova = [...siblings];
-      nova[idx] = swapCat;
-      nova[swapIdx] = cat;
-      const erros = await Promise.all(nova.map((c, i) =>
-        supabase.from("categorias").update({ ordem: i } as any).eq("id", c.id)));
-      fetchData();
-      const errR = erros.find((r) => r.error)?.error;
-      if (errR) toast.error("Could not reorder — the list may be out of order, refresh and try again: " + errR.message);
+    // O ramo de troca so estava correto quando os DOIS vizinhos tinham `ordem`
+    // distinta entre si E de todo o resto. `ordem` e `NOT NULL DEFAULT 0`, o
+    // formulario de nova categoria parte de 0, e o sync nao garante valor
+    // distinto (`parseInt(c.position || c.sort_order || "0") || 0`), entao empate
+    // e o estado NORMAL desta arvore. Com empate no PAR, a troca gravava 0 e 0:
+    // as duas escritas passavam e o botao nao fazia nada. E com empate entre
+    // OUTROS irmaos — `Z(0), A(1), B(1)`, clicar "down" em Z — a troca passava
+    // pela guarda do par, gravava Z:=1, e a releitura por `(ordem, nome)` punha
+    // Z depois de B: um clique, DUAS casas, sem toast nenhum.
+    //
+    // Reindexar 0..n-1 acerta os dois casos e um monte de outros, entao o ramo de
+    // troca sai inteiro em vez de ganhar mais uma guarda.
+    const nova = reordenarIrmaos(siblings, idx, direction);
+    // `.select("id")` em CADA escrita, pelo mesmo motivo que `handleSave` e
+    // `handleDelete` ganharam: a RLS de `categorias` e admin-only
+    // (20260317043654:177) e esta tela e `perm="view_products"`, que manager e
+    // warehouse tem. Sem confirmar, o UPDATE deles voltava 204 com `error: null`
+    // e o botao Move era um no-op MUDO — o mesmo sintoma que a reindexacao veio
+    // consertar.
+    const escritas = await Promise.all(nova.map((c, i) =>
+      supabase.from("categorias").update({ ordem: i } as any).eq("id", c.id).select("id")));
+    fetchData();
+    const errR = escritas.find((r) => r.error)?.error;
+    if (errR) {
+      toast.error("Could not reorder — the list may be out of order, refresh and try again: " + errR.message);
       return;
     }
-
-    const [a, b] = await Promise.all([
-      supabase.from("categorias").update({ ordem: swapCat.ordem } as any).eq("id", cat.id),
-      supabase.from("categorias").update({ ordem: cat.ordem } as any).eq("id", swapCat.id),
-    ]);
-    fetchData();
-    // Sao DUAS escritas: se so uma passar, as duas categorias ficam com a mesma
-    // `ordem` e a lista embaralha na proxima carga. Antes isso acontecia calado.
-    const err = a.error ?? b.error;
-    if (err) toast.error("Could not swap the order — the list may be out of order, refresh and try again: " + err.message);
+    if (escritas.some((r) => !r.data?.length)) {
+      toast.error("Nothing was reordered — you do not have permission to change categories.");
+    }
   };
 
   const sortAlphabetically = async () => {
@@ -377,9 +388,18 @@ const AdminCategorias = () => {
     // passaram: a ordenacao fica pela METADE, e antes a tela dizia "ordenado".
     // Parar no primeiro erro e dizer ate onde foi e melhor que fingir sucesso.
     for (let i = 0; i < sorted.length; i++) {
-      const { error } = await supabase.from("categorias").update({ ordem: i } as any).eq("id", sorted[i].id);
+      const { data: gravado, error } = await supabase.from("categorias")
+        .update({ ordem: i } as any).eq("id", sorted[i].id).select("id");
       if (error) {
         toast.error(`Sorting stopped at "${sorted[i].nome}" — the first ${i} were reordered: ${error.message}`);
+        fetchData();
+        return;
+      }
+      // Zero linhas sem erro e a RLS recusando calada (manager/warehouse chegam
+      // nesta tela). Sem isto, o laco ia ate o fim e a tela dizia "Categories
+      // sorted alphabetically" com NADA gravado.
+      if (!gravado?.length) {
+        toast.error("Nothing was sorted — you do not have permission to change categories.");
         fetchData();
         return;
       }

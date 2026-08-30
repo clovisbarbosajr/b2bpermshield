@@ -86,7 +86,7 @@ const AdminDashboard = () => {
         // recorte ARBITRARIO: a mesma tela recarregada dava outro numero, e
         // nenhum dos dois estava certo. `.order("id")` porque paginar por
         // OFFSET exige ordem estavel.
-        fetchAllRows((f, t) => supabase.from("pedidos").select("created_at, total, subtotal, status").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedidos").select("id, created_at, total, subtotal, status").order("id", { ascending: true }).range(f, t)),
       ]);
       // `error` ignorado devolvia 0 produtos / 0 clientes como se fosse o numero real.
       if (pr.error) throw pr.error;

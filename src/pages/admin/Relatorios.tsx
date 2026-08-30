@@ -35,11 +35,11 @@ const AdminRelatorios = () => {
     const fetch = async () => {
       const [ped, prod, it] = await Promise.all([
         fetchAllRows((f, t) => supabase.from("pedidos").select("*, clientes(nome, empresa)").order("id", { ascending: true }).range(f, t)),
-        fetchAllRows((f, t) => supabase.from("produtos").select("id, nome, sku, preco, estoque_total, estoque_reservado, quantidade_minima").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("produtos").select("id, nome, sku, preco, estoque_total, estoque_reservado, quantidade_minima, ativo, rastrear_estoque").order("id", { ascending: true }).range(f, t)),
         // `pedido_id` é necessário pra excluir itens de pedido CANCELADO do
         // "Top Products" (a receita total já os exclui — os dois números do
         // mesmo painel se contradiziam).
-        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, quantidade, subtotal").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("id, pedido_id, produto_id, nome_produto, quantidade, subtotal").order("id", { ascending: true }).range(f, t)),
       ]);
       setPedidos(ped);
       setProdutos(prod);
@@ -101,8 +101,22 @@ const AdminRelatorios = () => {
   }, {});
   const topProducts = (Object.values(productSales) as { name: string; qty: number; revenue: number }[]).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
 
-  // Low stock
-  const lowStock = produtos.filter((p) => (p.estoque_total - p.estoque_reservado) <= p.quantidade_minima);
+  // Low stock — SO produto ativo e SO produto com estoque monitorado.
+  //
+  // Sem os dois filtros, produto desativado com estoque 0 e `quantidade_minima`
+  // no default 1 satisfazia `0 - 0 <= 1` e entrava: um catalogo com centenas de
+  // desativados enchia o card e a aba de itens que ninguem vende mais, afogando
+  // o sinal de verdade. `rastrear_estoque = false` e ruido por definicao — o
+  // `estoque_total` desses nao quer dizer nada. O `?? true` e o mesmo default que
+  // o `ProductEdit` usa.
+  //
+  // ATENCAO, e decisao do dono: `quantidade_minima` e a quantidade minima de
+  // COMPRA (MOQ) — e assim que o carrinho e o export a usam —, nao ponto de
+  // reposicao, que nao existe como coluna. Entao este card responde hoje "sobrou
+  // menos do que o cliente e obrigado a levar de uma vez", que nao e a mesma
+  // pergunta que o nome "Low Stock" faz.
+  const lowStock = produtos.filter((p) =>
+    p.ativo && (p.rastrear_estoque ?? true) && (p.estoque_total - p.estoque_reservado) <= p.quantidade_minima);
 
   // Summary stats
   const totalRevenue = pedidos.filter((p) => canonicalStatus(p.status) !== "cancelled").reduce((sum, p) => sum + Number(p.total), 0);

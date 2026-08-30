@@ -12,6 +12,7 @@
 // o modulo existe (vitest roda em Node).
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
+import { fatiaEntre } from "@/test/fatia";
 
 const ler = (f: string) => readFileSync(f, "utf-8");
 const semComentario = (f: string) =>
@@ -46,17 +47,34 @@ describe("Estoque: o ajuste nao pode deixar disponivel negativo", () => {
     expect(src, "a trava nunca e liberada").toMatch(/finally \{[\s\S]{0,80}ajustandoRef\.current = false;/);
   });
 
-  it("o realtime aplica UPDATE no lugar, sem recarregar a tabela inteira", () => {
-    // Com `event: "*"` + `fetchData()`, salvar 40 linhas no InventoryAdjustment ou
-    // uma rodada do sync disparava 40 recargas completas — e, sem guarda de ordem,
-    // a resposta de uma recarga antiga podia deixar estoque velho na grade.
+  it("a recarga e por RAJADA e a leitura tem guarda de ordem", () => {
+    // Historico: era `event: "*"` + `fetchData()` direto, uma recarga por evento
+    // (40 linhas no InventoryAdjustment = 40 recargas). A tentativa seguinte
+    // aplicou `payload.new` em memoria e criou dois defeitos piores: a publicacao
+    // de `produtos` so traz `(id, estoque_total, estoque_reservado)`
+    // (20260828010000), e esta tela EXIBE e BUSCA por `nome`/`sku` — rename nunca
+    // chegava na grade; e sumiu o refetch, que era quem reparava resposta
+    // atrasada. A forma certa e recarga debounced + guarda de ordem.
     const src = f();
-    // NENHUM handler pode ser `event: "*"`: com curinga, todo UPDATE volta a
-    // recarregar a tabela inteira, independente do que venha depois.
-    expect(src, "o realtime voltou a escutar todos os eventos no mesmo handler")
-      .not.toContain('event: "*"');
-    expect(src, "o UPDATE deixou de ser aplicado no lugar")
-      .toMatch(/event: "UPDATE"[\s\S]{0,300}?setProdutos\(\(prev\) => prev\.map/);
+    // Asserts por SUBSTRING, e nao por regex: regex escrito por gerador ja
+    // chegou aqui sem as barras de escape, virando um assert que nao protegia
+    // nada (`docs/LOG-TRABALHO.md`, o caso dos dois bytes de backspace).
+    expect(src, "o patch em memoria voltou, e com ele o rename que nunca chega")
+      .not.toContain("setProdutos((prev) => prev.map");
+    expect(src, "sumiu o debounce: voltou uma recarga por evento")
+      .toContain("clearTimeout(recargaRef.current);");
+    expect(src, "sumiu o timer que junta a rajada numa leitura so")
+      .toContain("recargaRef.current = setTimeout(() => fetchData(), 300);");
+    expect(src, "o timer nao e limpo no cleanup do efeito")
+      .toContain("return () => { clearTimeout(recargaRef.current); supabase.removeChannel(channel); };");
+    // A guarda de ordem mora no `fetchData`, e vale para TODOS os chamadores.
+    expect(src, "sumiu o contador de carga").toContain("const minha = ++cargaSeq.current;");
+    expect(fatiaEntre(src, "const minha = ++cargaSeq.current;", "setProdutos(data)", 12),
+      "a resposta atrasada voltou a poder escrever na grade")
+      .toContain("if (minha !== cargaSeq.current) return;");
+    // A leitura precisa continuar trazendo as colunas que a grade exibe e filtra.
+    expect(src, "a leitura deixou de trazer nome/sku")
+      .toContain('select("id, nome, sku, estoque_total, estoque_reservado")');
   });
 });
 
@@ -188,12 +206,28 @@ describe("Categorias: escrita confirmada, cascata contada, ordem que anda", () =
       .toMatch(/\{loadError && flatList\.length > 0 &&/);
   });
 
-  it("`Move up/down` reindexa quando os irmaos empatam em `ordem`", () => {
-    // `ordem` e NOT NULL DEFAULT 0 e o formulario parte de 0: irmaos criados pela
-    // tela ficavam todos com 0, a troca gravava 0 e 0, as duas escritas passavam e
-    // o botao nao fazia nada — sem erro e sem toast.
-    expect(f(), "o empate de ordem voltou a gravar dois valores iguais")
-      .toMatch(/swapCat\.ordem === cat\.ordem[\s\S]{0,400}?update\(\{ ordem: i \}/);
+  it("`Move up/down` usa o reordenador puro, que tem teste que EXECUTA", () => {
+    // O assert anterior exigia literalmente `swapCat.ordem === cat.ordem` — ou
+    // seja, travava a forma que continha o defeito (o ramo de troca ainda movia
+    // DUAS casas quando o empate era entre OUTROS irmaos). A regra saiu da tela
+    // para `lib/ordemCategorias.ts` e o comportamento e conferido em
+    // `ordemCategorias.test.ts`, com o caso `Z(0), A(1), B(1)`. Aqui fica so a
+    // fiacao: a tela nao pode voltar a calcular ordem por conta propria.
+    const src = f();
+    expect(src, "a tela deixou de usar o reordenador").toContain("reordenarIrmaos(siblings, idx, direction)");
+    expect(src, "voltou a trocar dois valores de ordem dentro da tela")
+      .not.toContain("update({ ordem: swapCat.ordem }");
+    // Move e Sort escrevem em `categorias`, cuja RLS e admin-only, numa tela que
+    // manager e warehouse alcancam (`perm="view_products"`). Sem confirmar a
+    // linha, o Move era no-op MUDO e o Sort dizia "sorted" com zero gravacoes.
+    expect(src, "`Move` voltou a gravar ordem sem confirmar a linha")
+      .toContain('.eq("id", c.id).select("id")');
+    expect(src, "`Sort` voltou a gravar ordem sem confirmar a linha")
+      .toContain('.eq("id", sorted[i].id).select("id")');
+    expect(src, "sumiu a recusa de quem nao tem permissao para reordenar")
+      .toContain("Nothing was reordered");
+    expect(src, "sumiu a recusa de quem nao tem permissao para ordenar")
+      .toContain("Nothing was sorted");
   });
 });
 

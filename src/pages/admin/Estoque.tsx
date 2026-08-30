@@ -29,18 +29,33 @@ const AdminEstoque = () => {
   // Contador de pedido: so a resposta do clique MAIS RECENTE pode escrever.
   const pedidoSeq = useRef(0);
 
+  // Contador de CARGA: so a resposta da leitura mais recente pode escrever.
+  //
+  // A leitura pagina, entao demora, e ha varios chamadores (mount, realtime, e o
+  // fim de cada ajuste). Sem isto, uma carga disparada ANTES de uma reserva podia
+  // chegar DEPOIS e devolver a linha inteira com o valor anterior de
+  // estoque_reservado: a coluna Available passava a prometer unidade que nao
+  // existe, por tempo indeterminado e sem erro nenhum. A guarda mora AQUI, na
+  // funcao compartilhada, e nao no chamador do realtime -- vale para todos.
+  const cargaSeq = useRef(0);
+  // Junta a rajada de eventos do realtime numa leitura so.
+  const recargaRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
   const fetchData = async () => {
     // Pagina de verdade (o PostgREST corta em 1000 sem erro) e mostra o erro em
     // vez de virar lista vazia com cara de banco sem produto.
+    const minha = ++cargaSeq.current;
     try {
       const data = await fetchAllRows<any>((f, t) => supabase.from("produtos")
         .select("id, nome, sku, estoque_total, estoque_reservado").order("nome").order("id", { ascending: true }).range(f, t) as any);
+      if (minha !== cargaSeq.current) return;
       setProdutos(data);
     } catch (e: any) {
+      if (minha !== cargaSeq.current) return;
       console.error(e);
       toast.error("Could not load stock. Please try again.");
     } finally {
-      setLoading(false);
+      if (minha === cargaSeq.current) setLoading(false);
     }
   };
 
@@ -50,28 +65,26 @@ const AdminEstoque = () => {
   useEffect(() => {
     const channel = supabase
       .channel("admin-estoque-produtos")
-      // UPDATE e aplicado NO LUGAR, sem refetch — o mesmo que
-      // `portal/Catalogo.tsx:296` ja faz.
+      // UMA recarga por RAJADA, e nao uma por evento.
       //
-      // Com `() => fetchData()` em `event: "*"`, salvar 40 linhas no
+      // Com `() => fetchData()` direto em `event: "*"`, salvar 40 linhas no
       // `InventoryAdjustment` ou uma rodada do sync disparava 40 recargas da
-      // tabela inteira. E, sem guarda de ordem, a resposta de uma recarga ANTIGA
-      // podia chegar por ultimo e deixar estoque velho na grade.
+      // tabela inteira. Aplicar `payload.new` em memoria resolvia isso e criava
+      // dois defeitos piores: a publicacao de `produtos` esta fixada em
+      // `(id, estoque_total, estoque_reservado)` (20260828010000), e esta tela
+      // exibe e BUSCA por `nome` e `sku` -- um rename no ProductEdit ou vindo do
+      // sync nunca chegava na grade, e procurar pelo nome novo nao achava a
+      // linha; e o refetch, que era quem reparava uma resposta atrasada, deixava
+      // de rodar no UPDATE.
       //
-      // A publicacao de `produtos` esta fixada em `id, estoque_total,
-      // estoque_reservado` (20260828010000) — exatamente o que esta tela usa.
-      // INSERT e DELETE continuam recarregando: ali a lista muda de tamanho.
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "produtos" }, (payload: any) => {
-        const n = payload.new;
-        if (!n?.id) return;
-        setProdutos((prev) => prev.map((p) => (p.id === n.id
-          ? { ...p, estoque_total: n.estoque_total ?? p.estoque_total, estoque_reservado: n.estoque_reservado ?? p.estoque_reservado }
-          : p)));
+      // O debounce mantem o ganho (uma leitura por rajada) sem abrir mao de
+      // nenhuma coluna, e a guarda de ordem do `fetchData` cuida do atraso.
+      .on("postgres_changes", { event: "*", schema: "public", table: "produtos" }, () => {
+        clearTimeout(recargaRef.current);
+        recargaRef.current = setTimeout(() => fetchData(), 300);
       })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "produtos" }, () => fetchData())
-      .on("postgres_changes", { event: "DELETE", schema: "public", table: "produtos" }, () => fetchData())
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => { clearTimeout(recargaRef.current); supabase.removeChannel(channel); };
   }, []);
 
   const openAjuste = async (p: any) => {

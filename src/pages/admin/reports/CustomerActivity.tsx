@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { soDataLocal } from "@/lib/dataLocal";
 import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
@@ -65,7 +66,17 @@ const CustomerActivity = () => {
   const paginated = reportData.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleExport = () => {
-    exportToCSV(reportData, "customer_activity", [
+    // As datas saem no fuso LOCAL, como a grade ja mostra (`toLocaleDateString`).
+    // Cruas, eram o ISO com offset: um pedido de 30/ago as 22h no Brasil saia
+    // `2026-08-31...` no CSV e "8/30/2026" na tela — o arquivo e a tela
+    // discordavam do DIA. `soDataLocal` e o helper testado disso.
+    const paraCsv = reportData.map((d) => ({
+      ...d,
+      firstOrder: soDataLocal(d.firstOrder),
+      lastOrder: soDataLocal(d.lastOrder),
+      registered: soDataLocal(d.registered),
+    }));
+    exportToCSV(paraCsv, "customer_activity", [
       { key: "nome", label: "Customer" },
       { key: "empresa", label: "Company" },
       { key: "email", label: "Email" },

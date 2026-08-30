@@ -4253,3 +4253,55 @@ numa explicacao casava como se fosse JSX).
 
 Verificacao: `npm test` 576/576 em 56 arquivos, `tsc` limpo, `npm run build` ok,
 `check-edge` ok. ~25 mutantes plantados nas duas rodadas; todos reprovam a suite.
+
+### 2026-08-30 — checagem de integracao do diff agregado, e 18 mutantes independentes
+
+A leva do Grupo H estava na arvore sem commit e sem entrada no log. Antes de
+fechar, rodei a checagem de integracao que ainda faltava e um conjunto NOVO de
+mutantes, escrito sem olhar os ~25 das duas rodadas anteriores — a pergunta era se
+cada correcao da leva tem um mutante que a MATA, e nao se os mutantes de quem
+escreveu a correcao morrem.
+
+`FEITO` — **integracao**: `npm test` (que encadeia `check-migrations`,
+`check-sql`, `check-edge` e `tsc`) deu **576/576 em 56 arquivos**; 194
+migrations, 197 `.sql` e 16 edge functions OK; `npm run build` em 1.57s (o aviso
+de chunk > 500 kB e antigo, nao e desta leva).
+
+`FEITO` — **18 mutantes, 18 mortos**, um por correcao da leva: o `.lte` do
+reservado, a trava por ref e o curinga do realtime no `Estoque`; a regua inativa,
+a chave por nome e o `.or()` cru no `ProductExport`; o `.or()` cru da busca do
+`OrderDetail`; o cabecalho sem escape no `export-csv`; o botao de import sem
+guarda de papel; a confirmacao do update, a recusa quando nao da para contar a
+cascata, o erro de refetch com a lista cheia e a reindexacao de `ordem` empatada
+no `Categorias`; o update de zero linhas, o `setValues` nao funcional e a
+contagem da cascata no `Options`; e as duas metades do escape do
+`postgrestOr` (aspa e barra). Nenhum sobreviveu, e a arvore voltou ao estado
+original depois de cada um.
+
+
+`FEITO` — **rodada de cacador sobre a leva ja commitada**, dois recortes.
+Recorte A (`Estoque`, `Options`, `OrderDetail`, `postgrestOr`): 5 achados, o mais
+grave o refetch sem guarda de ordem que virou o UNICO caminho de reparo depois que
+o realtime passou a aplicar UPDATE em memoria. Recorte B (`Categorias`,
+`ProductExport`, `export-csv`, `ProductImport`): 7 achados, tres deles medios em
+`Categorias` — a guarda de empate so ve o par adjacente, a reindexacao grava a
+lista inteira sem CAS, e nem `moveCategory` nem `sortAlphabetically` confirmam a
+escrita (para manager, `sortAlphabetically` dispara `toast.success` com zero linhas
+gravadas). `postgrestOr`, `OrderDetail`, a guarda de papel do `ProductImport` e a
+contagem de cascata passaram sem achado.
+
+`INICIADO` — cetico sobre os 12 achados, antes de qualquer correcao.
+
+`FEITO` — **auditoria de `TabelasPreco.tsx`**, a tela de regua de preco, que nunca
+tinha sido varrida. 8 achados. Os tres graves sao todos da mesma familia: o que a
+tela OFERECE nao tem efeito nenhum no preco cobrado. `is_default` nao e lido por
+`pricing.ts`, nem por `preco_autoritativo`, nem pelo cadastro de cliente — o badge
+"Default" existe e o sistema inteiro ignora. `ativo = false` nao desliga preco:
+desativar a regua nao encerra a promocao, e ainda esconde a amarracao do admin,
+porque o `CustomerEdit` so carrega reguas ativas — a ficha diz "sem regua"
+enquanto o cliente e cobrado por ela. E renomear regua espelhada forka o sync, que
+casa POR NOME: os precos da origem vao para uma regua nova e vazia, e os clientes
+ficam na renomeada com o preco do dia do rename, para sempre.
+
+`INICIADO` — cetico sobre os 8, com pedido explicito de separar o que da para
+corrigir sozinho do que e decisao do dono.

@@ -9,6 +9,16 @@ import { exportToCSV } from "@/lib/export-csv";
 
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { valorOr } from "@/lib/postgrestOr";
+// Os nomes de coluna FIXOS do formato B2BWave, na ordem em que este arquivo os
+// escreve. Uma regua de preco com um destes nomes colide com a coluna fixa; ver o
+// desempate em `rows`.
+const COLUNAS_FIXAS = [
+  "product_sku", "category_path", "product_name", "product_desc",
+  "length", "width", "height", "brand", "product_unit", "product_active",
+  "quantity", "quantity_monitor", "can_backorder", "minimum_quantity",
+  "maximum_quantity", "box_quantity", "barcode", "reference_code", "product_upc",
+];
+
 const AdminProductExport = () => {
   const [priceLists, setPriceLists] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -89,9 +99,24 @@ const AdminProductExport = () => {
         });
         rotulos = rotuloDaTabela;
       } else {
-        const pl = priceLists.find(p => p.id === selectedPriceList);
+        // CONFERE QUE A REGUA AINDA ESTA ATIVA, na hora do export.
+        //
+        // O dropdown filtra `ativo = true`, mas e carregado UMA vez no mount e
+        // nunca mais. O sync do B2BWave desativa regua sozinho
+        // (`b2bwave-sync:1822'), entao com a tela aberta durante um sync a opcao
+        // continua la e o export saia com preco de regua MORTA — o mesmo defeito
+        // que o ramo "all" acabou de fechar, so que por outro caminho. Aproveita
+        // e usa o nome fresco no cabecalho, em vez do lido no mount.
+        const { data: viva, error: vErr } = await supabase.from("tabelas_preco")
+          .select("nome").eq("id", selectedPriceList).eq("ativo", true).maybeSingle();
+        if (vErr) { toast.error("Could not check the price list: " + vErr.message); setExporting(false); return; }
+        if (!viva) {
+          toast.error("That price list is no longer active — reload the page and pick another one. Nothing was exported.");
+          setExporting(false);
+          return;
+        }
         priceListNames = [selectedPriceList];
-        rotulos = { [selectedPriceList]: pl?.nome || selectedPriceList };
+        rotulos = { [selectedPriceList]: viva.nome || selectedPriceList };
         const items = await fetchAllRows<any>((from, to) =>
           supabase.from("tabela_preco_itens").select("produto_id, preco")
             .eq("tabela_preco_id", selectedPriceList)
@@ -132,7 +157,16 @@ const AdminProductExport = () => {
           // rotulos empatarem, o id desempata — o CSV nao pode ter duas colunas
           // com o mesmo cabecalho.
           const nome = rotulos[plId] || plId;
-          const repetido = priceListNames.filter((o) => (rotulos[o] || o) === nome).length > 1;
+          // O desempate compara com as OUTRAS REGUAS **e com as colunas fixas**.
+          // `exportToCSV` e chamado sem `columns`, entao as colunas saem de
+          // `Object.keys(row)` — uma regua chamada `product_sku` nao virava duas
+          // colunas, virava UMA: o preco entrava por cima do SKU (e o
+          // `Object.assign` abaixo nao restaura), ou o `Object.assign` entrava
+          // por cima do preco quando o nome batia com `length`, `brand`,
+          // `quantity`... Nos dois casos o CSV sai com cabecalho certo e valor
+          // errado, sem diferenca nenhuma na contagem de colunas.
+          const repetido = COLUNAS_FIXAS.includes(nome)
+            || priceListNames.filter((o) => (rotulos[o] || o) === nome).length > 1;
           row[repetido ? `${nome} (${plId.slice(0, 8)})` : nome] = priceMap[plId]?.[p.id] ?? "";
         });
         Object.assign(row, {

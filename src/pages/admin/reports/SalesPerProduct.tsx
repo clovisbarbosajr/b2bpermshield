@@ -25,7 +25,7 @@ const SalesPerProduct = () => {
       // relatório mostra um total plausível e errado.
       const [ord, its] = await Promise.all([
         fetchAllRows((f, t) => supabase.from("pedidos").select("id, created_at, status").order("id", { ascending: true }).range(f, t)),
-        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, subtotal").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("id, pedido_id, produto_id, nome_produto, sku, subtotal").order("id", { ascending: true }).range(f, t)),
       ]);
       setOrders(ord);
       setItems(its);

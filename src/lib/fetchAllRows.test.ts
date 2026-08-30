@@ -143,6 +143,34 @@ describe("fetchAllRows", () => {
     expect(unicos.has("aaa-nova")).toBe(false);
   });
 
+  it("linha SEM `id` avisa que o dedupe esta desligado, e avisa UMA vez so", async () => {
+    // O dedupe e por `linha.id`. Quem esquece `id` no `select` perde a protecao
+    // INTEIRA, e nada dizia nada: o unico jeito de descobrir era ler `select` por
+    // `select` — e foi assim que onze chamadores passaram batido (os relatorios
+    // de `pedido_itens`, o Dashboard, a duplicacao de regua de preco). Numa
+    // tabela com escrita concorrente isso soma a mesma venda duas vezes.
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const semId = Array.from({ length: 1500 }, (_, i) => ({ produto_id: `p-${i}`, preco: i }));
+    const servir = (f: number, t: number) =>
+      Promise.resolve({ data: semId.slice(f, t + 1), error: null } as any);
+
+    const out = await fetchAllRows<any>(servir, { chunk: 1000 });
+
+    expect(out.length, "a leitura tem que continuar funcionando, so sem dedupe").toBe(1500);
+    expect(aviso, "sumiu o aviso de dedupe desligado").toHaveBeenCalled();
+    expect(String(aviso.mock.calls[0][0])).toContain("dedupe DESLIGADO");
+    expect(aviso.mock.calls.length, "o aviso repetiu por pagina — vira ruido e para de ser lido").toBe(1);
+    aviso.mockRestore();
+  });
+
+  it("com `id` presente NAO avisa", async () => {
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const tt = tabelaFalsa(linhas(1500));
+    await fetchAllRows<{ id: string }>(tt.servir, { chunk: 1000 });
+    expect(aviso, "avisou sobre dedupe desligado com `id` presente").not.toHaveBeenCalled();
+    aviso.mockRestore();
+  });
+
   it("remocao concorrente antes do offset PULA uma linha", async () => {
     const tt = tabelaFalsa(linhas(2000), {
       onPage: (p) => { if (p === 1) tt.remover("id-000000"); },

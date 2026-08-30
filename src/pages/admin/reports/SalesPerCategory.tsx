@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { categoryPath } from "@/lib/categoryTree";
 import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
@@ -24,9 +25,9 @@ const SalesPerCategory = () => {
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro.
       const [ord, its, prod, cat] = await Promise.all([
         fetchAllRows((f, t) => supabase.from("pedidos").select("id, created_at, status").order("id", { ascending: true }).range(f, t)),
-        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, subtotal").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("id, pedido_id, produto_id, subtotal").order("id", { ascending: true }).range(f, t)),
         fetchAllRows((f, t) => supabase.from("produtos").select("id, categoria_id").order("id", { ascending: true }).range(f, t)),
-        fetchAllRows((f, t) => supabase.from("categorias").select("id, nome").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("categorias").select("id, nome, parent_id").order("id", { ascending: true }).range(f, t)),
       ]);
       setOrders(ord);
       setItems(its);
@@ -63,15 +64,21 @@ const SalesPerCategory = () => {
       if (!orderDate) return;
       const d = new Date(orderDate);
       if (String(d.getFullYear()) !== yearFilter) return;
-      const catId = prodCatMap[i.produto_id];
-      const catName = catId ? catNameMap[catId] || "Uncategorized" : "Uncategorized";
-      if (!map[catName]) map[catName] = {};
-      map[catName][d.getMonth()] = (map[catName][d.getMonth()] || 0) + i.subtotal;
+      // A CHAVE E O ID DA CATEGORIA, e nao o nome.
+      //
+      // `categorias` e uma ARVORE (`parent_id`), e nome nao e unico entre nos de
+      // pais diferentes: "Accessories" sob Doors e "Accessories" sob Windows
+      // viravam UMA linha com a receita das duas somada, sem como separar nem na
+      // tela nem no CSV. O rotulo desambiguado sai do `categoryPath`, o mesmo
+      // helper que o resto do projeto ja usa.
+      const catId = prodCatMap[i.produto_id] || "";
+      if (!map[catId]) map[catId] = {};
+      map[catId][d.getMonth()] = (map[catId][d.getMonth()] || 0) + i.subtotal;
     });
 
     return Object.entries(map)
-      .map(([category, monthData]) => ({
-        category,
+      .map(([catId, monthData]) => ({
+        category: catId ? (categoryPath(categories as any, catId) || catNameMap[catId] || "Uncategorized") : "Uncategorized",
         ...Object.fromEntries(months.map((_, idx) => [`m${idx}`, monthData[idx] || 0])),
         total: Object.values(monthData).reduce((a, b) => a + b, 0),
       }))

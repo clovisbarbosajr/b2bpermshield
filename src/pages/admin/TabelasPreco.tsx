@@ -59,21 +59,72 @@ const AdminTabelasPreco = () => {
   const handleSave = async () => {
     setSaving(true);
     if (editing) {
-      const { error } = await supabase.from("tabelas_preco").update(form).eq("id", editing.id);
+      // `.select("id")` de confirmacao: UPDATE que casa ZERO linhas volta 204 com
+      // `error: null`. O caso real nao e corrida de escrita, e a linha ja APAGADA
+      // por outro admin — a tela dizia "Price list updated" e so o `fetchData`
+      // seguinte revelava que a regua nem existia mais.
+      const { data: gravado, error } = await supabase.from("tabelas_preco")
+        .update(form).eq("id", editing.id).select("id").maybeSingle();
       if (error) { toast.error(error.message); setSaving(false); return; }
+      if (!gravado) {
+        toast.error("Nothing was saved — this price list no longer exists. Reload the page.");
+        setSaving(false); setDialogOpen(false); fetchData();
+        return;
+      }
       toast.success("Price list updated");
     } else {
-      const { error } = await supabase.from("tabelas_preco").insert(form);
+      const { data: criado, error } = await supabase.from("tabelas_preco").insert(form).select("id").maybeSingle();
       if (error) { toast.error(error.message); setSaving(false); return; }
+      if (!criado) { toast.error("Nothing was created. Try again."); setSaving(false); return; }
       toast.success("Price list created");
     }
     setSaving(false); setDialogOpen(false); fetchData();
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this price list?")) return;
-    const { error } = await supabase.from("tabelas_preco").delete().eq("id", id);
+    // CONTA A CASCATA ANTES DE PERGUNTAR — molde de `settings/PrivacyGroups.tsx`.
+    //
+    // "Delete this price list?" escondia quatro efeitos, e o pior e silencioso:
+    //   `clientes.tabela_preco_id ON DELETE SET NULL` (20260318182853:35) — cada
+    //     cliente amarrado passa a comprar por `produtos.preco`, o preco de
+    //     balcao, sem que nada apareca na ficha dele nem na tela.
+    //   `tabela_preco_itens` CASCADE (20260318182853:24) — os precos custom somem.
+    //   `variante_precos` CASCADE (20260318202244:129) — idem, por variante.
+    //   `produto_descontos` CASCADE (20260318202244:57) — dormente hoje, mas
+    //     20260828040000 preservou essas linhas DE PROPOSITO para permitir
+    //     rollback; apagar a regua leva o rollback junto.
+    //
+    // Falha ao contar RECUSA o delete: nao da para avisar sobre o que nao se leu.
+    const [itens, variantes, descontos, clis] = await Promise.all([
+      supabase.from("tabela_preco_itens").select("id", { count: "exact", head: true }).eq("tabela_preco_id", id),
+      supabase.from("variante_precos").select("id", { count: "exact", head: true }).eq("tabela_preco_id", id),
+      supabase.from("produto_descontos").select("id", { count: "exact", head: true }).eq("tabela_preco_id", id),
+      supabase.from("clientes").select("id", { count: "exact", head: true }).eq("tabela_preco_id", id),
+    ]);
+    if (itens.error || variantes.error || descontos.error || clis.error) {
+      toast.error("Could not check what this price list is used by — nothing was deleted. Try again.");
+      return;
+    }
+    const partes: string[] = [];
+    if (clis.count) partes.push(`${clis.count} customer(s) will lose this price list — they will be charged the base price`);
+    if (itens.count) partes.push(`${itens.count} custom price(s) will be deleted`);
+    if (variantes.count) partes.push(`${variantes.count} variant price(s) will be deleted`);
+    if (descontos.count) partes.push(`${descontos.count} discount row(s) will be deleted`);
+    const NL = String.fromCharCode(10);
+    const aviso = partes.length
+      ? ["Delete this price list?", "", ...partes.map((p) => "• " + p), "", "This cannot be undone."].join(NL)
+      : "Delete this price list?";
+    if (!confirm(aviso)) return;
+    // `.select("id")` de confirmacao: DELETE que nao casa linha volta 204 com
+    // `error: null`, e a tela dizia "Price list removed" por cima de nada.
+    const { data: apagado, error } = await supabase.from("tabelas_preco")
+      .delete().eq("id", id).select("id").maybeSingle();
     if (error) { toast.error(error.message); return; }
+    if (!apagado) {
+      toast.error("Nothing was deleted — the price list no longer exists.");
+      fetchData();
+      return;
+    }
     toast.success("Price list removed"); fetchData();
   };
 
@@ -89,10 +140,19 @@ const AdminTabelasPreco = () => {
     // e o PostgREST corta em 1000 SEM erro. Uma leitura so copiava as primeiras 1000
     // e a tela ainda dizia "1000 price(s) copied" — a copia nascia incompleta, e o
     // que faltasse cairia no preco base, mais caro, sem ninguem notar.
-    let items: { produto_id: string; preco: number }[];
+    // O `id` VAI NO SELECT: `fetchAllRows` deduplica por `linha.id`, e sem a
+    // coluna TODA linha cai no ramo sem dedupe — a protecao ficava desligada
+    // exatamente aqui, calada (ordenar por coluna nao selecionada e legal no
+    // PostgREST, entao nem erro havia). `tabela_preco_itens.id` e uuid aleatorio:
+    // uma insercao concorrente (o proprio sync escreve nesta tabela) cai em
+    // posicao arbitraria, empurra a linha de fronteira para a pagina seguinte e
+    // ela volta DUAS vezes. O insert e um statement so contra
+    // `UNIQUE(tabela_preco_id, produto_id)`: falha inteiro, e sobra uma regua
+    // criada e VAZIA na grade, pronta para alguem amarrar um cliente nela.
+    let items: { id: string; produto_id: string; preco: number }[];
     try {
-      items = await fetchAllRows<{ produto_id: string; preco: number }>((from, to) =>
-        supabase.from("tabela_preco_itens").select("produto_id, preco")
+      items = await fetchAllRows<{ id: string; produto_id: string; preco: number }>((from, to) =>
+        supabase.from("tabela_preco_itens").select("id, produto_id, preco")
           .eq("tabela_preco_id", t.id).order("id", { ascending: true }).range(from, to));
     } catch (e: any) {
       toast.error("List created, but failed to read prices: " + (e?.message ?? String(e)));
@@ -191,9 +251,19 @@ const AdminTabelasPreco = () => {
         .upsert(upserts, { onConflict: "tabela_preco_id,produto_id" });
       error = r.error;
     }
-    if (!error && removes.length) {
+    // O DELETE VAI EM LOTES DE 100.
+    //
+    // O filtro `in.(...)` viaja na QUERY STRING, e o encoder do postgrest-js nem
+    // sequer poe aspas em uuid: sao 37 bytes por item. Limpar ~200 precos de uma
+    // regua ja passa de 7 KB de URL e bate na linha de requisicao do proxy (414).
+    // E o upsert acima JA foi commitado quando isso acontece: a regua ficava
+    // meio-aplicada, e como o erro sai antes do `setOrigPrices`, toda linha
+    // continuava suja e a retentativa refazia o mesmo delete gigante — nunca
+    // saia do lugar sozinho. O lote de 100 e o mesmo que o sync usa
+    // (`b2bwave-sync:1441`).
+    for (let i = 0; !error && i < removes.length; i += 100) {
       const r = await supabase.from("tabela_preco_itens").delete()
-        .eq("tabela_preco_id", selectedTabela.id).in("produto_id", removes);
+        .eq("tabela_preco_id", selectedTabela.id).in("produto_id", removes.slice(i, i + 100));
       error = r.error;
     }
     setSavingPrices(false);

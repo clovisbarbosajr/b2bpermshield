@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { paraInstanteLocal } from "@/lib/dataLocal";
 import { toast } from "sonner";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
@@ -53,7 +54,7 @@ const InventoryControl = () => {
       // "sold qty" saía plausível e errado.
       const [prod, its, cat] = await Promise.all([
         fetchAllRows<Product>((f, t) => supabase.from("produtos").select("id, sku, nome, custo, estoque_total, estoque_reservado, categoria_id, updated_at").order("id", { ascending: true }).range(f, t) as any),
-        fetchAllRows<OrderItem>((f, t) => supabase.from("pedido_itens").select("produto_id, quantidade, subtotal, pedidos(status)").order("id", { ascending: true }).range(f, t) as any),
+        fetchAllRows<OrderItem>((f, t) => supabase.from("pedido_itens").select("id, produto_id, quantidade, subtotal, pedidos(status)").order("id", { ascending: true }).range(f, t) as any),
         fetchAllRows<Category>((f, t) => supabase.from("categorias").select("id, nome").order("nome").order("id", { ascending: true }).range(f, t) as any),
       ]);
       setProducts(prod);
@@ -89,9 +90,15 @@ const InventoryControl = () => {
       if (appliedFilters.name && !p.nome.toLowerCase().includes(appliedFilters.name.toLowerCase())) return false;
       if (appliedFilters.code && !(p.sku ?? "").toLowerCase().includes(appliedFilters.code.toLowerCase())) return false;
       if (appliedFilters.lastModified) {
-        const filterDate = new Date(appliedFilters.lastModified);
-        const productDate = new Date(p.updated_at);
-        if (productDate < filterDate) return false;
+        // O `<input type="date">` da "YYYY-MM-DD", e `new Date("2026-08-30")` cru
+        // e meia-noite UTC — 21h do dia ANTERIOR no Brasil. O filtro "modificado
+        // a partir de 30/ago" passava a aceitar produto tocado nas ultimas horas
+        // do dia 29 (e, a leste de UTC, PERDIA linhas do proprio dia pedido).
+        // Cinco telas irmas ja tinham resolvido isso com um `+ "T00:00:00"`
+        // duplicado na mao — e foi essa duplicacao que deixou a sexta escapar.
+        // Aqui usa o helper testado (`dataLocal.test.ts`).
+        const inicio = paraInstanteLocal(appliedFilters.lastModified, "00:00:00");
+        if (inicio && new Date(p.updated_at) < new Date(inicio)) return false;
       }
       return true;
     });

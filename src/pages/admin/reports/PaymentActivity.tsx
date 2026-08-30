@@ -114,13 +114,18 @@ const PaymentActivity = () => {
         <div><label className="mb-1 block text-xs text-muted-foreground">From</label><Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} /></div>
         <div><label className="mb-1 block text-xs text-muted-foreground">To</label><Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} /></div>
       </div>
-      {/* Summary */}
+      {/* Summary — SO depois de carregar.
+          Estava FORA do ramo de `loading`: durante a carga inteira a tela exibia
+          "Total Revenue $0.00" como se fosse o numero final. Zero durante a carga
+          e indistinguivel de zero de verdade. */}
+      {!loading && (
       <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Total Revenue</p><p className="text-lg font-bold">{formatCurrency(totals.total)}</p></div>
         <div className="rounded-md border p-3"><p className="text-xs text-green-400">Paid</p><p className="text-lg font-bold text-green-400">{formatCurrency(totals.paid)}</p></div>
         <div className="rounded-md border p-3"><p className="text-xs text-yellow-400">Pending</p><p className="text-lg font-bold text-yellow-400">{formatCurrency(totals.pending)}</p></div>
         <div className="rounded-md border p-3"><p className="text-xs text-red-400">Cancelled</p><p className="text-lg font-bold text-red-400">{formatCurrency(totals.cancelled)}</p></div>
       </div>
+      )}
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>
       ) : (

@@ -69,7 +69,7 @@ const AdminProdutos = () => {
           fetchAllRows<any>((f, t) => supabase.from("privacy_groups").select("id, nome").eq("ativo", true).order("id", { ascending: true }).range(f, t) as any),
           fetchAllRows<any>((f, t) => supabase.from("tabelas_preco").select("id, nome").eq("ativo", true).order("nome").order("id", { ascending: true }).range(f, t) as any),
           // Traz o ID do grupo, não só o nome — ver o mapa abaixo.
-          fetchAllRows<any>((f, t) => supabase.from("produto_acesso").select("produto_id, privacy_group_id, grupo_nome").order("id", { ascending: true }).range(f, t) as any),
+          fetchAllRows<any>((f, t) => supabase.from("produto_acesso").select("id, produto_id, privacy_group_id, grupo_nome").order("id", { ascending: true }).range(f, t) as any),
         ]);
         setProdutos(p);
         setCategorias(c);

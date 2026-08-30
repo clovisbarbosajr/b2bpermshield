@@ -32,7 +32,7 @@ const OrdersSummary = () => {
       const [ord, cli, its] = await Promise.all([
         fetchAllRows((f, t) => supabase.from("pedidos").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }).range(f, t)),
         fetchAllRows((f, t) => supabase.from("clientes").select("id, nome, empresa").order("id", { ascending: true }).range(f, t)),
-        fetchAllRows<{ pedido_id: string }>((f, t) => supabase.from("pedido_itens").select("pedido_id").order("id", { ascending: true }).range(f, t) as any),
+        fetchAllRows<{ pedido_id: string }>((f, t) => supabase.from("pedido_itens").select("id, pedido_id").order("id", { ascending: true }).range(f, t) as any),
       ]);
       setOrders(ord);
       setCustomers(cli);
@@ -74,7 +74,13 @@ const OrdersSummary = () => {
   const handleExport = () => {
     exportToCSV(filtered.map((o) => {
       const c = custMap[o.cliente_id] || { nome: "—", empresa: "—" };
-      return { numero: o.numero, customer: c.nome, company: c.empresa, status: o.status, items: itemsCount[o.id] || 0, subtotal: o.subtotal, total: o.total, date: new Date(o.created_at).toLocaleDateString() };
+      // `statusLabel`, e nao o status CRU. `orderStatuses.ts` se declara fonte
+      // unica e mapeia os legados PT->EN (`recebido` -> Submitted); esta tela ja
+      // usa `canonicalStatus` no filtro e `statusLabel` na grade, e o export era
+      // o unico ponto que furava. O admin filtrava "Submitted", via "Submitted",
+      // e recebia um CSV com `recebido` misturado a `submitted` — quem filtrasse
+      // a planilha por "Submitted" nao achava os pedidos antigos.
+      return { numero: o.numero, customer: c.nome, company: c.empresa, status: statusLabel(o.status), items: itemsCount[o.id] || 0, subtotal: o.subtotal, total: o.total, date: new Date(o.created_at).toLocaleDateString() };
     }), "orders_summary", [
       { key: "numero", label: "Order #" },
       { key: "customer", label: "Customer" },
@@ -107,7 +113,12 @@ const OrdersSummary = () => {
         <div><label className="mb-1 block text-xs text-muted-foreground">From</label><Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} /></div>
         <div><label className="mb-1 block text-xs text-muted-foreground">To</label><Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} /></div>
       </div>
-      {/* Summary cards */}
+      {/* Summary cards — SO depois de carregar.
+          Estavam FORA do ramo de `loading`, entao durante a carga inteira a tela
+          mostrava cinco cards com `0` e `$0.00` como se fossem o resultado, com o
+          spinner logo abaixo. Zero durante a carga e indistinguivel de zero de
+          verdade, e isso acontecia em TODA abertura, nao so quando falhava. */}
+      {!loading && (
       <div className="mb-4 grid grid-cols-2 md:grid-cols-5 gap-3">
         {STATUSES.map((s) => {
           const count = filtered.filter((o) => canonicalStatus(o.status) === s).length;
@@ -121,6 +132,7 @@ const OrdersSummary = () => {
           );
         })}
       </div>
+      )}
       {loading ? (
         <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>
       ) : (

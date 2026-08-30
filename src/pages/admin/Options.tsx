@@ -218,12 +218,18 @@ const AdminOptions = () => {
         return;
       }
     }
-    // FORMA FUNCIONAL: o `values` desta closure e o do render ANTERIOR ao await
-    // do delete. Os inputs nao ficam desabilitados durante a ida ao servidor (o
-    // proprio `handleSave` deste arquivo registra isso), entao digitar noutra
-    // linha enquanto o delete roda fazia o array velho voltar por cima — e o
-    // valor antigo era regravado no Save seguinte, sem aviso.
-    setValues((prev: any[]) => prev.filter((_, i) => i !== idx));
+    // FILTRA PELA REFERENCIA DA LINHA, e nao pela POSICAO — a mesma regra que o
+    // `handleSave` deste arquivo ja segue ("chave = a PROPRIA LINHA, nunca a
+    // posicao").
+    //
+    // A forma funcional sozinha nao bastava: `idx` continua sendo o do render
+    // ANTERIOR ao await do delete, e a lixeira (`:333`) nunca fica desabilitada.
+    // Clicar em duas linhas com a rede lenta — digamos a 2 e depois a 5 — fazia o
+    // segundo filtro rodar sobre o array JA ENCURTADO pelo primeiro: sumia da
+    // tela a linha 6, que esta VIVA no banco, e ficava a 5, que ja foi APAGADA.
+    // No Save seguinte a linha fantasma caia na guarda de zero-linhas e acusava
+    // "removed elsewhere" — culpando outro admin pelo clique do proprio operador.
+    setValues((prev: any[]) => prev.filter((x) => x !== v));
     toast.success("Value removed");
   };
 

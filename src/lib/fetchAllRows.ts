@@ -28,6 +28,7 @@ export async function fetchAllRows<T = any>(
 ): Promise<T[]> {
   const out: T[] = [];
   const vistos = new Set<unknown>();
+  let avisouSemId = false;
   for (let from = 0; from < maxRows; from += chunk) {
     const { data, error } = await buildQuery(from, from + chunk - 1);
     if (error) {
@@ -57,7 +58,21 @@ export async function fetchAllRows<T = any>(
     // isso o dedupe nao resolve nem finge resolver.
     for (const linha of page) {
       const id = (linha as any)?.id;
-      if (id === undefined || id === null) { out.push(linha); continue; }
+      if (id === undefined || id === null) {
+        // AVISA UMA VEZ POR LEITURA que o dedupe esta DESLIGADO.
+        //
+        // Sem `id` no `select`, toda linha cai aqui e a protecao acima vira
+        // no-op — silenciosamente. O unico jeito de descobrir isso era ler
+        // `select` por `select`, e foi exatamente o que falhou em uma duzia de
+        // chamadores (os relatorios de `pedido_itens`, o Dashboard, a duplicacao
+        // de regua de preco). O contrato "traga `id`" precisa se anunciar.
+        if (!avisouSemId) {
+          avisouSemId = true;
+          console.warn("fetchAllRows: linhas sem `id` — dedupe DESLIGADO. Inclua `id` no select.");
+        }
+        out.push(linha);
+        continue;
+      }
       if (vistos.has(id)) continue;
       vistos.add(id);
       out.push(linha);

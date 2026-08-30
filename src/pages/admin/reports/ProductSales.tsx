@@ -24,7 +24,7 @@ const ProductSales = () => {
       // Paginado (fetchAllRows): o PostgREST corta em 1000 linhas SEM erro, e a
       // receita por produto saía plausível e errada.
       const [its, ord] = await Promise.all([
-        fetchAllRows((f, t) => supabase.from("pedido_itens").select("pedido_id, produto_id, nome_produto, sku, quantidade, subtotal").order("id", { ascending: true }).range(f, t)),
+        fetchAllRows((f, t) => supabase.from("pedido_itens").select("id, pedido_id, produto_id, nome_produto, sku, quantidade, subtotal").order("id", { ascending: true }).range(f, t)),
         fetchAllRows<{ id: string; status: string }>((f, t) => supabase.from("pedidos").select("id, status").order("id", { ascending: true }).range(f, t) as any),
       ]);
       setItems(its);
