@@ -5293,3 +5293,40 @@ npm test                Test Files 68 passed (68) / Tests 741 passed (741)
 npm run build           2474 modules transformed, built in 6.20s
                         (unico aviso: chunk de 2.19 MB, preexistente)
 ```
+
+`FEITO` — **commit + push: `f3ede0d`**, 16 arquivos, `9b3f3b9..f3ede0d main -> main`.
+`git status` limpo, `main` alinhado com `origin/main`.
+
+`BLOQUEADO` — **teste de estresse concorrente NAO rodou, e o motivo nao e
+esquecimento.** A regra do dono manda exercitar sob carga concorrente toda funcao
+mexida, e diz para pedir OK explicito antes de escrita concorrente em banco. As
+funcoes que esta leva mexeu e que SO quebram com paralelismo — o snapshot de
+`porChave`/`jaTem` contra outro admin escrevendo, `promoveAPrincipal` com duas
+escritas sem transacao, e a recusa silenciosa de RLS — moram DENTRO dos componentes
+de pagina e nao existem sem o cliente Supabase. Exercitar de verdade exige escrever
+no banco real, que e exatamente o que a regra proibe sem o OK.
+
+O que deu para provar sem banco esta provado: as duas funcoes puras extraidas tem
+teste de comportamento (`mapaSku.test.ts`, `linhaAfetada.test.ts`), e todo o resto
+tem contrato com mutante que o mata. O que FALTA e o estresse contra banco, e ele
+esta na lista do dono abaixo, com o combinado de identificacao e limpeza pendente
+de decisao dele.
+
+## Fila para a proxima janela
+
+1. ~~checagem de integracao do diff agregado~~ **FEITA** (janela das 16:30).
+2. ~~commit + push do que estiver verde~~ **FEITO** — `f3ede0d` empurrado.
+3. ~~os achados que nao dependem do dono~~ **FEITOS** — 18 corrigidos, ciclo fechado
+   em 6 rodadas, 42 mutantes mortos.
+4. **telas ainda nao auditadas: ZERO das que sao minhas para mexer.** As 18 do
+   escopo re-listado foram cobertas nesta leva. O que sobra das 35 sem teste sao as
+   9 de autenticacao, as 3 de notificacao, `settings/B2BWaveSync`, as 4 telas mortas
+   fora do menu e `Index`/`NotFound` — todas fora do meu alcance por regra do dono,
+   nao por falta de tempo.
+
+Item novo para a proxima janela, herdado desta: **varrer a classe "escrita que nao
+confirma linha afetada" nas telas de importacao**. O cetico marcou como
+PRE-EXISTENTE (nao e regressao desta leva) o UPDATE de `ImportCategories` e o de
+`ImportProductVariants`, que reportam "Updated" sem checar linha. `nadaFoiEscrito`
+ja existe; falta aplicar — com o cuidado de que ali o retorno e `maybeSingle()`
+(objeto ou null), nao array, entao a checagem e `gravada === null && !error`.
