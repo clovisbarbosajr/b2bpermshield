@@ -20,6 +20,8 @@ export type ClasseLog = 'enviado' | 'recusado' | 'sistema' | 'falhou';
 
 export function classificaLog(l: { status: string; channel: string; error: string | null }): ClasseLog {
   if (l.status === 'sent') return 'enviado';
+  if (l.error?.startsWith('skip:')) return 'recusado';
+  if (l.channel === '-') return 'sistema';
   return 'falhou';
 }
 
