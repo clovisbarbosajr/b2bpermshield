@@ -146,6 +146,22 @@ describe("as quatro telas usam a chave por numero", () => {
         expect(m[1], `${tela}: ${qual} voltou a usar a pagina nao limitada`).toBe("pageOk");
       }
     }
+    // AS SETAS NAO PODEM SAIR DA FAIXA, por um dos DOIS mecanismos validos: as tres
+    // telas do admin usam `disabled={pageOk ...}`; o portal usa `<button>` cru com
+    // `Math.max(1, ...)` / `Math.min(totalPages, ...)` no proprio `onClick`. Exigir
+    // `disabled` de todas reprovaria o portal, que esta correto.
+    //
+    // Medido: apagar o `disabled` do Next de `Clientes` passava verde — e com
+    // `paginaValida` no lugar o botao vira MORTO (clica e nao sai do lugar), ou
+    // seja, o controle recem-corrigido some em silencio.
+    const travada =
+      /disabled=\{pageOk <= 1\}/.test(fonte) && /disabled=\{pageOk >= totalPages\}/.test(fonte);
+    const clampada =
+      /setPage\(Math\.max\(1, pageOk - 1\)\)/.test(fonte) && /setPage\(Math\.min\(totalPages, pageOk \+ 1\)\)/.test(fonte);
+    expect(travada || clampada,
+      `${tela}: as setas nao estao presas a faixa — nem por \`disabled\`, nem por \`Math.max\`/\`Math.min\``)
+      .toBe(true);
+
     // Uma fatia por lista de paginacao (o portal tem duas, topo e rodape). Cortar
     // pelo proprio `.map(` evita o recorte a mao que ja ficou verde e parou de
     // proteger tres vezes neste projeto — ver `src/test/fatia.ts`. O portal chama

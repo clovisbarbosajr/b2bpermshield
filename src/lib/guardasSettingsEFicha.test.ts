@@ -13,7 +13,7 @@
  */
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { NOMES_DE_SISTEMA } from "./stock";
 
@@ -66,7 +66,21 @@ describe("ProductStatuses: o nome e chave de sistema", () => {
     // `LIMIT 1`. Renomear "Sold Out" devolve ao catalogo, comprável, todo produto
     // que o admin tirou de venda DE PROPOSITO com estoque em caixa.
     const src = f();
+    // A NORMALIZACAO E A METADE QUE FUNCIONA. Os nomes gravados sao title case
+    // (`Available`, `Sold Out`, ... — `20260318203107:17-22`) e a lista esta em
+    // minusculas: sem `.trim().toLowerCase()` o `includes` NUNCA casa, os dois
+    // avisos nunca disparam, e a correcao vira decoracao com a suite verde.
+    // Medido: mutante de 24 bytes, 681/681 verde.
     expect(src, "sumiu a lista de nomes de sistema").toContain("NOMES_DE_SISTEMA");
+    // `[^;]*` e nao `[^)]*`: o argumento tem parenteses aninhados
+    // (`String(...).trim().toLowerCase()`), entao parar no primeiro `)` cortava a
+    // expressao antes da normalizacao e o assert reprovava codigo correto.
+    const usos = src.match(/NOMES_DE_SISTEMA\.includes\([^;]*/g) ?? [];
+    expect(usos.length, "nao achei os usos da lista de nomes de sistema").toBe(2);
+    for (const u of usos) {
+      expect(u, "a comparacao perdeu a normalizacao — os nomes gravados sao title case, entao ela nunca casa")
+        .toContain(".trim().toLowerCase()");
+    }
     expect(src, "o rename de um status de fabrica voltou a ser silencioso")
       .toContain("Products are matched to this status BY NAME");
     expect(src, "o delete de um status de fabrica voltou a ser silencioso")
@@ -75,6 +89,13 @@ describe("ProductStatuses: o nome e chave de sistema", () => {
     // `return`, e foi exatamente esse mutante que sobreviveu em `Categorias`.
     expect(src, "o aviso de rename nao interrompe mais o save")
       .toMatch(/if \(eraDeSistema[\s\S]{0,600}?return;\s*\n\s*\}/);
+    // E O DO DELETE TAMBEM. A licao escrita duas linhas acima foi aplicada so ao
+    // rename: quinze linhas abaixo, o `confirm` do delete podia ser neutralizado
+    // (`)) { }` no lugar de `)) return;`) e o icone de lixeira apagava "Sold Out"
+    // sem uma pergunta — a um clique de devolver ao catalogo, comprável, todo
+    // produto tirado de venda de proposito. Medido: 681/681 verde.
+    expect(src, "o confirm do delete nao interrompe mais — a lixeira apaga sem perguntar")
+      .toMatch(/\)\) return;\s*\n\s*const \{ data: apagado, error \}/);
   });
 
   it("o comentario nao afirma mais uma FK que nao existe", () => {
@@ -95,6 +116,13 @@ describe("ProductStatuses: o nome e chave de sistema", () => {
     expect(src, "a gravacao voltou a nao confirmar a linha").toContain('.select("id").maybeSingle()');
     expect(src, "o delete voltou a nao confirmar a linha")
       .toContain('.delete().eq("id", r.id).select("id").maybeSingle()');
+    // O `.select("id")` SOZINHO NAO CONSERTA NADA — quem conserta e o `if (!data)`.
+    // Toda a premissa e "supabase-js nao lanca; UPDATE barrado por RLS = zero
+    // linhas com `error: null`". Medido: apagar este bloco passava 681/681.
+    expect(src, "a gravacao confirma a linha mas ignora o zero")
+      .toMatch(/if \(!data\) \{ toast\.error\("Nothing was saved[\s\S]{0,200}?return; \}/);
+    expect(src, "o delete confirma a linha mas ignora o zero")
+      .toMatch(/if \(!apagado\) \{ toast\.error\("Nothing was deleted[\s\S]{0,200}?return; \}/);
   });
 
   it("a coluna que esconde o produto usa icone explicito", () => {
@@ -124,6 +152,32 @@ describe("os seis nomes de sistema batem com o mapa que os traduz", () => {
     expect(valores.length, "o NAME_MAP encolheu").toBeGreaterThan(0);
     expect([...NOMES_DE_SISTEMA].sort(), "a lista de nomes de sistema divergiu do NAME_MAP")
       .toEqual([...valores].sort());
+
+    // ANCORADO NO SEED, e nao so nas duas constantes do MESMO arquivo. Comparar
+    // `NOMES_DE_SISTEMA` com `NAME_MAP` passa com os dois errados juntos: sao duas
+    // linhas de `stock.ts`, editadas na mesma janela. Quem precisa concordar e o
+    // BANCO — a migration que insere os seis status.
+    //
+    // Se um nome divergir, o `includes` nunca casa e o aviso de rename vira
+    // decoracao, em silencio: exatamente o modo de falha que este teste existe
+    // para impedir.
+    //
+    // ACHA A MIGRATION PELO CONTEUDO, e nao pelo nome: nome de migration tem hash,
+    // e um caminho fixo que deixa de existir vira teste que nao roda mais.
+    const dir = "supabase/migrations";
+    const arquivo = readdirSync(dir)
+      .filter((n: string) => n.endsWith(".sql"))
+      .find((n: string) => ler(`${dir}/${n}`).includes("INSERT INTO public.product_statuses"));
+    expect(arquivo, "nao achei a migration que insere os status de fabrica").toBeTruthy();
+    const seed = ler(`${dir}/${arquivo}`);
+    const insert = seed.match(/INSERT INTO public\.product_statuses[\s\S]*?;/);
+    expect(insert, "nao achei o seed dos status").toBeTruthy();
+    const gravados = [...insert![0].matchAll(/'([^']+)'/g)].map((m) => m[1].trim().toLowerCase());
+    expect(gravados.length, "o seed dos status encolheu").toBeGreaterThan(0);
+    for (const n of NOMES_DE_SISTEMA) {
+      expect(gravados, `"${n}" nao existe no seed — o aviso de rename nunca vai disparar para ele`)
+        .toContain(n);
+    }
   });
 });
 
@@ -174,8 +228,18 @@ describe("ProductEdit: privacidade por cliente e trava de reservado", () => {
     // E A MENSAGEM TEM QUE DIZER A VERDADE. Sem `porFiltroExtra`, zero linhas
     // virava "someone else changed this product" e o admin recarregava a ficha
     // para ver exatamente o mesmo numero.
+    // O RAMO CERTO, e nao so a presenca do nome. Medido: inverter o ternario para
+    // `!r.porFiltroExtra` passava verde — e ai o conflito de TOKEN diria "aumente a
+    // quantidade", fazendo o admin subir o estoque por cima do save do colega.
     expect(src, "o conflito por trava de estoque voltou a acusar um colega que nao existe")
-      .toContain("r.porFiltroExtra");
+      .toMatch(/toast\.error\(r\.porFiltroExtra\s*\n?\s*\?/);
+    // E A TRAVA SO QUANDO DEVIDA. Incondicional, ela barrava o save de QUALQUER
+    // campo em todo produto com `reservado > total` — que e o estado ESPERADO de
+    // backorder, pre-venda e pedido criado por admin (o gatilho isenta os tres).
+    expect(src, "a trava de reservado voltou a ser incondicional")
+      .toContain("travaDeReservadoSeAplica({");
+    expect(src, "a trava e aplicada mesmo quando nao e devida")
+      .toContain("travaEstoque ? (q: any) => q.lte(");
   });
 });
 
@@ -191,6 +255,11 @@ describe("CustomerEdit: os toggles do funcionario confirmam a escrita", () => {
     expect(src, "sumiu o helper de gravacao confirmada").toContain("const gravarNoContato = async");
     expect(src, "o helper voltou a nao confirmar a linha")
       .toContain('.update(patch).eq("id", id).select("id").maybeSingle()');
+    // O DESFECHO, e nao so o fio. Medido: apagar o `if (!data)` deixava o helper
+    // devolvendo `true` sempre — o warehouse marca "Confirm orders", a RLS barra, e
+    // a tela confirma. Este mutante chegou a ser COMMITADO por um `git add -A`.
+    expect(src, "o helper confirma a linha mas devolve sucesso com zero linhas")
+      .toMatch(/if \(!data\) \{[\s\S]{0,250}?return false;\s*\n\s*\}/);
     // Os TRES. Cobrir dois deixa o terceiro mentindo.
     const usos = src.match(/await gravarNoContato\(/g) ?? [];
     expect(usos.length, "um dos tres toggles voltou a gravar direto, sem confirmar").toBe(3);

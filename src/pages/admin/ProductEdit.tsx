@@ -18,6 +18,7 @@ import { categoryTreeOptions } from "@/lib/categoryTree";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { gravacaoRecusadaComCerteza } from "@/lib/gravacaoRecusada";
 import { gravarComToken } from "@/lib/gravarComToken";
+import { travaDeReservadoSeAplica } from "@/lib/stock";
 
 // O PostgREST corta em 1000 linhas SEM erro. Este wrapper pagina e devolve o
 // mesmo formato `{ data, error }` das outras leituras, para caber no `Promise.all`
@@ -72,6 +73,9 @@ const ProductEdit = () => {
   // `useRef` porque ele precisa valer ja na proxima linha do mesmo handler, e
   // porque um re-render nao pode ressuscitar um token velho.
   const revRef = useRef<number | null>(null);
+  // `estoque_total` como veio do banco. O `form` guarda o EDITADO, entao ele nao
+  // serve para saber se o admin mexeu na quantidade.
+  const estoqueCarregadoRef = useRef<number>(0);
   // Gravacao cujo desfecho ficou DESCONHECIDO — a resposta se perdeu e o commit
   // pode ou nao ter acontecido. Trava o proximo save: sem saber se gravou, tentar
   // de novo ou cria produto duplicado ou acusa um colega que nao existe.
@@ -219,6 +223,9 @@ const ProductEdit = () => {
     // Token do bloqueio otimista, junto com o resto do carregamento: e a versao
     // que o admin esta vendo na tela.
     revRef.current = (data as any).admin_rev ?? null;
+    // O valor CARREGADO, para saber se o admin mexeu na quantidade. O `form` guarda
+    // o valor EDITADO, entao ele nao serve para essa comparacao.
+    estoqueCarregadoRef.current = (data as any).estoque_total ?? 0;
     // A incerteza morre com a ficha a que ela pertencia. Sem isto, pular do produto
     // A para o B pelo historico do navegador (a rota `:id` nao tem `key`, entao a
     // instancia sobrevive) carregaria B com token novo e MESMO ASSIM recusaria o
@@ -526,6 +533,7 @@ const ProductEdit = () => {
       productId = data.id;
       criadoIdRef.current = data.id;
       revRef.current = (data as any).admin_rev ?? 0;
+      estoqueCarregadoRef.current = (data as any).estoque_total ?? form.estoque_total;
     } else {
       // BLOQUEIO OTIMISTA — dois admins na mesma ficha nao se apagam mais.
       //
@@ -567,8 +575,24 @@ const ProductEdit = () => {
       // continua valendo e o save gravava um `estoque_total` MENOR que o reservado.
       // O produto TRAVA — o proprio gatilho passa a recusar toda reserva nova — e
       // nao se recupera sozinho. Nao ha CHECK no banco segurando isso.
+      // A TRAVA SO QUANDO ELA E DEVIDA. A primeira versao aplicava o `.lte`
+      // INCONDICIONALMENTE — e `estoque_total` sempre vai no payload, entao com o
+      // banco em `reservado > total` NENHUM campo do produto podia mais ser salvo,
+      // com o toast acusando estoque num save que nao tocou em estoque.
+      //
+      // E `reservado > total` nao e estado corrompido: e o esperado em backorder,
+      // pre-venda e pedido criado por admin — os tres que o proprio gatilho isenta.
+      // Sem a condicao, TODO produto de pre-venda e TODO com backorder virava
+      // ineditavel. A regra saiu para `travaDeReservadoSeAplica`, que espelha o
+      // `_enforce` do banco e tem teste que EXECUTA.
+      const travaEstoque = travaDeReservadoSeAplica({
+        estoqueAtual: estoqueCarregadoRef.current,
+        estoqueNovo: form.estoque_total,
+        permitirBackorder: form.permitir_backorder,
+        statusProduto: form.status_produto,
+      });
       const r = await gravarComToken(supabase, "produtos", productId, payload, revAtual,
-        (q: any) => q.lte("estoque_reservado", form.estoque_total));
+        travaEstoque ? (q: any) => q.lte("estoque_reservado", form.estoque_total) : undefined);
       if (r.tipo === "recusado") {
         // O PostgREST respondeu com `code`: a transacao abortou, nada foi escrito e
         // o token da tela continua valendo. Corrigir o campo e salvar de novo

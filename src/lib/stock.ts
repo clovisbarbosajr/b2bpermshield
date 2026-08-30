@@ -67,8 +67,12 @@ export type StockStatus = { nome: string; permite_comprar?: boolean | null };
 // `produtos.status_produto` guarda o codigo em portugues; `product_statuses.nome`
 // guarda o rotulo em ingles; e NAO EXISTE FK entre os dois. Todo o casamento e
 // por NOME, e os tres consumidores falham ABRINDO quando nao acham:
-//   `stock.ts:112`             -> `statusMap.get(...) ?? true`
-//   `Catalogo.tsx:267` e `:433` -> `?? { permite_comprar: true, permite_visualizar: true }`
+//   `stock.ts`, no `podeComprar`  -> `statusMap.get(normalized) ?? true`
+//   `Catalogo.tsx`, no `canBuy`   -> `?? { permite_comprar: true, permite_visualizar: true }`
+//   `Catalogo.tsx`, no filtro da vitrine -> `!(st && st.permite_visualizar === false)`,
+//     que falha abrindo pelo mesmo motivo com outra forma: status inexistente nao
+//     e `st` nenhum, entao o produto VOLTA a aparecer na loja. Renomear/apagar nao
+//     desliga so a trava de compra: desliga tambem a ocultacao.
 //   `fn_item_produto_valido`    -> denylist, `LIMIT 1`, nao achou = deixa passar
 //
 // Renomear "Sold Out" na tela de Product Statuses devolve ao catalogo, comprável,
@@ -200,4 +204,49 @@ export function checkCartStock(
   }
 
   return { blocked, insufficient };
+}
+
+/**
+ * A trava de `estoque_reservado` se aplica a ESTE save de produto?
+ *
+ * POR QUE ISTO EXISTE: a primeira versao da trava em `ProductEdit` era um
+ * `.lte("estoque_reservado", form.estoque_total)` incondicional — e `estoque_total`
+ * SEMPRE vai no payload, inclusive quando o admin editou so a descricao, o preco
+ * ou o SEO. Com o banco em `reservado > total`, NENHUM campo do produto podia mais
+ * ser salvo, e o toast acusava estoque num save que nao tocou em estoque.
+ *
+ * E `reservado > total` NAO e estado corrompido: e o comportamento desejado em
+ * tres casos que o proprio gatilho isenta de propósito
+ * (`20260825320000_estoque_por_variante.sql:110-116`, `_enforce`):
+ *   - produto com `permitir_backorder`;
+ *   - produto em pre-venda;
+ *   - pedido criado por ADMIN (o gatilho nao confere saldo nenhum nesse ramo).
+ * Mais o sync, que grava `estoque_total` do B2BWave e nao sincroniza o reservado.
+ *
+ * Ou seja: sem esta funcao, TODO produto de pre-venda e TODO produto com backorder
+ * ficava ineditavel, e a tela mandava o admin "aumentar a quantidade" de um produto
+ * que nao tem quantidade. `rastrear_estoque = false` era pior ainda — o gatilho nao
+ * le essa coluna, entao o produto fica com total 0 acumulando reservado.
+ *
+ * A trava vale quando o admin MEXEU na quantidade de um produto que exige saldo.
+ * Fora disso o save nao pode ser barrado por uma condicao que ele nao criou.
+ *
+ * Espelha o `_enforce` do banco de proposito: divergir faria a tela recusar o que
+ * o banco aceita, ou o contrario.
+ */
+export function travaDeReservadoSeAplica(p: {
+  estoqueAtual: number | null | undefined;
+  estoqueNovo: number | null | undefined;
+  permitirBackorder?: boolean | null;
+  statusProduto?: string | null;
+}): boolean {
+  // Nao mexeu na quantidade: nao ha risco novo a barrar.
+  if (Number(p.estoqueAtual) === Number(p.estoqueNovo)) return false;
+  // Subir a quantidade nunca cria disponivel negativo.
+  if (Number(p.estoqueNovo) > Number(p.estoqueAtual)) return false;
+  if (p.permitirBackorder === true) return false;
+  const s = String(p.statusProduto ?? "").toLowerCase();
+  // Mesmas tres formas que o `_enforce` do banco reconhece.
+  if (s.includes("pre_venda") || s.includes("pre-venda") || s.includes("pre-order") || s.includes("encomenda")) return false;
+  return true;
 }
