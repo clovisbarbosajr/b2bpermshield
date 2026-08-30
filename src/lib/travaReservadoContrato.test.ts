@@ -103,9 +103,14 @@ describe("a trava de reservado concorda com o `LIKE` do gatilho", () => {
       if (bancoIsenta(s) !== telaIsenta(s)) divergem.push(JSON.stringify(s));
       if (divergem.length >= 10) break;   // dez bastam para diagnosticar
     }
+    // A DIVERGENCIA PRIMEIRO. Com a ordem invertida, uma regex quebrada parava o
+    // laco nas dez primeiras divergencias, `n` ficava em ~104, e a mensagem dizia
+    // "o corpus encolheu" — culpando o gerador em vez da regex, e sem imprimir
+    // NENHUMA das dez strings coletadas. Vermelho pelo motivo errado ainda manda o
+    // proximo a olhar o lugar errado.
+    expect(divergem, "a tela e o gatilho discordam sobre estes status").toEqual([]);
     expect(n, "o corpus encolheu — este teste passou a nao exercitar quase nada")
       .toBeGreaterThan(20000);
-    expect(divergem, "a tela e o gatilho discordam sobre estes status").toEqual([]);
   });
 
   // O corpus so prova alguma coisa se ele CONTIVER os dois desfechos. Um corpus em

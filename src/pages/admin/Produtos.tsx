@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Pencil, Search, Image as ImageIcon, Eye, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useActivityLog } from "@/hooks/useActivityLog";
+import { useAuth } from "@/contexts/AuthContext";
 import { categoryTreeOptions } from "@/lib/categoryTree";
 import { gravarComToken } from "@/lib/gravarComToken";
 
@@ -47,6 +48,9 @@ const emptyFilters = {
 const AdminProdutos = () => {
   const navigate = useNavigate();
   const { log } = useActivityLog();
+  // Usado so para RECUSAR o delete quando a tela nao consegue contar a cascata —
+  // ver o comentario em `handleDelete`. Nao esconde nem libera nada alem disso.
+  const { role } = useAuth();
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -283,6 +287,33 @@ const AdminProdutos = () => {
     const erro = contagens.find(c => c.error)?.error;
     if (erro) {
       toast.error("Could not check what depends on this product — nothing was deleted: " + erro.message);
+      return;
+    }
+
+    // A GUARDA ACIMA FALHA ABERTA, e por isso ela nao basta sozinha.
+    //
+    // Contagem barrada por RLS NAO e erro: o PostgREST devolve `count: 0` com
+    // `error: null`. E `produto_status_regras` e `produto_acesso` tem policy SO de
+    // admin (`20260318202244:147` e `:157`) — nao ha policy de manager.
+    //
+    // Mas o MANAGER alcanca este delete: a rota exige so `view_products`
+    // (`App.tsx:191`), o botao da lixeira nao checa papel, e
+    // `Managers manage produtos` (`20260619003000:67-68`) da o DELETE.
+    //
+    // Resultado: onde o admin le "2 privacy group permission(s), 3 status
+    // rule(s)", o manager le "0" e "0" — e confirma sob um texto que promete
+    // completude ("Everything above was entered here and cannot be recovered").
+    // O CASCADE apaga as cinco linhas assim mesmo. Perda silenciosa.
+    //
+    // Nao da para contar o que a RLS esconde, entao a tela recusa a operacao que
+    // nao consegue descrever com honestidade. Isto NAO mexe em RLS nem afrouxa
+    // permissao: e a tela deixando de prometer o que nao pode cumprir. Liberar o
+    // delete para manager, se for o desejado, e decisao do dono — esta na batelada.
+    if (role !== "admin") {
+      toast.error(
+        "Only administrators can delete products. Some of the records that would be deleted " +
+        "along with it are not visible to your role, so this screen cannot tell you what would be lost."
+      );
       return;
     }
 
@@ -551,9 +582,13 @@ const AdminProdutos = () => {
                       <Button variant="default" size="icon" className="h-7 w-7 bg-cyan-600 hover:bg-cyan-700" onClick={() => window.open(`/portal/produto/${p.id}`, '_blank')} title="Preview">
                         <Eye className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="default" size="icon" className="h-7 w-7 bg-destructive hover:bg-destructive/90" onClick={(e) => handleDelete(e, p.id)} title="Delete">
+                      {/* Escondido para quem o `handleDelete` vai recusar: botao que so serve para
+                        dar erro e pior que botao ausente. */}
+                    {role === "admin" && (
+                    <Button variant="default" size="icon" className="h-7 w-7 bg-destructive hover:bg-destructive/90" onClick={(e) => handleDelete(e, p.id)} title="Delete">
                         <X className="h-3.5 w-3.5 font-bold" />
                       </Button>
+                    )}
                     </div>
                   </TableCell>
                 </TableRow>

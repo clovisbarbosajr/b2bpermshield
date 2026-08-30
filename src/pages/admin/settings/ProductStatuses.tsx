@@ -87,8 +87,29 @@ const ProductStatuses = () => {
     <AdminLayout>
       <div className="mb-6">
         <h2 className="font-display text-2xl font-semibold">Product statuses</h2>
-        <Button onClick={openNew} className="mt-3 gap-1"><Plus className="h-4 w-4" /> New product status</Button>
+        {/* `disabled` com a leitura falhada: a guarda antiduplicata do `handleSave`
+            compara com `items`, que fica VAZIO nesse caso — criar aqui geraria o
+            segundo "Sold Out" sem nada barrando (nao ha UNIQUE no banco). */}
+        <Button onClick={openNew} disabled={!!loadError} className="mt-3 gap-1"><Plus className="h-4 w-4" /> New product status</Button>
       </div>
+      {/* O `loadError` era ESTADO MORTO: escrito no `fetchData` e nunca lido em
+          lugar nenhum do render. O comentario do `fetchData` afirmava a protecao
+          ("sem isto, falha de leitura virava lista vazia e recriar gerava DUAS
+          linhas") — e sem o banner ela continuava virando. As telas irmas do mesmo
+          commit (`SalesTax`, `TabelasPreco`) desenham o banner; esta ficou pela
+          metade. */}
+      {loadError && (
+        <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-medium text-destructive">Could not load the product statuses.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This does NOT mean there are none — they could not be read. Do not re-create anything:
+            two statuses with the same name make the storefront and the order check disagree about
+            the same product.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{loadError}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => { setLoading(true); fetchData(); }}>Try again</Button>
+        </div>
+      )}
       {loading ? <div className="flex justify-center py-20"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div> : (
         <Card>
           <Table>

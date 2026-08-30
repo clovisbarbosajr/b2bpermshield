@@ -79,6 +79,16 @@ const Checkout = () => {
   // aliquota FALHAR, `taxRate` fica 0, o banco cobra o imposto de verdade e a
   // guarda barraria TODOS os pedidos. Falha de leitura nossa nao pode virar
   // checkout parado — entao a guarda so vale quando o imposto foi lido de fato.
+  // TRAVA DE MAO UNICA, e por isso ela e RESETADA no comeco do efeito.
+  //
+  // Nada nunca a devolvia para `true`: uma falha transitoria na leitura do imposto
+  // deixava "Sales Tax —", "Gross total —" e o botao em "TOTAL UNAVAILABLE" PARA
+  // SEMPRE — inclusive depois de o efeito reexecutar e `setTaxRate` gravar a
+  // aliquota certa. Carrinho de $500 com o total correto computado e nao exibido,
+  // e o cliente so saia disso com F5.
+  //
+  // Mesmo defeito que o `precoIncerto` do portal ja teve: estado de erro que
+  // ninguem desliga vira erro permanente.
   const [taxLookupOk, setTaxLookupOk] = useState(true);
   // Falha ao montar a tela (frete/pagamento). Ver a guarda que a alimenta: sem
   // ela, "nao consegui ler" ficava identico a "esta loja nao cobra frete".
@@ -117,6 +127,11 @@ const Checkout = () => {
   useEffect(() => {
     const fetch = async () => {
       if (!user && !impersonatedCustomer) return;
+
+      // RESET no comeco de CADA execucao. Sem isto o `taxLookupOk` so andava para
+      // `false`: uma falha transitoria travava a tela em "TOTAL UNAVAILABLE" para
+      // sempre, mesmo depois de o efeito reexecutar e ler a aliquota certa.
+      setTaxLookupOk(true);
 
       // Traz JÁ os campos de endereço + grupo de imposto na MESMA query — evita
       // 2 buscas redundantes depois (endereço da empresa e tax_customer_group_id).

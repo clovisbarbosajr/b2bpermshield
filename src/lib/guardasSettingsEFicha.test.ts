@@ -391,3 +391,56 @@ describe("OrdersPerMonth: o CSV leva o que a tela mostra", () => {
       .toContain('{ key: "avgOrder", label: "Avg Order" }');
   });
 });
+
+describe("o que a tela nao consegue contar, ela nao apaga", () => {
+  it("Produtos: o delete recusa quem nao enxerga a cascata", () => {
+    // A guarda de contagem FALHA ABERTA: contagem barrada por RLS nao e erro — o
+    // PostgREST devolve `count: 0` com `error: null`. E `produto_status_regras` e
+    // `produto_acesso` tem policy so de admin, enquanto o MANAGER alcanca este
+    // delete (rota exige so `view_products`, e `Managers manage produtos` da o
+    // DELETE).
+    //
+    // Onde o admin le "2 privacy group permission(s), 3 status rule(s)", o manager
+    // le "0" e "0" — e confirma sob um texto que promete completude. O CASCADE
+    // apaga as cinco assim mesmo.
+    const src = semComentario("src/pages/admin/Produtos.tsx");
+    expect(src, "a tela voltou a apagar o que nao consegue contar")
+      .toMatch(/if \(role !== "admin"\) \{[\s\S]{0,400}?return;/);
+    // E o botao some para quem vai ser recusado: botao que so serve para dar erro
+    // e pior que botao ausente.
+    expect(src, "o botao de apagar voltou a aparecer para quem o handler recusa")
+      .toContain('{role === "admin" && (');
+  });
+
+  it("ProductStatuses: o `loadError` e RENDERIZADO, e nao so escrito", () => {
+    // Era estado MORTO: `setLoadError` no `fetchData` e nenhuma leitura no render.
+    // O comentario do `fetchData` afirmava a protecao ("sem isto, falha de leitura
+    // virava lista vazia e recriar gerava DUAS linhas") — e sem o banner ela
+    // continuava virando. As telas irmas do mesmo commit desenham o banner; esta
+    // tinha ficado pela metade.
+    const src = semComentario("src/pages/admin/settings/ProductStatuses.tsx");
+    expect(src, "o loadError voltou a ser escrito e nunca lido").toContain("{loadError && (");
+    // E o botao de criar sai junto: a guarda antiduplicata do `handleSave` compara
+    // com `items`, que fica VAZIO na falha de leitura — criar ali geraria o segundo
+    // "Sold Out" sem nada barrando (nao ha UNIQUE no banco).
+    expect(src, "da para criar status com a leitura falhada, e a guarda de duplicata compara com lista vazia")
+      .toContain("disabled={!!loadError}");
+  });
+
+  it("Checkout: o `taxLookupOk` e resetado a cada execucao do efeito", () => {
+    // Trava de mao unica: nada nunca a devolvia para `true`. Uma falha transitoria
+    // deixava "Sales Tax —", "Gross total —" e "TOTAL UNAVAILABLE" PARA SEMPRE,
+    // inclusive depois de o efeito reexecutar e ler a aliquota certa. So saia com
+    // F5. Mesmo defeito que o `precoIncerto` do portal ja teve.
+    const src = semComentario("src/pages/portal/Checkout.tsx");
+    expect(src, "o taxLookupOk voltou a ser trava de mao unica").toContain("setTaxLookupOk(true);");
+    // E o reset tem que vir ANTES das leituras que o desligam, senao ele apaga a
+    // falha que acabou de ser detectada.
+    const reset = src.indexOf("setTaxLookupOk(true);");
+    const primeiroFalse = src.indexOf("setTaxLookupOk(false)");
+    expect(reset, "nao achei o reset").toBeGreaterThan(-1);
+    expect(primeiroFalse, "nao achei as leituras que desligam a trava").toBeGreaterThan(-1);
+    expect(reset, "o reset roda DEPOIS das leituras — ele apaga a falha que acabou de ser detectada")
+      .toBeLessThan(primeiroFalse);
+  });
+});
