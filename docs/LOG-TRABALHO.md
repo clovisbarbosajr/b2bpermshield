@@ -4591,3 +4591,29 @@ Fila intacta e inalterada para a proxima janela com o repositorio parado:
 (1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
 (3) os achados que nao dependem do dono; (4) as telas de relatorio ainda nao
 auditadas — a REVER quando a outra sessao terminar, ja que ela abriu esse item.
+
+---
+
+## 30/ago — varredura, rodadas 1 a 3 (sessao interativa)
+
+FEITO. Quatro commits, 653 testes verdes em 61 arquivos, tsc limpo, build ok.
+
+- `d10367d` — a lista de produtos confirmava escrita e delecao que nao aconteceram.
+- `848162f` — o botao do checkout prometia um valor e o cartao cobrava outro; frete
+  gratis por falha de leitura; clamp por estoque fossil no carrinho.
+- `a269bd7` — onze defeitos que os agentes acharam nas correcoes de `d10367d` e
+  `848162f`.
+- `f1141da` — a configuracao de imposto que faz o checkout mentir, mais seis
+  achados da rodada 3.
+
+Numeros da leva: ~35 defeitos de produto, 17 defeitos das PROPRIAS correcoes
+(achados pelo caçador/cetico antes do commit), 48 mutantes plantados e mortos.
+
+COBERTURA: 62 das 89 telas tem guarda de regressao. Faltam 27, sendo 7 de
+autenticacao (nao mexo sem o dono).
+
+EM VOO nesta janela: cetico da rodada 3; caçador de `ProductEdit`/`CustomerEdit`;
+caçador das seis telas de `settings` sem guarda.
+
+DECISOES DO DONO acumuladas (SQL e regra de negocio) — batelada ao fim, conforme
+combinado. Nao executar nada disso sozinho.
