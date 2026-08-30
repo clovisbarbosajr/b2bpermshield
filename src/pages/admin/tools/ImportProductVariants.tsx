@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { mapaSkuSemAmbiguidade } from "@/lib/mapaSku";
 
 /** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
  *
@@ -94,8 +95,11 @@ const ImportProductVariants = () => {
       return;
     }
 
-    const skuMap: Record<string, string> = {};
-    produtos.forEach((p: any) => { if (p.sku) skuMap[p.sku] = p.id; });
+    // `skuMap[p.sku] = p.id` era ultimo-vence, e sem `trim()` enquanto o lookup
+    // abaixo usa `parentSku.trim()`. Ver `mapaSku.ts`: a UNIQUE de `produtos.sku`
+    // caiu em `20260708140000`, entao SKU repetido e dado legal — e as variantes
+    // iam para a ficha sorteada pela ordem de paginacao, com "Inserted" verde.
+    const { mapa: skuMap, ambiguos: skuAmbiguo } = mapaSkuSemAmbiguidade(produtos);
 
     // NAO EXISTE UNIQUE em (produto_id, codigo) — o proprio ProductEdit comenta
     // isso. Sem este mapa, rodar o MESMO arquivo duas vezes duplicava todas as
@@ -120,7 +124,12 @@ const ImportProductVariants = () => {
       const variantSku = r["variant_sku"]?.trim();
 
       if (!parentSku || !variantSku) {
-        res.push({ row: linhaDoArquivo(r, i), sku: variantSku || "â€”", status: "error", message: "Missing parent_sku or variant_sku" });
+        res.push({ row: linhaDoArquivo(r, i), sku: variantSku || "—", status: "error", message: "Missing parent_sku or variant_sku" });
+        continue;
+      }
+
+      if (skuAmbiguo.has(parentSku)) {
+        res.push({ row: linhaDoArquivo(r, i), sku: variantSku, status: "error", message: `More than one product has SKU "${parentSku}" — cannot tell which one this variant belongs to` });
         continue;
       }
 
@@ -140,21 +149,36 @@ const ImportProductVariants = () => {
       const chave = `${parentId}|${variantSku.trim().toLowerCase()}`;
       const jaExiste = variantesPorChave.get(chave);
 
-      const dados: any = {
-        produto_id: parentId,
-        codigo: variantSku,
-        valores_opcao: r["option_value"] ? [r["option_value"]] : [],
-        quantidade: stock,
-      };
+      // DEFAULT DE CRIAR NAO PODE VIRAR DEFAULT DE ATUALIZAR. "stock (defaults to
+      // 0)" esta certo para uma variante nova e e destruicao em massa numa
+      // atualizacao: um arquivo so com `parent_sku,variant_sku` (o fluxo normal de
+      // corrigir codigos) zerava `quantidade` e apagava `valores_opcao` de TODAS as
+      // variantes tocadas, com "Updated" verde em cada linha. Desde
+      // `20260825320000_estoque_por_variante.sql`, `fn_reserve_stock_on_order_item`
+      // exige `(quantidade - estoque_reservado) >= pedido`: o catalogo inteiro
+      // passava a recusar pedido com INSUFFICIENT_STOCK, e o numero anterior nao
+      // volta — ninguem mais escreve essa coluna. No UPDATE, coluna ausente ou
+      // celula vazia agora significa NAO MEXER.
+      const base: any = { produto_id: parentId, codigo: variantSku };
+      const temStock = stockBruto !== "";
+      const temOpcao = String(r["option_value"] ?? "").trim() !== "";
 
       let error: any = null;
       if (jaExiste) {
         // ATUALIZA em vez de criar outra. Antes, reimportar o mesmo arquivo
         // duplicava a variante inteira.
-        const r2 = await (supabase.from("produto_variantes") as any).update(dados).eq("id", jaExiste);
+        const r2 = await (supabase.from("produto_variantes") as any).update({
+          ...base,
+          ...(temStock ? { quantidade: stock } : {}),
+          ...(temOpcao ? { valores_opcao: [r["option_value"]] } : {}),
+        }).eq("id", jaExiste);
         error = r2.error;
       } else {
-        const r2 = await (supabase.from("produto_variantes") as any).insert(dados).select("id").single();
+        const r2 = await (supabase.from("produto_variantes") as any).insert({
+          ...base,
+          valores_opcao: temOpcao ? [r["option_value"]] : [],
+          quantidade: stock,
+        }).select("id").single();
         error = r2.error;
         // Duas linhas do MESMO arquivo com a mesma variante duplicariam entre si.
         if (!error && r2.data?.id) variantesPorChave.set(chave, r2.data.id);

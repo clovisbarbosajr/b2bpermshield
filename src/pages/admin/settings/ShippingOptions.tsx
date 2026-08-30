@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, X, Check } from "lucide-react";
+import { nadaFoiEscrito } from "@/lib/linhaAfetada";
 
 const RULE_TYPES = ["Per Order flat rate", "Per Order Net Value", "Per Item flat rate", "Per Item flat value"];
 
@@ -118,9 +119,20 @@ const ShippingOptions = () => {
       toast.error("Could not change the default — nothing was changed: " + limpaErr.message);
       return;
     }
-    const { error: poeErr } = await supabase.from("shipping_options").update({ padrao: true } as any).eq("id", r.id);
+    const { data: posto, error: poeErr } = await supabase.from("shipping_options")
+      .update({ padrao: true } as any).eq("id", r.id).select("id");
     if (poeErr) {
       toast.error(`No shipping option is set as default now — please pick one again: ${poeErr.message}`);
+      fetchData();
+      return;
+    }
+    // O comentario la em cima promete cobrir "a segunda falhar", mas so cobria a
+    // falha COM erro. A linha apagada por outro admin com esta tela aberta casa
+    // ZERO no `.eq("id")` e volta `error: null` — e a primeira escrita JA tirou o
+    // padrao de todos. O sistema ficava sem padrao nenhum e a tela dizia que
+    // estava definido: exatamente o desfecho que o comentario diz evitar.
+    if (nadaFoiEscrito(posto, poeErr)) {
+      toast.error(`"${r.nome}" no longer exists — no shipping option is set as default now, please pick one again.`);
       fetchData();
       return;
     }
@@ -145,8 +157,16 @@ const ShippingOptions = () => {
       condicoes: conditions,
     };
     if (editing) {
-      const { error } = await supabase.from("shipping_options").update(payload).eq("id", editing.id);
+      const { data, error } = await supabase.from("shipping_options").update(payload).eq("id", editing.id).select("id");
       if (error) { toast.error("Error: " + error.message); setSaving(false); return; }
+      // Regra de frete e dinheiro. Se outro admin apagou esta opcao enquanto o
+      // formulario estava aberto, o `.eq("id")` casa zero linhas e volta sem erro —
+      // a tela dizia "Updated" e o checkout seguia cobrando o valor antigo.
+      if (nadaFoiEscrito(data, error)) {
+        toast.error("Nothing was saved — this shipping option no longer exists.");
+        setSaving(false); setListView(true); fetchData();
+        return;
+      }
       toast.success("Updated");
     } else {
       const { error } = await supabase.from("shipping_options").insert(payload);

@@ -26,6 +26,7 @@ const Team = () => {
   const target = impersonatedCustomer ? { cliente_id: impersonatedCustomer.id } : {};
 
   const [members, setMembers] = useState<Member[]>([]);
+  const [erro, setErro] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [companyName, setCompanyName] = useState("");
@@ -33,8 +34,14 @@ const Team = () => {
 
   const load = async () => {
     const { data, error } = await supabase.functions.invoke("company-member", { body: { action: "list", ...target } });
-    if (error) toast.error(error.message);
-    else setMembers(data?.members ?? []);
+    // A edge ja lanca 500 quando a leitura de `clientes` falha, justamente para nao
+    // devolver `members: []`. So que a TELA reintroduzia o mesmo estrago: com o erro
+    // virando um toast que some em 4s, a tabela seguia dizendo "No employees yet."
+    // para quem tem equipe — e o dono recadastrava os funcionarios, criando linha
+    // duplicada em `clientes` (que nao tem UNIQUE em `email`). Lista vazia agora so
+    // aparece quando a leitura DEU CERTO e voltou vazia.
+    if (error) { setErro(true); toast.error(error.message); }
+    else { setErro(false); setMembers(data?.members ?? []); }
     // Nome da EMPRESA DA CONTA logada no título — o header mostra a marca da LOJA,
     // o que já fez funcionário ser adicionado no time da empresa errada por engano.
     if (impersonatedCustomer) {
@@ -142,6 +149,10 @@ const Team = () => {
           <TableBody>
             {loading ? (
               <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>
+            ) : erro ? (
+              <TableRow><TableCell colSpan={6} className="text-center py-8 text-destructive">
+                Could not load your team — this is NOT an empty list. Do not re-add employees; reload the page.
+              </TableCell></TableRow>
             ) : members.length === 0 ? (
               <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No employees yet.</TableCell></TableRow>
             ) : members.map((m) => (

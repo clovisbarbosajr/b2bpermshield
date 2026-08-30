@@ -44,7 +44,11 @@ const PortalDashboard = () => {
 
       const { data: cliente, error: clienteErr } = await clienteQuery;
       if (clienteErr) { console.error(clienteErr); setErro(true); setLoading(false); return; }
-      if (!cliente) { setLoading(false); return; }
+      // METADE QUE FALTAVA da guarda de cima: `maybeSingle()` devolve `null` SEM
+      // erro quando a ficha nao existe ou a RLS a esconde. Saindo aqui sem `erro`,
+      // os cartoes mostravam $0.00 / 0 / 0 — a mesma afirmacao do que o codigo nao
+      // sabe que a linha anterior existe para impedir.
+      if (!cliente) { setErro(true); setLoading(false); return; }
 
       setClienteNome(cliente.empresa || cliente.nome || "");
 

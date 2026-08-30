@@ -19,7 +19,7 @@ import { fetchAllRows } from "@/lib/fetchAllRows";
  * real; o `i + 2` fica so como reserva para chamada que nao venha de la. */
 const linhaDoArquivo = (r: any, i: number): number => r?.__linha ?? i + 2;
 const TEMPLATE_HEADERS = ["name", "parent_name", "description", "ordem"];
-const TEMPLATE_ROW = ["Impermeabilizantes", "Produtos QuÃ­micos", "Linha completa de impermeabilizantes", "1"];
+const TEMPLATE_ROW = ["Impermeabilizantes", "Produtos Químicos", "Linha completa de impermeabilizantes", "1"];
 
 type Result = { row: number; name: string; status: "ok" | "error"; message: string };
 
@@ -71,12 +71,46 @@ const ImportCategories = () => {
     // o `error` ia para o lixo e o PostgREST ainda cortava em 1000 linhas sem
     // avisar. Leitura falhando = mapa vazio = TODA linha com `parent_name` saia
     // como "Parent category not found" — mentira, a categoria pai existe.
-    const nameMap: Record<string, string> = {};
+    // DOIS mapas, montados da MESMA leitura, porque as duas perguntas sao diferentes:
+    //
+    //  * `porNome` resolve `parent_name` — e o CSV so tem o NOME do pai, nunca o avo.
+    //    O bloco mais abaixo ja dizia que existem homonimas de proposito ("One Plus"
+    //    em 3 estados) e que "nome + pai identifica". Mesmo assim isto era
+    //    `nameMap[nome] = id` ultimo-vence: 40 subcategorias apontando para
+    //    `parent_name=One Plus` iam TODAS para a que veio por ultimo na paginacao,
+    //    com "Created" verde. Nome homonimo agora RECUSA a linha, do mesmo jeito que
+    //    `ImportCustomerPrices` recusa SKU repetido — o arquivo nao tem como
+    //    desempatar, e escolher por conta propria e o defeito.
+    //
+    //  * `porChave` responde "esta categoria ja existe?" por (nome, pai), que era a
+    //    unica metade ja correta — e substitui o SELECT por linha. Ele fazia
+    //    `.eq("nome", name)`, case-SENSITIVE (`categorias.nome` e TEXT puro, sem
+    //    `citext` nem `COLLATE` em nenhuma migration), enquanto o mapa do pai era
+    //    minusculo: as duas metades da mesma decisao usavam criterios diferentes, e
+    //    um CSV com "produtos quimicos" nao achava "Produtos Quimicos" e criava uma
+    //    irma duplicada, visivel no menu e vazia.
+    //
+    // Falha FECHADO continua valendo: `fetchAllRows` LANCA e o `catch` cancela a
+    // importacao inteira antes de gravar qualquer linha.
+    const porNome = new Map<string, string>();
+    const nomeAmbiguo = new Set<string>();
+    const porChave = new Map<string, string>();
+    const chaveAmbigua = new Set<string>();
+    const chaveDe = (nome: string, paiId: string | null) =>
+      `${nome.trim().toLowerCase()}|${paiId ?? ""}`;
     try {
-      const existingCats = await fetchAllRows<{ id: string; nome: string }>((from, to) =>
-        supabase.from("categorias").select("id, nome")
+      const existingCats = await fetchAllRows<{ id: string; nome: string; parent_id: string | null }>((from, to) =>
+        supabase.from("categorias").select("id, nome, parent_id")
           .order("id", { ascending: true }).range(from, to));
-      for (const c of existingCats) nameMap[c.nome.toLowerCase()] = c.id;
+      for (const c of existingCats) {
+        const n = c.nome.trim().toLowerCase();
+        if (porNome.has(n) && porNome.get(n) !== c.id) nomeAmbiguo.add(n);
+        else porNome.set(n, c.id);
+
+        const k = chaveDe(c.nome, c.parent_id);
+        if (porChave.has(k) && porChave.get(k) !== c.id) chaveAmbigua.add(k);
+        else porChave.set(k, c.id);
+      }
     } catch (e: any) {
       toast.error("Could not read existing categories — import cancelled: " + (e?.message ?? e));
       setImporting(false);
@@ -88,7 +122,7 @@ const ImportCategories = () => {
       const name = r["name"]?.trim();
 
       if (!name) {
-        res.push({ row: linhaDoArquivo(r, i), name: "â€”", status: "error", message: "Missing name" });
+        res.push({ row: linhaDoArquivo(r, i), name: "—", status: "error", message: "Missing name" });
         continue;
       }
 
@@ -96,7 +130,12 @@ const ImportCategories = () => {
       let categoriaPaiId: string | null = null;
 
       if (parentName) {
-        categoriaPaiId = nameMap[parentName.toLowerCase()] ?? null;
+        const pn = parentName.toLowerCase();
+        if (nomeAmbiguo.has(pn)) {
+          res.push({ row: linhaDoArquivo(r, i), name, status: "error", message: `More than one category is named "${parentName}" — the file cannot say which one is the parent` });
+          continue;
+        }
+        categoriaPaiId = porNome.get(pn) ?? null;
         if (!categoriaPaiId) {
           res.push({ row: linhaDoArquivo(r, i), name, status: "error", message: `Parent category not found: ${parentName}` });
           continue;
@@ -121,38 +160,59 @@ const ImportCategories = () => {
       const ordemParsed = parseInt(String(r["ordem"] ?? "").trim(), 10);
       const temOrdem = Number.isFinite(ordemParsed);
 
-      const buscaExistente = supabase.from("categorias").select("id").eq("nome", name);
-      // O `error` desta busca era descartado. Falhando ela — inclusive com o
-      // PGRST116 que o `maybeSingle()` devolve quando ja existe mais de uma
-      // categoria com este (nome, pai) — `existente` vinha nulo e o codigo caia
-      // no INSERT: a tela dizia "Created" e a importacao criava justamente a
-      // DUPLICATA que este bloco existe para evitar. Falha FECHADO.
-      const { data: existente, error: buscaErr } = categoriaPaiId
-        ? await buscaExistente.eq("parent_id", categoriaPaiId).maybeSingle()
-        : await buscaExistente.is("parent_id", null).maybeSingle();
-      if (buscaErr) {
-        res.push({ row: linhaDoArquivo(r, i), name, status: "error", message: `Could not check whether this category already exists, nothing written: ${buscaErr.message}` });
+      // O caso que o `maybeSingle()` cobria com PGRST116 — mais de uma categoria
+      // com este (nome, pai) — continua RECUSADO, agora no mapa e sem ida ao banco.
+      const chave = chaveDe(name, categoriaPaiId);
+      if (chaveAmbigua.has(chave)) {
+        res.push({ row: linhaDoArquivo(r, i), name, status: "error", message: "More than one category already has this name under this parent — nothing written; merge them first" });
         continue;
       }
+      const existenteId = porChave.get(chave) ?? null;
 
+      // MESMO VICIO DO IMPORT DE VARIANTES: campo de CRIAR aplicado ao ATUALIZAR.
+      // `ativo: true` e `descricao: ... || null` iam no UPDATE mesmo quando o
+      // arquivo nao trazia essas colunas. Um CSV so com `name,parent_name,ordem`
+      // (o fluxo normal de reordenar o menu) REPUBLICAVA na loja as categorias
+      // desativadas de proposito — e desativar assim e coisa que o proprio sistema
+      // faz em massa (`20260320204242:34`, `SET ativo = false WHERE b2bwave_id IS
+      // NULL`), com `ativo` sendo o filtro de visibilidade do catalogo
+      // (`20260701130000_privacy_view_as_target.sql:56`) — e apagava TODAS as
+      // descricoes, tudo com "Updated" verde.
+      const temDescricao = String(r["description"] ?? "").trim() !== "";
+      // `nome` e `parent_id` sao a CHAVE pela qual esta linha foi encontrada — nao
+      // sao dado a atualizar. Deixa-los no payload do UPDATE reintroduzia o mesmo
+      // vicio pelo outro lado: agora que o match e case-insensitive, um CSV com
+      // "produtos quimicos" casa "Produtos Quimicos" e RENOMEAVA a categoria para o
+      // caixa da planilha — mudando o rotulo do menu da loja inteira, com "Updated"
+      // verde. No UPDATE so vai o que o arquivo veio mudar.
       const campos: any = {
-        nome: name,
-        descricao: r["description"] || null,
-        parent_id: categoriaPaiId,
-        ativo: true,
+        ...(temDescricao ? { descricao: r["description"] } : {}),
         ...(temOrdem ? { ordem: ordemParsed } : {}),
       };
 
-      const { data: gravada, error } = existente?.id
-        ? await supabase.from("categorias").update(campos).eq("id", existente.id).select("id").maybeSingle()
-        : await supabase.from("categorias").insert(campos).select("id").maybeSingle();
+      // UPDATE sem nenhum campo e erro no PostgREST, e "nada a mudar" e um desfecho
+      // legitimo: a linha existe e o arquivo nao trouxe coluna nova nenhuma.
+      if (existenteId && Object.keys(campos).length === 0) {
+        res.push({ row: linhaDoArquivo(r, i), name, status: "ok", message: "Already on file — nothing to change" });
+        porChave.set(chave, existenteId);
+        continue;
+      }
+
+      const { data: gravada, error } = existenteId
+        ? await supabase.from("categorias").update(campos).eq("id", existenteId).select("id").maybeSingle()
+        : await supabase.from("categorias").insert({ ...campos, nome: name, parent_id: categoriaPaiId, descricao: temDescricao ? r["description"] : null, ativo: true }).select("id").maybeSingle();
 
       if (error) {
         res.push({ row: linhaDoArquivo(r, i), name, status: "error", message: error.message });
       } else {
         // Deixa a categoria disponível como PAI para as linhas seguintes do CSV.
-        if (gravada?.id) nameMap[name.toLowerCase()] = gravada.id;
-        res.push({ row: linhaDoArquivo(r, i), name, status: "ok", message: existente?.id ? "Updated" : "Created" });
+        if (gravada?.id) {
+          const n = name.toLowerCase();
+          if (porNome.has(n) && porNome.get(n) !== gravada.id) nomeAmbiguo.add(n);
+          else porNome.set(n, gravada.id);
+          porChave.set(chave, gravada.id);
+        }
+        res.push({ row: linhaDoArquivo(r, i), name, status: "ok", message: existenteId ? "Updated" : "Created" });
       }
     }
 
@@ -176,9 +236,13 @@ const ImportCategories = () => {
           <p className="mt-2 text-sm text-muted-foreground">Columns: <code className="text-xs bg-muted px-1 rounded">{TEMPLATE_HEADERS.join(", ")}</code></p>
           <div
             className="mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 cursor-pointer hover:border-primary/50"
-            onClick={() => inputRef.current?.click()}
+            // TRAVA A AREA INTEIRA, nao so o botao de dentro: com `importing` a
+            // moldura seguia clicavel e aceitando drop, e dois lotes concorrentes
+            // liam "nao existe" para a mesma chave e inseriam os dois. Mesma trava
+            // que `ImportProductVariants` e `BulkUpdateOrders` ja tinham.
+            onClick={() => { if (!importing) inputRef.current?.click(); }}
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+            onDrop={(e) => { e.preventDefault(); if (importing) return; const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
           >
             <div className="text-center">
               <Upload className="mx-auto h-10 w-10 text-muted-foreground" />

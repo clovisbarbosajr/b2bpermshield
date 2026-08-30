@@ -201,7 +201,15 @@ const Checkout = () => {
         // → zero busca extra. Antes eram 2 buscas SEQUENCIAIS aqui (lentidão).
         const isSub = !!(cliente as any).parent_customer_id;
         const [{ data: ends }, parentAcct] = await Promise.all([
-          supabase.from("enderecos").select("*").eq("cliente_id", addressClienteId),
+          // ORDEM EXPLICITA. `find(e => e.principal)` logo abaixo pega o PRIMEIRO da
+          // lista, e sem `.order()` o "primeiro" e o que o Postgres devolver — ordem
+          // fisica, que muda com UPDATE. Nao existe indice parcial unico garantindo um
+          // so `principal` por cliente (o import de enderecos ja criou dois), entao o
+          // desempate tem que ser deste lado: principal primeiro, e entre principais o
+          // mais recente. Sem isso o cliente que MUDOU de endereco continuava vendo o
+          // antigo pre-selecionado em parte das visitas, e o pedido saia para la.
+          supabase.from("enderecos").select("*").eq("cliente_id", addressClienteId)
+            .order("principal", { ascending: false }).order("created_at", { ascending: false }),
           isSub
             ? supabase.from("clientes").select("endereco, cidade, estado, cep").eq("id", addressClienteId).maybeSingle()
             : Promise.resolve({ data: cliente } as any),

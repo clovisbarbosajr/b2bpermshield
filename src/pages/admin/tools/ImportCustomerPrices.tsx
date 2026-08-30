@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { mapaSkuSemAmbiguidade } from "@/lib/mapaSku";
 
 /** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
  *
@@ -102,12 +103,11 @@ const ImportCustomerPrices = () => {
       // produtos de mesmo SKU, o mapa guardava o ultimo da paginacao e o preco
       // negociado ia para um produto sorteado pela ordem de leitura — com "ok"
       // verde na tela. Recusa e mostra qual SKU esta duplicado.
-      for (const p of produtos) {
-        if (!p.sku) continue;
-        const k = p.sku.trim();
-        if (skuMap[k] && skuMap[k] !== p.id) skuAmbiguo.add(k);
-        else skuMap[k] = p.id;
-      }
+      // Extraido para `mapaSku.ts` quando o mesmo caso apareceu em
+      // `ImportProductVariants`, que resolve produto por SKU e NAO tinha a guarda.
+      const m = mapaSkuSemAmbiguidade(produtos);
+      Object.assign(skuMap, m.mapa);
+      m.ambiguos.forEach((k) => skuAmbiguo.add(k));
     } catch (e: any) {
       // `fetchAllRows` LANCA quando a leitura falha, e ninguem pegava: a promessa
       // rejeitava fora do fluxo, `setImporting(false)` nunca rodava e a tela
@@ -224,9 +224,13 @@ const ImportCustomerPrices = () => {
           <p className="mt-2 text-sm text-muted-foreground">Columns: <code className="text-xs bg-muted px-1 rounded">{TEMPLATE_HEADERS.join(", ")}</code></p>
           <div
             className="mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 cursor-pointer hover:border-primary/50"
-            onClick={() => inputRef.current?.click()}
+            // TRAVA A AREA INTEIRA, nao so o botao de dentro: com `importing` a
+            // moldura seguia clicavel e aceitando drop, e dois lotes concorrentes
+            // liam "nao existe" para a mesma chave e inseriam os dois. Mesma trava
+            // que `ImportProductVariants` e `BulkUpdateOrders` ja tinham.
+            onClick={() => { if (!importing) inputRef.current?.click(); }}
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+            onDrop={(e) => { e.preventDefault(); if (importing) return; const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
           >
             <div className="text-center">
               <Upload className="mx-auto h-10 w-10 text-muted-foreground" />

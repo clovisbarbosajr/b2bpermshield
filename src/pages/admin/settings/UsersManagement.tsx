@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Plus, Search, Trash2, Pencil } from "lucide-react";
 import { PERMISSION_GROUPS, DEFAULT_PERMISSIONS, type PermissionKey } from "@/lib/permissions";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { nadaFoiEscrito } from "@/lib/linhaAfetada";
 
 type StaffRole = "admin" | "manager" | "warehouse";
 
@@ -147,11 +148,22 @@ const UsersManagement = () => {
 
   const handleDelete = async (u: StaffUser) => {
     if (!confirm(`Remove access for ${u.nome || u.email}?\nThis removes their role — their login account is kept.`)) return;
-    const { error } = await supabase.from("user_roles").delete().eq("user_id", u.user_id);
+    const { data, error } = await supabase.from("user_roles").delete().eq("user_id", u.user_id).select("user_id");
     if (error) {
       // Sem isto, a tela dizia "acesso removido" e a pessoa CONTINUAVA com o
       // papel — que e o oposto do que o admin acabou de pedir.
       toast.error("Access was NOT removed: " + error.message);
+      fetchData();
+      return;
+    }
+    // A guarda acima cobria so metade. A policy de `user_roles` e admin-only
+    // (`Admins can manage roles`), mas esta ROTA e liberada por permissao de staff
+    // (`view_users_management`) — um manager com a chave marcada chega aqui e o
+    // `USING` da policy FILTRA em vez de levantar erro: zero linhas, `error: null`,
+    // e a tela dizia "Access removed" numa tela cujo unico proposito e revogar
+    // acesso. Ver `linhaAfetada.ts`.
+    if (nadaFoiEscrito(data, error)) {
+      toast.error("Access was NOT removed — your account does not have permission to change roles.");
       fetchData();
       return;
     }

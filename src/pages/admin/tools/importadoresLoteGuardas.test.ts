@@ -227,8 +227,17 @@ describe("as telas reportam a linha REAL do arquivo", () => {
   // de proposito, para alguem ter de olhar.
   const ESPERADO: Record<string, number> = {
     "./BulkUpdateOrders.tsx": 8, "./ImportOrders.tsx": 5, "./ImportCustomers.tsx": 3,
-    "./ImportAddresses.tsx": 3, "./ImportCategories.tsx": 5, "./ImportCustomerPrices.tsx": 11,
-    "./ImportProductVariants.tsx": 5, "./ImportRelatedProducts.tsx": 7,
+    // 30/ago: +3 em `ImportAddresses` (obrigatorio em branco, endereco ja na base,
+    // principal anterior nao desmarcado), +1 liquido em `ImportCategories` (nome de
+    // pai homonimo e (nome,pai) duplicado entram; o ramo do `buscaErr` sai, porque
+    // a busca por linha virou mapa em memoria) e +1 em `ImportProductVariants`
+    // (SKU de pai repetido).
+    // Segunda rodada do mesmo dia: +2 em `ImportAddresses` (endereco ja cadastrado
+    // que o arquivo pede para virar principal — o sucesso e a falha da promocao) e
+    // +1 em `ImportCategories` ("ja existe e o arquivo nao traz nada a mudar", que
+    // e desfecho legitimo e nao pode virar UPDATE vazio).
+    "./ImportAddresses.tsx": 8, "./ImportCategories.tsx": 7, "./ImportCustomerPrices.tsx": 11,
+    "./ImportProductVariants.tsx": 6, "./ImportRelatedProducts.tsx": 7,
   };
 
   for (const arquivo of TELAS) {

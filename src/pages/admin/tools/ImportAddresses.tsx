@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { nadaFoiEscrito } from "@/lib/linhaAfetada";
 
 /** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
  *
@@ -92,6 +93,38 @@ const ImportAddresses = () => {
       return;
     }
 
+    // ENDERECOS JA CADASTRADOS. Esta era a UNICA das quatro telas de importacao sem
+    // deduplicacao — as outras tres tem (`variantesPorChave`, `(nome,pai)`,
+    // `(cliente,produto)`). E o fluxo que duplica e o normal, nao o descuidado: o
+    // admin sobe o arquivo, ve 40 linhas de "Customer not found", corrige os 40
+    // e-mails e sobe o arquivo INTEIRO de novo — a tela nao oferece "so os que
+    // falharam". Os 2.960 que ja tinham entrado entravam outra vez, e cada cliente
+    // passava a ver o endereco em duplicata na lista do checkout.
+    //
+    // `complemento` ENTRA NA CHAVE. Sem ele, "123 Main St / Suite 100" e "123 Main
+    // St / Suite 200" — mesmo predio, mesmo CEP, salas diferentes, que e a forma
+    // normal de uma conta B2B — colidiam, e a segunda saia "Already on file" em
+    // verde sem nunca entrar. Deduplicar demais e pior que nao deduplicar: perde
+    // dado legitimo E diz que deu certo. `address2` esta no template.
+    //
+    // `Map` e nao `Set`: o id do endereco existente e necessario para o caso do
+    // `is_primary` abaixo.
+    const jaTem = new Map<string, string>();
+    const chaveEndereco = (clienteId: string, logradouro: string, complemento: string, cep: string) =>
+      [clienteId, logradouro, complemento, cep].map((s) => (s ?? "").trim().toLowerCase()).join("|");
+    try {
+      const existentes = await fetchAllRows<{ id: string; cliente_id: string; logradouro: string; complemento: string | null; cep: string }>((from, to) =>
+        supabase.from("enderecos").select("id, cliente_id, logradouro, complemento, cep")
+          .order("id", { ascending: true }).range(from, to) as any);
+      for (const e of existentes) {
+        if (e.cliente_id) jaTem.set(chaveEndereco(e.cliente_id, e.logradouro ?? "", e.complemento ?? "", e.cep ?? ""), e.id);
+      }
+    } catch (e: any) {
+      toast.error("Could not read existing addresses — import cancelled: " + (e?.message ?? e));
+      setImporting(false);
+      return;
+    }
+
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       const email = r["customer_email"]?.trim();
@@ -100,16 +133,91 @@ const ImportAddresses = () => {
       const clienteId = email ? emailMap[email.toLowerCase()] : undefined;
 
       if (!clienteId) {
-        res.push({ row: linhaDoArquivo(r, i), email: email || "â€”", status: "error", message: "Customer not found" });
+        res.push({ row: linhaDoArquivo(r, i), email: email || "—", status: "error", message: "Customer not found" });
         continue;
       }
 
-      const { error } = await (supabase.from("enderecos") as any).insert({
+      // OS OBRIGATORIOS SAO OBRIGATORIOS DE VERDADE. `logradouro`, `cidade`,
+      // `estado` e `cep` sao `NOT NULL` (`20260317043654:83-89`) — e string VAZIA
+      // satisfaz `NOT NULL`. Com `|| ""`, um cabecalho divergente (`address_line1`
+      // no lugar de `address`, `postal_code` no lugar de `zip` — o export do
+      // B2BWave sai assim) gravava 3.000 enderecos EM BRANCO, a tela dizia
+      // "Imported 3000 of 3000" e o `import_logs` registrava `success`. No portal
+      // o cliente via linhas vazias na lista de entrega, e `Checkout.tsx`
+      // pre-selecionava uma delas. A ajuda ao lado ja declarava esses campos como
+      // "Required"; nada validava.
+      const logradouro = (r["address"] ?? "").trim();
+      const cidade = (r["city"] ?? "").trim();
+      const estado = (r["state"] ?? "").trim();
+      const cep = (r["zip"] ?? "").trim();
+      const faltando = [
+        !logradouro && "address", !cidade && "city", !estado && "state", !cep && "zip",
+      ].filter(Boolean);
+      if (faltando.length > 0) {
+        res.push({ row: linhaDoArquivo(r, i), email, status: "error", message: `Missing required: ${faltando.join(", ")}` });
+        continue;
+      }
+
+      const complemento = (r["address2"] ?? "").trim();
+      const querPrincipal = (r["is_primary"] || "").toLowerCase() === "yes";
+      const chave = chaveEndereco(clienteId, logradouro, complemento, cep);
+      const existenteId = jaTem.get(chave);
+
+      // "PRINCIPAL" NAO PODE SER DOIS, e a promocao vale para os DOIS caminhos —
+      // endereco novo e endereco que ja estava na base. Nada desmarcava o principal
+      // anterior e nao ha indice parcial unico em `enderecos`, entao dois
+      // `principal = true` no mesmo cliente eram aceitos; `Checkout.tsx` escolhe com
+      // `find(e => e.principal)` e o pre-selecionado virava o que o Postgres
+      // devolvesse primeiro. O cliente mudou de endereco, o admin importou o novo
+      // com `is_primary=yes`, a tela disse "Imported" — e parte dos pedidos
+      // continuava saindo para o endereco velho, sem sinal nenhum no admin.
+      // Duas escritas, e a PRIMEIRA ja desmarcou todos quando a segunda roda. Por
+      // isso a segunda confirma a linha: o endereco pode ter sido apagado no meio do
+      // lote (`portal/Conta.tsx:44` e `admin/CustomerEdit.tsx:787` deletam endereco,
+      // e o `existenteId` vem de um snapshot lido ANTES do laco). Zero linhas ali
+      // volta `error: null`, e sem esta checagem a tela dizia "set as primary" com o
+      // cliente ficando SEM principal nenhum — o `find(e => e.principal)` do
+      // `Checkout` nao acha nada e o fallback do endereco da empresa nao roda,
+      // porque a lista nao esta vazia.
+      //
+      // Na PRIMEIRA escrita nao se checa linha afetada de proposito: zero linhas ali
+      // e o caso normal — cliente com um endereco so. Checar viraria erro falso em
+      // todo lote.
+      const promoveAPrincipal = async (idDesteEndereco: string): Promise<{ message: string } | null> => {
+        const { error: limpaErr } = await (supabase.from("enderecos") as any)
+          .update({ principal: false }).eq("cliente_id", clienteId).neq("id", idDesteEndereco);
+        if (limpaErr) return limpaErr;
+        const { data: posto, error: poeErr } = await (supabase.from("enderecos") as any)
+          .update({ principal: true }).eq("id", idDesteEndereco).select("id");
+        if (poeErr) return poeErr;
+        if (nadaFoiEscrito(posto, poeErr)) return { message: "the address no longer exists" };
+        return null;
+      };
+
+      if (existenteId) {
+        // O `continue` do dedupe descartava o `is_primary` em silencio — e o fluxo
+        // que ele descartava e justamente o que motiva a dedupe: o admin ja tinha
+        // importado o endereco, corrige a planilha marcando `is_primary=yes` e
+        // resobe. A linha saia "ok" e o principal antigo continuava valendo.
+        if (querPrincipal) {
+          const err = await promoveAPrincipal(existenteId);
+          if (err) {
+            res.push({ row: linhaDoArquivo(r, i), email, status: "error", message: `Already on file, but the primary flag was not applied cleanly — check this customer's primary address: ${err.message}` });
+            continue;
+          }
+          res.push({ row: linhaDoArquivo(r, i), email, status: "ok", message: "Already on file — set as primary" });
+          continue;
+        }
+        res.push({ row: linhaDoArquivo(r, i), email, status: "ok", message: "Already on file — not imported again" });
+        continue;
+      }
+
+      const { data: criado, error } = await (supabase.from("enderecos") as any).insert({
         cliente_id: clienteId,
-        logradouro: r["address"] || "",
-        complemento: r["address2"] || null,
-        cidade: r["city"] || "",
-        estado: r["state"] || "",
+        logradouro,
+        complemento: complemento || null,
+        cidade,
+        estado,
         // `pais` FOI REMOVIDO — a coluna nunca existiu em `enderecos`.
         //
         // Como o campo era sempre preenchido (`|| "United States"`), TODA linha
@@ -120,15 +228,24 @@ const ImportAddresses = () => {
         // pais e `clientes.pais` e um valor SO por cliente — escrever ali a partir
         // de um import de endereco faria a ultima linha da planilha ganhar de
         // todas as outras. Se o dono quiser guardar isso, e decisao de produto.
-        cep: r["zip"] || "",
-        principal: (r["is_primary"] || "").toLowerCase() === "yes",
-      });
+        cep,
+        principal: querPrincipal,
+      }).select("id").single();
 
       if (error) {
         res.push({ row: linhaDoArquivo(r, i), email, status: "error", message: error.message });
-      } else {
-        res.push({ row: linhaDoArquivo(r, i), email, status: "ok", message: "Imported" });
+        continue;
       }
+      if (criado?.id) jaTem.set(chave, criado.id);
+
+      if (querPrincipal && criado?.id) {
+        const err = await promoveAPrincipal(criado.id);
+        if (err) {
+          res.push({ row: linhaDoArquivo(r, i), email, status: "error", message: `Address imported, but the primary flag was not applied cleanly — check this customer's primary address: ${err.message}` });
+          continue;
+        }
+      }
+      res.push({ row: linhaDoArquivo(r, i), email, status: "ok", message: "Imported" });
     }
 
     setResults(res);
@@ -149,7 +266,7 @@ const ImportAddresses = () => {
         <Card className="p-6">
           <h3 className="text-lg font-semibold">Upload CSV</h3>
           <p className="mt-2 text-sm text-muted-foreground">Columns: <code className="text-xs bg-muted px-1 rounded">{TEMPLATE_HEADERS.join(", ")}</code></p>
-          <div className="mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 cursor-pointer hover:border-primary/50" onClick={() => inputRef.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}>
+          <div className="mt-4 flex items-center justify-center rounded-lg border-2 border-dashed border-border p-8 cursor-pointer hover:border-primary/50" onClick={() => { if (!importing) inputRef.current?.click(); }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (importing) return; const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}>
             <div className="text-center">
               <Upload className="mx-auto h-10 w-10 text-muted-foreground" />
               <p className="mt-2 text-sm text-muted-foreground">{fileName || "Drag & drop or click to browse"}</p>

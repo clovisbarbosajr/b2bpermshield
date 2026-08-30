@@ -4766,3 +4766,530 @@ preco de balcao).
 Conserto de raiz que depende de OK do dono: o sync deveria casar por
 `btrim(lower(nome))` e ordenar a leitura, senao a duplicata nasce de novo sozinha.
 E edge function — deploy tem que ser pedido no chat do Lovable.
+
+`AGUARDANDO` — **14:51-14:56, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Oitavo registro seguido, e o primeiro em que a prova nao foi
+cadencia nem mtime: foi um **mutante plantado, vivo na arvore, na minha frente**.
+
+Prova, nao suposicao. Abri as 14:51:08 com HEAD em `0c066ce` e um unico sujo,
+`src/lib/stock.ts`. O diff dele nao era correcao — era mutacao deliberada em
+`travaDeReservadoSeAplica`, a regex afrouxada de
+`/pre.*venda|pre.*order|encomenda/` para `/pre|encomenda/`. Arquivo gravado as
+14:50:50, **18 segundos** antes da minha primeira checagem. Isso e' o passo
+"plantar mutante" do ciclo que `0c066ce` (`test: duas guardas que nao distinguiam
+a correcao do defeito`) acabou de instituir, congelado no meio.
+
+O ciclo inteiro fechou dentro da minha amostragem: as 14:51:29 o `stock.ts` foi
+reescrito de novo e os sujos cairam de 1 para 0 — plantar, testar, reverter, em
+**39 segundos**. Depois a arvore voltou a se mexer: sujos 0 -> 2 (14:54:01) -> 3
+(14:54:31), **HEAD virou `cb7374b`** as 14:54:48 (`docs: SQL rodado, reguas
+duplicadas diagnosticadas e o que sobra para a Jessika`, mexendo em
+`DECISOES-PENDENTES.md` e neste proprio `LOG-TRABALHO.md`), e as 14:56:08
+`stock.ts` + `travaReservado.test.ts` estavam sujos de novo, o par correcao+teste
+sendo escrito ao vivo pela segunda vez na mesma janela.
+
+Motivo extra para nao encostar, alem dos sete registros anteriores: a outra sessao
+esta commitando o **proprio `LOG-TRABALHO.md`** (`cb7374b`). E um `npm test` meu
+durante a janela de mutante vivo teria medido a mutacao dela e reportado uma falha
+que nao e' minha — exatamente o modo de errar que o precedente de `d10367d` deixou
+registrado, onde um `add -A` alheio gravou em HEAD um mutante plantado de proposito.
+
+Observacao guardada para quando o terreno liberar, NAO aplicada agora porque
+`stock.ts` e `travaReservado.test.ts` estao com ela: o mutante `/pre|encomenda/`
+parece **sobreviver** a `travaReservado.test.ts`. A lista negativa do teste
+("status normal com backorder desligado continua travando") e' `disponivel`,
+`esgotado`, `estoque_limitado`, `indisponivel`, `null`, `undefined` — nenhuma
+contem `pre`. Sem um status que tenha `pre` sem `venda`/`order` (tipo
+`preco_sob_consulta`), afrouxar a regex para `/pre/` passa na suite. Se for isso,
+e' a mesma classe de defeito que `0c066ce` nomeia. A conferir com a arvore parada,
+e possivelmente ela ja esteja consertando isso agora — os dois arquivos estao
+sujos justamente juntos.
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — a REVER
+quando a outra sessao terminar, ja que ela esta cobrindo esse terreno agora.
+
+ADENDO 14:57 — a observacao acima **confirmou-se, e nao era minha para consertar**.
+As 14:56:44 entrou `5643edc` (`test: o teste da faixa de pre-venda so fixava o
+limite INFERIOR`): a outra sessao mediu o mesmo mutante `/pre|encomenda/` passando
+**691/691** e fechou o limite superior com tres strings na lista dos que DEVEM
+travar — `premium`, `pre_lancamento`, `preco_sob_consulta`, a ultima exatamente o
+exemplo que eu tinha anotado. Zero codigo de producao novo.
+
+Ou seja: o que eu vi como mutante congelado na arvore as 14:50 era o passo do meio
+do trabalho dela, e o conserto chegou sozinho seis minutos depois. Se eu tivesse
+"corrigido" ao ver, teria colidido no mesmo arquivo com a correcao dela.
+
+Cadencia agora em ~2 min (14:54:48, 14:56:44). Sessao segue ativa; fila continua
+intacta e nao retomada.
+
+`AGUARDANDO` — **15:10-15:12, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Nono registro seguido. A prova desta vez foi a mais direta de
+todas: **peguei o mutante no diff, ainda vivo na arvore.**
+
+Abri as 15:10:56 com HEAD em `210e873` (15:06:31, `fix(estoque): a regex nao era
+equivalente ao LIKE do banco em duas dimensoes`) e um unico sujo, o meu proprio
+`LOG-TRABALHO.md`. Pelo criterio ingenuo — arvore quase limpa, ultimo commit ha 4
+minutos — era janela parada. Nao era.
+
+Segui a licao dos registros anteriores e amostrei em vez de concluir. Em **8
+segundos** os sujos subiram de 1 para 2, e a cada checagem `find src docs
+-newermt '-30 seconds'` voltava exatamente **um** arquivo: `src/lib/stock.ts`,
+regravado seguidamente (15:12:04 na ultima medida, um segundo antes da leitura).
+
+As 15:12:10 li o diff sujo e ele nomeia o que esta acontecendo:
+
+```
+-  if (/pre.*venda|pre.*order|encomenda/s.test(s)) return false;
++  if (/pre.*venda/s.test(s)) return false;
+```
+
+Isso nao e correcao: e um mutante deliberado, derrubando duas das tres alternativas
+da regex que o commit `210e873` acabou de fechar. E o passo "plantar mutante para
+ver se a guarda mata" do ciclo que ela roda, congelado na minha frente — o mesmo
+padrao que registrei as 14:51, ali com `/pre|encomenda/`.
+
+Nao commitei, nao empurrei, nao rodei `npm test` e nao plantei mutante nenhum.
+Motivo, agora com evidencia desta janela e nao so por precedente: um `npm test` meu
+neste instante mediria a **mutacao dela**, e reportaria como falha minha um verde
+quebrado que nao existe no codigo real. E um `add -A` em cima disso gravaria o
+mutante em HEAD — foi literalmente o que aconteceu em `d10367d`, que `fc6316f`
+depois teve que desfazer.
+
+Registro sobre a rodada 8 dela, so como leitura, sem tocar: `210e873` fecha duas
+divergencias reais entre a regex da tela e o `LIKE` do gatilho — ancoragem
+(o `LIKE` tem `%` na frente, casa em qualquer posicao) e a flag `s` (o `%` casa
+quebra de linha, o `.` do JS sem `s` nao). A segunda e alcancavel pela edge `api`,
+que tem `status_produto` no allow-list do PUT sem validar valor. As duas sao da
+mesma classe que domina esta serie: **o comentario afirmava equivalencia que o
+codigo nao entregava.**
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — a REVER
+quando a outra sessao terminar, ja que `stock.ts` e as guardas de estoque, item 3 da
+lista, sao exatamente onde ela esta trabalhando agora.
+
+`AGUARDANDO` — **15:30-15:33, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Decimo registro seguido. A prova desta vez foi um **commit
+nascendo no meio da minha amostragem**.
+
+Abri as 15:30:54 com HEAD em `11be65a` (15:28:19, `test: a terceira dimensao do
+`%` — letra no meio do gap`) e dois sujos: o meu proprio `LOG-TRABALHO.md` e um
+`src/lib/travaReservadoContrato.test.ts` ainda **nao rastreado**. `find src docs
+-newermt '-120 seconds'` voltava `stock.ts` e esse teste novo — arquivo sendo
+escrito ali, sem commit ainda.
+
+Amostrei em vez de concluir, como os nove registros anteriores ensinaram. As
+15:31:22 o **HEAD virou sozinho** para `4091faa`
+(`test(estoque): prova a regex contra o `LIKE` do gatilho, em vez de mais uma
+lista`, +139 linhas, arquivo unico: o mesmo `travaReservadoContrato.test.ts` que
+segundos antes estava untracked na minha frente). Sujos cairam de 2 para 1 — o 1
+que sobra e o meu proprio log.
+
+Nao commitei, nao empurrei, nao rodei `npm test`, nao plantei mutante. Se eu
+tivesse feito `add -A` na primeira leitura, teria levado para HEAD um teste
+inacabado dela no meio da escrita — a mesma falha de `d10367d`.
+
+Leitura da rodada dela, so como observacao: a serie `210e873` -> `257385d` ->
+`11be65a` -> `4091faa` esta fechando o `LIKE` do gatilho dimensao por dimensao
+(ancoragem, `%` do fim, letra no meio do gap) e agora **trocou a lista de strings
+por um contrato**: em vez de enumerar mais casos, prova a regex do TS contra a
+semantica do `LIKE`. Isso mata a classe inteira, nao mais um caso — e exatamente o
+terreno do item 3 da minha fila.
+
+Cadencia dos ultimos quatro commits: 15:06, 15:17, 15:28, 15:31. Os ~2 min de
+silencio depois de `4091faa` nao sao prova de parada; o intervalo dela ja variou de
+3 a 11 minutos dentro desta mesma serie.
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — itens 3
+e 4 a REVER quando ela terminar, ja que as guardas de estoque estao sendo reescritas
+por ela agora.
+
+`AGUARDANDO` — **15:50-15:52, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Decimo primeiro registro seguido. A prova, de novo, foi um
+**commit nascendo no meio da minha amostragem** — desta vez com os cinco arquivos
+que eu tinha visto sujos entrando em HEAD de uma vez.
+
+Abri as 15:50:56 com HEAD em `4091faa` (15:31:16) e **seis sujos**: o meu proprio
+`LOG-TRABALHO.md` mais `guardasSettingsEFicha.test.ts`,
+`travaReservadoContrato.test.ts`, `Produtos.tsx`, `ProductStatuses.tsx` e
+`Checkout.tsx`. Pelo criterio ingenuo — ultimo commit ha 19 minutos, o intervalo
+mais longo desta serie — era janela parada. Nao era: `find src docs -newermt
+'-180 seconds'` voltou os **cinco** arquivos de producao, todos gravados dentro
+dos ultimos tres minutos.
+
+Amostrei em vez de concluir, como os dez registros anteriores ensinaram. As
+15:51:21, no segundo ponto da amostra, o **HEAD virou sozinho** para `2778c17`
+(`fix: guarda de cascata que falha ABERTA, estado de erro morto, e trava de mao
+unica`, +132/-3, exatamente aqueles cinco arquivos). Os sujos cairam de 6 para 1 —
+o 1 que sobra e o meu proprio log. Os dois pontos seguintes (15:51:41, 15:52:02)
+ficaram estaveis nesse commit.
+
+Nao commitei, nao empurrei, nao rodei `npm test`, nao plantei mutante. Se eu
+tivesse feito `add -A` na primeira leitura, teria levado para HEAD cinco arquivos
+dela **no meio da escrita** — a falha de `d10367d`, agora com cinco arquivos em vez
+de um. E um `npm test` as 15:50:56 teria medido aquele estado intermediario e
+reportado como falha minha um verde que nunca esteve quebrado no codigo real.
+
+Leitura da rodada dela, so como observacao, sem tocar: `2778c17` sai do terreno da
+regex de estoque e vai para as **telas** — `Produtos`, `ProductStatuses`,
+`Checkout` — que sao justamente o item 4 da minha fila. O titulo nomeia tres
+defeitos da mesma familia que domina esta serie (guarda que **falha aberta** em vez
+de fechada, estado de erro que nao chega a ser lido, trava aplicada em um sentido
+so), e vem com +53 linhas de teste em `guardasSettingsEFicha.test.ts` junto.
+
+Nota de cadencia, para nao repetir o erro de ler silencio como parada: o intervalo
+entre `4091faa` e `2778c17` foi de **19 minutos**, o maior desta serie inteira
+(antes: 3 a 11 min). Silencio de 19 minutos aqui nao significou sessao encerrada.
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — os itens
+3 e 4 seguem a REVER, e agora com mais forca: com `2778c17` ela passou a mexer
+exatamente nas telas do item 4.
+
+`AGUARDANDO` — **16:10-16:12, run agendado da fila: a outra sessao continua ativa,
+nao retomei nada.** Decimo segundo registro seguido. A prova desta vez foi a mais
+curta de todas: **abri 18 segundos depois de um commit dela.**
+
+Abri as 16:10:56 com HEAD em `3e1d64a` (`fix(export,estoque): o catalogo saia da
+empresa sem deixar rastro, e o inventario mostrava numero velho`), datado
+**16:10:38** — dezoito segundos antes da minha primeira leitura. Um unico sujo, o
+meu proprio `LOG-TRABALHO.md`. E `find src docs -newermt '-180 seconds'` voltou os
+cinco arquivos daquele commit, ainda dentro da janela de tres minutos.
+
+Amostrei mesmo assim (16:11:00, 16:11:21, 16:11:41): HEAD estavel em `3e1d64a`,
+sujos em 1, nada gravado nos ultimos 60s. Isso e o intervalo entre rodadas dela,
+nao o fim da sessao — a cadencia dos tres ultimos commits e 15:51:19, 16:01:45,
+16:10:38, ou seja ~10 minutos, e esta serie ja teve silencio de 19 minutos
+(`4091faa` -> `2778c17`) sem significar parada.
+
+Nao commitei, nao empurrei, nao rodei `npm test`, nao plantei mutante. O motivo
+segue o mesmo dos registros anteriores, e vale principalmente para o `npm test`:
+medir agora, no meio da rodada dela, produziria um resultado que nao corresponde a
+nenhum estado real do codigo, e um `add -A` gravaria trabalho dela inacabado em
+HEAD — a falha de `d10367d`.
+
+Leitura das duas rodadas novas, so como observacao, sem tocar:
+
+- `6efef9b` (16:01) leva a **falha-aberta do delete** de `Produtos` para
+  `Categorias.tsx` — a tela vizinha, mesma classe de defeito. E o padrao
+  "achou defeito, varre a CLASSE" aplicado por ela, nao mais caso a caso.
+- `3e1d64a` (16:10) junta dois defeitos: export de catalogo **sem rastro na
+  empresa** (`ProductExport.tsx` + `ExportsLog.tsx`) e inventario exibindo
+  **numero velho** (`Estoque.tsx`). 211 linhas somadas, com teste junto nos dois
+  arquivos `*.test.ts`.
+
+Ambos caem no item 4 da minha fila (telas ainda nao auditadas): `Categorias`,
+`ProductExport`, `ExportsLog`, `Estoque`, `Options`. Ela ja cobriu cinco telas
+desse item nos ultimos vinte minutos.
+
+Fila intacta e inalterada para a proxima janela com o repositorio parado:
+(1) checagem de integracao do diff agregado; (2) commit + push do que estiver verde;
+(3) os achados que nao dependem do dono; (4) as telas ainda nao auditadas — o item 4
+precisa ser **re-listado do zero** quando ela terminar, porque a lista de telas nao
+auditadas encolheu muito desde que foi escrita.
+
+`FEITO` — **16:30-16:38, run agendado da fila: item 1 (checagem de integracao do
+diff agregado) EXECUTADO, com saida real. Item 2 ja estava satisfeito. Itens 3 e 4
+nao retomados — a outra sessao segue dentro do intervalo dela.**
+
+Decimo terceiro registro seguido, e o primeiro que **nao e so espera**. O que mudou
+em relacao aos doze anteriores: pela primeira vez a arvore estava **limpa** num HEAD
+ja commitado, com **zero gravacoes** durante ~6 minutos de amostragem. Nos doze
+registros anteriores havia sempre arquivo dela sendo escrito na minha frente; era
+por isso que um `npm test` mediria um estado intermediario que nao existe no codigo
+real. Aqui nao: `9b3f3b9` e um commit de verdade, e medir ele mede o codigo real.
+
+Amostragem antes de decidir (mesmo criterio dos registros anteriores):
+- 16:30:55 HEAD `9b3f3b9` (16:27:48), 1 sujo (o meu proprio log), 0 gravados em 180s.
+- 16:31:19 / 16:31:40 / 16:32:00 e mais nove pontos de 30 em 30s ate 16:36:38:
+  HEAD estavel, sujos=1, `find src docs -newermt '-60 seconds'` = **0** em todos.
+
+Item 2 (commit + push do que estiver verde): **nada a fazer** — `git rev-list
+--count origin/main..main` = **0**. Tudo que ela produziu ja esta empurrado. O unico
+sujo e o `LOG-TRABALHO.md`, meu.
+
+Item 1 (checagem de integracao do diff agregado) — saida real, nao "deve passar":
+
+```
+npm test
+  OK — 194 migrations, nenhuma com corpo fora de bloco.
+  OK — 197 arquivos .sql, todos parseiam no grammar do Postgres.
+  OK — 16 arquivos de edge function, nenhum nome fora de escopo.
+  Test Files  65 passed (65)
+       Tests  704 passed (704)
+    Duration  5.00s
+
+npx tsc --noEmit
+  exit=0, sem saida
+
+npm run build
+  tsc -p tsconfig.app.json --noEmit && vite build
+  2472 modules transformed, built in 1.76s
+  (unico aviso: chunk index-BwL57XU4.js com 2.190 kB > 500 kB — aviso de
+   tamanho de bundle, preexistente, nao e erro e nao e desta serie)
+```
+
+HEAD conferido de novo depois do build: ainda `9b3f3b9`, ainda 1 sujo. Ou seja, a
+medida corresponde inteira ao mesmo commit, do inicio ao fim — nao pegou rodada
+dela no meio.
+
+**Resultado: o diff agregado das dez rodadas dela (de `210e873` a `9b3f3b9`) esta
+integrado e verde nas tres verificacoes do projeto.**
+
+Por que parei nos itens 3 e 4, em vez de emendar: as 16:38 o ultimo commit dela
+tinha **10 minutos**, e a cadencia medida nesta serie e de 10 a 19 minutos entre
+commits (`4091faa` -> `2778c17` foram 19). Dez minutos de silencio aqui e o
+*intervalo* dela, nao o fim. E os itens 3 e 4 sao exatamente os arquivos que ela
+reescreveu nas ultimas duas horas — comecar a editar agora e colisao, nao progresso.
+Nenhum mutante plantado nesta janela, porque nenhuma correcao minha entrou.
+
+Fila para a proxima janela com o repositorio parado:
+(1) ~~checagem de integracao do diff agregado~~ **FEITA nesta janela, verde**;
+(2) ~~commit + push do que estiver verde~~ **nada pendente, 0 commits a empurrar**;
+(3) os achados que nao dependem do dono;
+(4) as telas ainda nao auditadas — segue precisando ser **re-listado do zero**: ela
+    ja cobriu `Produtos`, `ProductStatuses`, `Checkout`, `Categorias`,
+    `ProductExport`, `ExportsLog` e `Estoque` desde que a lista foi escrita.
+
+`INICIADO` — **16:51-16:53, run agendado da fila: repositorio PARADO, retomando os
+itens 3 e 4.** Primeira janela desta serie em que a outra sessao nao esta ativa.
+
+Prova de que parou, pelo mesmo criterio dos treze registros anteriores: as 16:50:57
+o ultimo commit (`9b3f3b9`, 16:27:48) tinha **23 minutos** — mais do que o maior
+silencio ja medido nesta serie (19 min, `4091faa` -> `2778c17`). Amostrei mesmo
+assim, cinco pontos de ~28s entre 16:51:08 e 16:53:00: HEAD estavel em `9b3f3b9`,
+sujos=1 (o meu proprio log) e `gravados60s=0` em **todos** os cinco. Nenhum arquivo
+de producao tocado em ~25 minutos.
+
+Estado da fila ao abrir: itens 1 e 2 ja FEITOS na janela das 16:30 (diff agregado
+verde nas tres verificacoes; `origin/main..main` = 0, nada a empurrar). Vou aos
+itens 3 e 4.
+
+`FEITO` — **item 4 RE-LISTADO DO ZERO, por medida e nao por memoria.** A lista
+antiga (`reports/CustomersPerformance`, `OrderSummaryByStatus`, `OrdersPerMonth`,
+`OrderRepsPerformance`) estava velha: a outra sessao cobriu duas das quatro.
+
+Criterio da nova lista, executavel: cruzei `find src/pages -name '*.tsx'` (**89
+telas**) com todo caminho `src/pages/**.tsx` citado em qualquer `*.test.ts(x)`
+(**54 cobertas**). Sobram **35 sem nenhum teste que as nomeie**.
+
+Das 35, tirei as que NAO sao minhas para mexer:
+- **fluxo de autenticacao (do dono)** — `AdminLogin`, `CustomerLogin`,
+  `LoginLanding`, `ResetPassword`, `RecuperarSenha`, `Cadastro`,
+  `PendingApproval`, `ViewAsRedirect`, `settings/EditPassword`;
+- **notificacao (proibido, os 1.508 SMS)** — `settings/Notificacoes`,
+  `settings/NotificacoesLog`, `settings/EmailSettings`;
+- **telas ja declaradas mortas e fora do menu/rota** — `settings/ExtraFields`,
+  `settings/MeasurementUnit`, `settings/QuickLinks`, `tools/PdfCatalog`;
+- **triviais** — `Index`, `NotFound`;
+- **`settings/B2BWaveSync`** — mexe no sync, que e o gatilho do incidente de SMS.
+  Fica para o dono.
+
+**Escopo real do item 4, 18 telas:** `admin/Configuracoes`, `admin/Ferramentas`,
+`admin/producao/ProducaoDashboard`, `admin/reports/OrderRepsPerformance`,
+`admin/reports/OrderSummaryByStatus`, `admin/settings/ProductStatusRules`,
+`admin/settings/SetupApp`, `admin/settings/ShippingOptions`,
+`admin/settings/UsersManagement`, `admin/tools/BulkUpdateOrders`,
+`admin/tools/ImportAddresses`, `admin/tools/ImportCategories`,
+`admin/tools/ImportCustomerPrices`, `admin/tools/ImportProductVariants`,
+`portal/Dashboard`, `portal/Team`.
+
+`INICIADO` — cacadores disparados em tres grupos sobre esse escopo, mirando a
+classe que domina esta serie inteira (guarda que falha ABERTA, estado de erro
+morto, trava de mao unica, erro de leitura engolido), nao caso a caso.
+
+`FEITO` — **caçadores voltaram: 26 achados nas 18 telas, e 4 telas declaradas
+limpas com motivo.** Limpas: `reports/OrderRepsPerformance`,
+`reports/OrderSummaryByStatus`, `producao/ProducaoDashboard`, `admin/Configuracoes`,
+`settings/ProductStatusRules` (esta ultima e componente estatico, sem query).
+
+O que os tres grupos acharam, por classe:
+
+- **Grupo A (relatorios/dashboards)** — 6 achados, todos em `portal/Team` e
+  `portal/Dashboard`. O mais forte: `Team.tsx:34-36` **reintroduz na tela** o mesmo
+  defeito que a edge `company-member` ja tinha consertado no servidor — erro de
+  leitura vira "No employees yet." para quem tem equipe. Mais duas mutacoes que
+  confirmam sucesso sem checar linha afetada (`toggleFlag`, `removeMember`).
+- **Grupo B (settings/config)** — 9 achados. Destaque: `configuracoes` **nao tem
+  UNIQUE nem singleton**, e `SetupApp.tsx:178` le `LIMIT 1` sem `ORDER BY` e cria
+  linha nova no `else` — duas linhas de config divergentes, e a RPC
+  `registration_is_open()` le a outra com `COALESCE(..., true)` por tras (cadastro
+  aberto continua aberto depois de desmarcado). Mais quatro saves que MENTEM
+  (`ShippingOptions`, `UsersManagement`) por nao confirmarem linha afetada.
+- **Grupo C (tools/importacao)** — 11 achados. Nenhuma coluna inexistente (o
+  precedente do `desconto` nao se repete). O padrao real e outro: **payload de
+  INSERT reaproveitado no UPDATE**, apagando o que o CSV nao trouxe —
+  `ImportProductVariants` zera `quantidade` e `valores_opcao` de todas as
+  variantes, `ImportCategories` reativa categoria desativada e apaga `descricao`.
+  Mais chave ambigua por SKU/nome (a UNIQUE de `sku` foi dropada em jul/2026) e
+  guardas de lote que ja existem em `BulkUpdateOrders` e nao foram propagadas.
+
+`INICIADO` — ceticos disparados para tentar DERRUBAR cada um dos 26. So sobrevive
+achado com caminho alcancavel provado no codigo.
+
+`FEITO` — **ceticos julgaram os 26: 18 sobrevivem, 8 DERRUBADOS.** Vale registrar o
+que caiu, porque quase tudo caiu por *caminho inalcancavel*, nao por leitura errada
+do codigo:
+
+- **Corrida de "view as" em `Team` e `Dashboard` (2 achados) — DERRUBADOS.** Entrar
+  em view-as faz `window.location.replace` (`ViewAsRedirect.tsx:54`) e sair tambem
+  (`AuthContext.tsx:445-448`). O componente NUNCA vai de empresa A para B na mesma
+  montagem, entao a resposta velha nao tem como sobrescrever a nova.
+- **`Team` confirmando remocao sem checar linha — DERRUBADO.** `member_id` vem da
+  lista ja escopada pelo mesmo `companyId`; zero linhas exigiria o
+  `parent_customer_id` ter mudado no meio — e e justamente ele que da o acesso que
+  o "remove" ia tirar. Toast otimista sem consequencia = nit.
+- **Sub-usuario vendo a tela de gestao — DERRUBADO.** Falha aberta na tela, mas
+  fechada em DOIS portoes de servidor: 403 da edge e trigger com `RAISE`
+  (`20260619191000_subcustomer_enforcement.sql:24`).
+- **`upsert` de papel sem confirmar linha — DERRUBADO.** `ON CONFLICT DO UPDATE`
+  levanta 42501 sob RLS; nao existe o caminho de zero linhas.
+- **`delete` do `ShippingOptions:420` — DERRUBADO.** Ja le o `error` e ja tem teste
+  (`dinheiroGravacaoSegura.test.ts:113-117`).
+- **`.then(() => {})` sem handler de rejeicao (3 telas) — DERRUBADO com prova no
+  `node_modules`.** `PostgrestBuilder.then()` so rejeita com `throwOnError`, e
+  nenhuma tela chama isso: erro de rede vira objeto RESOLVIDO
+  (`postgrest-js/src/PostgrestBuilder.ts:390-457`). O handler extra que
+  `ImportProductVariants:198` ja tem e ruido, nao correcao.
+- **Laco sem `try/finally` (3 telas) — DERRUBADO pela mesma prova.** Nada dentro do
+  laco pode lancar, entao `importing` nao trava.
+
+E o cetico do grupo B **derrubou o achado que parecia o mais grave**: a duplicidade
+de `configuracoes` nao e alcancavel — existe seed de uma linha
+(`20260318182853:110`), o insert so roda com SELECT limpo E vazio, e o `select("*")`
+so e lido por admin (`20260825290000_segredos_so_admin.sql:73-75`). Sobra dali
+apenas uma **ressalva latente** (nao ha UNIQUE de singleton, e `registration_is_open`
+e o unico leitor que ainda faz `LIMIT 1` sem `ORDER BY`) — vai para a lista do dono,
+porque a correcao e SQL.
+
+Correcao de rumo de um cetico sobre um caçador, que muda o dano: em
+`ImportCustomerPrices` a funcao `preco_para_cliente` **nao existe** (a citacao era so
+um comentario no codigo). Preco duplicado nao vira preco sorteado — `pricing.ts:36-42`
+usa `.maybeSingle()`, que com duas linhas devolve PGRST116 e `pricing.ts:50` lanca.
+O preco daquele cliente QUEBRA. Dano real, mecanismo outro.
+
+`INICIADO` — aplicando as correcoes dos sobreviventes que NAO dependem do dono.
+
+`FEITO` — **18 correcoes aplicadas, 25 mutantes plantados, 25 mortos.** Saida real:
+`npm test` **731/731 em 68 arquivos** (era 704/65), `npx tsc --noEmit` exit=0,
+`npm run build` ok (unico aviso: o chunk de 2.19 MB, preexistente).
+
+Duas funcoes compartilhadas novas, porque a mesma falha aparecia em varios
+chamadores — guarda em cada tela seria diff maior e cobertura pior:
+
+- **`src/lib/linhaAfetada.ts`** (`nadaFoiEscrito`) — o caso que
+  `gravacaoRecusadaComCerteza` NAO cobre, porque nao tem erro nenhum: sob RLS o
+  `USING` de policy **filtra** em UPDATE/DELETE em vez de levantar. Zero linhas +
+  `error: null` era lido como sucesso. O helper deixa escrito por que NAO vale para
+  INSERT/upsert (ali o `WITH CHECK` levanta 42501, e o `error` ja conta a verdade) —
+  senao a proxima pessoa espalha isso por toda escrita e enche a tela de ruido.
+- **`src/lib/mapaSku.ts`** (`mapaSkuSemAmbiguidade`) — extraido de
+  `ImportCustomerPrices`, que ja tinha a guarda, para `ImportProductVariants`, que
+  nao tinha. Com a UNIQUE de `produtos.sku` dropada em `20260708140000`, `mapa[sku]
+  = id` em laco e ultimo-vence.
+
+As correcoes, por gravidade:
+
+1. **`ImportProductVariants`: o UPDATE zerava o estoque.** `quantidade: stock` e
+   `valores_opcao: []` eram default de CRIAR aplicados ao ATUALIZAR. Um arquivo so
+   com `parent_sku,variant_sku` zerava todas as variantes tocadas e o catalogo
+   passava a recusar pedido com `INSUFFICIENT_STOCK` — sem volta, ninguem mais
+   escreve essa coluna. Agora coluna ausente ou celula vazia = NAO MEXER; o INSERT
+   mantem o default.
+2. **`ImportCategories`: o mesmo vicio.** `ativo: true` republicava na loja as
+   categorias que o proprio sistema desativa em massa (`20260320204242:34`), e
+   `descricao || null` apagava a descricao do catalogo inteiro.
+3. **`ImportCategories`: pai resolvido por nome puro.** O arquivo ja dizia que
+   existem homonimas de proposito e que "nome + pai identifica" — mas so a busca de
+   EXISTENCIA respeitava. Agora recusa; e o SELECT por linha virou mapa em memoria
+   com chave `(nome minusculo, pai)`, o que de quebra mata a assimetria de caixa
+   (`.eq("nome")` era case-sensitive contra um mapa minusculo).
+4. **`ImportAddresses`: `|| ""` satisfazia o NOT NULL.** Cabecalho divergente
+   gravava milhares de enderecos em branco com "Imported N of N". Agora recusa a
+   linha, deduplica por `(cliente, logradouro, cep)` e desmarca o principal
+   anterior. E `Checkout.tsx` ganhou `.order("principal").order("created_at")` — o
+   `find(e => e.principal)` dependia da ordem fisica do Postgres.
+5. **Area de drop travada** em `ImportAddresses`, `ImportCategories` e
+   `ImportCustomerPrices`, como ja era em `BulkUpdateOrders` e
+   `ImportProductVariants`.
+6. **`UsersManagement` e `ShippingOptions`: escrita que nao achou linha dizia que
+   salvou.** Delete de papel, save de frete e o segundo update do `setDefault` —
+   este ultimo era o pior, porque a PRIMEIRA escrita ja tirou o padrao de todos.
+7. **`portal/Team` e `portal/Dashboard`: leitura falhada saindo como resultado.**
+
+Uma correcao de percurso minha, pega pelo proprio projeto: escrevi os primeiros
+asserts com `fonte.slice(indexOf, indexOf)` a mao — exatamente a armadilha que
+`src/test/fatia.ts` documenta (marcador ausente devolve -1 e o recorte pega o
+arquivo quase inteiro, deixando o teste verde e inutil) e que
+`fatiaSemGuarda.test.ts` existe para proibir. Reescrito com `fatiaEntre`, e o teto
+de linhas do helper ja reprovou um recorte meu grande demais na primeira execucao.
+
+E um mutante que SOBREVIVEU na primeira rodada, o que mudou o assert: trocar
+`(r["address"] ?? "").trim()` por `r["address"] || ""` nao era pego, porque a
+checagem de vazio continuava de pe. So que sem `trim` a celula de **espacos** passa
+por preenchida — e planilha exportada e reimportada produz celula assim o tempo
+todo. O assert virou "os quatro obrigatorios sao lidos com trim", e o mutante
+morreu.
+
+`FEITO` — **ciclo cacador+cetico fechado em SEIS rodadas, nao uma.** Cada rodada
+achou defeito na correcao da anterior, e a maioria dos achados era MINHA.
+
+- **Rodada 2** (sobre as 18 correcoes): 8 achados. O cetico derrubou 2, marcou 2
+  como pre-existentes e confirmou 4. **Tres eram regressoes que eu tinha acabado de
+  introduzir**: (a) a chave de deduplicacao de endereco ignorava `complemento`, e
+  "123 Main St / Suite 100" e "Suite 200" — mesmo predio, salas diferentes, a forma
+  normal de conta B2B — colidiam, com a segunda saindo "Already on file" em verde
+  sem nunca entrar; deduplicar demais e pior que nao deduplicar, porque perde dado
+  legitimo E diz que deu certo; (b) o `continue` do dedupe descartava o
+  `is_primary` em silencio, justamente no fluxo que a dedupe existe para atender;
+  (c) com o match de categoria agora case-insensitive, deixar `nome` no payload do
+  UPDATE fazia o CSV **renomear** a categoria para o caixa da planilha, mudando o
+  rotulo do menu da loja — o mesmo vicio que eu tinha acabado de matar, entrando
+  pelo outro lado.
+- **Rodada 3**: `promoveAPrincipal` nao confirmava a linha na segunda escrita (a
+  primeira ja tinha desmarcado todos) e a mensagem de erro afirmava um estado que o
+  codigo nao sabe. O cetico tambem **recusou dois consertos meus como overkill** e
+  eu segui a recusa: aplicar `nadaFoiEscrito` na PRIMEIRA escrita viraria erro falso
+  em todo lote (zero linhas ali e o caso normal, cliente com um endereco so), e
+  recusar linha ambigua de `is_primary` seria fricção sem dano — ao contrario de SKU
+  e nome homonimo, aqui cada linha e inequivoca e o banco termina consistente.
+- **Rodada 4**: a mensagem que eu tinha "corrigido" era falsa na direcao oposta —
+  `promoveAPrincipal` tem TRES saidas de erro, e no caminho do desmarque o UPDATE e
+  atomico, entao o principal antigo continua la. Passou a nao afirmar estado.
+- **Rodadas 5 e 6**: buracos nos meus proprios testes, achados rodando mutante e nao
+  lendo. `if (poeErr) return poeErr` nao tinha assert nenhum; e o assert de
+  `nadaFoiEscrito` era regex solto no arquivo — trocar o corpo por `return null`
+  deixava a chamada la, passava verde e reintroduzia o defeito inteiro.
+
+**42 mutantes plantados no total, 42 mortos** (tres da primeira rodada ficaram
+obsoletos quando o codigo que miravam foi reescrito, e foram REAPONTADOS para a
+forma atual em vez de contados como mortos de graca). Cinco sobreviveram na
+primeira tentativa e cada um mudou um assert:
+- sem `trim`, celula de **espacos** passa por preenchida;
+- assert na ASSINATURA de `chaveEndereco` nao pega mutante que muda o CORPO;
+- assert que procura a chamada nao pega mutante que anula a CONDICAO (`if (false)`);
+- so o ramo do dedupe testado deixava o ramo do INSERT livre;
+- guarda cuja CONSEQUENCIA nao e verificada e guarda que nao existe.
+
+**Varredura de classe, do achado de passagem do ultimo cacador:** `email || "â€”"`
+era mojibake real no codigo — U+2014 salvo em UTF-8 e relido como latin-1, que
+aparece **literalmente assim na tela**. Varri a classe em vez do caso: 4 ocorrencias
+em 3 arquivos. A pior nao era nenhum dos travessoes e sim o `TEMPLATE_ROW` de
+`ImportCategories`, `"Produtos QuÃ­micos"` — o admin **baixa o template** com o nome
+corrompido e reimporta criando categoria errada. Todas corrigidas, com guarda em 10
+telas contra `â€` e `Ã` + continuation byte.
+
+VERIFICACAO FINAL, saida real:
+```
+npx tsc --noEmit        exit=0, sem saida
+npm test                Test Files 68 passed (68) / Tests 741 passed (741)
+                        OK — 194 migrations / 197 .sql / 16 edge functions
+npm run build           2474 modules transformed, built in 6.20s
+                        (unico aviso: chunk de 2.19 MB, preexistente)
+```
