@@ -154,13 +154,26 @@ describe("as quatro telas usam a chave por numero", () => {
     // Medido: apagar o `disabled` do Next de `Clientes` passava verde — e com
     // `paginaValida` no lugar o botao vira MORTO (clica e nao sai do lugar), ou
     // seja, o controle recem-corrigido some em silencio.
-    const travada =
-      /disabled=\{pageOk <= 1\}/.test(fonte) && /disabled=\{pageOk >= totalPages\}/.test(fonte);
-    const clampada =
-      /setPage\(Math\.max\(1, pageOk - 1\)\)/.test(fonte) && /setPage\(Math\.min\(totalPages, pageOk \+ 1\)\)/.test(fonte);
-    expect(travada || clampada,
-      `${tela}: as setas nao estao presas a faixa — nem por \`disabled\`, nem por \`Math.max\`/\`Math.min\``)
-      .toBe(true);
+    //
+    // CONTA OS PARES, e nao `.test()`. Medido: o portal tem DUAS barras (topo e
+    // rodape) e o `.test()` era satisfeito pela do topo — tirar o `Math.min` so do
+    // rodape passava verde, e o "›" de baixo virava botao morto na ultima pagina.
+    // O proprio arquivo ja tinha aprendido isso e usa `matchAll` nos outros
+    // controles; este assert nao seguiu a disciplina.
+    const conta = (re: RegExp) => (fonte.match(new RegExp(re.source, "g")) ?? []).length;
+    const anteriorTravada = conta(/disabled=\{pageOk <= 1\}/);
+    const proximaTravada = conta(/disabled=\{pageOk >= totalPages\}/);
+    const anteriorClamp = conta(/setPage\(Math\.max\(1, pageOk - 1\)\)/);
+    const proximaClamp = conta(/setPage\(Math\.min\(totalPages, pageOk \+ 1\)\)/);
+    // Uma barra = um par. As duas metades tem que existir na MESMA quantidade,
+    // senao uma das barras tem so metade da protecao.
+    const barras = Math.max(anteriorTravada, anteriorClamp);
+    expect(barras, `${tela}: nao achei nenhuma seta "anterior" presa a faixa`).toBeGreaterThan(0);
+    expect(anteriorTravada + anteriorClamp,
+      `${tela}: uma das barras tem a seta "anterior" solta`).toBe(barras);
+    expect(proximaTravada + proximaClamp,
+      `${tela}: uma das barras tem a seta "proxima" solta — ela vira botao morto na ultima pagina`)
+      .toBe(barras);
 
     // Uma fatia por lista de paginacao (o portal tem duas, topo e rodape). Cortar
     // pelo proprio `.map(` evita o recorte a mao que ja ficou verde e parou de

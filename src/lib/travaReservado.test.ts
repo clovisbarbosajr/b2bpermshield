@@ -55,11 +55,20 @@ describe("travaDeReservadoSeAplica", () => {
 describe("gravarComToken: `porFiltroExtra` distingue o token do filtro do chamador", () => {
   // Falso de DUAS chamadas, que e o que a funcao faz: o UPDATE, e — so quando ele
   // casa zero linhas COM filtro extra — a releitura que separa as duas causas.
+  let usouLte = false;
   const falso = (opts: { casaUpdate: boolean; revAtual: number | null }) => {
+    usouLte = false;
     let chamadas = 0;
     const cadeia = (ehUpdate: boolean) => {
       const api: any = {
-        update: () => api, eq: () => api, lte: () => api, select: () => api,
+        // `lte` MARCA. Sem isto, apagar o `if (filtroExtra) q = filtroExtra(q);` da
+        // funcao passava verde: o `.lte` nunca saia no UPDATE, a corrida reabria
+        // inteira, e o `porFiltroExtra` continuava sendo calculado — a tela dizia
+        // "aumente a quantidade" enquanto nada tinha protegido nada. O teste cobria
+        // o desfecho e nao o MECANISMO.
+        update: () => api, eq: () => api,
+        lte: () => { usouLte = true; return api; },
+        select: () => api,
         maybeSingle: async () =>
           ehUpdate
             ? (opts.casaUpdate ? { data: { admin_rev: 8 }, error: null, status: 200 }
@@ -76,6 +85,7 @@ describe("gravarComToken: `porFiltroExtra` distingue o token do filtro do chamad
     // barrou foi o filtro, e nao um colega.
     const sb = falso({ casaUpdate: false, revAtual: 7 });
     const r = await gravarComToken(sb, "produtos", "p1", { estoque_total: 5 }, 7, (q: any) => q.lte("estoque_reservado", 5));
+    expect(usouLte, "o filtroExtra nao chegou ao statement — o `.lte` nao saiu no UPDATE").toBe(true);
     expect(r.tipo).toBe("conflito");
     expect((r as any).porFiltroExtra, "o filtro barrou mas a tela vai acusar um colega").toBe(true);
   });
@@ -85,6 +95,7 @@ describe("gravarComToken: `porFiltroExtra` distingue o token do filtro do chamad
     // gravou no meio.
     const sb = falso({ casaUpdate: false, revAtual: 99 });
     const r = await gravarComToken(sb, "produtos", "p1", { estoque_total: 5 }, 7, (q: any) => q.lte("estoque_reservado", 5));
+    expect(usouLte, "o filtroExtra nao chegou ao statement — o `.lte` nao saiu no UPDATE").toBe(true);
     expect(r.tipo).toBe("conflito");
     expect((r as any).porFiltroExtra, "conflito de token virou mensagem de estoque").toBe(false);
   });
@@ -93,6 +104,7 @@ describe("gravarComToken: `porFiltroExtra` distingue o token do filtro do chamad
     const sb = falso({ casaUpdate: false, revAtual: 99 });
     const r = await gravarComToken(sb, "produtos", "p1", { nome: "x" }, 7);
     expect(r.tipo).toBe("conflito");
+    expect(usouLte, "chamou o filtro sem ter recebido um").toBe(false);
     expect((r as any).porFiltroExtra, "sem filtro extra nao ha o que atribuir a ele").toBeUndefined();
   });
 });

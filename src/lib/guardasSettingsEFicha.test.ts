@@ -15,6 +15,7 @@
 // o modulo existe (vitest roda em Node).
 import { readFileSync, readdirSync } from "node:fs";
 import { describe, it, expect } from "vitest";
+import { fatiaEntre } from "@/test/fatia";
 import { NOMES_DE_SISTEMA } from "./stock";
 
 const ler = (f: string) => readFileSync(f, "utf-8");
@@ -67,7 +68,7 @@ describe("ProductStatuses: o nome e chave de sistema", () => {
     // que o admin tirou de venda DE PROPOSITO com estoque em caixa.
     const src = f();
     // A NORMALIZACAO E A METADE QUE FUNCIONA. Os nomes gravados sao title case
-    // (`Available`, `Sold Out`, ... — `20260318203107:17-22`) e a lista esta em
+    // (`Available`, `Sold Out`, ... — no seed, `20260318203107`, linhas 18-23) e a lista esta em
     // minusculas: sem `.trim().toLowerCase()` o `includes` NUNCA casa, os dois
     // avisos nunca disparam, e a correcao vira decoracao com a suite verde.
     // Medido: mutante de 24 bytes, 681/681 verde.
@@ -240,6 +241,19 @@ describe("ProductEdit: privacidade por cliente e trava de reservado", () => {
       .toContain("travaDeReservadoSeAplica({");
     expect(src, "a trava e aplicada mesmo quando nao e devida")
       .toContain("travaEstoque ? (q: any) => q.lte(");
+    // A COMPARACAO E CONTRA O VALOR CARREGADO, e nao contra o proprio form —
+    // comparar o form consigo mesmo da sempre "nao mudou" e mata a trava inteira.
+    expect(src, "a comparacao voltou a ser do form com ele mesmo — a trava morre")
+      .toContain("estoqueAtual: estoqueCarregadoRef.current,");
+    // E O REF TEM QUE SER ATUALIZADO DEPOIS DE GRAVAR. Sem isso ele fica com o
+    // valor do carregamento para sempre (`useEffect(..., [id])` nao re-roda num
+    // save), e a trava erra nas DUAS direcoes na mesma sessao: abre quando devia
+    // fechar (sobe, salva, clientes reservam, baixa -> grava disponivel negativo) e
+    // fecha quando nao devia (baixa, salva, pedido de admin reserva, edita so a
+    // descricao -> "aumente a quantidade").
+    const depoisDoOk = fatiaEntre(src, "revRef.current = r.rev;", "}", 20);
+    expect(depoisDoOk, "o estoque carregado nao e atualizado depois do save — a trava erra no segundo save")
+      .toContain("estoqueCarregadoRef.current = form.estoque_total;");
   });
 });
 

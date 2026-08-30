@@ -67,7 +67,7 @@ export type StockStatus = { nome: string; permite_comprar?: boolean | null };
 // `produtos.status_produto` guarda o codigo em portugues; `product_statuses.nome`
 // guarda o rotulo em ingles; e NAO EXISTE FK entre os dois. Todo o casamento e
 // por NOME, e os tres consumidores falham ABRINDO quando nao acham:
-//   `stock.ts`, no `podeComprar`  -> `statusMap.get(normalized) ?? true`
+//   `stock.ts`, na const `canBuy` de `checkCartStock` -> `statusMap.get(normalized) ?? true`
 //   `Catalogo.tsx`, no `canBuy`   -> `?? { permite_comprar: true, permite_visualizar: true }`
 //   `Catalogo.tsx`, no filtro da vitrine -> `!(st && st.permite_visualizar === false)`,
 //     que falha abrindo pelo mesmo motivo com outra forma: status inexistente nao
@@ -225,8 +225,12 @@ export function checkCartStock(
  *
  * Ou seja: sem esta funcao, TODO produto de pre-venda e TODO produto com backorder
  * ficava ineditavel, e a tela mandava o admin "aumentar a quantidade" de um produto
- * que nao tem quantidade. `rastrear_estoque = false` era pior ainda — o gatilho nao
- * le essa coluna, entao o produto fica com total 0 acumulando reservado.
+ * que nao tem quantidade.
+ *
+ * (`rastrear_estoque` NAO entra nisso: o gatilho nao le essa coluna, e nao ler
+ * significa que ele EXIGE saldo tambem para esse produto — o pedido e recusado com
+ * `INSUFFICIENT_STOCK` em vez de acumular reservado. Uma versao anterior deste
+ * comentario descrevia o mecanismo ao contrario.)
  *
  * A trava vale quando o admin MEXEU na quantidade de um produto que exige saldo.
  * Fora disso o save nao pode ser barrado por uma condicao que ele nao criou.
@@ -246,7 +250,12 @@ export function travaDeReservadoSeAplica(p: {
   if (Number(p.estoqueNovo) > Number(p.estoqueAtual)) return false;
   if (p.permitirBackorder === true) return false;
   const s = String(p.statusProduto ?? "").toLowerCase();
-  // Mesmas tres formas que o `_enforce` do banco reconhece.
-  if (s.includes("pre_venda") || s.includes("pre-venda") || s.includes("pre-order") || s.includes("encomenda")) return false;
+  // REGEX, e nao `includes` de quatro formas fixas. O banco usa
+  // `LIKE %pre%venda%` / `%pre%order%` / `%encomenda%`, que casa `prevenda`,
+  // `pre venda`, `pre  venda` e `Pre Order` — todos os quais o `includes` DEIXAVA
+  // passar como "nao isento", divergindo do gatilho. Hoje o `statusOptions` do
+  // admin so grava `pre_venda`, mas a edge `api` tem `status_produto` na allow-list
+  // do PUT e aceita texto livre.
+  if (/pre.*venda|pre.*order|encomenda/.test(s)) return false;
   return true;
 }

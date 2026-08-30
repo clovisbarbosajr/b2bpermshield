@@ -626,6 +626,20 @@ const ProductEdit = () => {
         return;
       }
       revRef.current = r.rev;
+      // O ESTOQUE CARREGADO TAMBEM. Sem esta linha o ref ficava com o valor do
+      // carregamento para sempre (`useEffect(..., [id])` nao re-roda num save), e a
+      // trava errava nas DUAS direcoes na mesma sessao:
+      //
+      // ABRE quando devia fechar — sobe 10->100 e salva; clientes reservam 90; o
+      // admin baixa para 20 e a comparacao ainda e contra 10, entao `20 > 10` e a
+      // trava NAO e aplicada: grava total 20 com reservado 90, disponivel -70, e o
+      // produto trava de vez. E a corrupcao que o `.lte` existe para impedir.
+      //
+      // FECHA quando nao devia — baixa 100->10 e salva; um pedido de ADMIN reserva
+      // 50 (o gatilho nao confere saldo nesse ramo); o admin corrige so a DESCRICAO
+      // e a comparacao ainda e contra 100, entao a trava dispara e acusa estoque
+      // num save que nao tocou em estoque. E a regressao da rodada anterior, de volta.
+      estoqueCarregadoRef.current = form.estoque_total;
     }
 
     // Save sub-data — se um insert de privacidade/preço falhar, avisa e NÃO declara
