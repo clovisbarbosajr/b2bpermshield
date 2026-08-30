@@ -160,27 +160,30 @@ describe("as quatro telas usam a chave por numero", () => {
     // rodape passava verde, e o "›" de baixo virava botao morto na ultima pagina.
     // O proprio arquivo ja tinha aprendido isso e usa `matchAll` nos outros
     // controles; este assert nao seguiu a disciplina.
-    const conta = (re: RegExp) => (fonte.match(new RegExp(re.source, "g")) ?? []).length;
-    const anteriorTravada = conta(/disabled=\{pageOk <= 1\}/);
-    const proximaTravada = conta(/disabled=\{pageOk >= totalPages\}/);
-    const anteriorClamp = conta(/setPage\(Math\.max\(1, pageOk - 1\)\)/);
-    const proximaClamp = conta(/setPage\(Math\.min\(totalPages, pageOk \+ 1\)\)/);
-    // Uma barra = um par. As duas metades tem que existir na MESMA quantidade,
-    // senao uma das barras tem so metade da protecao.
-    const barras = Math.max(anteriorTravada, anteriorClamp);
-    expect(barras, `${tela}: nao achei nenhuma seta "anterior" presa a faixa`).toBeGreaterThan(0);
-    expect(anteriorTravada + anteriorClamp,
-      `${tela}: uma das barras tem a seta "anterior" solta`).toBe(barras);
-    expect(proximaTravada + proximaClamp,
-      `${tela}: uma das barras tem a seta "proxima" solta — ela vira botao morto na ultima pagina`)
-      .toBe(barras);
-
     // Uma fatia por lista de paginacao (o portal tem duas, topo e rodape). Cortar
     // pelo proprio `.map(` evita o recorte a mao que ja ficou verde e parou de
     // proteger tres vezes neste projeto — ver `src/test/fatia.ts`. O portal chama
     // via `pageNumbers()`, entao o marcador comum e o callback, nao o nome.
     const listas = fonte.split(".map((n, i) =>").slice(1);
     expect(listas.length, `${tela}: nenhuma lista de paginacao encontrada`).toBeGreaterThan(0);
+
+    const conta = (re: RegExp) => (fonte.match(new RegExp(re.source, "g")) ?? []).length;
+    const anteriorTravada = conta(/disabled=\{pageOk <= 1\}/);
+    const proximaTravada = conta(/disabled=\{pageOk >= totalPages\}/);
+    const anteriorClamp = conta(/setPage\(Math\.max\(1, pageOk - 1\)\)/);
+    const proximaClamp = conta(/setPage\(Math\.min\(totalPages, pageOk \+ 1\)\)/);
+    // `barras` vem do NUMERO DE LISTAS, e nao das proprias contagens que ele
+    // deveria validar. Medido: derivando de `Math.max(anteriorTravada,
+    // anteriorClamp)`, apagar o PAR INTEIRO do rodape do portal derrubava os dois
+    // lados juntos (`1 === 1`) e passava verde — as duas setas da barra de baixo
+    // viravam botao morto e nada reclamava. Uma guarda nao pode tirar o gabarito
+    // do que ela esta medindo.
+    const barras = listas.length;
+    expect(anteriorTravada + anteriorClamp,
+      `${tela}: uma das ${barras} barra(s) tem a seta "anterior" solta`).toBe(barras);
+    expect(proximaTravada + proximaClamp,
+      `${tela}: uma das ${barras} barra(s) tem a seta "proxima" solta — ela vira botao morto na ultima pagina`)
+      .toBe(barras);
 
     for (const lista of listas) {
       // 700 caracteres cobrem o corpo do `.map` com folga e param antes do proximo

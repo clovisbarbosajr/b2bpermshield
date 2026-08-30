@@ -29,7 +29,18 @@ describe("travaDeReservadoSeAplica", () => {
   });
 
   it("NAO vale para pre-venda, nas formas que o banco reconhece", () => {
-    for (const s of ["pre_venda", "pre-venda", "pre-order", "Pre-Order", "encomenda"]) {
+    // AS CINCO PRIMEIRAS SAO AS QUE AS DUAS IMPLEMENTACOES CASAM — sozinhas, elas
+    // nao distinguiam a regex do `includes` de quatro formas fixas que ela
+    // substituiu: reverter o commit passava 691/691. As cinco de baixo sao as que
+    // DIVERGEM, e sao as que o banco isenta com `LIKE %pre%venda%` / `%pre%order%`.
+    //
+    // Alcancavel: a edge `api` tem `status_produto` no allow-list do PUT e aceita
+    // texto livre. Sem elas, um produto de pre-venda com status escrito de outro
+    // jeito volta a ficar INEDITAVEL, que e a regressao da rodada 4.
+    for (const s of [
+      "pre_venda", "pre-venda", "pre-order", "Pre-Order", "encomenda",
+      "prevenda", "pre venda", "pre  venda", "pre order", "preorder",
+    ]) {
       expect(travaDeReservadoSeAplica({ ...base, statusProduto: s }), s).toBe(false);
     }
   });
