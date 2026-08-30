@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import { descendantIds } from "@/lib/categoryTree";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { reordenarIrmaos } from "@/lib/ordemCategorias";
@@ -74,6 +75,9 @@ const CustomerPicker = ({ label, options, selected, onChange }: {
 };
 
 const AdminCategorias = () => {
+  // So para RECUSAR o delete quando a tela nao consegue contar a cascata — ver o
+  // comentario em `handleDelete`. Nao esconde nem libera mais nada.
+  const { role } = useAuth();
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   // Leitura que falhou NAO e "nao existe categoria": a tela nao pode afirmar
@@ -295,6 +299,29 @@ const AdminCategorias = () => {
   };
 
   const handleDelete = async (id: string) => {
+    // MESMA FALHA-ABERTA do `Produtos.handleDelete`: contagem barrada por RLS nao
+    // e erro (`count: 0`, `error: null`), e a guarda de `.error` logo abaixo nao a
+    // pega. `user_locations` tem policy so de admin para escrita e "own rows" para
+    // leitura, entao o manager/warehouse conta apenas as PROPRIAS linhas e o aviso
+    // ("aqueles usuarios passarao a ver a producao de TODAS as localizacoes") sai
+    // com zero.
+    //
+    // Esta tela e alcancavel por eles: `/admin/product-categories` exige so
+    // `view_products` (`App.tsx:205`) — a outra rota, `/admin/categorias`, e
+    // admin-only, e por isso o problema passou despercebido.
+    //
+    // Aqui o dano e menor que em `Produtos`: `categorias` so tem policy de escrita
+    // para admin, entao o DELETE casa zero linhas e o `if (!apagado)` avisa. O que
+    // sobra e um dialogo que MENTE sobre a cascata antes de uma acao que nao vai
+    // acontecer. Recusar antes e mais honesto que perguntar errado.
+    if (role !== "admin") {
+      toast.error(
+        "Only administrators can delete categories. Some of the records that would be affected " +
+        "are not visible to your role, so this screen cannot tell you what would be lost."
+      );
+      return;
+    }
+
     // CONTA A CASCATA ANTES DE PERGUNTAR — molde de `PrivacyGroups.handleDelete`,
     // que ja faz isso com teste (`acessoFalhaFechada.test.ts:69`).
     //
@@ -569,8 +596,9 @@ const AdminCategorias = () => {
                           variant="default"
                           size="icon"
                           className="h-7 w-7 bg-destructive hover:bg-destructive/90"
+                          disabled={role !== "admin"}
                           onClick={() => handleDelete(cat.id)}
-                          title="Delete"
+                          title={role !== "admin" ? "Only administrators can delete categories" : "Delete"}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

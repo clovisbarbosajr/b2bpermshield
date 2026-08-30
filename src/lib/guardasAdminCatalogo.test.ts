@@ -187,8 +187,10 @@ describe("Categorias: escrita confirmada, cascata contada, ordem que anda", () =
     // `user_locations` em cascade faz quem estava amarrado a uma localizacao
     // passar a ver a producao de TODAS.
     const src = f();
-    const del = src.match(/const handleDelete = async \(id: string\) => \{[\s\S]{0,2000}?\n  \};/);
-    expect(del, "nao achei o handleDelete").toBeTruthy();
+    // `fatiaEntre`, e nao regex com teto de caracteres: o `handleDelete` cresceu com
+    // a recusa por papel e estourou os 2000, entao o regex parou de casar e o teste
+    // reprovava dizendo "nao achei o handleDelete" — vermelho pelo motivo errado.
+    const del = [fatiaEntre(src, "const handleDelete = async (id: string)", "\n  };", 80)];
     for (const t of ["produtos", "categorias", "user_locations"]) {
       expect(del![0], `o delete parou de contar ${t}`).toContain(`from("${t}")`);
     }

@@ -444,3 +444,25 @@ describe("o que a tela nao consegue contar, ela nao apaga", () => {
       .toBeLessThan(primeiroFalse);
   });
 });
+
+describe("Categorias: a mesma falha-aberta do delete de produto", () => {
+  it("recusa quem nao enxerga a cascata, e o botao some", () => {
+    // `/admin/product-categories` exige so `view_products` (`App.tsx:205`) — a
+    // outra rota da MESMA tela, `/admin/categorias`, e admin-only, e foi por isso
+    // que o problema passou despercebido.
+    //
+    // `user_locations` tem policy "own rows" para leitura, entao manager/warehouse
+    // contava apenas as PROPRIAS linhas: o aviso ("aqueles usuarios passarao a ver
+    // a producao de TODAS as localizacoes") saia com zero, e a guarda de `.error`
+    // nao pega isso — contagem barrada por RLS devolve `count: 0, error: null`.
+    //
+    // Aqui o dano e menor que em `Produtos` (a escrita em `categorias` e admin-only
+    // na RLS, entao o DELETE casa zero linhas e o `if (!apagado)` avisa). O que
+    // sobra e um dialogo que MENTE antes de uma acao que nao vai acontecer.
+    const src = semComentario("src/pages/admin/Categorias.tsx");
+    expect(src, "a tela voltou a perguntar sobre uma cascata que nao consegue contar")
+      .toMatch(/if \(role !== "admin"\) \{[\s\S]{0,400}?return;/);
+    expect(src, "o botao de apagar voltou a ficar ativo para quem o handler recusa")
+      .toContain('disabled={role !== "admin"}');
+  });
+});
