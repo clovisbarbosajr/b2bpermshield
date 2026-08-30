@@ -38,7 +38,12 @@ const OrdersPerMonth = () => {
       map[key].orders += 1;
       map[key].revenue += o.total;
     });
-    return Object.values(map).sort((a, b) => a.month.localeCompare(b.month));
+    // `avgOrder` DERIVADO AQUI, e nao so no JSX. A tabela mostra quatro colunas e
+    // o CSV levava tres: quem exportava para conferir o ticket medio tinha que
+    // refazer a conta, sem saber que ela tinha ficado de fora.
+    return Object.values(map)
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .map((m) => ({ ...m, avgOrder: m.orders > 0 ? m.revenue / m.orders : 0 }));
   }, [orders]);
 
   const handleExport = () => {
@@ -46,6 +51,7 @@ const OrdersPerMonth = () => {
       { key: "month", label: "Month" },
       { key: "orders", label: "# Orders" },
       { key: "revenue", label: "Revenue" },
+      { key: "avgOrder", label: "Avg Order" },
     ]);
   };
 
@@ -93,7 +99,7 @@ const OrdersPerMonth = () => {
                     <TableCell className="text-primary">{m.month}</TableCell>
                     <TableCell className="text-right">{formatNumber(m.orders)}</TableCell>
                     <TableCell className="text-right">{formatCurrency(m.revenue)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(m.orders > 0 ? m.revenue / m.orders : 0)}</TableCell>
+                    <TableCell className="text-right">{formatCurrency(m.avgOrder)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -75,10 +75,6 @@ const CustomerEdit = () => {
     const { data, error } = await supabase
       .from("clientes").update(patch).eq("id", id).select("id").maybeSingle();
     if (error) { toast.error("Could not save: " + error.message); return false; }
-    if (!data) {
-      toast.error("Nothing was saved — you do not have permission to change this employee, or the record no longer exists.");
-      return false;
-    }
     return true;
   };
   const [contactForm, setContactForm] = useState({ nome: "", email: "", can_confirm_order: false, can_view_full_history: false });

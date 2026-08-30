@@ -230,3 +230,81 @@ describe("CustomersPerformance: o contador nao pode imprimir numero que nao exis
       .toContain("disabled={pageOk <= 1}");
   });
 });
+
+describe("logs de import/export: falha de leitura nao vira 'nunca aconteceu nada'", () => {
+  it("ImportsLog: o erro sai do silencio, e a barra de paginacao some junto", () => {
+    // Sem `else`, falha de leitura deixava `logs`/`total` INTACTOS. Na 1a carga
+    // isso imprime "(0 total)" e "No imports yet." — indistinguivel de "nunca
+    // importaram nada", numa tela de AUDITORIA. Ao PAGINAR e pior: `page` ja
+    // avancou (e o gatilho do efeito) e as linhas sao as da pagina anterior, entao
+    // a pagina 1 aparecia rotulada "Page 2 of N".
+    const src = semComentario("src/pages/admin/tools/ImportsLog.tsx");
+    expect(src, "o error da leitura voltou a ser descartado")
+      .toContain("setErro(error ? error.message : null)");
+    expect(src, "falha de leitura voltou a manter a lista e o total antigos")
+      .toContain("if (error) { setLogs([]); setTotal(0); }");
+    expect(src, "o erro nao e renderizado").toContain("{erro && (");
+    // A BARRA TEM QUE SAIR JUNTO: senao ela volta a rotular "Page 2 of N" sobre
+    // uma lista que nao e da pagina 2.
+    expect(src, "a barra de paginacao voltou a aparecer com a leitura falhada")
+      .toContain("{!erro && totalPages > 1 && (");
+    // E o contador do cabecalho nao pode afirmar "0 total" sem ter lido.
+    expect(src, "o cabecalho voltou a afirmar um total que nao foi lido")
+      .toContain("{erro ? \"\" : ` (${total} total)`}");
+  });
+
+  it("ExportsLog: as duas abas leem o error, e o corte silencioso saiu", () => {
+    const src = semComentario("src/pages/admin/tools/ExportsLog.tsx");
+    expect(src, "os dois error voltaram a ser descartados")
+      .toContain("setErro(e.error || i.error ?");
+    expect(src, "falha de leitura voltou a preencher as listas")
+      .toContain("setExports(e.error ? [] : (e.data ?? []))");
+    expect(src, "o erro nao e renderizado").toContain("{erro && (");
+    // O `Select` nao era tamanho de pagina — nao ha paginacao aqui. Ele cortava
+    // `slice(0, pageSize)` sobre linhas ja limitadas em 100: com o padrao 25, as
+    // linhas 26 a 100 ficavam invisiveis nas DUAS abas, sem controle nenhum para
+    // chegar nelas, e o seletor so aparecia numa.
+    expect(src, "voltou o corte silencioso das linhas 26 a 100")
+      .not.toContain("slice(0, pageSize)");
+    expect(src, "voltou o seletor que so governava uma das abas").not.toContain("setPageSize");
+  });
+
+  it("ExportsLog: o badge de import reconhece os status que os importadores gravam", () => {
+    // `"concluido"` e o valor do EXPORT. Os seis importadores gravam
+    // `success`/`partial`/`failed`, entao a comparacao era falsa em 100% das
+    // linhas reais — inclusive para `failed`, que saia cinza. A cor tinha deixado
+    // de significar qualquer coisa, e a MESMA linha aparecia verde em `ImportsLog`.
+    const src = semComentario("src/pages/admin/tools/ExportsLog.tsx");
+    expect(src, "o badge de import voltou a comparar com o valor do export")
+      .toContain('r.status === "success" ? "default" : r.status === "failed" ? "destructive" : "secondary"');
+  });
+
+  it("ExportsLog: a coluna Download, que era sempre um traco, saiu", () => {
+    // `arquivo_url` nunca e populada: o unico gravador de `export_logs` nao manda
+    // a coluna, e o export e blob no navegador — nao existe arquivo guardado para
+    // a URL apontar.
+    const src = semComentario("src/pages/admin/tools/ExportsLog.tsx");
+    expect(src, "voltou a coluna Download, que nada popula").not.toContain("arquivo_url");
+  });
+
+  it("o realce da aba nao aponta mais para a aba errada", () => {
+    // A classe-base do `TabsTrigger` e `data-[state=active]:bg-background`, que tem
+    // especificidade MAIOR que um `bg-primary` injetado — entao o primary so vencia
+    // com a aba DESLIGADA.
+    const src = semComentario("src/pages/admin/tools/ExportsLog.tsx");
+    expect(src, "voltou o realce hardcoded, que pinta a aba inativa")
+      .not.toContain('value="imports" className="bg-primary');
+  });
+});
+
+describe("OrdersPerMonth: o CSV leva o que a tela mostra", () => {
+  it("`Avg Order` e derivado no dado, e nao so no JSX", () => {
+    // A tabela mostra quatro colunas e o CSV levava tres: quem exportava para
+    // conferir o ticket medio refazia a conta, sem saber que ela ficara de fora.
+    const src = semComentario("src/pages/admin/reports/OrdersPerMonth.tsx");
+    expect(src, "o avgOrder voltou a ser calculado so no JSX")
+      .toContain("avgOrder: m.orders > 0 ? m.revenue / m.orders : 0");
+    expect(src, "o CSV voltou a perder a coluna de ticket medio")
+      .toContain('{ key: "avgOrder", label: "Avg Order" }');
+  });
+});

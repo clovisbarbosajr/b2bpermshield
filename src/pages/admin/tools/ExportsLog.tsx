@@ -7,15 +7,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Download } from "lucide-react";
 
 const ExportsLog = () => {
   const [exports, setExports] = useState<any[]>([]);
   const [imports, setImports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("exports");
-  const [pageSize, setPageSize] = useState(25);
+  const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -23,8 +21,12 @@ const ExportsLog = () => {
         supabase.from("export_logs").select("*").order("created_at", { ascending: false }).limit(100),
         supabase.from("import_logs").select("*").order("created_at", { ascending: false }).limit(100),
       ]);
-      setExports(e.data ?? []);
-      setImports(i.data ?? []);
+      // Os dois `error` eram descartados: qualquer falha pintava "No exports yet." /
+      // "No imports yet." — indistinguivel de "nunca exportaram nada", numa tela de
+      // AUDITORIA. Era a unica tela do lote sem nenhum tratamento de erro.
+      setErro(e.error || i.error ? (e.error ?? i.error)!.message : null);
+      setExports(e.error ? [] : (e.data ?? []));
+      setImports(i.error ? [] : (i.data ?? []));
       setLoading(false);
     };
     fetchAll();
@@ -39,23 +41,37 @@ const ExportsLog = () => {
 
   return (
     <AdminLayout>
+      {erro && (
+        <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-medium text-destructive">Could not load the logs.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This does NOT mean nothing was exported or imported — the log could not be read.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{erro}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => window.location.reload()}>Try again</Button>
+        </div>
+      )}
+
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="mb-4">
-          <TabsTrigger value="exports">List</TabsTrigger>
-          <TabsTrigger value="imports" className="bg-primary text-primary-foreground">Imports</TabsTrigger>
+          {/* "List" nao dizia de que. E o `bg-primary` na aba de imports era um
+              realce HARDCODED: a classe-base do TabsTrigger e
+              `data-[state=active]:bg-background`, que tem especificidade MAIOR —
+              entao o primary so vencia com a aba DESLIGADA. O realce apontava para
+              a aba errada. */}
+          <TabsTrigger value="exports">Exports</TabsTrigger>
+          <TabsTrigger value="imports">Imports</TabsTrigger>
         </TabsList>
 
         <TabsContent value="exports">
-          <div className="flex items-center gap-2 mb-3">
-            <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
-              <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="25">25</SelectItem>
-                <SelectItem value="50">50</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {/* O SELECT SAIU, e com ele o corte silencioso. Ele nao era "tamanho de
+              pagina": nao ha paginacao nesta tela. Alimentava `slice(0, pageSize)`
+              sobre linhas ja cortadas em `limit(100)`, entao com o padrao 25 as
+              linhas 26 a 100 ficavam invisiveis, nas DUAS abas, sem nenhum controle
+              para chegar nelas — e o seletor so aparecia numa delas. Ocultacao de
+              dado numa tela de auditoria. Mostrar as 100 e dizer que sao 100 e
+              menos codigo e mais verdade. Quem precisa de historico completo tem
+              `Imports Log`, que pagina de verdade. */}
           <Card>
             <Table>
               <TableHeader>
@@ -68,27 +84,27 @@ const ExportsLog = () => {
                   <TableHead>Date</TableHead>
                   <TableHead className="text-right">Records</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {exports.length === 0 ? (
-                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No exports yet.</TableCell></TableRow>
-                ) : exports.slice(0, pageSize).map(r => (
+                {erro ? (
+                  <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Could not read the log — see the message above.</TableCell></TableRow>
+                ) : exports.length === 0 ? (
+                  <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No exports yet.</TableCell></TableRow>
+                ) : exports.map(r => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.tipo}</TableCell>
                     <TableCell>{formatDate(r.created_at)}</TableCell>
                     <TableCell className="text-right">{r.registros ?? 0}</TableCell>
                     <TableCell><Badge variant={r.status === "concluido" || r.status === "Finished" ? "default" : "secondary"}>{r.status ?? "Finished"}</Badge></TableCell>
-                    <TableCell className="text-right">
-                      {r.arquivo_url ? (
-                        <Button variant="ghost" size="sm" asChild>
-                          <a href={r.arquivo_url} download><Download className="h-4 w-4 mr-1" /> Download</a>
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
+                    {/* COLUNA "Download" REMOVIDA. `arquivo_url` nunca e populada: o
+                        unico gravador de `export_logs` (`ProductExport.tsx:193`) nao
+                        manda a coluna, e o export e blob no navegador — nao existe
+                        arquivo guardado para a URL apontar. Era um botao que, por
+                        construcao, mostrava "—" em 100% das linhas.
+
+                        Persistir o export no Storage (com link reutilizavel e
+                        retencao) e decisao do dono, e esta na batelada. */}
                   </TableRow>
                 ))}
               </TableBody>
@@ -109,15 +125,22 @@ const ExportsLog = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {imports.length === 0 ? (
+                {erro ? (
+                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Could not read the log — see the message above.</TableCell></TableRow>
+                ) : imports.length === 0 ? (
                   <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No imports yet.</TableCell></TableRow>
-                ) : imports.slice(0, pageSize).map(r => (
+                ) : imports.map(r => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.tipo}</TableCell>
                     <TableCell>{r.arquivo_nome ?? "—"}</TableCell>
                     <TableCell>{formatDate(r.created_at)}</TableCell>
                     <TableCell>{r.registros_total ?? 0} ({r.registros_sucesso ?? 0} ok / {r.registros_erro ?? 0} err)</TableCell>
-                    <TableCell><Badge variant={r.status === "concluido" ? "default" : "secondary"}>{r.status ?? "pending"}</Badge></TableCell>
+                    <TableCell>{/* `"concluido"` e o valor do EXPORT. Os seis importadores gravam
+                        `success`/`partial`/`failed`, entao esta comparacao era falsa em
+                        100% das linhas reais — inclusive para `failed`, que saia cinza.
+                        A cor tinha deixado de significar qualquer coisa. `ImportsLog`
+                        ja tratava os tres certo, sobre a MESMA tabela. */}
+                    <Badge variant={r.status === "success" ? "default" : r.status === "failed" ? "destructive" : "secondary"}>{r.status ?? "pending"}</Badge></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

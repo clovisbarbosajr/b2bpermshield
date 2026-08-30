@@ -14,6 +14,7 @@ const ImportsLog = () => {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
     const fetch = async () => {
@@ -29,7 +30,16 @@ const ImportsLog = () => {
         .order("id", { ascending: true })
         .range(from, to);
 
-      if (!error) {
+      // Sem `else`, falha de leitura deixava `logs`/`total` INTACTOS. Duas
+      // consequencias, as duas mentindo:
+      //   1ª carga falha -> `total = 0` -> o cabecalho imprime "(0 total)" e o
+      //   corpo "No imports yet.", indistinguivel de "nunca importaram nada" —
+      //   numa tela de AUDITORIA, que e onde se confere o que entrou;
+      //   falha ao PAGINAR -> `page` ja avancou (e o gatilho do efeito) e as
+      //   linhas continuam as da pagina anterior: a pagina 1 rotulada "Page 2 of N".
+      setErro(error ? error.message : null);
+      if (error) { setLogs([]); setTotal(0); }
+      else {
         setLogs(data ?? []);
         setTotal(count ?? 0);
       }
@@ -45,10 +55,23 @@ const ImportsLog = () => {
     <AdminLayout>
       <div className="mb-6">
         <h2 className="font-display text-2xl font-semibold">Imports Log</h2>
-        <p className="mt-1 text-sm text-muted-foreground">History of all CSV import operations ({total} total).</p>
+        <p className="mt-1 text-sm text-muted-foreground">History of all CSV import operations{erro ? "" : ` (${total} total)`}.</p>
       </div>
 
-      {totalPages > 1 && (
+      {erro && (
+        <div className="mb-6 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-medium text-destructive">Could not load the imports log.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This does NOT mean nothing was imported — the log could not be read.
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{erro}</p>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => window.location.reload()}>Try again</Button>
+        </div>
+      )}
+
+      {/* A barra sai junto com o erro: sem isto ela rotularia "Page 2 of N" sobre
+          uma lista que nao e da pagina 2. */}
+      {!erro && totalPages > 1 && (
         <div className="flex items-center gap-1 mb-3">
           <Button variant="outline" size="icon" className="h-7 w-7" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
             <ChevronLeft className="h-3 w-3" />
@@ -78,7 +101,13 @@ const ImportsLog = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {logs.length === 0 ? (
+              {erro ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                    Could not read the log — see the message above.
+                  </TableCell>
+                </TableRow>
+              ) : logs.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                     No imports yet.
