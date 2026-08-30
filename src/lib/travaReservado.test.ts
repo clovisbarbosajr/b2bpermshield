@@ -54,6 +54,19 @@ describe("travaDeReservadoSeAplica", () => {
       // lados.
       "em_pre_venda", "produto pre-venda",
       "pre-venda lote 2", "encomenda especial",
+      // E A TERCEIRA DIMENSAO DO `%`: LETRA no meio. Todas as outras tem gap vazio
+      // (`prevenda`), separador (`-`, `_`, espaco) ou quebra de linha — nenhuma tem
+      // letra entre `pre` e `venda`. O `%` casa letra tambem.
+      //
+      // Sem esta, `/pre[\s_-]*venda|.../` passava 691/691 — e essa e literalmente a
+      // leitura que a lista sugere a quem for reescrever a regex olhando os testes
+      // em vez do `LIKE`. Das 676 strings `preXYvenda` com XY alfabetico, as 676
+      // divergiam: `"preco de venda"` e `"pre lancamento venda"` viravam save
+      // recusado que o banco aceita.
+      //
+      // Com esta, as quatro formas de gap estao cobertas: vazio, separador, letra e
+      // terminador de linha.
+      "pre lancamento venda",
       // E a quebra de linha, que o `%` casa e o `.` do JS so casa com a flag `s`.
       "pre\nvenda",
     ]) {
