@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { nadaFoiEscrito } from "@/lib/linhaAfetada";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 
 /** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
@@ -204,6 +205,16 @@ const ImportCategories = () => {
 
       if (error) {
         res.push({ row: linhaDoArquivo(r, i), name, status: "error", message: error.message });
+      } else if (existenteId && nadaFoiEscrito(gravada, error)) {
+        // RLS FILTRA o UPDATE em vez de levantar erro, e outro admin pode ter
+        // apagado a categoria entre o SELECT do inicio da importacao e este
+        // UPDATE. Nos dois casos o PostgREST devolve `error: null` com zero linha
+        // e a tela dizia "Updated". Aqui `gravada` vem de `maybeSingle()`, entao
+        // e objeto ou `null` — nao array.
+        res.push({
+          row: linhaDoArquivo(r, i), name, status: "error",
+          message: "This category is no longer there for you to update — nothing was written",
+        });
       } else {
         // Deixa a categoria disponível como PAI para as linhas seguintes do CSV.
         if (gravada?.id) {

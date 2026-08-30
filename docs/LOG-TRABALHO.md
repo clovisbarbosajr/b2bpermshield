@@ -5330,3 +5330,134 @@ PRE-EXISTENTE (nao e regressao desta leva) o UPDATE de `ImportCategories` e o de
 `ImportProductVariants`, que reportam "Updated" sem checar linha. `nadaFoiEscrito`
 ja existe; falta aplicar — com o cuidado de que ali o retorno e `maybeSingle()`
 (objeto ou null), nao array, entao a checagem e `gravada === null && !error`.
+
+---
+
+## 30/ago, janela seguinte — a classe "escrita que nao confirma linha afetada"
+
+`INICIADO` — item herdado da leva anterior: o cetico tinha marcado como
+PRE-EXISTENTE o UPDATE de `ImportCategories` e o de `ImportProductVariants`, que
+diziam "Updated" sem checar linha. Varri a CLASSE em vez dos dois casos citados —
+**seis sites**, nao dois.
+
+`EDITADO` — primeiro o helper compartilhado, e por um defeito que a varredura
+revelou: `nadaFoiEscrito` so tratava ARRAY. `ImportCategories` grava com
+`.select("id").maybeSingle()`, que devolve OBJETO ou `null` — e objeto entrava por
+`data?.length ?? 0`, `length` de objeto e `undefined`, virava 0, e o helper
+afirmaria "nada foi escrito" sobre a linha que ESTAVA la. Falha aberta na direcao
+oposta: em vez de comemorar escrita que nao houve, recusaria escrita que houve, e
+TODA categoria atualizada sairia como erro. Aplicar o helper sem isso teria
+plantado um defeito pior que o que eu vim corrigir. Agora a checagem e explicita
+por forma (`data == null || (Array.isArray(data) && data.length === 0)`).
+
+`EDITADO` — os seis sites. Todos tem a mesma anatomia: um SNAPSHOT lido antes do
+laco (mapa de SKU, de e-mail, de categoria) e a escrita pelo id que o snapshot deu.
+RLS **filtra** UPDATE e DELETE em vez de levantar erro, e outro admin apagando a
+linha no meio produz exatamente o mesmo `error: null` com zero linha:
+
+1. `ImportCategories` — UPDATE de categoria (`maybeSingle`).
+2. `ImportCustomerPrices` — UPDATE de preco. Dinheiro: "Updated" faz o admin
+   fechar a tela achando que o preco novo esta valendo.
+3. `ImportCustomers` — UPDATE por e-mail. **O pior dos seis**, porque o e-mail
+   continua no snapshot `existingEmails`: reimportar o arquivo NAO cria o cliente,
+   ele nunca entra, e toda execucao diz que atualizou.
+4. `ImportProductVariants` — UPDATE de variante (estoque que nao mudou).
+5. `BulkUpdateOrders` — UPDATE de pedido. Ler e escrever passam por policies
+   DIFERENTES: o SELECT acima achou o pedido, o UPDATE pode nao alterar nada. Numa
+   mudanca de status em lote o operador marca a leva como despachada e ela nao
+   mudou.
+6. `ImportOrders` — DELETE de limpeza do pedido orfao. Filtrado por RLS, a tela
+   dizia "nothing was imported for this order" com o pedido VAZIO ainda no banco —
+   e o operador reimporta e duplica, que e exatamente o desfecho que essa limpeza
+   existe para evitar. De quebra, a mensagem citava `limpezaErr.message` num ramo
+   onde `limpezaErr` agora pode ser `null`: imprimiria "undefined".
+
+Deixados de FORA de proposito, porque ali zero linha e desfecho LEGITIMO: o
+`update({ principal: false })` de `ImportAddresses` (cliente com um endereco so) e
+o `delete().eq("produto_id")` de `ImportRelatedProducts` (produto sem vinculo).
+Espalhar a guarda por toda escrita viraria erro falso em lote — o mesmo overkill
+que o cetico ja tinha recusado na leva anterior.
+
+`FEITO` — dois arquivos de teste. `recusaSilenciosaImportadores.test.ts` prende os
+seis, e cada assert prende as DUAS pernas de que a guarda depende: o `.select(...)`
+na cadeia (sem ele o PostgREST devolve `data: null` e a guarda dispara em TODA
+linha, invertendo o defeito) e a CONSEQUENCIA — a linha do relatorio virando
+`error`, com o helper `exigeConsequenciaDeErro` recusando `"Updated"/"Created"/
+"Inserted"` dentro do bloco. Prender so a chamada de `nadaFoiEscrito` deixaria
+passar o mutante que mantem a chamada e devolve "ok" mesmo assim — a licao que ja
+custou 5 sobreviventes na leva passada.
+
+O teste de contagem de `linhaDoArquivo` reprovou a leva na primeira execucao, e
+estava certo: cinco telas ganharam um ponto de relatorio novo. Numeros atualizados
+com o motivo escrito ao lado, como o proprio bloco manda.
+
+VERIFICACAO, saida real:
+```
+npx tsc --noEmit    exit=0, sem saida
+npm test            Test Files 69 passed (69) / Tests 748 passed (748)
+                    OK — 194 migrations / 197 .sql / 16 edge functions
+```
+
+`FEITO` — **12 mutantes plantados, 12 mortos**, um por perna de cada correcao:
+helper voltando a so tratar array; `.select` removido em Categories, Variants,
+BulkUpdateOrders e no DELETE de Orders; guarda com a condicao anulada (`if (false)`)
+em CustomerPrices e BulkUpdateOrders; guarda devolvendo "ok" em Categories e
+Variants; flag presa em `false` em Customers; `naoApagou = limpezaErr` sozinho; e a
+volta do `limpezaErr.message` direto.
+
+`FEITO` — **ciclo cacador+cetico fechado em QUATRO rodadas.**
+
+- **Rodada 2** (sobre as 6 guardas): 3 achados, os 3 confirmados pelo cetico. E ele
+  **corrigiu o cacador num ponto que decidia a correcao**: o e-mail ambiguo de
+  `ImportCustomers` NAO podia ser checado com `data.length > 1` depois do UPDATE —
+  as duas fichas ja teriam sido sobrescritas, e o relatorio reportaria erro sobre
+  estrago consumado. Tem que ser PRE-VOO, com o `id` que a tela ja lia e jogava
+  fora. Os outros dois achados eram mensagens MINHAS, novas, afirmando causa que o
+  codigo nao sabe: `BulkUpdateOrders` dizia "could not be changed by you" quando a
+  tela e `requiredRole="admin"` e admin tem `FOR ALL` em `pedidos`
+  (20260317043654:211) — a causa citada e a MENOS provavel das duas; e
+  `ImportOrders` dizia "you are not allowed to delete it" num ramo que so roda
+  depois de o INSERT do mesmo pedido ter PASSADO, pela MESMA policy `FOR ALL`:
+  autocontraditoria, e ainda mandava apagar a mao um pedido que a corrida removeu.
+- **Rodada 3**: o cacador achou que a chave do snapshot de `ImportCustomers`
+  normaliza com `trim()` e o `.ilike` da escrita NAO ignora espaco — duas nocoes de
+  "mesmo e-mail" no mesmo arquivo, divergindo. E a base tem as duas grafias:
+  `b2bwave-sync/index.ts:1901` grava `c.email || ""` sem trim. Dava erro nos dois
+  sentidos: ficha ` john@x.com` com CSV `john@x.com` recusada por "ambigua" sem que
+  o `.ilike` casasse as duas, e — pior — casando ZERO linhas, a tela dizia "this
+  customer is no longer there" sobre cliente que ESTA la; sendo ramo de UPDATE, ele
+  nunca era criado e toda reimportacao repetia o erro.
+
+  A raiz nao era a normalizacao e sim escrever por FILTRO DE TEXTO tendo o `id` na
+  mao. UPDATE passou a ser `.eq("id", ...)`, o que mata a divergencia e de quebra
+  dispensa o escape de `_`/`%` do LIKE. `existingEmails` e o mapa de id viraram UM
+  mapa so — dois conjuntos paralelos dessincronizavam, e a segunda linha do mesmo
+  CSV com o mesmo e-mail entraria no UPDATE com id `undefined`.
+- **Rodada 4**: sem defeito. O cacador traceou todos os caminhos ate o `!` do
+  `idPorEmail.get(emailLc)!` (o mapa so CRESCE, e o unico `set` esta no ramo
+  oposto do `if`), confirmou que `payload.user_id` so e montado no ramo de INSERT
+  — entao `clientes_user_id_unique` e `claim_customer_record()` nao sao tocados —
+  e registrou de passagem que gravar o e-mail trimado MELHORA o claim, porque
+  `claim_customer_record` compara `lower(email)` sem trim
+  (20260619000000:31) e uma ficha suja que antes nunca casava passa a casar.
+
+**21 mutantes plantados, 21 mortos.** Tres sobreviveram na primeira tentativa e
+cada um mudou um assert:
+- **M16**: restaurar "could not be changed by you" passava verde. Meu
+  `exigeConsequenciaDeErro` prendia status e ausencia de "Updated", e nada impedia
+  a mensagem de voltar a NOMEAR A CAUSA. A proibicao entrou no helper do teste, nao
+  num caso so — a tentacao de explicar a causa aparece igual nas seis telas.
+- **M20**: `.select("id")` removido do INSERT. `novoId` vira sempre `undefined`, o
+  `set` nunca roda, e a segunda linha do mesmo CSV volta a INSERIR: duplicata de
+  cliente. Meu assert prendia a LINHA do `set`, nao as duas coisas de que ela
+  depende.
+- **M21**: `trim()` removido da chave do snapshot — ficha ` john@x.com` deixa de
+  casar com o CSV e a duplicata volta pelo outro lado.
+
+VERIFICACAO FINAL, saida real:
+```
+npx tsc --noEmit        exit=0, sem saida
+npm test                Test Files 69 passed (69) / Tests 749 passed (749)
+                        OK — 194 migrations / 197 .sql / 16 edge functions
+npm run build           built ok (unico aviso: chunk de 2.19 MB, preexistente)
+```

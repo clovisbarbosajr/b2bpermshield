@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle, SkipForward } from "lucide-reac
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { nadaFoiEscrito } from "@/lib/linhaAfetada";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 
 /** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
@@ -344,13 +345,27 @@ const ImportOrders = () => {
         // Seguro: os itens NAO entraram, entao nao houve reserva de estoque
         // (`trg_reserve_stock_on_order_item` e no INSERT do item), e o ajuste por
         // status e AFTER UPDATE, nao INSERT. Nao ha o que devolver.
-        const { error: limpezaErr } = await supabase.from("pedidos").delete().eq("id", pedido.id);
+        const { data: apagado, error: limpezaErr } = await supabase.from("pedidos").delete().eq("id", pedido.id).select("id");
+        // DELETE tambem e FILTRADO por RLS, nao recusado: quem pode inserir pedido
+        // e nao pode apagar recebe `error: null` com zero linha. Sem isto a tela
+        // dizia "nothing was imported for this order" enquanto o pedido VAZIO
+        // continuava no banco — e o operador reimporta e duplica, que e exatamente
+        // o desfecho que esta limpeza existe para evitar. Tratado como falha de
+        // limpeza porque a consequencia para o operador e a mesma: sobrou lixo.
+        const naoApagou = limpezaErr || nadaFoiEscrito(apagado, limpezaErr);
         res.push({
           row: group.rows[0].rowNum, key, status: "error",
-          message: limpezaErr
+          message: naoApagou
             // A mensagem TEM que mudar quando a limpeza falha: o operador precisa
             // saber que ficou lixo, senao ele reimporta e duplica.
-            ? `Items failed (${amigavel}) — and the empty order could NOT be removed: ${limpezaErr.message}. Delete order ${pedido.id} by hand before importing again.`
+            // Sem `limpezaErr` nao existe mensagem de erro para citar, e a causa
+            // NAO pode ser afirmada. Uma versao anterior desta linha dizia "(you
+            // are not allowed to delete it)" e era autocontraditoria: este ramo so
+            // e alcancado depois de o INSERT do pedido ter PASSADO oito linhas
+            // acima, e INSERT e DELETE em `pedidos` vem da MESMA policy `FOR ALL`
+            // (20260317043654:211) — quem acabou de inserir pode apagar. Sobra a
+            // corrida, e ai o pedido ja nao esta la para apagar a mao.
+            ? `Items failed (${amigavel}) — and the empty order could NOT be removed${limpezaErr ? `: ${limpezaErr.message}` : " (it did not come back as deleted)"}. Check order ${pedido.id} and delete it by hand if it is still there, before importing again.`
             : `Items failed, nothing was imported for this order: ${amigavel}`,
         });
       } else {

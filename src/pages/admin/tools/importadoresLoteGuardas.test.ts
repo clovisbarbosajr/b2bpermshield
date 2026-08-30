@@ -134,9 +134,15 @@ describe("ImportOrders: pedido orfao", () => {
   it("le o erro da limpeza — senao o lixo fica e ninguem sabe", () => {
     // Destruturado E usado depois. Sem a segunda ocorrencia, o delete falharia em
     // silencio e o pedido vazio continuaria no banco com a mensagem de sucesso.
-    expect(ramoErro).toMatch(/const \{ error: limpezaErr \}/);
+    expect(ramoErro).toMatch(/const \{ data: apagado, error: limpezaErr \}/);
     const usos = ramoErro.match(/limpezaErr/g) ?? [];
     expect(usos.length, "`limpezaErr` foi lido mas nunca usado").toBeGreaterThan(1);
+    // 30/ago: erro NAO e o unico jeito de a limpeza nao acontecer. RLS FILTRA o
+    // DELETE — zero linha com `error: null` — e o pedido vazio fica no banco
+    // enquanto a tela diz "nothing was imported". A linha afetada tem que ser
+    // confirmada junto com o erro.
+    expect(ramoErro, "o DELETE nao pede a linha de volta").toMatch(/\.select\("id"\)/);
+    expect(ramoErro).toMatch(/naoApagou = limpezaErr \|\| nadaFoiEscrito\(apagado, limpezaErr\)/);
   });
 
   it("a mensagem MUDA quando a limpeza falha, e entrega o id para apagar a mao", () => {
@@ -226,7 +232,12 @@ describe("as telas reportam a linha REAL do arquivo", () => {
   // o caso que passava despercebido. Um a MAIS e ponto novo, e a lista se atualiza
   // de proposito, para alguem ter de olhar.
   const ESPERADO: Record<string, number> = {
-    "./BulkUpdateOrders.tsx": 8, "./ImportOrders.tsx": 5, "./ImportCustomers.tsx": 3,
+    // 30/ago, leva da recusa silenciosa: +1 em CADA tela que faz UPDATE por id
+    // lido de snapshot (BulkUpdateOrders, ImportCustomers, ImportCategories,
+    // ImportCustomerPrices, ImportProductVariants) — a linha do relatorio quando
+    // o UPDATE nao casa linha nenhuma. `ImportOrders` nao muda: o ramo de limpeza
+    // reaproveita o `res.push` que ja existia, so troca a mensagem.
+    "./BulkUpdateOrders.tsx": 9, "./ImportOrders.tsx": 5, "./ImportCustomers.tsx": 5,
     // 30/ago: +3 em `ImportAddresses` (obrigatorio em branco, endereco ja na base,
     // principal anterior nao desmarcado), +1 liquido em `ImportCategories` (nome de
     // pai homonimo e (nome,pai) duplicado entram; o ramo do `buscaErr` sai, porque
@@ -236,8 +247,8 @@ describe("as telas reportam a linha REAL do arquivo", () => {
     // que o arquivo pede para virar principal — o sucesso e a falha da promocao) e
     // +1 em `ImportCategories` ("ja existe e o arquivo nao traz nada a mudar", que
     // e desfecho legitimo e nao pode virar UPDATE vazio).
-    "./ImportAddresses.tsx": 8, "./ImportCategories.tsx": 7, "./ImportCustomerPrices.tsx": 11,
-    "./ImportProductVariants.tsx": 6, "./ImportRelatedProducts.tsx": 7,
+    "./ImportAddresses.tsx": 8, "./ImportCategories.tsx": 8, "./ImportCustomerPrices.tsx": 12,
+    "./ImportProductVariants.tsx": 7, "./ImportRelatedProducts.tsx": 7,
   };
 
   for (const arquivo of TELAS) {

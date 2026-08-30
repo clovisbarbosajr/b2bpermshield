@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { nadaFoiEscrito } from "@/lib/linhaAfetada";
 
 /** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
  *
@@ -161,13 +162,31 @@ const BulkUpdateOrders = () => {
         continue;
       }
 
-      const { error } = await supabase
+      const { data: gravada, error } = await supabase
         .from("pedidos")
         .update(updatePayload as any)
-        .eq("id", (matches[0] as any).id);
+        .eq("id", (matches[0] as any).id)
+        .select("id");
 
       if (error) {
         res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "error", message: error.message });
+      } else if (nadaFoiEscrito(gravada, error)) {
+        // O SELECT logo acima ACHOU o pedido e o UPDATE nao mudou linha nenhuma.
+        // Numa mudanca de status em lote esse e o pior desfecho possivel: o
+        // operador marca a leva como despachada e ela nunca mudou.
+        //
+        // A mensagem NAO nomeia a causa, e a primeira versao desta linha nomeava
+        // ("could not be changed by you"). Sao DUAS causas e a citada e a menos
+        // provavel: esta tela e `requiredRole="admin"` (App.tsx) e admin tem
+        // `FOR ALL` em `pedidos` (20260317043654:211), entao RLS aqui exigiria
+        // perder o papel no meio do lote. O que sobra e a corrida — um manager,
+        // que tambem tem `FOR ALL` (20260619163651:118), apagando o pedido entre
+        // o SELECT e o UPDATE. Mandar o operador conferir permissao quando o dado
+        // sumiu e o manda investigar a coisa errada.
+        res.push({
+          row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "error",
+          message: `Order #${orderNumber} is no longer there for you to update — nothing was written`,
+        });
       } else {
         res.push({ row: linhaDoArquivo(r, i), orderNumber: orderNumberRaw, status: "ok", message: "Updated" });
       }

@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { nadaFoiEscrito } from "@/lib/linhaAfetada";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { mapaSkuSemAmbiguidade } from "@/lib/mapaSku";
 
@@ -164,6 +165,7 @@ const ImportProductVariants = () => {
       const temOpcao = String(r["option_value"] ?? "").trim() !== "";
 
       let error: any = null;
+      let recusaSilenciosa = false;
       if (jaExiste) {
         // ATUALIZA em vez de criar outra. Antes, reimportar o mesmo arquivo
         // duplicava a variante inteira.
@@ -171,8 +173,13 @@ const ImportProductVariants = () => {
           ...base,
           ...(temStock ? { quantidade: stock } : {}),
           ...(temOpcao ? { valores_opcao: [r["option_value"]] } : {}),
-        }).eq("id", jaExiste);
+        }).eq("id", jaExiste).select("id");
         error = r2.error;
+        // O `id` saiu do mapa montado ANTES do laco. RLS filtra o UPDATE sem
+        // levantar erro, e outro admin pode ter apagado a variante no meio: vinha
+        // `error: null`, zero linha, e a tela dizia "Updated" sobre estoque que
+        // nao mudou.
+        recusaSilenciosa = nadaFoiEscrito(r2.data, r2.error);
       } else {
         const r2 = await (supabase.from("produto_variantes") as any).insert({
           ...base,
@@ -186,6 +193,11 @@ const ImportProductVariants = () => {
 
       if (error) {
         res.push({ row: linhaDoArquivo(r, i), sku: variantSku, status: "error", message: error.message });
+      } else if (recusaSilenciosa) {
+        res.push({
+          row: linhaDoArquivo(r, i), sku: variantSku, status: "error",
+          message: "This variant is no longer there for you to update — nothing was written",
+        });
       } else {
         // Diz o que foi DESCARTADO. "Inserted" sozinho afirmava mais do que o
         // codigo tinha feito quando o arquivo trazia preco ou nome de variante.

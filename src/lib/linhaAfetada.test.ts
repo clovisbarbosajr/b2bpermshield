@@ -27,4 +27,18 @@ describe("nadaFoiEscrito", () => {
     expect(nadaFoiEscrito(null, null)).toBe(true);
     expect(nadaFoiEscrito(undefined, null)).toBe(true);
   });
+
+  it("resultado de `maybeSingle()` e OBJETO, e objeto e escrita que aconteceu", () => {
+    // `.select("id").maybeSingle()` devolve `{ id }` ou `null`, nunca array —
+    // e `ImportCategories` usa essa forma. A versao anterior deste helper so
+    // tratava array: `data?.length ?? 0` sobre um objeto da `undefined`, virava
+    // 0, e a funcao afirmava "nada foi escrito" sobre a linha que ESTAVA ali.
+    // Toda categoria atualizada sairia como erro.
+    expect(nadaFoiEscrito({ id: "1" }, null)).toBe(false);
+    // O objeto vazio tambem e uma linha — `.select("id")` de uma tabela sem a
+    // coluna pedida devolveria `{}`, e "veio linha" continua sendo a resposta.
+    expect(nadaFoiEscrito({}, null)).toBe(false);
+    // E o `null` do `maybeSingle()` que nao achou linha e a recusa silenciosa.
+    expect(nadaFoiEscrito(null, null)).toBe(true);
+  });
 });

@@ -8,6 +8,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { nadaFoiEscrito } from "@/lib/linhaAfetada";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { mapaSkuSemAmbiguidade } from "@/lib/mapaSku";
 
@@ -193,12 +194,22 @@ const ImportCustomerPrices = () => {
         continue;
       }
       const jaTinha = existentes.length === 1;
-      const { error } = jaTinha
-        ? await supabase.from("produto_precos_cliente").update({ preco }).eq("id", existentes[0].id)
-        : await supabase.from("produto_precos_cliente").insert({ cliente_id: clienteId, produto_id: produtoId, preco });
+      const { data: gravada, error } = jaTinha
+        ? await supabase.from("produto_precos_cliente").update({ preco }).eq("id", existentes[0].id).select("id")
+        : await supabase.from("produto_precos_cliente").insert({ cliente_id: clienteId, produto_id: produtoId, preco }).select("id");
 
       if (error) {
         res.push({ row: linhaDoArquivo(r, i), key, status: "error", message: error.message });
+      } else if (jaTinha && nadaFoiEscrito(gravada, error)) {
+        // O `id` veio do SELECT alguns milissegundos atras, mas o UPDATE ainda
+        // pode nao casar linha nenhuma: RLS FILTRA o UPDATE (nao levanta erro), e
+        // outro admin pode ter apagado o preco no meio. Preco de cliente e dinheiro
+        // — "Updated" sobre escrita que nao houve faz o admin fechar a tela achando
+        // que o preco novo esta valendo.
+        res.push({
+          row: linhaDoArquivo(r, i), key, status: "error",
+          message: "The existing custom price could not be updated (row no longer there for you) — nothing was written",
+        });
       } else {
         res.push({ row: linhaDoArquivo(r, i), key, status: "ok", message: jaTinha ? "Updated" : "Created" });
       }

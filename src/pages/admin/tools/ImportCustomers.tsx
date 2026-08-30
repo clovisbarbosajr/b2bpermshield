@@ -9,6 +9,7 @@ import { Upload, Download, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import { parseCSV } from "@/lib/csv";
+import { nadaFoiEscrito } from "@/lib/linhaAfetada";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 
 /** Numero da linha NO ARQUIVO, para o admin abrir a linha certa.
@@ -90,13 +91,48 @@ const ImportCustomers = () => {
     // Conserto: le a coluna INTEIRA, paginada, e compara em minusculas. Sao os
     // e-mails de todos os clientes — dezenas de KB, nao e caro, e e a unica
     // forma de nao depender do tamanho da URL nem do limite de 1000.
-    const existingEmails = new Set<string>();
+    // E-MAIL REPETIDO NA BASE RECUSA A LINHA, como ja fazem as telas irmas
+    // (`ImportCustomerPrices` com este MESMO e-mail, `ImportCategories` com nome
+    // de pai, `ImportProductVariants` com SKU, `BulkUpdateOrders` com numero de
+    // pedido). Esta era a unica das seis que escrevia por filtro NAO UNICO.
+    //
+    // `clientes` nao tem UNIQUE em `email` — a unica da tabela e
+    // `clientes_user_id_unique` (20260331183125:21) — e a duplicata nao e
+    // hipotese: `b2bwave-sync/index.ts:57` registra que o cron ja encheu a base
+    // de fichas duplicadas por isso. Com duas linhas no mesmo e-mail, o
+    // `.ilike()` do UPDATE casa AS DUAS (filtro do PostgREST nao tem LIMIT) e
+    // sobrescrevia nome, empresa, telefone e endereco das duas com a linha do
+    // CSV — as duas fichas viravam a mesma, com UM "Updated" verde no relatorio.
+    // O cadastro do outro cliente sumia sem sinal.
+    //
+    // A checagem tem que ser PRE-VOO: olhar `data.length > 1` depois do UPDATE
+    // reportaria erro sobre estrago ja consumado. O `id` para isto ja estava
+    // sendo lido aqui e jogado fora.
+    const emailAmbiguo = new Set<string>();
+    // E O UPDATE PASSA A SER POR `id`, nao por filtro de texto.
+    //
+    // Enquanto a escrita era `.ilike("email", ...)`, existiam DUAS nocoes de
+    // "mesmo e-mail" no mesmo arquivo e elas divergiam: a chave aqui normaliza com
+    // `trim()`, e `ilike` e case-insensitive mas NAO ignora espaco. A base tem as
+    // duas grafias — `b2bwave-sync/index.ts:1901` grava `c.email || ""` sem trim —
+    // e a divergencia dava erro nos dois sentidos: ficha ` john@x.com` com CSV
+    // `john@x.com` casava zero linhas e a tela dizia "this customer is no longer
+    // there" sobre um cliente que ESTA la (e, sendo ramo de UPDATE, ele nunca era
+    // criado — toda reimportacao repetia o erro).
+    //
+    // O `id` ja estava sendo lido e jogado fora. Escrever por ele mata a
+    // divergencia inteira, e de quebra dispensa o escape de `_`/`%` do LIKE, que
+    // so existia porque o filtro era textual.
+    const idPorEmail = new Map<string, string>();
     try {
-      const todos = await fetchAllRows<{ email: string | null }>((from, to) =>
+      const todos = await fetchAllRows<{ id: string; email: string | null }>((from, to) =>
         supabase.from("clientes").select("id, email")
           .order("id", { ascending: true }).range(from, to));
       for (const c of todos) {
-        if (c.email) existingEmails.add(String(c.email).trim().toLowerCase());
+        if (!c.email) continue;
+        const k = String(c.email).trim().toLowerCase();
+        if (idPorEmail.has(k) && idPorEmail.get(k) !== c.id) emailAmbiguo.add(k);
+        else idPorEmail.set(k, c.id);
       }
     } catch (e: any) {
       // FALHA ALTO. Seguir com o conjunto vazio significaria duplicar a base
@@ -114,7 +150,16 @@ const ImportCustomers = () => {
         continue;
       }
       const emailLc = email.toLowerCase();
-      const isExisting = existingEmails.has(emailLc);
+      if (emailAmbiguo.has(emailLc)) {
+        // O arquivo nao tem como desempatar, e escolher por conta propria seria
+        // sobrescrever as DUAS fichas com a mesma linha.
+        res.push({
+          row: linhaDoArquivo(r, i), email, status: "error",
+          message: `More than one customer record uses ${email} — merge them before importing`,
+        });
+        continue;
+      }
+      const isExisting = idPorEmail.has(emailLc);
 
       const payload: any = { email };
       // Só grava o que veio preenchido no CSV — coluna ausente/vazia não apaga o
@@ -162,24 +207,42 @@ const ImportCustomers = () => {
       //
       // Não dá pra criar o UNIQUE sem decidir o que fazer com e-mails duplicados
       // que já existam na base — então aqui é UPDATE ou INSERT explícito, usando
-      // o `existingEmails` que a tela já carregou acima.
+      // o mapa `idPorEmail` que a tela já carregou acima.
       let error: any = null;
+      let recusaSilenciosa = false;
       if (isExisting) {
-        // `likeEscape`: `_` e `%` sao curinga no LIKE, e `_` e comum em e-mail
-        // (`john_doe@x.com`). Sem escapar, o UPDATE podia acertar OUTRO cliente.
+        // Pelo `id` do snapshot, nao por `.ilike("email", ...)`. O filtro textual
+        // divergia da chave que decidiu `isExisting` (ela normaliza com `trim()`,
+        // `ilike` nao) e exigia escapar `_` e `%`, que sao curinga no LIKE e `_` e
+        // comum em e-mail. `emailAmbiguo` ja recusou a linha acima quando o e-mail
+        // tem mais de uma ficha, entao aqui o `id` e unico por construcao.
         const r2 = await supabase.from("clientes").update(payload)
-          .ilike("email", email.replace(/[\\%_]/g, (m) => `\\${m}`));
+          .eq("id", idPorEmail.get(emailLc)!).select("id");
         error = r2.error;
+        // `idPorEmail` e um SNAPSHOT lido antes do laco. Entre a leitura e este
+        // UPDATE o cliente pode ter sido apagado por outro admin, e RLS FILTRA o
+        // UPDATE em vez de levantar erro. Nos dois casos vinha `error: null` com
+        // zero linha e a tela dizia "Updated" — e como o e-mail continua no
+        // snapshot, reimportar o arquivo NAO cria o cliente: ele nunca entra, e
+        // toda execucao diz que atualizou.
+        recusaSilenciosa = nadaFoiEscrito(r2.data, r2.error);
       } else {
-        const r2 = await supabase.from("clientes").insert(payload);
+        const r2 = await supabase.from("clientes").insert(payload).select("id");
         error = r2.error;
         // Duas linhas do MESMO arquivo com o mesmo e-mail duplicariam entre si,
-        // porque o conjunto so tem o que ja estava no banco. Marca o que acabou
-        // de entrar.
-        if (!error) existingEmails.add(emailLc);
+        // porque o mapa so tem o que ja estava no banco. Registra o que acabou de
+        // entrar — com o `id`, senao a segunda linha entraria no ramo de UPDATE
+        // sem id nenhum para escrever.
+        const novoId = r2.data?.[0]?.id;
+        if (!error && novoId) idPorEmail.set(emailLc, novoId);
       }
       if (error) {
         res.push({ row: linhaDoArquivo(r, i), email, status: "error", message: error.message });
+      } else if (recusaSilenciosa) {
+        res.push({
+          row: linhaDoArquivo(r, i), email, status: "error",
+          message: "This customer is no longer there for you to update — nothing was written",
+        });
       } else {
         res.push({ row: linhaDoArquivo(r, i), email, status: "ok", message: isExisting ? "Updated" : "Created" });
       }
