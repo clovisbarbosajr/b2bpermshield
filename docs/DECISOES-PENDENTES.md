@@ -7,6 +7,10 @@
 >
 > Ficou de fora, e continua pendente: o índice único de `tabelas_preco.nome`.
 > Ver a seção **A5**, acrescentada depois.
+>
+> **Atualização 31/ago.** A varredura terminou. Três itens desta lista ganharam
+> correção parcial no código e continuam precisando de decisão — estão marcados
+> com **(parcial)** no título. Nada aqui foi executado sem você.
 
 Tudo aqui é o que **eu não posso decidir nem executar sozinho**: exige SQL no
 banco, mexe em RLS/permissão, ou é regra de produto.
@@ -104,7 +108,7 @@ sozinho.
 
 ## B. Bloqueia lançamento — segurança e perda de dado
 
-### B1. Chave secreta do gateway legível por qualquer cliente logado
+### B1. Chave secreta do gateway legível por qualquer cliente logado **(parcial)**
 
 A tela de Payment Options oferece um campo "Secret Key" que grava em
 `payment_options.gateway_config`. A RLS dessa tabela é por LINHA, e a policy
@@ -176,7 +180,7 @@ real vários produtos compartilham código. Se qualquer uma das três acima tamb
 aceita homônimo por decisão de produto, me diga e eu tiro da lista — e a correção
 passa a ser mostrar algo discriminante nos seletores.
 
-### B5. Status de produto é chave de sistema e não tem nada segurando
+### B5. Status de produto é chave de sistema e não tem nada segurando **(parcial)**
 
 `produtos.status_produto` é `text` e o casamento com `product_statuses` é **por
 nome**, sem FK. Os três consumidores — `lib/stock.ts`, o catálogo do portal e o
@@ -203,7 +207,7 @@ Não achei caminho na UI que crie isso hoje, mas a coluna aceita.
 
 **Decisão:** quer o trigger anti-ciclo? É pequeno e fecha de vez.
 
-### B7. Export de manager e warehouse não deixa rastro
+### B7. Export de manager e warehouse não deixa rastro **(parcial — e é pior do que eu tinha escrito)**
 
 `export_logs` não tem policy de INSERT para esses dois papéis. Eles exportam e o
 log não registra.
@@ -345,3 +349,64 @@ CREATE UNIQUE INDEX IF NOT EXISTS tabelas_preco_nome_uniq
 `btrim(lower(nome))` e ordenar a leitura, senão a duplicata volta a nascer sozinha.
 Isso é código de edge function — preciso do seu OK para mexer, e o deploy tem que
 ser pedido no chat do Lovable.
+
+---
+
+## Atualização de 31/ago — o que mudou nesta lista
+
+### B7 é pior do que eu tinha escrito, e agora tem número
+
+Eu havia registrado que "o export de manager e warehouse não deixa rastro". A
+varredura mostrou o tamanho:
+
+- `ProductExport` é o **único caminho de saída de dados** do sistema **e** o único
+  gravador de `export_logs` — nada em `supabase/functions/` escreve nessa tabela.
+- O resultado do insert **nem era desestruturado**: o erro caía no chão.
+- E ele falha **sempre**, não às vezes: a única policy é
+  `"Admins can manage export_logs" FOR ALL USING (has_role admin)`, e **sem
+  `WITH CHECK`** o Postgres aplica o `USING` também no INSERT. Manager e warehouse
+  levam `42501` em 100% das tentativas.
+- A rota exige só `view_products`, que os dois têm.
+
+**Corrigido no código:** quem exporta agora é avisado de que aquele download **não
+entrou na auditoria**. Não bloqueei o export — o insert é do lado do cliente, então
+bloquear na tela é fricção com aparência de controle, e puniria o operador legítimo.
+
+**Decisão sua, e agora com o SQL pronto.** Se a resposta for "manager e warehouse
+podem exportar, e o log tem que registrar":
+
+```sql
+CREATE POLICY "Staff insert export_logs" ON public.export_logs
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    has_role(auth.uid(), 'admin')
+    OR has_role(auth.uid(), 'manager')
+    OR has_role(auth.uid(), 'warehouse')
+  );
+```
+
+Se a resposta for "export é privilégio de admin", o caminho é tirar
+`/admin/products/export` de `view_products` — e aí me diga, porque isso é rota.
+
+### B1 — a chave do gateway: metade fechada
+
+O vazamento pelo app está fechado (o checkout lê colunas explícitas). O que continua
+aberto é a leitura direta da tabela por qualquer cliente logado, e o fato de que
+**nada no repositório lê `gateway_config`**. A decisão (tirar o campo, ou fechar a
+RLS) continua sua.
+
+### B5 — status de produto: a tela avisa, o banco não
+
+A tela agora **avisa** antes de renomear ou apagar um dos seis status de fábrica, e
+recusa nome duplicado. Isso é guarda no chamador. A escolha entre proteger as seis
+linhas no banco ou trocar `produtos.status_produto` por FK continua sua.
+
+### Não é decisão, é aviso: o sync das réguas volta a duplicar sozinho
+
+O sync casa régua por `nome.toLowerCase()` **sem `trim`**
+(`b2bwave-sync/index.ts:1138` e `:1819`), e o mapa de preços é *last-wins* sobre um
+`select` **sem `order`**. Enquanto isso não for corrigido, a duplicata que você
+acabou de diagnosticar **nasce de novo sozinha**.
+
+É código de edge function: preciso do seu OK para mexer, e o deploy tem que ser
+pedido no chat do Lovable (push no GitHub não publica edge function).
