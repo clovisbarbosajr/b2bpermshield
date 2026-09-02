@@ -5761,3 +5761,67 @@ A troca do remetente das edge functions (hoje o fallback e
 `noreply@permshield.com`) para o dominio do cliente. So na palavra dele
 (`"NAO agora, eu aviso na hora"`), e o deploy tem que ser pedido no chat do
 Lovable.
+
+---
+
+## 02/set — remetente de e-mail: PermShield usa permshield.com, e por que nada foi mexido
+
+**Decisao do dono:** *"use o email da permshield aqui... no outro projeto vai ser
+zapsupplies"* — e, depois de ver o levantamento abaixo, *"mantenha assim"*.
+
+**Nenhuma linha de codigo foi alterada.** O remetente ja e o desejado.
+
+### Os dois dominios estao prontos no Resend, em formatos DIFERENTES
+
+|  | zapsupplies.com | permshield.com |
+|---|---|---|
+| DNS servido por | WHM, 162.214.155.187 | Cloudflare |
+| `resend._domainkey` | OK (chave propria) | OK (chave propria, outra) |
+| formato do Resend | CNAME `send`/`rsend` -> `forge.rmta.net` | MX + TXT em `send` -> `amazonses.com` |
+
+O `permshield.com` usa o formato CLASSICO do Resend e por isso NAO tem os CNAMEs
+`send`/`rsend`. Ele tem, no lugar:
+
+```
+MX   send.permshield.com   feedback-smtp.us-east-1.amazonses.com
+TXT  send.permshield.com   v=spf1 include:amazonses.com ~all
+TXT  resend._domainkey.permshield.com   p=MIGfMA0GCSqG...
+```
+
+**Isto e valido e esta completo.** Procurar CNAME `send`/`rsend` no
+`permshield.com` da "nao existe" e parece defeito — nao e. Os dois formatos
+convivem no Resend; cada dominio usa o seu.
+
+### O remetente ja aponta para permshield
+
+```ts
+// supabase/functions/send-email/index.ts:781
+const fromEmail = config?.email_from || "noreply@permshield.com";
+```
+
+**Ressalva que vale lembrar:** o BANCO vence o codigo. Se
+`configuracoes.email_from` estiver preenchido, e ele que sai, e o fallback nunca
+e usado. Consulta para conferir:
+
+```sql
+SELECT email_from, email_contato, nome_empresa FROM public.configuracoes LIMIT 5;
+```
+
+### O que continua `jess@zapsupplies.com` — DE PROPOSITO
+
+| onde | o que e |
+|---|---|
+| `send-email/index.ts:219` `COMPANY_EMAIL` | contato no rodape do e-mail **e destinatario de reserva** — aparece como `to = ... \|\| COMPANY_EMAIL` em 12 pontos |
+| `generate-pdf/index.ts:282` | contato impresso no PDF |
+| `send-email/index.ts:217` `COMPANY_NAME` | `"Zap Supplies, LLC"` |
+
+Isso e a identidade do CLIENTE aparecendo para o comprador dele — o portal e da
+Zap Supplies, o PermShield e so o sistema. Nao confundir com remetente:
+
+- **remetente** (`from`) = de qual dominio o e-mail SAI, e precisa estar
+  verificado no Resend -> `permshield.com`;
+- **contato** (`COMPANY_EMAIL`) = o que o comprador LE e para onde cai notificacao
+  de admin sem destinatario configurado -> `jess@zapsupplies.com`.
+
+Trocar o segundo mudaria o rodape, o PDF e o destino de notificacao. **So com
+ordem explicita do dono.**
