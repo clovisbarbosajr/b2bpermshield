@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { EnderecoWebhookStripe } from "@/components/EnderecoWebhookStripe";
 import { Save, Building2, Mail, Palette, FileText, CreditCard, Eye, EyeOff } from "lucide-react";
 
 // Só os campos que ESTA página edita. Antes gravava a linha inteira (spread),
@@ -368,10 +369,11 @@ const AdminConfiguracoes = () => {
                       onChange={(e) => update("stripe_webhook_secret", e.target.value)}
                       className="font-mono text-sm"
                     />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      To receive webhook events (payment confirmation), set the webhook endpoint in Stripe Dashboard to:<br />
-                      <code className="text-xs bg-muted px-1 rounded">{window.location.origin.replace(/^http/, 'https')}/functions/v1/stripe-webhook</code>
-                    </p>
+                    {/* Endereço DITADO ao operador: ele copia daqui e cola no
+                        painel da Stripe. Se não soubermos o host, não se inventa
+                        um — URL errada aqui não dá erro em lugar nenhum, só faz
+                        o webhook morrer calado. */}
+                    <EnderecoWebhookStripe supabaseUrl={import.meta.env.VITE_SUPABASE_URL} />
                   </div>
                 </div>
 
