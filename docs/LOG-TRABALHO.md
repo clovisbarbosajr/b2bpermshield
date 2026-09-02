@@ -5825,3 +5825,45 @@ Zap Supplies, o PermShield e so o sistema. Nao confundir com remetente:
 
 Trocar o segundo mudaria o rodape, o PDF e o destino de notificacao. **So com
 ordem explicita do dono.**
+
+**Atualizacao do mesmo dia — o banco tinha um TERCEIRO dominio.**
+
+A consulta acima foi rodada pelo dono e devolveu:
+
+```
+email_from     Zap Supplies <noreply@inwisepro.com>
+email_contato  jess@zapsupplies.com
+nome_empresa   PermShield
+```
+
+Ou seja: todo e-mail saia por **inwisepro.com** — nem permshield, nem zapsupplies
+— e o fallback `noreply@permshield.com` do codigo nunca era usado. E o caso
+"banco vence o codigo" acontecendo de verdade.
+
+Os **tres** dominios estao verificados no Resend (conferido no DNS publico):
+
+| dominio | DKIM | envio |
+|---|---|---|
+| permshield.com | OK | MX `send` -> feedback-smtp.us-east-1.amazonses.com |
+| zapsupplies.com | OK | CNAME `send`/`rsend` -> forge.rmta.net |
+| inwisepro.com | OK | MX `send` -> feedback-smtp.us-east-1.amazonses.com |
+
+Nada estava quebrado; so nao era o que o dono queria.
+
+**Executado pelo dono em 02/set:**
+
+```sql
+UPDATE public.configuracoes SET email_from = 'PermShield <noreply@permshield.com>';
+```
+
+**Decisao do dono sobre a assinatura:** `nome_empresa` continua **PermShield**.
+Perguntado explicitamente se o corpo do e-mail deveria assinar como
+"Zap Supplies, LLC" — resposta: manter PermShield. Nao alterar.
+
+**Fica como esta, de proposito:** `email_contato = jess@zapsupplies.com` (rodape,
+PDF e destinatario de reserva) e `COMPANY_NAME = "Zap Supplies, LLC"` no codigo.
+
+**Ressalva de reputacao, avisada ao dono antes:** o `inwisepro.com` tinha
+historico de envio; o `permshield.com` esta verificado mas frio. Se algum e-mail
+comecar a cair em spam nos primeiros envios, a causa provavel e essa, e nao
+configuracao errada.
