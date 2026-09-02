@@ -5601,3 +5601,75 @@ Tudo em `docs/DECISOES-PENDENTES.md`. NAO EXECUTAR sem a Jessika.
 Fora dela, uma coisa depende do dono: o conserto de raiz do sync das reguas de preco
 (casar por `btrim(lower(nome))` e ordenar a leitura). E edge function, e o deploy tem
 que ser pedido no chat do Lovable.
+
+---
+
+## 02/set — o lint que ficava vermelho sem defeito nenhum
+
+**Sintoma.** A primeira execucao da suite no dia deu **759/760**. O vermelho era
+`src/test/fatiaSemGuarda.test.ts > "recorte com limite de busca usa fatiaEntre"`,
+em **5827 ms**. Rodando o arquivo sozinho: 4/4 verde em 1,1 s. Rodando a suite de
+novo, cache quente: 760/760.
+
+**Causa, medida e nao adivinhada.** Nao ha `testTimeout` configurado, entao vale o
+padrao de 5000 ms do vitest. O teste le e varre os **538 KB** de todos os 71
+arquivos de teste do repositorio. Medicao:
+
+| | tempo |
+|---|---|
+| `semLiterais` nos 71 arquivos, em node puro | 531 ms |
+| o mesmo teste dentro da suite completa | 5827 ms |
+
+Nao e algoritmo — sao os 71 arquivos disputando CPU, ~10x. O prazo padrao e que e
+curto para o unico teste cujo trabalho cresce com o TAMANHO DO REPOSITORIO.
+
+**Correcao.** `describe(..., { timeout: 30_000 }, ...)` nesse arquivo, com o
+motivo e os numeros escritos ao lado, e o aviso de que passar de 30 s significa
+otimizar `semLiterais` em vez de subir o numero de novo.
+
+**Por que importa.** Suite vermelha por motivo falso ensina a ignorar o vermelho —
+e ignorar justamente esse lint, que existe para pegar guarda que morre calada.
+
+### Cetico — a assinatura podia estar sendo ignorada
+
+O risco real era o vitest 4 nao honrar `{ timeout }` no `describe`: eu teria
+"consertado" nada e acreditado que consertei. Prova pareada, com mutante:
+
+| | resultado | tempo |
+|---|---|---|
+| **A** — `describe(nome, { timeout: 30_000 }, fn)`, teste dorme 6 s | passou | 6,01 s |
+| **B** — controle, mesmo teste **sem** a opcao | **falhou** | 5,01 s |
+
+A opcao e honrada, e o controle prova que o padrao de 5 s e real. Mutantes
+apagados na mesma execucao. Contagem de testes intacta (760), o que descarta a
+hipotese de a nova assinatura ter deixado de registrar algum teste.
+
+### Cacador — a CLASSE, nao o caso
+
+Pergunta certa: quem MAIS varre o repositorio inteiro dentro do prazo padrao?
+Quatro arquivos de teste usam `readdirSync`:
+
+| arquivo | escopo | pior teste |
+|---|---|---|
+| `fatiaSemGuarda` | 2 raizes, 71 arquivos, 538 KB | **530 ms** — o unico em risco |
+| `nadaDeControle` | **4** raizes, 455 arquivos | 125 ms |
+| `guardasSettingsEFicha` | um diretorio so | ~0 ms |
+| `conteudoErroDeLeitura` | um diretorio so | ~0 ms |
+
+`nadaDeControle` varre MAIS raizes e mesmo assim leva 125 ms — regex simples por
+linha. A 10x continua em 1,25 s, longe do limite. A classe tem um caso so, e e o
+que foi corrigido. Nao mexi nos outros tres.
+
+### Verificacao
+
+```
+tsc            LIMPO
+npm test       760/760 em 71 arquivos
+build          ok
+check:edge     OK — 16 arquivos, nenhum nome fora de escopo
+check:sql      OK — 197 arquivos .sql
+eslint (arquivo mexido)  exit 0
+```
+
+O `npm run lint` do projeto inteiro devolve 1182 problemas **pre-existentes**, sem
+relacao com esta mudanca; o arquivo mexido passa limpo sozinho.

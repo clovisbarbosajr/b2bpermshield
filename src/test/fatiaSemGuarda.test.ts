@@ -156,7 +156,22 @@ function recortesAMao(fonte: string): { linha: number; texto: string }[] {
   return achados;
 }
 
-describe("nenhum teste recorta fonte a mao", () => {
+// PRAZO PROPRIO, e nao o padrao de 5 s do vitest.
+//
+// Este lint le e varre os 538 KB de TODOS os arquivos de teste do repositorio.
+// Medido: 531 ms rodando sozinho em node, 5827 ms dentro da suite completa — os
+// mesmos 71 arquivos disputando CPU deixam a varredura 10x mais lenta, e ela
+// estourou o padrao. O vermelho que sai dai nao e defeito nenhum: e o unico
+// arquivo cujo trabalho cresce com o TAMANHO DO REPOSITORIO, entao ele volta a
+// estourar sozinho a cada punhado de teste novo.
+//
+// Suite vermelha por motivo falso e pior do que suite lenta: ensina a ignorar o
+// vermelho — e ignorar justamente ESTE lint, que existe para pegar guarda que
+// morre calada, e o que ele veio impedir.
+//
+// Se um dia passar de 30 s, o problema deixou de ser prazo. Ai vale otimizar
+// `semLiterais`, nao subir o numero de novo.
+describe("nenhum teste recorta fonte a mao", { timeout: 30_000 }, () => {
   const arquivos = RAIZES.flatMap(arquivosDeTeste)
     .filter((f) => !f.endsWith("src/test/fatiaSemGuarda.test.ts"));
 
