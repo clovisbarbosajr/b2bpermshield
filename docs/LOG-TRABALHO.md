@@ -5673,3 +5673,91 @@ eslint (arquivo mexido)  exit 0
 
 O `npm run lint` do projeto inteiro devolve 1182 problemas **pre-existentes**, sem
 relacao com esta mudanca; o arquivo mexido passa limpo sozinho.
+
+---
+
+## 02/set — DNS do zapsupplies.com para o Resend: onde o painel certo estava escondido
+
+**Sintoma.** O Resend dizia `DNS check failed: All required records are missing`
+para o `zapsupplies.com`, mesmo com o dono tendo cadastrado os tres registros e
+clicado em *restart verification* varias vezes.
+
+### A causa: os registros estavam numa zona que ninguem le
+
+Os tres registros EXISTIAM — na zona do painel "Domain Center" do HostGator
+(`hgns1/hgns2.hostgator.com`). Conferido: aquele servidor respondia o DKIM
+correto. Mas o mundo nao pergunta para ele.
+
+Rastreio da delegacao, feito com RDAP da Verisign e consultas diretas:
+
+```
+zapsupplies.com   registrado na GoDaddy
+   NS  ->  ns1.zap-server.com / ns2.zap-server.com
+   glue no .com  ->  162.214.155.187
+        └─ servidor dedicado, cPanel/WHM `server-605316.zapsupplies.com`
+```
+
+O painel do HostGator editava `hgns1.hostgator.com`; a delegacao aponta para o
+**WHM do servidor dedicado**. Duas zonas diferentes para o mesmo dominio, e a
+editada era a que ninguem consulta.
+
+**Detalhe que enganou:** a zona do WHM tem NS *internos* dizendo
+`ns1.server-605316.zapsupplies.com`, que e o que um `nslookup -type=NS` devolve.
+Isso NAO e a delegacao — a delegacao real esta no registro do `.com`, e so o RDAP
+mostrou (`NS1.ZAP-SERVER.COM`). Perseguir o NS de dentro da zona levou a um
+servidor que nem resolve publicamente. **A delegacao autoritativa vem do
+registrador, nunca da propria zona.**
+
+### Onde mexer, para a proxima vez
+
+```
+WHM  ->  DNS Functions  ->  DNS Zone Manager  ->  zapsupplies.com  ->  Manage
+https://server-605316.zapsupplies.com:2087/scripts7/zone_editor/manage/?domain=zapsupplies.com
+```
+
+Acesso: HostGator > Hosting > o plano `Linux Enterprise Dedicated` (IP
+162.214.155.187, dominio principal `coastsupplies.com`) > botao **WHM**. Entra
+como `root` por SSO, sem senha. O `permshield.com` tambem tem zona nesse mesmo
+servidor.
+
+### O que foi adicionado — tres registros, zero delecoes
+
+```
+TXT     resend._domainkey    p=MIGfMA0GCSqG...PaGVPtP8LwIDAQAB   (218 caracteres)
+CNAME   send                 send.forge.rmta.net
+CNAME   rsend                rsend.forge.rmta.net
+```
+
+**O SPF nao foi tocado**, e nao precisava: neste modelo do Resend os dois CNAMEs
+SAO o mecanismo de SPF (o caminho de retorno vira `send.zapsupplies.com`, que via
+CNAME carrega o SPF deles). O SPF da raiz do dominio continua
+`v=spf1 ip4:162.214.155.187 +a +mx +ip4:10.0.2.15 ~all`, e o e-mail que ja saia
+pelo servidor continua saindo.
+
+Tambem nao houve conflito de DKIM: o servidor usa o seletor `default._domainkey` e
+o Resend usa `resend._domainkey` — nomes diferentes, convivem.
+
+### Verificacao — perguntando ao servidor, nao a tela
+
+```
+resend._domainkey   218 caracteres, IDENTICO byte a byte ao esperado
+send                -> send.forge.rmta.net     confere
+rsend               -> rsend.forge.rmta.net    confere
+
+intactos: A, MX, TXT(SPF) e default._domainkey  — todos iguais ao que eram
+serial:   2026083101 -> 2026090202  (tres incrementos, um por registro)
+```
+
+Conferido tambem o erro classico do painel de cPanel, que **nao** aconteceu:
+`resend._domainkey.zapsupplies.com.zapsupplies.com` e os equivalentes de `send` e
+`rsend` nao existem. O WHM completa o dominio sozinho — por isso o campo recebeu
+so `resend._domainkey`, e a tela exibe o nome ja completo.
+
+**Resend validou o dominio.** Confirmado pelo dono.
+
+### Pendente, e continua sendo decisao do dono
+
+A troca do remetente das edge functions (hoje o fallback e
+`noreply@permshield.com`) para o dominio do cliente. So na palavra dele
+(`"NAO agora, eu aviso na hora"`), e o deploy tem que ser pedido no chat do
+Lovable.
