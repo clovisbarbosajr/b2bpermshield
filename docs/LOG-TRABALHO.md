@@ -5510,3 +5510,94 @@ npm test    OK — 194 migrations / 197 .sql / 16 edge functions
 Nenhum trabalho inventado. Segue pendente so o que depende do dono: o OK para o
 teste de estresse concorrente contra banco real (com combinado de identificacao e
 limpeza).
+
+---
+
+## 30/ago, janela 3 — item 4 da fila NAO estava vazio
+
+`INICIADO` — recontei as telas sem teste conferindo contra os 67 arquivos de teste
+reais (a contagem anterior usava glob que nao desce recursivo). Sobram 14 sem
+teste; cruzando com `src/App.tsx`, 4 tem a rota COMENTADA (PdfCatalog, QuickLinks,
+MeasurementUnit, ExtraFields = as "telas mortas"), 4 sao autenticacao/roteamento
+(CustomerLogin, ResetPassword, ViewAsRedirect, NotFound) e sobram **5 telas VIVAS,
+roteadas e minhas para auditar**, que a leva anterior deu como inexistentes:
+ProducaoDashboard, OrderRepsPerformance, OrderSummaryByStatus, ProductStatusRules,
+Configuracoes. Auditoria em andamento.
+
+---
+
+## 31/ago — fechamento da varredura, e o incidente da tarefa agendada
+
+### Estado final
+
+- **760 testes verdes em 71 arquivos**, `tsc` limpo, build ok, check-edge ok.
+- **72 das 89 telas** com guarda de regressao.
+- ~40 commits desde `d3dff02`.
+
+### Como o ciclo terminou
+
+Onze rodadas de caçador/cetico. As rodadas 7 a 10 acharam a MESMA classe quatro
+vezes seguidas — uma dimensao do `%` do `LIKE` que faltava numa lista de exemplos
+escrita a mao. Isso foi trocado por PROVA DE EQUIVALENCIA
+(`src/lib/travaReservadoContrato.test.ts`): o `LIKE` do Postgres virou referencia e
+a regex e comparada contra ela sobre ~40 mil strings geradas. Quinze mutantes, todos
+mortos, e os SEIS equivalentes sobreviveram — que e o que prova que o teste nao esta
+sobreajustado.
+
+### A licao que custou caro
+
+O dono corrigiu, e com razao: dez rodadas foram gastas numa funcao de UMA LINHA
+enquanto uma guarda que falhava ABERTA esperava em `Produtos.tsx`. Assim que o
+escopo mudou para "onde mais isso existe?", apareceram tres defeitos de produto na
+mesma hora, e depois mais seis nos commits que ninguem tinha revisado.
+
+Registrado em `~/.claude/.../memory/varrer-classe-nao-caso.md`.
+
+**O modo de falha que ninguem procurava:** contagem barrada por RLS NAO e erro — o
+PostgREST devolve `count: 0` com `error: null`. Guarda que so olha `error` falha
+ABERTA. Varri os 8 pontos do `src/` que contam cascata antes de apagar: seis sao
+admin-only na rota e imunes; `Produtos` e `Categorias` estavam expostos e foram
+corrigidos. `Categorias` estava escondido atras de DUAS rotas para a mesma tela —
+`/admin/categorias` e admin-only, mas `/admin/product-categories` exige so
+`view_products`.
+
+### Os achados de produto do fim
+
+- `ProductExport` e o UNICO caminho de saida de dados do sistema e o unico gravador
+  de `export_logs`. O resultado do insert nem era desestruturado, e ele falha SEMPRE
+  para manager/warehouse (policy `FOR ALL USING` sem `WITH CHECK`). O catalogo
+  inteiro saia da empresa sem uma linha de log.
+- `Estoque` nao tinha estado de erro nenhum: refetch falho deixava Total/Reserved/
+  Available exibindo os numeros ANTERIORES, sem nada indicando.
+- `Produtos`/`Categorias`: as guardas de cascata falhando abertas (acima).
+- `ProductStatuses`: `loadError` era estado MORTO — escrito e nunca renderizado.
+- `Checkout`: `taxLookupOk` era trava de mao unica; falha transitoria travava a tela
+  em "TOTAL UNAVAILABLE" para sempre.
+- `EnderecoWebhookStripe`: o endereco do webhook estava com `hidden` — o admin nunca
+  via o que precisa colar na Stripe.
+
+### INCIDENTE — tarefa agendada
+
+Quando o dono pediu "ligue seu alarme", eu criei a tarefa `permshield-fila` com cron
+`7,27,47 * * * *` — **3x por hora**, persistindo em disco e sobrevivendo a sessao.
+Rodou **18 vezes**, cada disparo abrindo uma sessao nova, consumindo credito do dono
+sem ele saber. Eu vinha chamando de "o alarme" no singular, como se fosse pequeno.
+
+Encerrado em 31/ago: tarefa deletada do agendador, pasta removida do disco (backup
+no scratchpad), e a ultima sessao arquivada. Agendador e cron conferidos vazios.
+
+Duas sessoes agendadas commitaram trabalho util antes disso, e uma delas pegou um
+mutante que um `git add -A` meu tinha varrido para o historico (`46afe69`). Mas o
+custo nao compensou, e a decisao e do dono, nao minha: **nao criar tarefa agendada
+nem cron sem pedido explicito**.
+
+O trabalho que ficou pela metade quando a tarefa foi interrompida (o webhook da
+Stripe) estava sem commit e com teste vermelho — foi terminado e commitado.
+
+### Pendente
+
+Tudo em `docs/DECISOES-PENDENTES.md`. NAO EXECUTAR sem a Jessika.
+
+Fora dela, uma coisa depende do dono: o conserto de raiz do sync das reguas de preco
+(casar por `btrim(lower(nome))` e ordenar a leitura). E edge function, e o deploy tem
+que ser pedido no chat do Lovable.
