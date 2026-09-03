@@ -6014,3 +6014,29 @@ Resend e Twilio ficam.**
 
 Nada foi apagado ate aqui. Este registro foi escrito ANTES de qualquer alteracao,
 conforme a regra de hoje.
+
+**Respostas do dono (02/set), e o plano em `docs/DESLIGAR-SYNC-B2BWAVE.md`:**
+
+| pergunta | resposta |
+|---|---|
+| "apenas os clientes" e literal? | **Nao.** Zera so `pedidos`; clientes E catalogo ficam |
+| ETA de container morre? | **Fica** — nao e do B2BWave, alimenta Producao |
+| edge `api` morre? | **Morre** |
+
+Verificado arquivo por arquivo antes de listar o que apagar: dos oito
+importadores, **seis nao chamam o sync** — so o citam em comentario. Sao
+ferramentas de CSV e servem ao catalogo, que fica. Morrem apenas `ImportOrders` e
+`BulkUpdateOrders`, que sao de pedido.
+
+Ordem registrada: **1) cron -> 2) dado -> 3) codigo.** Passo 1 entregue ao dono.
+
+**AGUARDANDO:** o dono rodar o `cron.unschedule` dos quatro jobs e mandar o
+resultado do `SELECT ... FROM cron.job`.
+
+**Nota do dia, sobre o questionario da Jessika.** O link publicado salva o
+rascunho no navegador dela e depende de ela clicar em "Copiar todas as respostas"
+— **eu nao recebo nada automaticamente**. A versao que gravava no servidor
+(`capabilities: db`) existe, mas a plataforma a torna interna da organizacao e
+proibe link publico; escolhido o link publico, essa era a unica forma. O erro foi
+nao ter dito isso em destaque no momento de montar. O dono vai receber as
+respostas por WhatsApp e repassar.
