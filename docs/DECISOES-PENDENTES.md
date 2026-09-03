@@ -459,3 +459,8 @@ Ela definiu o comportamento de pre-order:
 
 O item 2 e o unico que muda regra de banco (hoje o gatilho de reserva nao deixa
 negativar fora dos status isentos). Os itens 1 e 4 sao o que `A4` pedia.
+
+**PREÇO — CONFIRMADO pelo dono em 02/set:** *"TODAS, ela vai criar tudo do
+zero!"*. Apagar todas as tabelas de preco e os itens delas. Os 70 clientes ficam
+com `tabela_preco_id` nulo (`ON DELETE SET NULL`) ate ela recriar. Isso e
+esperado, nao efeito colateral.
