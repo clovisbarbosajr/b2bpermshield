@@ -6058,3 +6058,33 @@ pedidos 0 | itens 0 | prod_reservado 0 | var_reservado 0 | clientes 70 | produto
 ```
 
 **PASSO 3 INICIADO** — limpeza de codigo.
+
+### Cacador + cetico sobre o commit `55ef241` — o que sobreviveu
+
+**INICIADO** a correcao. Ordem do cetico:
+
+| # | achado | veredito |
+|---|---|---|
+| 3 | aba "API configuration" no `Profile.tsx` emite token para uma API apagada | **CONFIRMADO** — o de maior valor |
+| 9 | `pedidos.numero` sem UNIQUE; `notify-dispatch` resolve pedido ambiguo em silencio | **CONFIRMADO**, com mecanismo corrigido |
+| 1 | migrations recriam os cron jobs | **EXAGERADO** — migrations aqui sao coladas a mao no editor, nao ha `db reset`. Mas faltou um QUINTO job no inventario do cacador: `20260717130000_cron_categorias.sql:12` |
+| 2 | scripts de runbook mandam publicar `b2bwave-sync` | **EXAGERADO** — `supabase functions deploy` nao existe no repo; a lista e so exibicao, e os scripts ja foram gastos |
+| 7 | gatilhos viraram ramo morto | **FALSO no principal** — a trava `a_trg_pedido_b2bwave_id_so_servidor` nao virou morta, virou a UNICA defesa: sem escritor legitimo, todo valor nao-nulo agora e forjado |
+| 4, 5, 8 | imports nao usados, `config.toml`, titulo "seis telas" | cosmeticos |
+
+**O que o cacador NAO viu, e o cetico pegou — vale mais que metade da lista.**
+`sync_state` TEM cara de residuo do sync (foi criada pela migration do cron do
+B2BWave) e **nao e**: guarda `envio_pausado`, a TORNEIRA GERAL de notificacao —
+o kill switch criado depois dos 1.508 SMS de 25/ago — e o
+`order_notify_max_age_days` que `send-email/index.ts:1688` le. Dropar essa tabela
+como "sobra do sync" desarma o kill switch em silencio.
+
+**Correcao do mecanismo do item 9, contra o que o cacador afirmou:**
+`maybeSingle()` **nao lanca** com duas linhas — devolve `error` PGRST116 e
+`data: null` (verificado em `postgrest-js/dist/index.cjs:405`), entao
+`OrderDetail` mostra "Order not found", nao tela em branco. O dano real esta em
+`notify-dispatch/index.ts:133-135`: `.limit(1)` + `.maybeSingle()` resolve **um
+pedido arbitrario** em silencio, e esse lookup e justamente a checagem de dono que
+decide quem pode disparar notificacao daquele pedido. Os outros dois consumidores
+(`_shared/dispatch.ts:87` e `send-email/index.ts:1694`) ja recusam ambiguidade com
+`count: "exact"`; o `notify-dispatch` ficou para tras.
