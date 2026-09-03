@@ -82,10 +82,28 @@ DROP FUNCTION IF EXISTS public._schedule_b2bwave_job(text, text, text);
 --
 -- Dropar esta tabela "limpando o sync" desarma o kill switch em silêncio.
 -- ---------------------------------------------------------------------------
-COMMENT ON TABLE public.sync_state IS
-  'NAO E residuo do sync do B2BWave (que morreu em 02/set/2026). Guarda o kill '
-  'switch de notificacao `envio_pausado` e o `order_notify_max_age_days`. '
-  'Apagar esta tabela desarma a torneira geral de notificacao em silencio.';
+-- Os dois `COMMENT ON` abaixo vao dentro de um `DO` com checagem de existencia.
+--
+-- `COMMENT ON` nao aceita `IF EXISTS`: se o alvo nao existir, ele LANCA. E se
+-- esta migration rodar em transacao unica, esse erro desfaz o bloco de cima
+-- junto — ou seja, o comentario que existe para AVISAR que nao se deve apagar a
+-- tabela impediria o desligamento dos cron jobs, que e a parte que importa.
+-- Exatamente no banco onde alguem ja apagou o alvo a mao: o cenario que o
+-- comentario existe para prevenir.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class WHERE oid = 'public.sync_state'::regclass) THEN
+    COMMENT ON TABLE public.sync_state IS
+      'NAO E residuo do sync do B2BWave (que morreu em 02/set/2026). Guarda o kill '
+      'switch de notificacao `envio_pausado` e o `order_notify_max_age_days`. '
+      'Apagar esta tabela desarma a torneira geral de notificacao em silencio.';
+  ELSE
+    RAISE WARNING 'public.sync_state NAO EXISTE — o kill switch de notificacao (`envio_pausado`) sumiu com ela';
+  END IF;
+EXCEPTION WHEN undefined_table THEN
+  RAISE WARNING 'public.sync_state NAO EXISTE — o kill switch de notificacao (`envio_pausado`) sumiu com ela';
+END
+$$;
 
 -- ---------------------------------------------------------------------------
 -- `pedidos_numero_idx` — mesma armadilha, vizinho de porta.
@@ -100,7 +118,18 @@ COMMENT ON TABLE public.sync_state IS
 -- podem nascer com o mesmo número, e as três recusam a ambiguidade em vez de
 -- adivinhar de quem é o pedido.
 -- ---------------------------------------------------------------------------
-COMMENT ON INDEX public.pedidos_numero_idx IS
-  'NAO E residuo do sync do B2BWave. Sustenta o `count: exact` das checagens de '
-  'pedido por numero em notify-dispatch, _shared/dispatch.ts e send-email. '
-  'Sem ele, cada checagem de notificacao vira seq scan em `pedidos`.';
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'pedidos_numero_idx' AND relkind = 'i') THEN
+    COMMENT ON INDEX public.pedidos_numero_idx IS
+      'NAO E residuo do sync do B2BWave. Sustenta o `count: exact` das checagens de '
+      'pedido por numero em notify-dispatch, _shared/dispatch.ts e send-email. '
+      'Sem ele, cada checagem de notificacao vira seq scan em `pedidos`.';
+  ELSE
+    -- Recria em vez de so avisar: o indice e barato e as tres checagens de
+    -- notificacao dependem dele. `IF NOT EXISTS` mantem a migration idempotente.
+    RAISE WARNING 'pedidos_numero_idx nao existia — recriando (as checagens de pedido por numero dependem dele)';
+    CREATE INDEX IF NOT EXISTS pedidos_numero_idx ON public.pedidos (numero);
+  END IF;
+END
+$$;

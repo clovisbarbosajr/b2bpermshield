@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Plus, Pencil, Check, X, Trash2, Eye, EyeOff } from "lucide-react";
+import { Plus, Pencil, Check, X, Trash2 } from "lucide-react";
 
 type GatewayType = "none" | "sola" | "paypal" | "stripe" | "square" | "authorize_net" | "paynote";
 
@@ -27,7 +27,8 @@ const PaymentOptions = () => {
   const [editing, setEditing] = useState<any>(null);
   const [saving, setSaving] = useState(false);
   const [listView, setListView] = useState(true);
-  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  // `showSecrets` saiu com os campos de credencial (02/set/2026): era o
+  // olhinho de mostrar/esconder a chave, e nao ha mais chave nesta tela.
 
   const defaultForm = {
     nome: "", descricao: "", instrucoes: "", ativo: true, ordem: 0,
@@ -45,7 +46,7 @@ const PaymentOptions = () => {
   };
   useEffect(() => { fetchData(); }, []);
 
-  const openNew = () => { setEditing(null); setForm(defaultForm); setShowSecrets({}); setListView(false); };
+  const openNew = () => { setEditing(null); setForm(defaultForm); setListView(false); };
   const openEdit = (r: any) => {
     setEditing(r);
     const gc = typeof r.gateway_config === "object" && r.gateway_config ? r.gateway_config : {};
@@ -58,7 +59,6 @@ const PaymentOptions = () => {
       gateway_type: (r.gateway_type ?? "none") as GatewayType,
       gateway_config: gc,
     });
-    setShowSecrets({});
     setListView(false);
   };
 
@@ -128,136 +128,39 @@ const PaymentOptions = () => {
     fetchData();
   };
 
-  const toggleSecret = (field: string) => setShowSecrets(prev => ({ ...prev, [field]: !prev[field] }));
-
-  // Era um COMPONENTE declarado DENTRO do render. A cada tecla o `updateConfig`
-  // chama `setForm`, o componente pai re-renderiza e `SecretInput` ganha uma
-  // identidade nova — pro React e outro tipo de componente, entao ele DESMONTA e
-  // remonta o <input>. O campo perdia o foco a cada caractere: dava pra digitar
-  // exatamente uma letra por clique. Chave de gateway (Stripe secret, token do
-  // Square) so entrava colada, e qualquer correcao depois era impossivel.
-  // Como funcao que devolve JSX nao ha fronteira de componente e o input fica.
-  const secretInput = (field: string, label: string, required?: boolean) => (
-    <div key={field}>
-      <Label>{label}{required && " *"}</Label>
-      <div className="relative">
-        <Input
-          type={showSecrets[field] ? "text" : "password"}
-          value={form.gateway_config[field] ?? ""}
-          onChange={e => updateConfig(field, e.target.value)}
-        />
-        <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => toggleSecret(field)}>
-          {showSecrets[field] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        </button>
-      </div>
-    </div>
-  );
-
+  // CAMPOS DE CREDENCIAL REMOVIDOS em 02/set/2026 — decisao da Jessika (SEG 1):
+  // "Tirar o campo da tela. Chave secreta de pagamento tem lugar proprio para
+  // ficar, e nao e esse."
+  //
+  // O que havia aqui: Secret Key da Stripe, Access Token do Square, API
+  // Password e Signature do PayPal, Transaction Key do Authorize.Net, API Key
+  // do Sola e do Paynote — sete gateways, todos gravando em
+  // `payment_options.gateway_config`.
+  //
+  // O PROBLEMA nao era a tela: a RLS de `payment_options` e por LINHA, e a
+  // policy "Read visible payment_options" libera SELECT para todo
+  // `authenticated`. Qualquer cliente logado baixava a coluna inteira pelo
+  // console do navegador. O checkout ja nao lia mais essa coluna (colunas
+  // explicitas), entao o vazamento pelo app estava fechado — o que continuava
+  // aberto era a leitura direta, e o campo convidava a por segredo novo la.
+  //
+  // Removido a CLASSE, e nao so a Secret Key da Stripe que motivou a pergunta:
+  // os sete tinham exatamente o mesmo destino.
+  //
+  // PARA VOLTAR, quando houver gateway de verdade: a chave vai para os secrets
+  // da edge function (`Deno.env.get`), nunca para uma coluna que o cliente le.
   const renderGatewayFields = () => {
-    switch (form.gateway_type) {
-      case "sola":
-        return (
-          <Card className="p-4 space-y-4 mt-4">
-            <h4 className="text-base font-semibold text-primary">Sola Configuration</h4>
-            <p className="text-xs text-muted-foreground">Obtain your API Key from the Sola dashboard under <strong>Gateway Settings → Key Management</strong></p>
-            {secretInput("api_key", "API Key", true)}
-          </Card>
-        );
-      case "paypal":
-        return (
-          <Card className="p-4 space-y-4 mt-4">
-            <h4 className="text-base font-semibold text-primary">Paypal configuration</h4>
-            <p className="text-xs text-muted-foreground">
-              Paypal authentication uses Paypal API Signature for authentication. Please consult the information in the following link in order to obtain your Paypal API Credentials for the Signature method:{" "}
-              <a href="https://developer.paypal.com/docs/nvp-soap-api/apiCredentials/#api-signatures" target="_blank" rel="noopener noreferrer" className="text-primary underline">
-                https://developer.paypal.com/docs/nvp-soap-api/apiCredentials/#api-signatures
-              </a>
-            </p>
-            {secretInput("api_login", "API Login", true)}
-            {secretInput("api_password", "API Password", true)}
-            {secretInput("api_signature", "API Signature", true)}
-            <div>
-              <Label>Mode *</Label>
-              <select className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={form.gateway_config.mode ?? "production"} onChange={e => updateConfig("mode", e.target.value)}>
-                <option value="production">production</option>
-                <option value="sandbox">sandbox</option>
-              </select>
-            </div>
-            <div>
-              <Label>Capture Amount *</Label>
-              <select className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={form.gateway_config.capture_amount ?? ""} onChange={e => updateConfig("capture_amount", e.target.value)}>
-                <option value="">Select...</option>
-                <option value="immediately">Immediately</option>
-                <option value="manual">Manual</option>
-              </select>
-            </div>
-          </Card>
-        );
-      case "stripe":
-        return (
-          <Card className="p-4 space-y-4 mt-4">
-            <h4 className="text-base font-semibold text-primary">Stripe Configuration</h4>
-            <div className="flex gap-4 border-b border-border pb-2 mb-2">
-              <button type="button" className={`text-sm pb-1 ${!form.gateway_config.use_keys ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`} onClick={() => updateConfig("use_keys", false)}>Stripe Connect</button>
-              <button type="button" className={`text-sm pb-1 ${form.gateway_config.use_keys ? "border-b-2 border-primary text-primary" : "text-muted-foreground"}`} onClick={() => updateConfig("use_keys", true)}>Advanced (Stripe keys)</button>
-            </div>
-            {form.gateway_config.use_keys ? (
-              <>
-                {secretInput("publishable_key", "Publishable Key", true)}
-                {secretInput("secret_key", "Secret Key", true)}
-              </>
-            ) : (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-                <p className="text-sm text-amber-200">
-                  Stripe Connect (OAuth) is not enabled yet. Use the{" "}
-                  <button type="button" className="underline font-medium" onClick={() => updateConfig("use_keys", true)}>
-                    Advanced (Stripe keys)
-                  </button>{" "}
-                  tab and paste your Publishable + Secret keys to enable card payments.
-                </p>
-              </div>
-            )}
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.gateway_config.save_cards ?? false} onChange={e => updateConfig("save_cards", e.target.checked)} /> Allow saving of card details for reuse</label>
-          </Card>
-        );
-      case "square":
-        return (
-          <Card className="p-4 space-y-4 mt-4">
-            <h4 className="text-base font-semibold text-primary">Square configuration</h4>
-            {secretInput("application_id", "Application ID", true)}
-            {secretInput("location_id", "Location ID", true)}
-            {secretInput("access_token", "Access Token", true)}
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.gateway_config.save_cards ?? false} onChange={e => updateConfig("save_cards", e.target.checked)} /> Allow saving of card details for reuse</label>
-          </Card>
-        );
-      case "authorize_net":
-        return (
-          <Card className="p-4 space-y-4 mt-4">
-            <h4 className="text-base font-semibold text-primary">Authorize.Net Configuration</h4>
-            <p className="text-xs text-muted-foreground">Sign up with Authorize.Net to accept Credit Card payments.</p>
-            {secretInput("api_login_id", "API Login ID", true)}
-            {secretInput("transaction_key", "Transaction Key", true)}
-            <div>
-              <Label>Mode</Label>
-              <select className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={form.gateway_config.mode ?? "production"} onChange={e => updateConfig("mode", e.target.value)}>
-                <option value="production">production</option>
-                <option value="sandbox">sandbox</option>
-              </select>
-            </div>
-          </Card>
-        );
-      case "paynote":
-        return (
-          <Card className="p-4 space-y-4 mt-4">
-            <h4 className="text-base font-semibold text-primary">Paynote Configuration</h4>
-            <p className="text-xs text-muted-foreground">Sign up with Paynote to accept ACH payments.</p>
-            {secretInput("api_key", "API Key", true)}
-            {secretInput("merchant_id", "Merchant ID", true)}
-          </Card>
-        );
-      default:
-        return null;
-    }
+    if (form.gateway_type === "none") return null;
+    return (
+      <Card className="p-4 space-y-2 mt-4">
+        <h4 className="text-base font-semibold text-primary">Gateway credentials</h4>
+        <p className="text-sm text-muted-foreground">
+          Credentials are <strong>not stored here</strong>. This table is readable by any
+          signed-in customer, so API keys and secret tokens are kept in the server
+          environment instead. Ask the developer to set them there.
+        </p>
+      </Card>
+    );
   };
 
   const BoolIcon = ({ val }: { val: boolean }) => val ? <Check className="h-4 w-4 text-green-500" /> : <X className="h-4 w-4 text-destructive" />;

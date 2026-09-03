@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { TablesUpdate } from "@/integrations/supabase/types";
 import AdminLayout from "@/components/layouts/AdminLayout";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -217,6 +218,19 @@ const CustomerEdit = () => {
 
     setLoading(false);
   };
+
+  // ACESSO 2 — decisao da Jessika em 02/set: "deixa o acesso e Esconde os botoes
+  // que ele nao pode usar".
+  //
+  // A rota exige so `view_customers`, que o almoxarifado TEM. O banco ja recusa
+  // a escrita (ele so tem SELECT em `clientes`), entao os botoes apareciam,
+  // clicavam e nao gravavam nada — a tela avisa desde 30/ago, mas avisar depois
+  // do clique e pior do que nao oferecer.
+  //
+  // Isto e APARENCIA, nao seguranca: quem impede a escrita e o RLS. Esconder o
+  // botao evita o trabalho jogado fora, nao substitui a policy.
+  const { hasPermission } = useAuth();
+  const podeEditar = hasPermission("edit_customers");
 
   const handleSave = async (goBack = false) => {
     // A gravacao anterior ficou sem resposta: nao da para tentar de novo as cegas.
@@ -1034,6 +1048,12 @@ const CustomerEdit = () => {
                         </Badge>
                       </TableCell>
                       <TableCell>
+                        {/* Os tres botoes abaixo ESCREVEM: reset de senha, senha
+                            manual, e apagar o funcionario junto com o login. Quem
+                            so consulta nao os ve — ver `podeEditar` no topo. */}
+                        {!podeEditar ? (
+                          <span className="text-xs text-muted-foreground">read-only</span>
+                        ) : (<>
                         <Button variant="ghost" size="icon" className="h-7 w-7" title="Send reset password"
                           onClick={async () => {
                             const { error } = await supabase.functions.invoke("send-email", {
@@ -1059,7 +1079,38 @@ const CustomerEdit = () => {
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" title="Delete permanently (frees the email for re-registration)"
                           onClick={async () => {
-                            if (!confirm(`Permanently delete ${ct.email}?\nThis removes the employee AND the login — the email can be registered again from scratch.`)) return;
+                            // CONTA OS PEDIDOS ANTES DE PERGUNTAR — decisao da
+                            // Jessika em 02/set (DADO 1): "Avisar".
+                            //
+                            // `pedidos.cliente_id` e ON DELETE CASCADE e o pedido
+                            // de um sub-login fica com o `cliente_id` DO SUB. Este
+                            // botao apagava, junto com o funcionario, todos os
+                            // pedidos dele e os `pedido_itens` — sem volta, e o
+                            // aviso so falava em "employee AND the login".
+                            //
+                            // `count: "exact", head: true` traz so o numero.
+                            const { count: nPedidos, error: contErr } = await supabase
+                              .from("pedidos")
+                              .select("id", { count: "exact", head: true })
+                              .eq("cliente_id", ct.id);
+
+                            // CONTAGEM BARRADA POR RLS NAO E ERRO: o PostgREST
+                            // devolve `count: 0` com `error: null`. Se so olhasse
+                            // `error`, a guarda falharia ABERTA e o aviso diria
+                            // "nenhum pedido" para quem tem 40. Por isso recusa
+                            // quando nao conseguiu contar.
+                            if (contErr || nPedidos === null || nPedidos === undefined) {
+                              toast.error(
+                                "Could not check how many orders this employee has — nothing was deleted. "
+                                + (contErr?.message ?? "the count came back empty"),
+                              );
+                              return;
+                            }
+
+                            const avisoPedidos = nPedidos > 0
+                              ? `\n\n⚠ This ALSO deletes ${nPedidos} order${nPedidos > 1 ? "s" : ""} placed by this employee, and every item in them. This cannot be undone.`
+                              : "";
+                            if (!confirm(`Permanently delete ${ct.email}?\nThis removes the employee AND the login — the email can be registered again from scratch.${avisoPedidos}`)) return;
                             const { error: rowErr } = await supabase.from("clientes").delete().eq("id", ct.id);
                             if (rowErr) { toast.error(`Could not delete the employee record: ${rowErr.message}`); return; }
                             if (ct.user_id) {
@@ -1073,6 +1124,7 @@ const CustomerEdit = () => {
                           }}>
                           🗑
                         </Button>
+                        </>)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1080,7 +1132,7 @@ const CustomerEdit = () => {
               </Table>
             )}
 
-            {addingContact ? (
+            {!podeEditar ? null : addingContact ? (
               <div className="mt-4 rounded-lg border p-4 space-y-3">
                 <h4 className="text-sm font-semibold">New employee</h4>
                 <div className="grid grid-cols-2 gap-3">
@@ -1164,16 +1216,26 @@ const CustomerEdit = () => {
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => navigate("/admin/customers")}>Back</Button>
-          <Button size="sm" className="bg-primary" onClick={() => handleSave(true)} disabled={saving || falhouCarregar.length > 0}>
-            {saving ? "Saving..." : "Save"}
-          </Button>
-          <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => handleSave(false)} disabled={saving || falhouCarregar.length > 0}>
-            Save and stay on page
-          </Button>
+          {podeEditar ? (
+            <>
+              <Button size="sm" className="bg-primary" onClick={() => handleSave(true)} disabled={saving || falhouCarregar.length > 0}>
+                {saving ? "Saving..." : "Save"}
+              </Button>
+              <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => handleSave(false)} disabled={saving || falhouCarregar.length > 0}>
+                Save and stay on page
+              </Button>
+            </>
+          ) : (
+            <span className="self-center rounded border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-700 dark:text-amber-400">
+              Read-only — your role can view this customer but not change it.
+            </span>
+          )}
         </div>
         {cliente?.id && (
           <div className="flex gap-2 flex-wrap">
-            {cliente?.status === "pendente" && (
+            {/* Aprovar/Rejeitar ESCREVEM em `clientes`; "View all orders" so
+                navega e continua visivel para quem so consulta. */}
+            {podeEditar && cliente?.status === "pendente" && (
               <>
                 <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={async () => {
                   // Checa o erro ANTES de seguir: sem isso, uma aprovação barrada
@@ -1259,9 +1321,12 @@ const CustomerEdit = () => {
                 </Button>
               </>
             )}
-            <Button variant="outline" size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => navigate(`/admin/orders/new?customer=${cliente.id}`)}>
-              Create Order
-            </Button>
+            {/* Criar pedido e escrita: o almoxarifado nao tem `create_orders`. */}
+            {hasPermission("create_orders") && (
+              <Button variant="outline" size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => navigate(`/admin/orders/new?customer=${cliente.id}`)}>
+                Create Order
+              </Button>
+            )}
             <Button variant="outline" size="sm" className="gap-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={() => {
               navigate(`/admin/orders?customer=${cliente.id}`);
             }}>

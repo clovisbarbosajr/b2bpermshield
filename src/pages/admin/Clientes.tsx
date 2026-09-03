@@ -217,7 +217,30 @@ const AdminClientes = () => {
 
   const handleDelete = async (e: React.MouseEvent, c: any) => {
     e.stopPropagation();
-    if (!confirm(`Permanently delete "${c.empresa || c.nome || c.email}"?\nThis also deletes the login (if any), freeing the email for re-registration.`)) return;
+    // CONTA OS PEDIDOS ANTES DE PERGUNTAR — mesma guarda que `CustomerEdit.tsx`
+    // ganhou em 02/set (decisao da Jessika, DADO 1: "Avisar"). Aqui o alcance e
+    // MAIOR: apagar a ficha do cliente leva os pedidos dele E os dos sub-logins
+    // que apontam para ela, por `ON DELETE CASCADE` em `pedidos.cliente_id`.
+    const { count: nPedidos, error: contErr } = await supabase
+      .from("pedidos")
+      .select("id", { count: "exact", head: true })
+      .eq("cliente_id", c.id);
+
+    // Contagem barrada por RLS NAO e erro — o PostgREST devolve `count: 0` com
+    // `error: null`. Olhar so `error` faria a guarda falhar ABERTA e o aviso
+    // dizer "nenhum pedido" para quem tem 40.
+    if (contErr || nPedidos === null || nPedidos === undefined) {
+      toast.error(
+        "Could not check how many orders this customer has — nothing was deleted. "
+        + (contErr?.message ?? "the count came back empty"),
+      );
+      return;
+    }
+
+    const avisoPedidos = nPedidos > 0
+      ? `\n\n⚠ This ALSO deletes ${nPedidos} order${nPedidos > 1 ? "s" : ""} and every item in them. This cannot be undone.`
+      : "";
+    if (!confirm(`Permanently delete "${c.empresa || c.nome || c.email}"?\nThis also deletes the login (if any), freeing the email for re-registration.${avisoPedidos}`)) return;
     const { error } = await supabase.from("clientes").delete().eq("id", c.id);
     if (error) { toast.error(`Could not delete: ${error.message}`); return; }
     // Libera o LOGIN também (senão o email fica "preso" — não recadastra nunca).

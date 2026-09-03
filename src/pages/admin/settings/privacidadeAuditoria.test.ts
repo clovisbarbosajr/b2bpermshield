@@ -58,7 +58,11 @@ describe("delete que apaga em cascata tem que dizer quanto", () => {
   // atribuicao de cliente, sem volta. O irmao `PrivacyGroups.handleDelete` ja
   // contava antes; esta tela dizia so "Delete this payment option?".
   it("PaymentOptions conta as atribuicoes antes de perguntar", () => {
-    const fn = fatiaEntre(pay, "const handleDelete", "const toggleSecret", 45);
+    // O marcador final era `const toggleSecret`, que saiu em 02/set com os campos
+    // de credencial. Trocado pelo comentario que ficou no lugar deles — e o
+    // proximo trecho estavel depois do `handleDelete`. A guarda em si nao mudou:
+    // continua exigindo contagem, tratamento de erro e o numero no confirm.
+    const fn = fatiaEntre(pay, "const handleDelete", "// CAMPOS DE CREDENCIAL REMOVIDOS", 45);
     expect(fn).toMatch(/from\("cliente_payment_options"\)/);
     expect(fn).toMatch(/count: "exact", head: true/);
     expect(fn, "contagem falhada NAO pode virar delete as cegas")

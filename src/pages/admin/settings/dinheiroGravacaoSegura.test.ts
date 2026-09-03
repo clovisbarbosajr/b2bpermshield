@@ -149,20 +149,39 @@ describe("SalesTax: nao limpa o is_default dos outros sem id confirmado", () => 
   }
 });
 
-describe("PaymentOptions: campo de segredo nao remonta a cada tecla", () => {
-  // `SecretInput` era um COMPONENTE declarado dentro do render: cada `setForm`
-  // dava a ele uma identidade nova, o React desmontava e remontava o <input> e
-  // o campo perdia o foco a cada caractere. Chave de gateway so entrava colada.
+describe("PaymentOptions nao guarda mais segredo de gateway", () => {
+  // ANTES: este describe protegia o `secretInput` — treze campos de credencial
+  // (Secret Key da Stripe, Access Token do Square, API Password e Signature do
+  // PayPal, Transaction Key do Authorize.Net, API Key do Sola e do Paynote), e a
+  // guarda cuidava de um bug de FOCO: declarado como componente dentro do render,
+  // o input remontava a cada tecla e a chave so entrava colada.
+  //
+  // Em 02/set/2026 os treze SAIRAM (decisao da Jessika, SEG 1). O bug de foco
+  // deixou de existir junto com os campos, entao a guarda dele nao tem mais o que
+  // proteger — e a guarda que importa agora e a OPOSTA: que nao volte segredo
+  // para uma tabela que qualquer cliente logado le.
   const fonte = ler("./PaymentOptions.tsx");
+  const soCodigo = fonte.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
-  it("virou funcao que devolve JSX, sem fronteira de componente", () => {
-    expect(fonte).toMatch(/const secretInput = \(field: string, label: string/);
-    expect(fonte).not.toMatch(/<SecretInput/);
-    expect(fonte).not.toMatch(/const SecretInput = \(/);
+  it("nenhum campo de credencial voltou para a tela", () => {
+    // A RLS de `payment_options` e por LINHA e a policy libera SELECT para todo
+    // `authenticated`: o que entrar em `gateway_config` sai pelo console do
+    // navegador de qualquer cliente.
+    for (const chave of [
+      "secret_key", "api_password", "api_signature", "access_token",
+      "transaction_key", "api_key", "merchant_id", "publishable_key",
+      "api_login", "api_login_id", "application_id",
+    ]) {
+      expect(soCodigo, `voltou um campo gravando \`${chave}\` em gateway_config`)
+        .not.toMatch(new RegExp(`updateConfig\\("${chave}"`));
+    }
+    expect(soCodigo, "voltou o helper de campo secreto").not.toMatch(/secretInput/);
+    expect(soCodigo, "voltou input de senha nesta tela").not.toMatch(/type="password"/);
   });
 
-  it("todos os campos de segredo passaram a usar a funcao", () => {
-    const usos = fonte.match(/\{secretInput\("/g) ?? [];
-    expect(usos.length).toBeGreaterThanOrEqual(13);
+  it("a tela DIZ onde a credencial deve ficar, em vez de so sumir com o campo", () => {
+    // Campo que some sem explicacao vira chamado de suporte, e a proxima pessoa
+    // recoloca. O texto e a parte que impede a volta.
+    expect(fonte).toMatch(/not stored here/i);
   });
 });

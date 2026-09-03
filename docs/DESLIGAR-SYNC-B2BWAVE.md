@@ -24,15 +24,21 @@ Twilio**.
 
 ## A ORDEM IMPORTA — e o motivo
 
-**Há quatro cron jobs rodando no banco agora**, chamando a edge `b2bwave-sync`
-sozinhos (`migrations/20260618000002_b2bwave_sync_cron.sql`):
+**Há CINCO cron jobs rodando no banco agora**, chamando a edge `b2bwave-sync`
+sozinhos:
 
-| job | frequência | ação |
-|---|---|---|
-| `b2bwave-cron-orders` | **a cada 15 min** | `cron_orders` |
-| `b2bwave-cron-customers` | a cada 15 min, defasado 5 | `sync_customers` |
-| `b2bwave-cron-products` | 1x por hora, minuto 10 | `sync_products` |
-| `b2bwave-cron-pricelists` | 1x por hora, minuto 20 | `sync_price_lists` |
+| job | frequência | ação | criado em |
+|---|---|---|---|
+| `b2bwave-cron-orders` | **a cada 15 min** | `cron_orders` | `20260618000002` |
+| `b2bwave-cron-customers` | a cada 15 min, defasado 5 | `sync_customers` | `20260618000002` |
+| `b2bwave-cron-products` | 1x por hora, minuto 10 | `sync_products` | `20260618000002` |
+| `b2bwave-cron-pricelists` | 1x por hora, minuto 20 | `sync_price_lists` | `20260618000002` |
+| `b2bwave-cron-categories` | 1x por hora, minuto 5 | `sync_categories` | **`20260717130000`** |
+
+⚠️ **O `categories` mora em outra migration** e por isso escapou do inventário
+inicial — que dizia "quatro". Só apareceu quando o dono rodou o `SELECT` de
+conferência e sobrou uma linha. Qualquer varredura por `b2bwave-` tem que ser por
+**prefixo**, nunca por lista escrita à mão.
 
 **Apagar os pedidos antes de desligar o cron não funciona:** em até 15 minutos o
 `cron_orders` reimporta tudo do B2BWave. E o `sync_customers` continua
@@ -50,11 +56,16 @@ Nada é apagado aqui; só para de disparar. Reversível.
 -- 1. VER o que está agendado hoje (rode primeiro, e me mande o resultado):
 SELECT jobid, jobname, schedule, active FROM cron.job ORDER BY jobname;
 
--- 2. Desligar os quatro:
-SELECT cron.unschedule('b2bwave-cron-orders');
-SELECT cron.unschedule('b2bwave-cron-customers');
-SELECT cron.unschedule('b2bwave-cron-products');
-SELECT cron.unschedule('b2bwave-cron-pricelists');
+-- 2. Desligar TODOS de uma vez, por prefixo — nunca por lista escrita à mão.
+--    Foi uma lista à mão que deixou o `b2bwave-cron-categories` para trás.
+DO $$
+DECLARE _job text;
+BEGIN
+  FOR _job IN SELECT jobname FROM cron.job WHERE jobname LIKE 'b2bwave-%' LOOP
+    PERFORM cron.unschedule(_job);
+    RAISE NOTICE 'desligado: %', _job;
+  END LOOP;
+END $$;
 
 -- 3. CONFIRMAR que sumiram (tem que voltar sem nenhuma linha `b2bwave-`):
 SELECT jobid, jobname, schedule, active FROM cron.job ORDER BY jobname;
@@ -119,7 +130,12 @@ leva as duas junto sem perceber.
 | chave | o que é |
 |---|---|
 | `envio_pausado` | a **TORNEIRA GERAL de notificação** — cala todos os canais de uma vez. É o kill switch criado depois dos 1.508 SMS de 25/ago (`20260825180000_teto_notificacao.sql`) |
-| `order_notify_max_age_days` | lido por `send-email/index.ts:1688` |
+| `order_notify_max_age_days` | lido por `send-email/index.ts:1688` **e** `_shared/dispatch.ts` |
+| `suppress_order_notify`, `suppress_stock_notify` | silêncio por tipo de evento |
+| `order_max_per_hour`, `low_stock_max_per_hour`, `sms_max_per_hour`, `email_max_per_hour`, `auth_max_per_hour` | os **tetos por hora** — o outro freio criado depois do incidente |
+
+São pelo menos **nove chaves**, não duas. `docs/CONSULTA-ESTADO-NOTIFICACAO.sql`
+lê todas — rode-o antes de encostar nessa tabela.
 
 Dropar essa tabela **desarma o kill switch em silêncio** — sem erro, sem aviso.
 Há um `COMMENT ON TABLE` nela avisando isso (`20260902120000`).

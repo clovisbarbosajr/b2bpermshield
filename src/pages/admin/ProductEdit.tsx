@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import AdminLayout from "@/components/layouts/AdminLayout";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -390,6 +391,21 @@ const ProductEdit = () => {
     return faltando;
   };
 
+  // ACESSO 2 — decisao da Jessika em 02/set: "deixa o acesso e Esconde os botoes
+  // que ele nao pode usar".
+  //
+  // A rota exige so `view_products`, que o almoxarifado TEM, e o banco recusa a
+  // escrita plena. O botao aparecia, clicava, e nao gravava.
+  //
+  // NAO confundir com ACESSO 1: ela respondeu "Sim, pode fazer os dois" para o
+  // almoxarifado mudar status e desativar produto — isso continua valendo, e
+  // acontece pelas telas de Estoque e da lista de produtos, nao por este Save,
+  // que reescreve o produto inteiro e o sub-dado todo.
+  //
+  // Isto e APARENCIA. Quem impede a escrita e o RLS.
+  const { hasPermission } = useAuth();
+  const podeEditar = hasPermission("edit_products");
+
   const handleSave = async (goBack = false) => {
     // Code (sku) é OPCIONAL — igual ao B2BWave original. Vazio vira NULL no banco
     // (string vazia colidiria na UNIQUE a partir do 2º produto sem código).
@@ -446,6 +462,34 @@ const ProductEdit = () => {
     if (faltando.length > 0) {
       toast.error(`Nothing was saved — fix these first:\n• ${faltando.join('\n• ')}`);
       return;
+    }
+
+    // DESMARCAR "PRIVATE" APAGA AS LIBERACOES — avisa com a CONTAGEM antes.
+    //
+    // Decisao da Jessika em 02/set (DADO 2): "Pode apagar e coloca o aviso".
+    //
+    // O save reescreve `produto_acesso` e `produto_cliente_acesso` a partir da
+    // tela: com `is_private` desmarcado, as duas listas viram `[]` e o delete
+    // apaga tudo. Remarcar depois volta VAZIO, e a lista antiga nao existe em
+    // lugar nenhum para recuperar — teria que ser remontada na mao.
+    //
+    // A contagem sai do estado JA CARREGADO (`falhouCarregar` acima ja barrou o
+    // save quando algum deles nao carregou), entao nao ha ida ao servidor aqui e
+    // nao ha como o numero vir errado por RLS.
+    if (!form.is_private && id) {
+      const nGrupos = accGroups.size;
+      const nClientes = accGrant.length + accExclude.length;
+      if (nGrupos + nClientes > 0) {
+        const partes = [
+          nGrupos > 0 ? `${nGrupos} access group${nGrupos > 1 ? "s" : ""}` : "",
+          nClientes > 0 ? `${nClientes} per-customer rule${nClientes > 1 ? "s" : ""}` : "",
+        ].filter(Boolean).join(" and ");
+        if (!confirm(
+          `"Private" is unchecked, so saving DELETES ${partes} for this product.\n\n`
+          + "Re-checking Private later brings back an empty list — this cannot be undone.\n\n"
+          + "Save anyway?",
+        )) return;
+      }
     }
 
     // A GRAVACAO ANTERIOR FICOU SEM RESPOSTA. Nao da para tentar de novo as cegas:
@@ -920,14 +964,22 @@ const ProductEdit = () => {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => navigate("/admin/products")}>Cancel</Button>
-          <Button onClick={() => handleSave(true)} disabled={saving || falhouCarregar.length > 0} className="gap-1">
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save
-          </Button>
-          {!isNew && (
-            <Button variant="secondary" onClick={() => handleSave(false)} disabled={saving || falhouCarregar.length > 0}>
-              Save and stay on page
-            </Button>
+          {podeEditar ? (
+            <>
+              <Button onClick={() => handleSave(true)} disabled={saving || falhouCarregar.length > 0} className="gap-1">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Save
+              </Button>
+              {!isNew && (
+                <Button variant="secondary" onClick={() => handleSave(false)} disabled={saving || falhouCarregar.length > 0}>
+                  Save and stay on page
+                </Button>
+              )}
+            </>
+          ) : (
+            <span className="self-center rounded border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-700 dark:text-amber-400">
+              Read-only — your role can view this product but not edit it.
+            </span>
           )}
         </div>
       </div>

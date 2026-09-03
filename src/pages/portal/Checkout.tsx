@@ -31,7 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ChevronRight, Lock, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useCart } from "@/contexts/CartContext";
-import { checkCartStock, cartKey } from "@/lib/stock";
+import { checkCartStock, cartKey, normalizeStatus } from "@/lib/stock";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice } from "@/lib/pricing";
 
@@ -882,8 +882,33 @@ const Checkout = () => {
       return;
     }
 
+    // PRE-ORDER ENTRA NO PEDIDO MARCADO COMO BACKORDER.
+    //
+    // Especificacao da Jessika em 02/set (VENDA 2): "Pre-order sera aceita se o
+    // produto estiver liberado no status para 'pre order'. A quantidade do
+    // produto fica negativa, e mostra como backorder na ordem."
+    //
+    // O carrinho JA aceita pre-order sem piso de estoque (`stock.ts`: `if
+    // (isPreOrder) continue`) e JA recusa "sold out" (`permite_comprar` false).
+    // O que faltava era a terceira parte: a linha chegava no pedido igual a
+    // qualquer outra, e alguem tinha que lembrar de marcar a caixinha
+    // "Backorder" a mao no OrderDetail. Ninguem lembra.
+    //
+    // `freshProducts` e a leitura do servidor feita segundos atras para a
+    // checagem de estoque — o status vem de la, nao do carrinho, que vive no
+    // localStorage e pode estar velho.
+    const statusPorProduto = new Map(
+      (freshProducts ?? []).map((p: any) => [p.id, normalizeStatus(p.status_produto)]),
+    );
+
     const itens = recalculated.map(i => ({
       pedido_id: pedido.id,
+      // A COMPARACAO ja devolve boolean: produto ausente do mapa da `undefined`,
+      // e `undefined === "pre-order"` e `false`. Nao ha `?? false` aqui de
+      // proposito — o `tsc` reprova como operando inalcancavel, e ele tem razao:
+      // seria uma rede que nunca pega nada, do tipo que faz o proximo leitor
+      // acreditar que existe um caso nulo a tratar.
+      backorder: statusPorProduto.get(i.produto_id) === "pre-order",
       produto_id: i.produto_id,
       // Coluna própria da variante: o texto abaixo é pro humano ler, ISTO é o
       // que o re-order e os relatórios usam. Antes a variante só existia no

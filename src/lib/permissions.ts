@@ -60,8 +60,21 @@ export const PERMISSION_GROUPS: { group: string; keys: { key: PermissionKey; lab
 // ─── Default permissions per role ─────────────────────────────────────────────
 export const DEFAULT_PERMISSIONS: Record<"warehouse" | "manager", Record<PermissionKey, boolean>> = {
   // WAREHOUSE = logística: VÊ pedidos/clientes/produtos e muda STATUS + ajusta estoque.
-  // NÃO cria/edita/deleta cliente/pedido/produto, NÃO mexe em settings/segredos.
-  // (Bate com o RLS de 20260619003000 — o banco impõe o mesmo.)
+  // NÃO cria/edita/deleta cliente/pedido, NÃO mexe em settings/segredos.
+  //
+  // ⚠ ESTE MAPA NÃO É A FRONTEIRA DE SEGURANÇA. Ele decide o que a TELA mostra;
+  // quem decide o que grava é o RLS. Nos produtos os dois DIVERGEM de propósito:
+  //
+  //   `edit_products: false` aqui   →  a tela não oferece edição plena
+  //   policy "Warehouse update produtos" (20260619003000) é `FOR UPDATE` SEM
+  //   restrição de coluna  →  o banco aceita `ativo` e `status_produto`
+  //
+  // O comentário que estava aqui dizia "o banco impõe o mesmo", e era FALSO.
+  //
+  // Decisão da Jessika em 02/set (ACESSO 1), perguntada exatamente sobre isso —
+  // "o almoxarifado pode mudar status de produto? e pode desativar produto?":
+  // **"Sim, pode fazer os dois."** A divergência fica, agora deliberada e
+  // registrada, em vez de acidental.
   warehouse: {
     view_dashboard:       true,
     view_orders:          true,

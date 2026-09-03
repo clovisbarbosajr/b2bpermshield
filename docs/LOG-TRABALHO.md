@@ -6230,3 +6230,109 @@ build          ok
 check:edge     13 arquivos (8 funcoes)
 check:sql      198 arquivos .sql
 ```
+
+---
+
+## 02/set — as 14 decisoes da Jessika, executadas
+
+Respostas transcritas em `docs/DECISOES-PENDENTES.md`. O que dependia de codigo
+esta abaixo; o que depende de SQL foi para o dono.
+
+### SEG 1 — credencial de gateway fora da tela
+
+Ela: *"Tirar o campo da tela. Chave secreta de pagamento tem lugar proprio para
+ficar, e nao e esse."*
+
+Removida a CLASSE, nao so a Secret Key da Stripe que motivou a pergunta:
+**sete gateways** gravavam credencial em `payment_options.gateway_config` — Stripe
+(publishable + secret), PayPal (login, password, signature), Square (application
+id, location id, access token), Authorize.Net (login id, transaction key), Sola e
+Paynote (api key, merchant id). A RLS de `payment_options` e por LINHA e a policy
+libera SELECT para todo `authenticated`: qualquer cliente logado baixava a coluna
+pelo console.
+
+No lugar, a tela DIZ onde a credencial deve ficar. Campo que some sem explicacao
+vira chamado de suporte, e a proxima pessoa recoloca.
+
+**NAO mexido:** `Configuracoes.tsx` tem outro campo de Secret Key, mas grava em
+`configuracoes`, cuja leitura e **admin-only** desde `20260825290000`. Situacao
+diferente, e a tela esta na lista C, que ela mandou nao tocar.
+
+### DADO 1 — apagar cliente/funcionario conta os pedidos antes
+
+Ela: *"Avisar."* Os dois botoes (`Clientes.tsx` e a aba Employees do
+`CustomerEdit.tsx`) agora contam com `count: "exact", head: true` e poem o NUMERO
+no confirm.
+
+A parte que importa: **contagem barrada por RLS nao e erro** — o PostgREST
+devolve `count: 0` com `error: null`. Uma guarda que so olhasse `error` falharia
+ABERTA e o aviso diria "nenhum pedido" para quem tem 40. Por isso os dois recusam
+o delete quando nao conseguiram contar.
+
+### DADO 2 — desmarcar Private avisa com a contagem
+
+Ela: *"Pode apagar e coloca o aviso."* O aviso roda ANTES de qualquer gravacao,
+diz quantos grupos e quantas regras por cliente serao apagados, e recusar
+interrompe o save.
+
+### ACESSO 1 — a divergencia virou deliberada
+
+Ela: *"Sim, pode fazer os dois"* (mudar status E desativar produto). Nada mudou de
+comportamento; o que mudou foi o **comentario mentiroso** em `permissions.ts`, que
+afirmava "o banco impoe o mesmo" que o mapa da tela. Nao impoe: a policy
+`"Warehouse update produtos"` e `FOR UPDATE` sem restricao de coluna. Comentario
+errado sobre permissao e pior que nenhum — ele encerra a investigacao.
+
+### ACESSO 2 — botao que nao grava nao aparece
+
+Ela: *"deixa o acesso e Esconde os botoes que ele nao pode usar."* `CustomerEdit`
+e `ProductEdit` passam a ler `hasPermission`; quem so consulta ve uma faixa
+"Read-only" no lugar do Save, e nao ve aprovar/rejeitar/criar pedido nem os tres
+botoes de funcionario. **"View all orders" continua visivel** — so navega.
+
+Isto e APARENCIA, nao seguranca: quem impede a escrita e o RLS.
+
+### VENDA 2 — pre-order marcado como backorder no pedido
+
+Ela definiu o comportamento, nao so um sim/nao. Dois terços ja existiam em
+`stock.ts` (`if (isPreOrder) continue` e o bloqueio por `permite_comprar`). O que
+faltava era a terceira parte: a linha chegava no pedido igual a qualquer outra e
+alguem tinha que lembrar de marcar "Backorder" a mao no `OrderDetail`. Agora o
+item nasce marcado, com o status vindo da leitura FRESCA do servidor — nao do
+carrinho, que vive no `localStorage` e pode estar velho.
+
+**Falta a parte de banco** (a quantidade ficar negativa): e gatilho, vai no bloco
+de SQL do dono.
+
+### VENDA 1 — nada a fazer no codigo
+
+Ela: *"Nao vamos aceitar pagamento por stripe."* O checkout ja esconde o cartao
+atras de `cfg?.stripe_enabled && cfg?.stripe_publishable_key`. Basta a flag
+continuar desligada — e vale um `UPDATE` explicito, que foi para o bloco do dono.
+Com isso o item **A1** (cartao recusado deixa o pedido preso) fica inerte.
+
+### TELA 1 — nao tocado, por ordem dela
+
+*"nao mexe em nada por enquanto."* Os 13 campos que nao fazem nada ficam como
+estao.
+
+### `src/test/decisoesDaJessika.test.ts` — 14 guardas, 9 mutantes, 9 mortos
+
+Cada bloco prende UMA decisao e cita a pergunta e a resposta, porque daqui a seis
+meses *"por que este botao sumiu?"* e o que faz alguem devolver o defeito.
+
+Uma guarda minha nasceu furada e o mutante mostrou: a de ACESSO 1 recortava so o
+bloco `warehouse`, e recolocar a afirmacao falsa no CABECALHO do arquivo
+sobrevivia. O criterio certo nao era ONDE a frase aparece e sim se ela e
+**afirmada ou citada** — agora toda linha que a contenha tem de estar marcada como
+historico (`era FALSO`).
+
+### Verificacao
+
+```
+tsc            LIMPO
+npm test       758/758 em 72 arquivos
+build          ok
+check:edge     13 arquivos (8 funcoes)
+check:sql      198 arquivos .sql
+```
