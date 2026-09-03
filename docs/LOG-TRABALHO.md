@@ -5867,3 +5867,78 @@ PDF e destinatario de reserva) e `COMPANY_NAME = "Zap Supplies, LLC"` no codigo.
 historico de envio; o `permshield.com` esta verificado mas frio. Se algum e-mail
 comecar a cair em spam nos primeiros envios, a causa provavel e essa, e nao
 configuracao errada.
+
+---
+
+## 02/set — REGRA NOVA DO DONO: documentar ANTES de agir
+
+*"tudo que eu falar agora, eu PRECISO que voce abra a documentacao, atualize .md,
+log e absolutamente tudo, ANTES de fazer qualquer coisa."*
+
+Ordem obrigatoria para qualquer pedido, a partir de agora:
+
+1. **Ler** o fim deste log e o `.md` do assunto — antes de tocar em nada.
+2. **Escrever** `INICIADO` dizendo o que vou fazer.
+3. **Executar.**
+4. **Atualizar** com o resultado real, e o `.md` de decisao se houver.
+
+Registrada tambem na memoria do projeto (`documentar-em-paralelo`), substituindo a
+versao de 30/jul, que so exigia documentar *em paralelo*.
+
+### O erro que motivou a regra: 24 horas de cliente vendo pagina velha
+
+**O que aconteceu.** O documento de decisoes da Jessika foi publicado como
+artifact, o dono compartilhou o link, e depois eu **republiquei duas vezes em cima
+do mesmo link** — primeiro tirando os campos de resposta, depois recolocando-os
+com armazenamento no navegador.
+
+**O defeito da plataforma que eu ignorei:** o compartilhamento de um artifact fica
+**preso (pinned) na versao que existia quando ele foi compartilhado**. Toda
+republicacao posterior e invisivel para quem tem o link. O proprio sistema avisava,
+em texto, na resposta da leitura do artifact:
+
+```
+shared with anyone with the link
+(viewers see a pinned earlier version, not this live version)
+```
+
+Eu li essa linha, mencionei "arrasta o pin" para o dono uma vez, e depois **agi sem
+reler**. A cliente passou ~24h abrindo a versao sem campos, e o dono repetiu tres
+vezes que "continua sem poder digitar" antes de eu ir conferir o que estava de fato
+publicado em vez de supor.
+
+**Correcao.** Publicado um artifact NOVO, que nunca foi compartilhado e portanto
+nao tem pin antigo:
+
+```
+https://claude.ai/code/artifact/adc4ea70-cf9b-4dbf-8657-9adf168d2cda
+```
+
+Conteudo conferido antes de publicar: 14 campos, botao "Copiar todas as
+respostas", rascunho salvo no `localStorage` do navegador dela.
+
+### A licao, para nao repetir
+
+- **Artifact ja compartilhado nao se republica.** Se o conteudo mudou de forma que
+  o leitor precisa ver, publicar link NOVO — ou o dono move o pin no Share.
+- Quando o dono disser "continua nao funcionando", **abrir e olhar o que esta
+  publicado** antes de qualquer explicacao. Duas das minhas respostas foram teoria
+  sobre uma pagina que eu nao tinha aberto.
+- Havia um caminho errado anterior no mesmo assunto: publiquei uma versao com
+  banco (`capabilities: db`), que a plataforma torna **interna da organizacao** e
+  impede compartilhamento publico. O link `c637cbec...` ficou orfao por isso; nao
+  usar.
+
+### Aguardando resposta do dono
+
+- Os 14 itens de `docs/DECISOES-PENDENTES.md` — com a Jessika.
+- Regua de preco duplicada (PRECO 1, 2, 3) — trava o indice unico de
+  `tabelas_preco.nome`.
+- OK para o conserto de raiz do sync das reguas (edge function; deploy pedido no
+  chat do Lovable).
+
+### O que ainda nao foi testado
+
+- O envio real por `noreply@permshield.com` depois do `UPDATE` de hoje. So um
+  e-mail de verdade prova, e disparo de e-mail e do dono.
+- Se a Jessika consegue de fato digitar no link novo.
