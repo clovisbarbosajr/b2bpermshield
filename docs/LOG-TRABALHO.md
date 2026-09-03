@@ -5942,3 +5942,75 @@ respostas", rascunho salvo no `localStorage` do navegador dela.
 - O envio real por `noreply@permshield.com` depois do `UPDATE` de hoje. So um
   e-mail de verdade prova, e disparo de e-mail e do dono.
 - Se a Jessika consegue de fato digitar no link novo.
+
+---
+
+## 02/set — DECISAO DO CLIENTE: sistema nasce com ZERO pedidos, sync morre
+
+**INICIADO.** Palavras do dono:
+
+> *"O nosso sistema B2B vai comecar do ZERO, zero ordens... vamos manter APENAS os
+> clientes. (...) principalmente pq nao precisamos mais daquela parte de sync...
+> tudo aquilo vai morrer e qualquer outra ligacao com API. (...) esse periodo foi
+> bom pq serviu de testes, aprendizado."*
+
+O que isso significa:
+
+1. Nenhum pedido migrado — o sistema nasce vazio de `pedidos`.
+2. Os **clientes** ficam.
+3. O sync com o B2BWave morre, e a integracao de API junto.
+4. O periodo anterior foi teste e aprendizado, nao trabalho perdido.
+
+### ACHADO URGENTE — ha QUATRO cron jobs rodando no banco agora
+
+`supabase/migrations/20260618000002_b2bwave_sync_cron.sql` agenda, via `pg_cron`,
+chamadas automaticas a edge `b2bwave-sync`:
+
+| job | frequencia | acao |
+|---|---|---|
+| `b2bwave-cron-orders` | **a cada 15 min** | `cron_orders` |
+| `b2bwave-cron-customers` | a cada 15 min (defasado 5) | `sync_customers` |
+| `b2bwave-cron-products` | 1x por hora | `sync_products` |
+| `b2bwave-cron-pricelists` | 1x por hora | `sync_price_lists` |
+
+**Consequencia se nao forem desligados PRIMEIRO:** apagar os pedidos nao adianta —
+em ate 15 minutos o `cron_orders` reimporta tudo do B2BWave. E o `sync_customers`
+continua sobrescrevendo cliente que o dono queria manter como esta.
+
+Por isso a ordem e: **1) desligar o cron, 2) so entao limpar dado, 3) so entao
+mexer em codigo.** Nao o contrario.
+
+### Inventario do que existe hoje
+
+**Edge functions** (11 no total; as que tem relacao com sync/API):
+
+| funcao | linhas | destino proposto |
+|---|---|---|
+| `b2bwave-sync` | **3490** — a maior do projeto | morre |
+| `api` | 246 — API de saida do PermShield, autenticada por `x-api-token` | **decisao do dono** |
+| `sync-container-eta` | 175 — le ETA do tracker CONTAINER ZAP (ShipsGo) | **decisao do dono** |
+| `send-email`, `notify-dispatch`, `generate-pdf`, `stripe-checkout`, `register-customer`, `admin-create-user`, `company-member` | — | ficam (nao tem relacao com B2BWave) |
+
+**Telas e ferramentas** que citam o sync: 18 arquivos em `src/`, incluindo a tela
+dedicada `settings/B2BWaveSync.tsx` e as ferramentas `ImportOrders`,
+`BulkUpdateOrders`, `ImportCustomers`, `ImportCategories`, `ImportAddresses`,
+`ImportCustomerPrices`, `ImportProductVariants`, `ImportRelatedProducts`.
+
+**Banco:** ~84 referencias a `b2bwave` nas migrations, entre elas as colunas
+`pedidos.b2bwave_order_id`, `produtos.b2bwave_id`, `clientes.b2bwave_id`, a tabela
+`sync_state` e a de log do sync.
+
+### AGUARDANDO o dono — tres perguntas que mudam o que sera apagado
+
+1. **"Manter APENAS os clientes" e literal?** Produtos, categorias, tabelas de
+   preco e estoque ficam, ou tambem zeram? Portal B2B sem produto nao vende.
+2. **`sync-container-eta` morre junto?** Ele NAO e do B2BWave — le ETA de container
+   do projeto CONTAINER ZAP e alimenta o modulo Producao.
+3. **A edge `api` morre?** E a API de SAIDA do PermShield (token proprio), nao a de
+   entrada do B2BWave. Se algo externo consome, apagar quebra esse consumidor.
+
+Assumido sem perguntar, por serem servico e nao integracao B2BWave: **Stripe,
+Resend e Twilio ficam.**
+
+Nada foi apagado ate aqui. Este registro foi escrito ANTES de qualquer alteracao,
+conforme a regra de hoje.
