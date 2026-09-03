@@ -134,67 +134,15 @@ describe("EmailSettings: o motivo do envio recusado vem do servidor", () => {
   });
 });
 
-describe("B2BWaveSync: o botao que pode notificar avisa antes", () => {
-  const fonte = ler("./B2BWaveSync.tsx");
-
-  it("syncAllOrders pede confirmacao ANTES de comecar", () => {
-    const bloco = fatiaEntre(fonte, "const syncAllOrders", "const stopOrderSync");
-    const pergunta = bloco.indexOf("if (!confirm(");
-    const comeco = bloco.indexOf("setOrderSyncing(true)");
-    expect(pergunta, "syncAllOrders perdeu a confirmacao").toBeGreaterThan(-1);
-    expect(pergunta).toBeLessThan(comeco);
-    expect(bloco.slice(pergunta, comeco)).toMatch(/48 HORAS/);
-  });
-
-  // O TETO E DE VOLUME DE NOTIFICACAO, e por isso este teste olha o CATCH e nao o
-  // bloco inteiro.
-  //
-  // A primeira versao daqui so exigia que as strings `falhasSeguidas >= 5` e
-  // `falhasSeguidas = 0;` existissem em algum lugar da funcao. Apagar o
-  // `falhasSeguidas++` do catch mantinha as duas: o contador ficava preso em 0, a
-  // condicao nunca disparava, e o `while` voltava a chamar `sync-b2bwave` a cada
-  // 2s enquanto a aba ficasse aberta — numa acao que PODE notificar pedido novo.
-  // O teste passava. E o mesmo vetor de volume dos 1.508 SMS de 25/ago.
-  it("a retentativa tem teto — erro permanente nao vira laco infinito", () => {
-    const bloco = fatiaEntre(fonte, "const syncAllOrders", "const stopOrderSync");
-
-    const iCatch = bloco.indexOf("} catch (err");
-    expect(iCatch, "syncAllOrders perdeu o catch do laco").toBeGreaterThan(-1);
-    const catchBloco = bloco.slice(iCatch);
-
-    // 1) o contador PRECISA andar, e antes da comparacao — senao o teto e enfeite
-    const iInc = catchBloco.indexOf("falhasSeguidas++");
-    const iTeto = catchBloco.indexOf("falhasSeguidas >= 5");
-    expect(iInc, "o catch nao incrementa `falhasSeguidas` — o teto nunca dispara").toBeGreaterThan(-1);
-    expect(iTeto, "o catch nao compara com o teto").toBeGreaterThan(-1);
-    expect(iInc, "`falhasSeguidas++` tem que vir ANTES da comparacao").toBeLessThan(iTeto);
-
-    // 2) bater no teto tem que SAIR do laco, nao so avisar
-    expect(catchBloco.slice(iTeto, iTeto + 400), "bater no teto nao interrompe o laco").toMatch(/break;/);
-
-    // 3) o reset fica no caminho de SUCESSO. Se estivesse no catch, cada falha
-    //    zeraria o contador e o teto nunca seria alcancado.
-    expect(bloco.slice(0, iCatch), "o reset de `falhasSeguidas` sumiu do caminho de sucesso").toMatch(/falhasSeguidas = 0;/);
-  });
-
-  it("le o error do sync_log — sem ele o aviso BLOQUEIO_ some calado", () => {
-    const bloco = fatiaEntre(fonte, "const fetchLastRuns", "useEffect(() => { fetchLastRuns()");
-    expect(bloco).toMatch(/find\(\(r: any\) => r\?\.error\)/);
-    expect(bloco).toMatch(/setLastRunsErro\(erro \? erro\.message : null\)/);
-    expect(fonte).toMatch(/N[aã]o consegui ler o hist[oó]rico de sincroniza[cç][aã]o/);
-  });
-
-  it("o painel busca cada acao conhecida, nao so as 50 linhas mais novas", () => {
-    // O cron de `orders` grava a cada 15 min; sem a consulta por acao, a ultima
-    // rodada de `products` sai da janela de 50 e some do painel calada.
-    const bloco = fatiaEntre(fonte, "const fetchLastRuns", "useEffect(() => { fetchLastRuns()");
-    for (const acao of ["orders", "products", "customers", "sync_orders_backfill"]) {
-      expect(bloco, `a acao ${acao} saiu da busca por acao`).toContain(`"${acao}"`);
-    }
-    expect(bloco).toMatch(/\.eq\("action", a\)\.limit\(1\)/);
-  });
-
-  it("nao mostra contador que ninguem alimenta", () => {
-    expect(fonte).not.toMatch(/orderTotalItems/);
-  });
-});
+// BLOCO REMOVIDO em 02/set/2026 com a tela `B2BWaveSync.tsx`.
+//
+// O cliente decidiu que o sistema nasce com ZERO pedidos e sem sync do B2BWave;
+// a tela, a edge `b2bwave-sync` e os cinco cron jobs foram apagados. Ver
+// `docs/DESLIGAR-SYNC-B2BWAVE.md`.
+//
+// O que estes testes protegiam, e que vale para QUALQUER botao futuro que possa
+// disparar notificacao em lote (o vetor dos 1.508 SMS de 25/ago):
+//   - confirmacao ANTES de comecar, nao depois;
+//   - retentativa com TETO, com o contador andando dentro do catch e `break` ao
+//     bater no teto — senao o laco chama a edge a cada 2s enquanto a aba viver;
+//   - o reset do contador no caminho de SUCESSO, nunca no catch.

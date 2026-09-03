@@ -54,8 +54,6 @@ const isGroup = (entry: NavEntry): entry is NavGroup => "children" in entry;
 //   Tools → Import Addresses        (/admin/tools/import-addresses)
 //   Tools → Import Product Variants (/admin/tools/import-product-variants)
 //   Tools → Import Categories       (/admin/tools/import-categories)
-//   Tools → Import Orders           (/admin/tools/import-orders)
-//   Tools → Bulk Update Orders      (/admin/tools/bulk-update-orders)
 //   Tools → Imports Log             (/admin/tools/imports-log)
 //   Tools → Exports Log             (/admin/tools/exports-log)
 //   Products → Import               (/admin/products/import)
@@ -119,8 +117,6 @@ const adminNavEntries: NavEntry[] = [
       // { to: "/admin/tools/import-addresses", icon: FileUp, label: "Import Addresses" },
       // { to: "/admin/tools/import-product-variants", icon: Layers, label: "Import Product Variants" },
       // { to: "/admin/tools/import-categories", icon: FolderTree, label: "Import Categories" },
-      // { to: "/admin/tools/import-orders", icon: ClipboardList, label: "Import Orders" },
-      // { to: "/admin/tools/bulk-update-orders", icon: ClipboardCheck, label: "Bulk Update Orders" },
       // { to: "/admin/tools/imports-log", icon: ScrollText, label: "Imports Log" },
       // { to: "/admin/tools/exports-log", icon: ScrollText, label: "Exports Log" },
     ],
@@ -186,7 +182,10 @@ const adminNavEntries: NavEntry[] = [
       //
       // Havia ainda um quarto caminho: `settings/Profile.tsx` tinha um `<Link>`
       // visivel para `extra-fields`.
-      { to: "/admin/settings/b2bwave-sync", icon: RefreshCw, label: "B2B Wave Sync" },
+      // SYNC DO B2BWAVE REMOVIDO em 02/set/2026 — decisao do cliente: o sistema
+      // nasce com zero pedidos e nao ha mais integracao com o B2BWave. A tela, a
+      // edge `b2bwave-sync` (3490 linhas) e os cinco cron jobs foram apagados.
+      // Ver `docs/DESLIGAR-SYNC-B2BWAVE.md`.
     ],
   },
 ];

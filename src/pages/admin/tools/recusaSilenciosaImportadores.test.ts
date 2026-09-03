@@ -139,33 +139,8 @@ describe("importadores nao anunciam escrita que nao aconteceu", () => {
       .toMatch(/const k = String\(c\.email\)\.trim\(\)\.toLowerCase\(\)/);
   });
 
-  it("BulkUpdateOrders confirma a linha do UPDATE de pedido", () => {
-    const f = soCodigo(ler("./BulkUpdateOrders.tsx"));
-    // Ler e escrever passam por policies DIFERENTES: o SELECT acima achou o
-    // pedido, o UPDATE pode nao alterar nada.
-    expect(f).toMatch(/\.eq\("id", \(matches\[0\] as any\)\.id\)\s*\.select\("id"\)/);
-    const guarda = fatiaEntre(f, "} else if (nadaFoiEscrito(gravada, error)) {", "} else {", 8);
-    exigeConsequenciaDeErro(guarda, "BulkUpdateOrders");
-  });
-
-  it("ImportOrders trata DELETE filtrado como limpeza que nao aconteceu", () => {
-    const f = soCodigo(ler("./ImportOrders.tsx"));
-    expect(f).toMatch(/\.delete\(\)\.eq\("id", pedido\.id\)\.select\("id"\)/);
-    expect(f).toMatch(/const naoApagou = limpezaErr \|\| nadaFoiEscrito\(apagado, limpezaErr\)/);
-    // A CONSEQUENCIA aqui nao e um `res.push` novo e sim a mensagem TROCAR: com o
-    // pedido vazio ainda no banco, "nothing was imported" e falso e o operador
-    // reimporta e duplica.
-    const msg = fatiaEntre(f, "message: naoApagou", "});", 10);
-    expect(msg, "a mensagem nao entrega o id nem manda conferir a mao")
-      .toMatch(/\$\{pedido\.id\} and delete it by hand/);
-    // `limpezaErr` pode ser `null` neste ramo (RLS filtrou sem erro): citar
-    // `.message` direto imprimiria "undefined".
-    expect(msg).toMatch(/limpezaErr \?/);
-    // E NAO afirma a causa. Este ramo so roda depois de o INSERT do pedido ter
-    // passado, e INSERT e DELETE em `pedidos` saem da MESMA policy `FOR ALL`:
-    // dizer "you are not allowed to delete it" contradiz o estado que produziu o
-    // ramo, e manda o operador investigar permissao quando o pedido sumiu.
-    expect(msg, "a mensagem voltou a afirmar falta de permissao")
-      .not.toMatch(/not allowed/);
-  });
+  // TESTES REMOVIDOS em 02/set/2026 junto com as telas que eles protegiam:
+  // `BulkUpdateOrders.tsx` e `ImportOrders.tsx` foram apagadas quando o cliente
+  // decidiu que o sistema nasce com ZERO pedidos e sem sync do B2BWave.
+  // Ver `docs/DESLIGAR-SYNC-B2BWAVE.md`.
 });

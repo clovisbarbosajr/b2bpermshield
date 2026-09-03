@@ -30,17 +30,31 @@ describe("importadores de lote: numero vindo de planilha e lido por inteiro", ()
   // `parseInt`/`parseFloat` leem o PREFIXO e descartam o resto sem erro:
   // "1001abc" -> 1001 (pedido ERRADO atualizado, "Updated" em verde) e "45x" ->
   // 45 (preco errado num pedido historico). O conserto e `Number` + checagem.
-  it("BulkUpdateOrders nao usa parseInt no order_number", () => {
-    const fonte = ler("./BulkUpdateOrders.tsx");
-    expect(semComentarios(fonte)).not.toMatch(/parseInt\s*\(/);
-    expect(fonte).toMatch(/Number\.isInteger\(orderNumber\)/);
+  // Os dois testes que viviam aqui protegiam `BulkUpdateOrders.tsx` e
+  // `ImportOrders.tsx`, apagadas em 02/set/2026 — o cliente decidiu que o sistema
+  // nasce com ZERO pedidos e sem sync do B2BWave. Ver
+  // `docs/DESLIGAR-SYNC-B2BWAVE.md`.
+  //
+  // NAO generalizar isto para "nenhum importador usa parseInt/parseFloat": as duas
+  // telas que sobraram usam, e CORRETAMENTE — `ImportCategories` chama `parseInt`
+  // e checa com `Number.isFinite`, `ImportCustomerPrices` valida com
+  // `/^\d+(\.\d+)?$/` ANTES do `parseFloat`. Um assert amplo aqui reprovaria as
+  // duas e seria removido pelo proximo a passar, levando junto a guarda de
+  // verdade. A guarda de cada uma vive no seu proprio bloco, abaixo.
+  it("ImportCustomerPrices valida o preco ANTES de converter", () => {
+    const fonte = semComentarios(ler("./ImportCustomerPrices.tsx"));
+    // A ordem e o que importa: a regex tem que vir antes do `parseFloat`, senao
+    // "89,90" vira 89 e o cliente e cobrado errado com "Upserted" em verde.
+    const iRegex = fonte.indexOf("/^\\d+(\\.\\d+)?$/");
+    const iParse = fonte.indexOf("parseFloat(precoBruto)");
+    expect(iRegex, "sumiu a validacao do preco").toBeGreaterThan(-1);
+    expect(iParse, "sumiu a conversao do preco").toBeGreaterThan(-1);
+    expect(iRegex, "a validacao tem que vir ANTES do parseFloat").toBeLessThan(iParse);
   });
 
-  it("ImportOrders nao usa parseFloat no price", () => {
-    const fonte = ler("./ImportOrders.tsx");
-    expect(semComentarios(fonte)).not.toMatch(/parseFloat\s*\(/);
-    // Celula vazia nao pode virar preco zero: `Number("")` e 0.
-    expect(fonte).toMatch(/priceRaw === ""/);
+  it("ImportCategories nao aceita `ordem` que o parseInt truncou", () => {
+    expect(semComentarios(ler("./ImportCategories.tsx")))
+      .toMatch(/Number\.isFinite\(ordemParsed\)/);
   });
 });
 
@@ -61,7 +75,7 @@ describe("importadores de lote: leitura que falha nao vira silencio", () => {
   // (`if (f) handleFile(f)`), sem `.catch()`. O `setFileName` roda antes do parse,
   // entao o admin via o nome do arquivo aparecer e NADA acontecia — sem toast, sem
   // erro. O assert deste laco ja existia; faltava incluir os arquivos.
-  for (const arquivo of ["./BulkUpdateOrders.tsx", "./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx", "./ImportOrders.tsx",
+  for (const arquivo of ["./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx",
                          "./ImportCustomers.tsx", "./ImportAddresses.tsx", "./ImportCategories.tsx", "./ImportCustomerPrices.tsx"]) {
     it(`${arquivo}: leitura do arquivo esta protegida e avisa`, () => {
       const fonte = ler(arquivo);
@@ -76,7 +90,7 @@ describe("importadores de lote: um lote por vez", () => {
   // So o `<Button>` interno estava desabilitado — a moldura continuava clicavel
   // e aceitando drop. Dois `handleFile` concorrentes duplicam variante (nao ha
   // UNIQUE em produto_variantes) e embaralham o relatorio.
-  for (const arquivo of ["./BulkUpdateOrders.tsx", "./ImportProductVariants.tsx", "./ImportOrders.tsx"]) {
+  for (const arquivo of ["./ImportProductVariants.tsx"]) {
     it(`${arquivo}: a area de drop inteira recusa enquanto importa`, () => {
       const fonte = ler(arquivo);
       expect(fonte).toMatch(/onClick=\{\(\) => \{ if \(!importing\)/);
@@ -85,17 +99,6 @@ describe("importadores de lote: um lote por vez", () => {
   }
 });
 
-describe("importadores de lote: janela de silencio cobre o lote", () => {
-  // `desde` e compartilhado e ancorado no PRIMEIRO incremento da sequencia
-  // (20260826010000). Herdando um `desde` velho, um piso de 10 minutos morre no
-  // meio da planilha e o gatilho de notificacao volta a falar — o formato do
-  // incidente de 25/ago.
-  for (const arquivo of ["./BulkUpdateOrders.tsx", "./ImportOrders.tsx"]) {
-    it(`${arquivo}: piso de 30 minutos`, () => {
-      expect(ler(arquivo)).toMatch(/Math\.max\(30,/);
-    });
-  }
-});
 
 describe("ImportProductVariants nao promete coluna que a tabela nao tem", () => {
   // `produto_variantes` nao tem coluna de preco nem de nome; o codigo nunca as
@@ -109,51 +112,14 @@ describe("ImportProductVariants nao promete coluna que a tabela nao tem", () => 
   });
 });
 
-// ---------------------------------------------------------------------------
-// ImportOrders: pedido sem item nao pode sobreviver ao lote.
+// TESTES REMOVIDOS em 02/set/2026 junto com `BulkUpdateOrders.tsx` e
+// `ImportOrders.tsx`: o cliente decidiu que o sistema nasce com ZERO pedidos e
+// sem sync do B2BWave, e as duas telas foram apagadas. Ver
+// `docs/DESLIGAR-SYNC-B2BWAVE.md`.
 //
-// O caminho de erro dos itens deixava o `pedidos` ja criado no banco, com o total
-// que a planilha mandou e no status que o CSV pediu — inclusive `complete`. E o
-// operador, lendo "Order created but items failed", reimportava a planilha
-// corrigida e criava outro.
-//
-// Estes testes sao sobre a FIACAO do caminho de erro, que e onde o defeito estava.
-// ---------------------------------------------------------------------------
-describe("ImportOrders: pedido orfao", () => {
-  const fonte = readFileSync("src/pages/admin/tools/ImportOrders.tsx", "utf8");
-  const ramoErro = fatiaEntre(
-    fonte,
-    "if (itensError) {",
-    "} else {",
-  );
-
-  it("apaga o pedido quando os itens falham", () => {
-    expect(ramoErro).toMatch(/\.from\("pedidos"\)\.delete\(\)\.eq\("id", pedido\.id\)/);
-  });
-
-  it("le o erro da limpeza — senao o lixo fica e ninguem sabe", () => {
-    // Destruturado E usado depois. Sem a segunda ocorrencia, o delete falharia em
-    // silencio e o pedido vazio continuaria no banco com a mensagem de sucesso.
-    expect(ramoErro).toMatch(/const \{ data: apagado, error: limpezaErr \}/);
-    const usos = ramoErro.match(/limpezaErr/g) ?? [];
-    expect(usos.length, "`limpezaErr` foi lido mas nunca usado").toBeGreaterThan(1);
-    // 30/ago: erro NAO e o unico jeito de a limpeza nao acontecer. RLS FILTRA o
-    // DELETE — zero linha com `error: null` — e o pedido vazio fica no banco
-    // enquanto a tela diz "nothing was imported". A linha afetada tem que ser
-    // confirmada junto com o erro.
-    expect(ramoErro, "o DELETE nao pede a linha de volta").toMatch(/\.select\("id"\)/);
-    expect(ramoErro).toMatch(/naoApagou = limpezaErr \|\| nadaFoiEscrito\(apagado, limpezaErr\)/);
-  });
-
-  it("a mensagem MUDA quando a limpeza falha, e entrega o id para apagar a mao", () => {
-    expect(ramoErro).toMatch(/could NOT be removed/);
-    expect(ramoErro).toMatch(/\$\{pedido\.id\}/);
-  });
-
-  it("nao afirma mais que o pedido foi criado quando nada foi importado", () => {
-    expect(ramoErro).not.toMatch(/Order created but items failed/);
-  });
-});
+// Ficam registrados os defeitos que eles pegavam, porque a CLASSE reaparece em
+// qualquer tela nova de importacao: piso de 30 min na janela de silencio de
+// notificacao, e registro-pai que sobrevive quando os filhos falham no lote.
 
 // ---------------------------------------------------------------------------
 // ImportRelatedProducts: foto antes do DELETE, restauracao se o INSERT falhar.
@@ -223,7 +189,7 @@ describe("ImportRelatedProducts: perda entre o delete e o insert", () => {
 // ---------------------------------------------------------------------------
 describe("as telas reportam a linha REAL do arquivo", () => {
   const TELAS = [
-    "./BulkUpdateOrders.tsx", "./ImportOrders.tsx", "./ImportCustomers.tsx",
+    "./ImportCustomers.tsx",
     "./ImportAddresses.tsx", "./ImportCategories.tsx", "./ImportCustomerPrices.tsx",
     "./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx",
   ];
@@ -237,7 +203,7 @@ describe("as telas reportam a linha REAL do arquivo", () => {
     // ImportCustomerPrices, ImportProductVariants) — a linha do relatorio quando
     // o UPDATE nao casa linha nenhuma. `ImportOrders` nao muda: o ramo de limpeza
     // reaproveita o `res.push` que ja existia, so troca a mensagem.
-    "./BulkUpdateOrders.tsx": 9, "./ImportOrders.tsx": 5, "./ImportCustomers.tsx": 5,
+    "./ImportCustomers.tsx": 5,
     // 30/ago: +3 em `ImportAddresses` (obrigatorio em branco, endereco ja na base,
     // principal anterior nao desmarcado), +1 liquido em `ImportCategories` (nome de
     // pai homonimo e (nome,pai) duplicado entram; o ramo do `buscaErr` sai, porque
@@ -280,7 +246,7 @@ describe("as telas reportam a linha REAL do arquivo", () => {
     // Se `__linha` sumir do parser, as telas nao podem quebrar — mas tambem nao
     // podem fingir que o numero e o real. Aqui le o arquivo INTEIRO, porque e a
     // linha do helper que interessa.
-    const fonte = ler("./BulkUpdateOrders.tsx");
+    const fonte = ler("./ImportCustomers.tsx");
     expect(fonte).toMatch(/const linhaDoArquivo = \(r: any, i: number\): number => r\?\.__linha \?\? i \+ 2;/);
   });
 });
@@ -296,7 +262,7 @@ describe("as telas reportam a linha REAL do arquivo", () => {
 // ---------------------------------------------------------------------------
 describe("resultado anterior e limpo antes de ler o arquivo novo", () => {
   for (const arquivo of [
-    "./BulkUpdateOrders.tsx", "./ImportOrders.tsx", "./ImportCustomers.tsx",
+    "./ImportCustomers.tsx",
     "./ImportAddresses.tsx", "./ImportCategories.tsx", "./ImportCustomerPrices.tsx",
     "./ImportProductVariants.tsx", "./ImportRelatedProducts.tsx",
   ]) {

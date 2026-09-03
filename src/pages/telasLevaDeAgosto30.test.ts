@@ -193,7 +193,6 @@ describe("area de drop travada durante a importacao, nas seis telas", () => {
   const TELAS = [
     "./admin/tools/ImportAddresses.tsx", "./admin/tools/ImportCategories.tsx",
     "./admin/tools/ImportCustomerPrices.tsx", "./admin/tools/ImportProductVariants.tsx",
-    "./admin/tools/BulkUpdateOrders.tsx", "./admin/tools/ImportOrders.tsx",
   ];
   for (const t of TELAS) {
     it(`${t}: clique e drop recusados enquanto \`importing\``, () => {
@@ -273,7 +272,6 @@ describe("nenhuma tela mostra mojibake ao usuario", () => {
   const TELAS = [
     "./admin/tools/ImportAddresses.tsx", "./admin/tools/ImportCategories.tsx",
     "./admin/tools/ImportCustomerPrices.tsx", "./admin/tools/ImportProductVariants.tsx",
-    "./admin/tools/BulkUpdateOrders.tsx", "./admin/tools/ImportOrders.tsx",
     "./portal/Team.tsx", "./portal/Dashboard.tsx",
     "./admin/settings/UsersManagement.tsx", "./admin/settings/ShippingOptions.tsx",
   ];

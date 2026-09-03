@@ -64,8 +64,6 @@ import ImportAddresses from "./pages/admin/tools/ImportAddresses";
 import ImportRelatedProducts from "./pages/admin/tools/ImportRelatedProducts";
 import ImportProductVariants from "./pages/admin/tools/ImportProductVariants";
 import ImportCategories from "./pages/admin/tools/ImportCategories";
-import ImportOrders from "./pages/admin/tools/ImportOrders";
-import BulkUpdateOrders from "./pages/admin/tools/BulkUpdateOrders";
 import ImportsLog from "./pages/admin/tools/ImportsLog";
 import ExportsLog from "./pages/admin/tools/ExportsLog";
 
@@ -105,7 +103,6 @@ import EmailSettings from "./pages/admin/settings/EmailSettings";
 import Notificacoes from "./pages/admin/settings/Notificacoes";
 import NotificacoesLog from "./pages/admin/settings/NotificacoesLog";
 // import ExtraFields from "./pages/admin/settings/ExtraFields";  // rota comentada abaixo
-import B2BWaveSync from "./pages/admin/settings/B2BWaveSync";
 const queryClient = new QueryClient();
 
 // Admin-only routes
@@ -224,8 +221,6 @@ const App = () => (
               <Route path="/admin/tools/import-related-products" element={<A><ImportRelatedProducts /></A>} />
               <Route path="/admin/tools/import-product-variants" element={<A><ImportProductVariants /></A>} />
               <Route path="/admin/tools/import-categories" element={<A><ImportCategories /></A>} />
-              <Route path="/admin/tools/import-orders" element={<A><ImportOrders /></A>} />
-              <Route path="/admin/tools/bulk-update-orders" element={<A><BulkUpdateOrders /></A>} />
               <Route path="/admin/tools/imports-log" element={<A><ImportsLog /></A>} />
               <Route path="/admin/tools/exports-log" element={<A><ExportsLog /></A>} />
 
@@ -289,7 +284,6 @@ const App = () => (
                 * que ainda apontava para ca — este comentario dizia que a tela ja
                 * estava fora do menu, e nao estava.
                 */}
-              <Route path="/admin/settings/b2bwave-sync" element={<A><B2BWaveSync /></A>} />
               {/* TELA REMOVIDA em 25/ago/2026 — nao fazia nada.
                 * Nao existe endpoint OAuth neste sistema. Nenhuma das edge functions fala `/authorize` ou `/token`, e o `client_id`/`client_secret` gerados aqui nao sao validados por nada. O `redirect_uri` padrao aponta para um app mobile que nao existe.
                 * PARA VOLTAR: precisaria de uma edge function OAuth2 completa (authorize + token + tabela de codigos), validando contra `oauth_applications`. Hoje nao ha nem o esqueleto.
