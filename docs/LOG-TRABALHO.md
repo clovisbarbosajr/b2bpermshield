@@ -6336,3 +6336,38 @@ build          ok
 check:edge     13 arquivos (8 funcoes)
 check:sql      198 arquivos .sql
 ```
+
+---
+
+## 03/set — INCIDENTE: `TRUNCATE ... CASCADE` apagou os clientes
+
+Relato completo em `docs/INCIDENTE-2026-09-03-truncate-cascade.md`.
+
+**Causa: eu.** Entreguei ao dono
+`TRUNCATE public.tabela_preco_itens, public.tabelas_preco CASCADE;` para zerar as
+reguas de preco (decisao da Jessika). O `CASCADE` do TRUNCATE **trunca toda tabela
+que REFERENCIA a truncada** e **ignora a acao da FK** — `clientes.tabela_preco_id`
+era `ON DELETE SET NULL`, que so vale para `DELETE`. Foram 70 clientes, os
+enderecos, os sub-logins e 64 linhas de `auth.users`.
+
+**Recuperado: 66 clientes, sem nenhum e-mail ou SMS disparado.** Via edge function
+de uso unico `recuperar-clientes` — o pedaco da `b2bwave-sync` que resolve o
+incidente e so ele. Conferido contra o `notification_log`: os unicos e-mails que
+sobraram fora do banco sao cinco contas internas. **Nenhum cliente real ficou
+faltando.**
+
+**Perdido de vez:** os enderecos. Nao existem no B2BWave nem no log.
+
+**O que salvou:** `notification_log` guarda `customer_email`, `customer_name`,
+`customer_company` e `customer_phone` no `payload` (2.550 linhas) e sobreviveu
+porque nao referencia `clientes`. Foi a prova de quais clientes existiam.
+
+**Regra nova, registrada tambem na memoria do projeto:** `TRUNCATE ... CASCADE` e
+proibido em tabela referenciada; antes de comando destrutivo, listar dependentes
+por `pg_constraint` e criar `backup_<tabela>_<AAAAMMDD>`.
+
+### AGUARDANDO o dono
+
+1. Pedir ao Lovable que **apague a `recuperar-clientes`** — ela reabre a porta do
+   B2BWave, fechada de proposito no dia anterior.
+2. Rodar o bloco de backup das tabelas criticas (abaixo).
