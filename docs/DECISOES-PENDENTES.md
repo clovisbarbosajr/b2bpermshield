@@ -410,3 +410,52 @@ acabou de diagnosticar **nasce de novo sozinha**.
 
 É código de edge function: preciso do seu OK para mexer, e o deploy tem que ser
 pedido no chat do Lovable (push no GitHub não publica edge function).
+
+---
+
+# RESPOSTAS DA JESSIKA — 02/set/2026
+
+Chegaram todas as 14. Transcritas literalmente.
+
+| código | resposta |
+|---|---|
+| **PREÇO 1** | "Pode apagar todas as price lists" |
+| **PREÇO 2** | "Pode apagar todas as price lists" |
+| **PREÇO 3** | "Pode apagar todas as price lists" |
+| **VENDA 1** | "Nao vamos aceitar pagamento por stripe, todos os pedidos devem ser liberados." |
+| **VENDA 2** | "Pre-order sera aceita se o produto estiver liberado no status para 'pre order'. A quantidade do produto fica negativa, e mostra como backorder na ordem. Se o produto tiver como 'Sold Out' nao pode ser adicionado no carrinho" |
+| **DADO 1** | "Avisar" |
+| **DADO 2** | "Pode apagar e coloca o aviso" |
+| **DADO 3** | "Pode travar a edicao, mas deixa liberada a opcao de deletar o status. Status novo pode ser criado à vontade." |
+| **DADO 4** | "Proibir nome repetido nas três." |
+| **SEG 1** | "Tirar o campo da tela." |
+| **SEG 2** | "pode deixar exportar" |
+| **ACESSO 1** | "Sim, pode fazer os dois" |
+| **ACESSO 2** | "deixa o acesso e Esconde os botões que ele não pode usar" |
+| **TELA 1** | "nao mexe em nada por enquanto. Tem algumas opcoes que precisamos implementar mas preciso olhar com calma" |
+
+## Duas respostas que preciso confirmar antes de executar
+
+**PREÇO 1/2/3 — "apagar TODAS as price lists".** A pergunta era sobre as
+DUPLICATAS (3 nomes, 7 réguas). A resposta e mais ampla do que a pergunta.
+`clientes.tabela_preco_id` e `ON DELETE SET NULL`: apagar todas faz os **70
+clientes** cairem em `produtos.preco`, o preco de balcao. E irreversivel e muda o
+que gente real paga. **NAO EXECUTADO — aguardando confirmacao do dono.**
+
+**DADO 3 — "travar a edicao, mas deixar deletar o status".** Apagar "Sold Out"
+tem o MESMO efeito que renomear: os tres consumidores (`lib/stock.ts`, catalogo
+do portal, gatilho `fn_item_produto_valido`) falham ABRINDO — nome que nao casa e
+tratado como "pode comprar e pode aparecer". Ou seja, apagar devolve a vitrine,
+comprável, todo produto tirado de venda de propósito. A trava pedida protege
+metade da porta. **Registrado; executado como ela pediu, com o risco anotado.**
+
+## VENDA 2 — virou especificacao, nao so um sim/nao
+
+Ela definiu o comportamento de pre-order:
+1. produto com status "pre order" **pode** ser comprado sem saldo;
+2. a quantidade do produto **fica negativa**;
+3. o pedido **mostra o item como backorder**;
+4. produto "Sold Out" **nao entra no carrinho**.
+
+O item 2 e o unico que muda regra de banco (hoje o gatilho de reserva nao deixa
+negativar fora dos status isentos). Os itens 1 e 4 sao o que `A4` pedia.
