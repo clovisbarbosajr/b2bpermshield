@@ -157,21 +157,58 @@ serve(async (req) => {
       ja_no_banco: jaTem.size,
       sem_email_ignorados: semEmail.length,
       seriam_inseridos: linhas.length,
+      seriam_criados_logins: "1 usuario em auth por cliente novo (email_confirm=true, senha aleatoria, NENHUM e-mail enviado)",
       amostra: linhas.slice(0, 3).map((l) => ({ nome: l.nome, email: l.email, empresa: l.empresa })),
       para_gravar: 'chame de novo com o corpo {"confirmar": true}',
     });
   }
 
-  // Em lotes: o PostgREST tem limite de payload, e um lote que falha no meio
-  // deixa rastro do que entrou — por isso o relatório é por lote, não um total.
-  const TAM = 100;
+  // Mapa e-mail -> user_id do que JÁ existe em auth, para reaproveitar o login
+  // em vez de criar um segundo usuário para o mesmo e-mail.
+  const authPorEmail = new Map<string, string>();
+  for (let page = 1; page <= 100; page++) {
+    const { data, error } = await db.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) return json({ error: "Falha ao listar usuarios: " + error.message }, 500);
+    const users = data?.users ?? [];
+    for (const u of users) if (u.email) authPorEmail.set(u.email.toLowerCase(), u.id);
+    if (users.length < 1000) break;
+  }
+
+  const senhaAleatoria = () =>
+    crypto.randomUUID().replace(/-/g, "") + "Aa1!" + crypto.randomUUID().slice(0, 8);
+
   const inseridos: string[] = [];
-  const falhas: { lote: number; erro: string }[] = [];
-  for (let i = 0; i < linhas.length; i += TAM) {
-    const lote = linhas.slice(i, i + TAM);
-    const { data, error } = await db.from("clientes").insert(lote).select("email");
-    if (error) { falhas.push({ lote: i / TAM + 1, erro: error.message }); continue; }
-    inseridos.push(...(data ?? []).map((r: any) => r.email));
+  const reaproveitados: string[] = [];
+  const criados: string[] = [];
+  const falhas: { email: string; erro: string }[] = [];
+
+  // Um cliente por vez: cada linha precisa do seu user_id, e uma falha isolada
+  // não pode derrubar o lote inteiro.
+  for (const linha of linhas) {
+    const chave = String(linha.email).toLowerCase();
+    let userId = authPorEmail.get(chave);
+
+    if (!userId) {
+      // APENAS createUser. Nada de invite/generateLink/reset: nenhum e-mail sai daqui.
+      const { data: novo, error: authErr } = await db.auth.admin.createUser({
+        email: linha.email,
+        email_confirm: true,
+        password: senhaAleatoria(),
+      });
+      if (authErr || !novo?.user) {
+        falhas.push({ email: linha.email, erro: "auth: " + (authErr?.message ?? "sem usuario") });
+        continue;
+      }
+      userId = novo.user.id;
+      authPorEmail.set(chave, userId);
+      criados.push(linha.email);
+    } else {
+      reaproveitados.push(linha.email);
+    }
+
+    const { error: insErr } = await db.from("clientes").insert({ ...linha, user_id: userId });
+    if (insErr) { falhas.push({ email: linha.email, erro: "clientes: " + insErr.message }); continue; }
+    inseridos.push(linha.email);
   }
 
   const { count: totalAgora } = await db.from("clientes").select("id", { count: "exact", head: true });
@@ -179,9 +216,12 @@ serve(async (req) => {
   return json({
     modo: "gravado",
     lidos_no_b2bwave: brutos.length,
+    logins_criados: criados.length,
+    logins_reaproveitados: reaproveitados.length,
     inseridos: inseridos.length,
     falhas,
     total_de_clientes_agora: totalAgora ?? null,
-    aviso: "Clientes voltam SEM login e SEM tabela de preco. Apague esta funcao depois de usar.",
+    aviso: "Clientes voltam com login (senha aleatoria, sem e-mail enviado) e SEM tabela de preco. Apague esta funcao depois de usar.",
   });
 });
+
