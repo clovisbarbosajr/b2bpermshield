@@ -184,7 +184,7 @@ describe("ImportAddresses: os obrigatorios sao obrigatorios", () => {
   });
 });
 
-describe("area de drop travada durante a importacao, nas seis telas", () => {
+describe("area de drop travada durante a importacao, em cada tela da lista", () => {
   // So o `<Button>` interno estava `disabled` em tres delas: a moldura seguia
   // clicavel e aceitando drop, e dois lotes concorrentes liam "nao existe" para a
   // mesma chave e inseriam os dois. Em `ImportCustomerPrices` isso QUEBRA o preco

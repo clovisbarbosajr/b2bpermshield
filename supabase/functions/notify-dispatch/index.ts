@@ -130,15 +130,35 @@ Deno.serve(async (req) => {
       const ref = String((vars as any)?.order_id ?? "").trim();
       if (!ref) return json({ error: "Missing 'vars.order_id'" }, 400);
       const numero = /^\d+$/.test(ref) ? Number(ref) : null;
-      const q = db.from("pedidos").select("id, cliente_id").limit(1);
-      const { data: ped, error: pedErr } = numero !== null
-        ? await q.eq("numero", numero).maybeSingle()
-        : await q.eq("id", ref).maybeSingle();
+      // `pedidos.numero` NAO e unico — nao ha UNIQUE na coluna, e o gatilho
+      // `fn_pedido_numero_continua` gera o proximo com `MAX(numero)+1` sem lock,
+      // entao dois checkouts concorrentes podem nascer com o mesmo numero.
+      //
+      // O `.limit(1)` que estava aqui era PIOR do que uma consulta sem limite:
+      // ele garantia que o `maybeSingle()` nunca visse duas linhas, e assim
+      // resolvia um pedido ARBITRARIO em silencio — sem erro, sem aviso. E este
+      // lookup nao e cosmetico: e a checagem de DONO logo abaixo
+      // (`ped.cliente_id`) que decide se o chamador pode disparar notificacao
+      // daquele pedido. Com dois pedidos de clientes diferentes no mesmo numero,
+      // a checagem podia liberar contra o pedido errado.
+      //
+      // `count: "exact"` e recusa em >1: mesmo tratamento que `_shared/dispatch.ts`
+      // e `send-email/index.ts` ja davam. Este era o unico dos tres que faltava.
+      const q = db.from("pedidos").select("id, cliente_id", { count: "exact" });
+      const { data: peds, error: pedErr, count } = numero !== null
+        ? await q.eq("numero", numero)
+        : await q.eq("id", ref);
       // "Unknown order" afirmava que o pedido nao existe. Com o `error` engolido,
       // uma leitura que FALHOU dava a mesma resposta — e quem investigasse iria
       // procurar um pedido inexistente em vez de um banco fora do ar.
       if (pedErr) return json({ error: "Could not verify the order: " + pedErr.message }, 500);
-      if (!ped) return json({ error: "Unknown order" }, 403);
+      if (!peds || peds.length === 0) return json({ error: "Unknown order" }, 403);
+      // Recusa em vez de escolher: com o numero ambiguo nao da para saber de quem
+      // e o pedido, e adivinhar aqui e adivinhar o dono.
+      if ((count ?? peds.length) > 1) {
+        return json({ error: `Order number ${ref} matches ${count ?? peds.length} orders — ambiguous, refused` }, 409);
+      }
+      const ped = peds[0];
 
       if (callerUserId) {
         // Fail-open DELIBERADO (ver acima) — mas o erro precisa deixar rastro:

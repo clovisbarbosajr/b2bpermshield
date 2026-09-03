@@ -8,7 +8,9 @@ import {
   FileUp, ListOrdered, UserCog, CreditCard, Truck, Lock, Link2, Layers,
   Percent, Receipt, Ruler, Building2, UserPlus, Mail, Database,
   Activity, ShoppingCart, TrendingUp, PieChart, PackageSearch, CalendarRange,
-  LayoutGrid, ScrollText, ClipboardCheck, RefreshCw, ClipboardSignature, Bell, History, Factory
+  // `RefreshCw` (icone do "B2B Wave Sync") e `ClipboardCheck` (do "Bulk Update
+  // Orders") sairam em 02/set/2026 com os itens de menu que os usavam.
+  LayoutGrid, ScrollText, ClipboardSignature, Bell, History, Factory
 } from "lucide-react";
 import { useState, createContext, useContext } from "react";
 

@@ -134,7 +134,7 @@ SELECT a.passo, a.bloco,
 FROM alvo a
 ORDER BY a.passo;"""
 
-EDGE = ["send-email", "stripe-checkout", "register-customer", "company-member", "b2bwave-sync"]
+EDGE = ["send-email", "stripe-checkout", "register-customer", "company-member"]
 
 
 def corpo_executavel(sql):

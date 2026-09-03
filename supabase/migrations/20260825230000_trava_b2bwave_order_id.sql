@@ -102,8 +102,22 @@ COMMIT;
 --
 --   DROP TRIGGER IF EXISTS a_trg_pedido_b2bwave_id_so_servidor ON public.pedidos;
 --
--- ATENCAO: reverter reabre a escolha de preco pelo cliente. So faca isso se o
--- sync parar de importar pedido, e me avise.
+-- ATENCAO: reverter reabre a escolha de preco pelo cliente. NAO REVERTA.
+--
+-- ATUALIZACAO 02/set/2026 — a condicao que estava escrita aqui ("so faca isso se
+-- o sync parar de importar pedido") VIROU UMA ARMADILHA e por isso saiu.
+--
+-- Ela queria dizer "se ESTE gatilho quebrar o sync, me avise antes de reverter" —
+-- era escape de diagnostico, nao autorizacao. Mas o sync do B2BWave MORREU em
+-- 02/set (decisao do cliente: o sistema nasce com zero pedidos). Lido ao pe da
+-- letra hoje, o texto antigo diz que a condicao de reverter foi cumprida.
+--
+-- E hoje reverter e PIOR do que era: sem o sync, nao sobrou nenhum escritor
+-- legitimo de `b2bwave_order_id`. Todo valor nao-nulo que chegar agora e forjado
+-- pelo cliente — e o que este gatilho zera. Ele nao virou ramo morto com a
+-- remocao do sync; virou a UNICA defesa. Sem ele, um `b2bwave_order_id`
+-- inventado no insert isenta o pedido de cinco gatilhos, incluindo o
+-- `fn_pedido_item_preco_autoritativo`: preco vira campo livre.
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------

@@ -6088,3 +6088,81 @@ pedido arbitrario** em silencio, e esse lookup e justamente a checagem de dono q
 decide quem pode disparar notificacao daquele pedido. Os outros dois consumidores
 (`_shared/dispatch.ts:87` e `send-email/index.ts:1694`) ja recusam ambiguidade com
 `count: "exact"`; o `notify-dispatch` ficou para tras.
+
+**FEITO** — correcoes aplicadas (commit abaixo), na ordem do cetico:
+
+1. **`Profile.tsx`: aba "API configuration" esvaziada.** Sairam App Code, API
+   Token, botao Copy, "Reset Token" (que gravava `crypto.randomUUID()` em
+   `configuracoes.api_token`), o link de "API Documentation" para a raiz nua de
+   `/functions/v1/`, e o bloco Zapier — cuja senha era o MESMO token morto
+   (`zapierPass = config?.zapier_password || apiToken`). Sairam tambem os cinco
+   `const` derivados que so alimentavam a aba. Os **Webhooks ficaram** (nao tem
+   relacao com aquela API e ja avisam que o disparo automatico nao existe) e a aba
+   foi renomeada para "Webhooks". O `value` do `TabsContent` continua
+   `api_configuration` de proposito, para nao quebrar link com ancora.
+2. **`notify-dispatch/index.ts`: recusa numero ambiguo.** Trocado
+   `.limit(1)` + `maybeSingle()` por `count: "exact"` e recusa em >1, o mesmo que
+   `_shared/dispatch.ts` e `send-email` ja faziam. Era a checagem de DONO: com
+   dois pedidos no mesmo numero, ela podia liberar contra o pedido errado. **Isto
+   ENDURECE notificacao, nao afrouxa** — passa a recusar onde antes adivinhava.
+3. **`20260902120000_desliga_cron_b2bwave.sql`** (forward-only, o formato do
+   projeto): desliga os CINCO jobs — inclusive o `b2bwave-cron-categories`, criado
+   por `20260717130000_cron_categorias.sql` e ausente do inventario do cacador —
+   com varredura por prefixo `b2bwave-%` como rede, dropa
+   `_schedule_b2bwave_job()` e poe **`COMMENT ON TABLE sync_state`** avisando que
+   ela NAO e residuo do sync e guarda o kill switch de notificacao.
+4. **Nota de ROLLBACK de `20260825230000_trava_b2bwave_order_id.sql` reescrita.**
+   Dizia "so faca isso se o sync parar de importar pedido" — o sync parou, e lido
+   ao pe da letra hoje o texto AUTORIZA a reversao. Trocado por "NAO REVERTA", com
+   o motivo: sem o sync nao sobrou escritor legitimo de `b2bwave_order_id`, entao
+   todo valor nao-nulo agora e forjado e o gatilho virou a UNICA defesa.
+5. Cosmeticos: `b2bwave-sync` fora das listas `EDGE` dos dois geradores,
+   `[functions.b2bwave-sync]` fora do `config.toml` (declarava
+   `verify_jwt = false`, e uma funcao futura com esse nome herdaria publica),
+   `RefreshCw`/`ClipboardCheck` fora dos imports, titulo "nas seis telas" com
+   quatro corrigido.
+
+### `src/test/removidoOSyncB2BWave.test.ts` — 12 guardas, com mutante
+
+Nao guarda a remocao (o `tsc` ja pega import quebrado); guarda o que **nenhuma
+ferramenta pega**: `invoke("nome")` e string, rota morta e string, e credencial
+orfa na tela compila.
+
+Mutantes plantados, todos MORTOS: `.limit(1)` de volta no `notify-dispatch`;
+"Reset Token" de volta como JSX de verdade; `COMMENT ON TABLE` comentado; job
+`categories` fora da lista.
+
+**Duas guardas minhas nasceram furadas e os mutantes mostraram:**
+- o mutante "Reset Token" como COMENTARIO sobreviveu — mutante ruim, nao guarda
+  ruim (o teste usa `soCodigo`); replantado como JSX, morreu;
+- o mutante que apenas COMENTAVA o `COMMENT ON TABLE` **sobreviveu de verdade**:
+  a linha `-- COMMENT ON TABLE public.sync_state IS` ainda casava a regex. Guarda
+  corrigida para tirar os `--` antes de asserir. Guarda que nao distingue SQL de
+  prosa sobre SQL nao prova que o SQL roda.
+
+E o lint `fatiaSemGuarda` **pegou o meu proprio arquivo novo**: eu tinha escrito
+`codigo.slice(codigo.indexOf(a), codigo.indexOf(b))`, exatamente o que ele existe
+para proibir. Trocado por `fatiaEntre`.
+
+### Verificacao
+
+```
+tsc            LIMPO
+npm test       741/741 em 71 arquivos
+build          ok
+check:edge     13 edge functions
+check:sql      198 arquivos .sql
+```
+
+### AGUARDANDO o dono
+
+1. **Rodar a migration** `20260902120000_desliga_cron_b2bwave.sql` no editor do
+   Lovable. O banco de hoje ja esta limpo (ele desligou a mao); a migration e o
+   que faz a decisao sobreviver a uma reconstrucao.
+2. **Pedir deploy de `notify-dispatch` no chat do Lovable** — push no GitHub nao
+   publica edge function.
+3. **Decisao de schema, item 9 do cetico:** `pedidos.numero` sem UNIQUE. A razao
+   escrita na migration para recusar o indice era o sync, e ela morreu. Com a
+   tabela zerada e a sequencia reiniciada, da para dropar
+   `fn_pedido_numero_continua` (o SERIAL sozinho ja e livre de corrida) e por
+   UNIQUE em `numero` — conserto na causa, em vez de guarda em cada leitor.

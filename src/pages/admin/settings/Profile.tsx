@@ -352,11 +352,10 @@ const SettingsProfile = () => {
     );
   };
 
-  const appCode = config?.app_code || "permshield";
-  const apiToken = config?.api_token || "";
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
-  const zapierUser = config?.zapier_username || `${appCode}@app.b2bwave.com`;
-  const zapierPass = config?.zapier_password || apiToken;
+  // `appCode`, `apiToken`, `supabaseUrl`, `zapierUser` e `zapierPass` sairam em
+  // 02/set/2026 com a aba "API configuration": os cinco so alimentavam aquela
+  // tela, e a edge que dava sentido a eles (`functions/api`) foi apagada.
+  // Deixar variavel derivada sem leitor e o comeco do proximo campo fantasma.
 
   return (
     <AdminLayout>
@@ -379,7 +378,12 @@ const SettingsProfile = () => {
           <TabsTrigger value="registration_fields">Customer registration fields</TabsTrigger>
           <TabsTrigger value="default_values">Default Values</TabsTrigger>
           <TabsTrigger value="advanced">Advanced</TabsTrigger>
-          <TabsTrigger value="api_configuration">API configuration</TabsTrigger>
+          {/* Rotulo trocado com o conteudo: a aba nao configura mais API nenhuma,
+            * so guarda os endereços de webhook. Manter "API configuration" seria a
+            * mesma promessa vazia que o conteudo veio corrigir. O `value` continua
+            * `api_configuration` de proposito — e o que o `<TabsContent>` casa, e
+            * trocar por trocar quebraria qualquer link com `#api_configuration`. */}
+          <TabsTrigger value="api_configuration">Webhooks</TabsTrigger>
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="mobile_app">Mobile app (iOS/Android)</TabsTrigger>
         </TabsList>
@@ -1135,111 +1139,42 @@ const SettingsProfile = () => {
               {/* REMOVIDO 30/ago: a rota de `extra-fields` esta comentada em
                   `App.tsx`, entao este link caia no 404. Era o quarto caminho para
                   a mesma tela morta, alem dos tres itens do menu. */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div>
-                  <Label>App Code</Label>
-                  <Input
-                    value={config?.app_code ?? ""}
-                    onChange={(e) => update("app_code", e.target.value)}
-                    placeholder="zapsupplies"
-                  />
-                </div>
-                <div>
-                  <Label>API Token</Label>
-                  <Input
-                    value={config?.api_token ?? ""}
-                    onChange={(e) => update("api_token", e.target.value)}
-                    placeholder="45afb79c-44ae-4989-8944-80763375e61b"
-                  />
-                </div>
-              </div>
+              {/* APP CODE e API TOKEN REMOVIDOS em 02/set/2026.
+                *
+                * Quem lia `configuracoes.api_token` era a edge `api`, apagada no
+                * commit 55ef241 junto com o sync do B2BWave. Nenhuma edge function
+                * le mais essa coluna — conferido por grep.
+                *
+                * Deixar o campo era pior do que nao ter: o admin gerava o token,
+                * copiava, entregava a um parceiro, e TODA chamada voltava 404 sem
+                * nada na tela explicando por que.
+                *
+                * A COLUNA CONTINUA NO BANCO, de proposito (ver
+                * `docs/DESLIGAR-SYNC-B2BWAVE.md`). Se um dia houver API de novo,
+                * o campo volta junto com o endpoint que o le — nao antes. */}
             </div>
           </div>
         </TabsContent>
 
-        {/* === API CONFIGURATION === */}
+        {/* === WEBHOOKS === */}
+        {/* A aba se chamava "API configuration" e mostrava App Code, API Token com
+          * botao Copy, um "Reset Token" que gravava `crypto.randomUUID()` em
+          * `configuracoes.api_token`, um link de "API Documentation" apontando para
+          * a RAIZ nua de `/functions/v1/`, e um bloco Zapier cuja senha era o mesmo
+          * token (`zapierPass = config?.zapier_password || apiToken`).
+          *
+          * Tudo isso servia a edge `api`, apagada em 02/set/2026 junto com o sync do
+          * B2BWave (commit 55ef241). Nenhuma edge function le `api_token` nem
+          * `zapier_password` — conferido por grep nas 13 restantes.
+          *
+          * Era um controle VIVO emitindo credencial para uma porta que nao existe:
+          * o admin rotacionava o token achando que protegia uma integracao, entregava
+          * ao parceiro, e toda chamada voltava 404 sem explicacao na tela.
+          *
+          * O que sobrou aqui — Webhooks — nao tem relacao com aquela API e ja avisa,
+          * em destaque, que o disparo automatico nao existe. */}
         <TabsContent value="api_configuration">
           <div className="space-y-6">
-            <div>
-              <a
-                href={`${supabaseUrl}/functions/v1/`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline text-sm flex items-center gap-1"
-              >
-                <ExternalLink className="h-3 w-3" /> API Documentation
-              </a>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div>
-                <Label className="font-semibold">App Code</Label>
-                <p className="text-sm text-muted-foreground">{appCode}</p>
-                <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={() => copyToClipboard(appCode)}>
-                  <Copy className="h-3 w-3" /> Copy
-                </Button>
-              </div>
-              <div>
-                <Label className="font-semibold">API Token</Label>
-                <p className="text-sm text-muted-foreground font-mono">{apiToken || "Not set"}</p>
-                {apiToken && (
-                  <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={() => copyToClipboard(apiToken)}>
-                    <Copy className="h-3 w-3" /> Copy
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs text-primary"
-                  onClick={() => {
-                    const token = crypto.randomUUID();
-                    update("api_token", token);
-                  }}
-                >
-                  Reset Token
-                </Button>
-              </div>
-            </div>
-
-            <div className="border-t pt-4">
-              <a
-                href="https://zapier.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary underline text-sm flex items-center gap-1"
-              >
-                <ExternalLink className="h-3 w-3" /> Use B2B Wave with Zapier
-              </a>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-2">
-                <div>
-                  <Label className="font-semibold">Zapier Username</Label>
-                  <p className="text-sm text-muted-foreground">{zapierUser}</p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs gap-1"
-                    onClick={() => copyToClipboard(zapierUser)}
-                  >
-                    <Copy className="h-3 w-3" /> Copy
-                  </Button>
-                </div>
-                <div>
-                  <Label className="font-semibold">Zapier Password</Label>
-                  <p className="text-sm text-muted-foreground font-mono">{zapierPass || "Not set"}</p>
-                  {zapierPass && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs gap-1"
-                      onClick={() => copyToClipboard(zapierPass)}
-                    >
-                      <Copy className="h-3 w-3" /> Copy
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-
             <div className="border-t pt-4">
               <h3 className="text-lg font-semibold mb-2">Webhooks</h3>
               {/* O texto anterior prometia disparo AUTOMATICO em pedido novo/alterado.

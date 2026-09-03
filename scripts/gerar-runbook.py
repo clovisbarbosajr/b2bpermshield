@@ -72,7 +72,7 @@ PASSOS = [
 # As edge functions que precisam de deploy. `b2bwave-sync` entrou depois: o
 # `diff_orders`/`diff_catalog` vivem nela e mudaram varias vezes; sem o deploy a
 # comparacao roda com criterio antigo e pode dizer "identico" para o que nao esta.
-EDGE = ["send-email", "stripe-checkout", "register-customer", "company-member", "b2bwave-sync"]
+EDGE = ["send-email", "stripe-checkout", "register-customer", "company-member"]
 
 
 def extrai_backup(sql):

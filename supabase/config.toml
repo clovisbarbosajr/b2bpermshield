@@ -4,8 +4,9 @@ project_id = "bnicfvxvyblzzatvursw"
 [functions.generate-pdf]
 verify_jwt = true
 
-[functions.b2bwave-sync]
-verify_jwt = false
+# `[functions.b2bwave-sync]` REMOVIDO em 02/set/2026 com a propria funcao.
+# O bloco declarava `verify_jwt = false`: deixado aqui, uma funcao futura com esse
+# nome nasceria PUBLICA por herdar esta linha, sem ninguem perceber.
 
 # Notificações: gateway off; a função valida (usuário logado p/ evento, admin ou
 # X-Cron-Secret p/ teste). Permite forçar um teste sem login admin.
