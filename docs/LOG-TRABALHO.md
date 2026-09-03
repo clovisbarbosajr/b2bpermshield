@@ -6040,3 +6040,21 @@ rascunho no navegador dela e depende de ela clicar em "Copiar todas as respostas
 proibe link publico; escolhido o link publico, essa era a unica forma. O erro foi
 nao ter dito isso em destaque no momento de montar. O dono vai receber as
 respostas por WhatsApp e repassar.
+
+**PASSO 1 e 2 FEITOS pelo dono (02/set).** Cron desligado — sobrou um job que nao
+estava na migration, `b2bwave-cron-categories`, tambem removido; `cron.job` voltou
+vazio. Depois, `TRUNCATE pedido_itens, pedidos RESTART IDENTITY` mais o zeramento
+manual de `estoque_reservado` em `produtos` e `produto_variantes` (TRUNCATE nao
+dispara gatilho, entao a devolucao de reserva nao aconteceria sozinha).
+
+Dependentes de `pedidos` conferidos no catalogo do Postgres antes de apagar: so
+`pedido_itens`. `producao_pedidos` referencia `produtos`, nao `pedidos` — Producao
+nao foi tocada.
+
+Prova depois:
+
+```
+pedidos 0 | itens 0 | prod_reservado 0 | var_reservado 0 | clientes 70 | produtos 330
+```
+
+**PASSO 3 INICIADO** — limpeza de codigo.
