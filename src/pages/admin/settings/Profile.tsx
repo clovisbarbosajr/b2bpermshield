@@ -9,8 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Save, Upload, Image as ImageIcon, Copy, ExternalLink, FileText } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Save, Upload, Image as ImageIcon, FileText } from "lucide-react";
 import qrCodeSvg from "@/assets/qr-permshield-app.svg";
 import { diffConfig } from "@/lib/diffConfig";
 
@@ -171,10 +170,8 @@ const SettingsProfile = () => {
     toast.success("Image uploaded");
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard");
-  };
+  // `copyToClipboard` saiu em 02/set/2026 com a aba "API configuration": os
+  // unicos botoes Copy da tela eram os do App Code, do API Token e do Zapier.
 
   const handleSave = async () => {
     if (!config) return;
@@ -1165,7 +1162,9 @@ const SettingsProfile = () => {
           *
           * Tudo isso servia a edge `api`, apagada em 02/set/2026 junto com o sync do
           * B2BWave (commit 55ef241). Nenhuma edge function le `api_token` nem
-          * `zapier_password` — conferido por grep nas 13 restantes.
+          * `zapier_password` — conferido por grep nas 8 restantes. (Eram "13" numa
+          * versao anterior deste comentario: 13 e a contagem de ARQUIVOS que o
+          * `check:edge` imprime, nao de funcoes.)
           *
           * Era um controle VIVO emitindo credencial para uma porta que nao existe:
           * o admin rotacionava o token achando que protegia uma integracao, entregava

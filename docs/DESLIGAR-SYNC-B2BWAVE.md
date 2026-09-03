@@ -98,20 +98,43 @@ Ficam também as edges `send-email`, `notify-dispatch`, `generate-pdf`,
 `stripe-checkout`, `register-customer`, `admin-create-user`, `company-member` e
 `sync-container-eta`.
 
-### Colunas de banco — deixar por último, e provavelmente deixar
+### Banco — o que dá para apagar um dia, e o que NUNCA
 
-`pedidos.b2bwave_order_id`, `produtos.b2bwave_id`, `clientes.b2bwave_id`,
-`sync_state` e a tabela de log do sync.
+**PODE ficar para depois** (recomendação: não apagar; coluna sobrando não custa
+nada e é o único vestígio de qual registro veio de onde):
 
-**Recomendação: não apagar agora.** Coluna sobrando não custa nada e é o único
-vestígio de qual registro veio de onde. Apagar coluna é irreversível e não traz
-benefício. Decidir depois, com o sistema no ar.
+`pedidos.b2bwave_order_id`, `produtos.b2bwave_id`, `clientes.b2bwave_id`, e a
+tabela `sync_log` — esta sim é órfã, nenhum leitor no código.
+
+---
+
+### ⛔ NÃO APAGUE — duas coisas que PARECEM sobra do sync e não são
+
+Ambas foram criadas pela migration do cron do B2BWave
+(`20260618000002_b2bwave_sync_cron.sql`), então quem for limpar por esse arquivo
+leva as duas junto sem perceber.
+
+**1. A tabela `sync_state`.** O nome engana. Ela guarda:
+
+| chave | o que é |
+|---|---|
+| `envio_pausado` | a **TORNEIRA GERAL de notificação** — cala todos os canais de uma vez. É o kill switch criado depois dos 1.508 SMS de 25/ago (`20260825180000_teto_notificacao.sql`) |
+| `order_notify_max_age_days` | lido por `send-email/index.ts:1688` |
+
+Dropar essa tabela **desarma o kill switch em silêncio** — sem erro, sem aviso.
+Há um `COMMENT ON TABLE` nela avisando isso (`20260902120000`).
+
+**2. O índice `pedidos_numero_idx`** (linha 34 do mesmo arquivo). É ele que faz o
+`count: "exact"` das três checagens de pedido por número
+(`notify-dispatch`, `_shared/dispatch.ts`, `send-email`) não virar varredura
+completa da tabela. Nasceu na migration do sync, mas serve ao portal.
 
 ---
 
 ## Estado
 
 - [x] Decisão registrada e perguntas respondidas
-- [ ] Passo 1 — cron desligado *(aguardando o dono)*
-- [ ] Passo 2 — pedidos zerados
-- [ ] Passo 3 — código limpo
+- [x] Passo 1 — cron desligado (`cron.job` vazio; havia um quinto job fora da migration, `b2bwave-cron-categories`)
+- [x] Passo 2 — pedidos zerados: 0 pedidos, 0 itens, 0 reservado, **70 clientes e 330 produtos intactos**
+- [x] Passo 3 — código limpo (commit `55ef241`): tsc limpo, 729/729 testes, build ok, 8 edge functions (13 arquivos)
+- [ ] Caçador + cético — em andamento

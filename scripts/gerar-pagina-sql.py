@@ -309,7 +309,12 @@ PAGINA = f'''<meta charset="utf-8">
       <li>Pedir no chat do Lovable o deploy destas edge functions — push no GitHub <strong>não</strong> publica edge function:
         <ul>{edge_html}</ul>
       </li>
-      <li>Abrir <strong>B2B Wave Sync</strong> no admin e clicar em <strong>Comparar Pedidos</strong> e <strong>Comparar Catálogo</strong>. Me mandar os dois resultados.</li>
+      <!-- O passo "Abrir B2B Wave Sync no admin e clicar em Comparar Pedidos /
+           Comparar Catálogo" saiu em 02/set/2026: a tela
+           `/admin/settings/b2bwave-sync` e a edge que fazia a comparação foram
+           apagadas com o sync. Mandava o dono procurar no menu um item que não
+           existe mais. -->
+      <li>Me avisar — eu confiro o resultado dos blocos e digo se ficou consistente.</li>
     </ol>
   </div>
 </div>

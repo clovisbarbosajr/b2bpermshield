@@ -52,11 +52,21 @@ describe("o que foi apagado nao volta pela porta dos fundos", () => {
     anda("src");
 
     const orfas: string[] = [];
+    let invocacoes = 0;
     for (const arq of arquivos) {
       for (const m of soCodigo(ler(arq)).matchAll(/\.invoke\(\s*["'`]([\w-]+)["'`]/g)) {
+        invocacoes++;
         if (!existentes.has(m[1])) orfas.push(`${arq}: invoke("${m[1]}")`);
       }
     }
+    // CORPUS PRIMEIRO. Sem estes dois, o `toEqual([])` abaixo passa quando o
+    // caminhamento quebra e `arquivos` fica vazio — o teste fica verde e para de
+    // proteger, o mesmo modo de falha que motivou o `fatiaEntre`. Um mutante que
+    // so trocasse `/\.tsx?$/` por `/\.jsx?$/` sobrevivia.
+    expect(arquivos.length, "a varredura de `src/` nao achou arquivo nenhum")
+      .toBeGreaterThan(100);
+    expect(invocacoes, "nao achou nenhuma chamada `.invoke(` — o teste ficou sem alvo")
+      .toBeGreaterThan(5);
     expect(orfas, "invoke apontando para edge function inexistente — 404 em producao")
       .toEqual([]);
   });
@@ -76,10 +86,18 @@ describe("o que foi apagado nao volta pela porta dos fundos", () => {
     };
     anda("src");
     const achados: string[] = [];
+    let rotasVistas = 0;
     for (const arq of arquivos) {
       const codigo = soCodigo(ler(arq));
+      rotasVistas += (codigo.match(/["'`]\/admin\//g) ?? []).length;
       for (const rota of MORTAS) if (codigo.includes(rota)) achados.push(`${arq}: ${rota}`);
     }
+    // CORPUS PRIMEIRO, pelo mesmo motivo do teste acima: lista vazia faz o
+    // `toEqual([])` passar sem ter olhado nada.
+    expect(arquivos.length, "a varredura de `src/` nao achou arquivo nenhum")
+      .toBeGreaterThan(100);
+    expect(rotasVistas, "nao achou nenhuma rota `/admin/` — o teste ficou sem alvo")
+      .toBeGreaterThan(50);
     expect(achados, "rota removida ainda referenciada — clique leva a tela em branco")
       .toEqual([]);
   });
@@ -112,26 +130,39 @@ describe("numero de pedido ambiguo e recusado, nao adivinhado", () => {
   // ambiguidade. `notify-dispatch` era o unico que nao recusava: usava
   // `.limit(1)`, que garante que o `maybeSingle()` nunca veja duas linhas — e
   // assim resolvia um pedido ARBITRARIO em silencio, numa checagem de DONO.
-  const CONSUMIDORES = [
-    "supabase/functions/notify-dispatch/index.ts",
-    "supabase/functions/_shared/dispatch.ts",
-    "supabase/functions/send-email/index.ts",
+  // Cada entrada recorta o BLOCO da consulta, e nao o arquivo inteiro.
+  //
+  // A primeira versao asseria sobre o arquivo todo, e um mutante sobreviveu:
+  // `send-email/index.ts` tem QUATRO `count: "exact"` — tres sao contadores de
+  // outra coisa (`head: true`, linhas 1386, 1503, 1743) e so o de 1694 e o desta
+  // guarda. Tirar justamente esse deixava as outras tres casando a regex, o teste
+  // verde, e o ramo "numero de pedido ambiguo" virava codigo morto.
+  const CONSUMIDORES: Array<{ arq: string; de: string; ate: string; max: number }> = [
+    { arq: "supabase/functions/notify-dispatch/index.ts",
+      de: 'const ref = String((vars as any)?.order_id', ate: "if (callerUserId)", max: 40 },
+    { arq: "supabase/functions/_shared/dispatch.ts",
+      de: "const ehNumero =", ate: "const ped: any = data[0];", max: 40 },
+    { arq: "supabase/functions/send-email/index.ts",
+      de: "const sel = adminClient.from(\"pedidos\")", ate: "const ped: any = peds[0];", max: 40 },
   ];
 
-  for (const arq of CONSUMIDORES) {
+  for (const { arq, de, ate, max } of CONSUMIDORES) {
     it(`${arq.split("/").slice(-2).join("/")}: conta as linhas e recusa >1`, () => {
-      const codigo = soCodigo(ler(arq));
-      const iNumero = codigo.indexOf('.eq("numero"');
-      expect(iNumero, "parou de resolver pedido por numero — o teste ficou sem alvo")
-        .toBeGreaterThan(-1);
+      const bloco = fatiaEntre(soCodigo(ler(arq)), de, ate, max);
 
-      // Pede a contagem ao PostgREST. Sem isto nao ha como saber que havia duas.
-      expect(codigo, "a consulta por numero perdeu o `count: \"exact\"`")
+      expect(bloco, "a consulta por numero perdeu o `count: \"exact\"`")
         .toMatch(/count:\s*"exact"/);
 
-      // E a consequencia: recusar. Contar e nao recusar e pior que nao contar,
+      // Pedir a contagem sem `head: true` — com `head` o PostgREST devolve so o
+      // numero e nenhuma linha, e o `peds[0]` do consumidor viria vazio.
+      expect(bloco, "a contagem virou `head: true` e a consulta parou de trazer linha")
+        .not.toMatch(/head:\s*true/);
+
+      // E a CONSEQUENCIA: recusar. Contar e nao recusar e pior que nao contar,
       // porque parece protegido.
-      expect(codigo, "conta as linhas mas nao recusa quando ha mais de uma")
+      expect(bloco, "conta as linhas mas nao recusa quando ha mais de uma")
+        .toMatch(/\(count \?\? [\w.]+\.length\) > 1/);
+      expect(bloco, "recusa sem dizer que o motivo foi ambiguidade")
         .toMatch(/(ambiguo|ambiguous)/i);
     });
   }
@@ -156,12 +187,26 @@ describe("numero de pedido ambiguo e recusado, nao adivinhado", () => {
 });
 
 describe("a migration que desliga o cron cobre os cinco jobs", () => {
-  // SEM os comentarios de `--`. A primeira versao lia o arquivo cru, e um mutante
-  // que apenas COMENTAVA o `COMMENT ON TABLE` sobreviveu: a linha
-  // `-- COMMENT ON TABLE public.sync_state IS` ainda casa a regex. Guarda que nao
-  // distingue SQL de prosa sobre SQL nao prova que o SQL roda.
-  const semComentario = (t: string) => t.replace(/^\s*--.*$/gm, "");
+  // SEM comentario nenhum — as DUAS sintaxes do SQL.
+  //
+  // Duas rodadas de mutante furaram esta funcao, uma de cada vez:
+  //   1a — so lia o arquivo cru: comentar a linha com `--` sobrevivia, porque
+  //        `-- COMMENT ON TABLE public.sync_state IS` ainda casa a regex;
+  //   2a — passou a tirar `--`, mas nao `/* */`: envolver o `DO $$ ... $$;`
+  //        inteiro num bloco `/* */` sobrevivia, e a migration desligava ZERO
+  //        cron jobs com os tres testes verdes.
+  // Guarda que nao distingue SQL de prosa sobre SQL nao prova que o SQL roda.
+  const semComentario = (t: string) =>
+    t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
   const sql = semComentario(ler("supabase/migrations/20260902120000_desliga_cron_b2bwave.sql"));
+
+  it("o corpo executavel da migration nao esta todo comentado", () => {
+    // Sem isto, os tres testes abaixo passam sobre um arquivo inerte.
+    expect(sql, "o bloco `DO $$` sumiu ou virou comentario").toMatch(/DO \$\$/);
+    expect(sql, "sumiu o `cron.unschedule` — a migration nao desliga nada")
+      .toMatch(/cron\.unschedule/);
+    expect(sql.trim().length, "sobrou quase nada de SQL executavel").toBeGreaterThan(400);
+  });
 
   it("nomeia os cinco, inclusive o `categories` que faltou no inventario", () => {
     for (const job of ["orders", "customers", "products", "pricelists", "categories"]) {

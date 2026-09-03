@@ -86,3 +86,21 @@ COMMENT ON TABLE public.sync_state IS
   'NAO E residuo do sync do B2BWave (que morreu em 02/set/2026). Guarda o kill '
   'switch de notificacao `envio_pausado` e o `order_notify_max_age_days`. '
   'Apagar esta tabela desarma a torneira geral de notificacao em silencio.';
+
+-- ---------------------------------------------------------------------------
+-- `pedidos_numero_idx` — mesma armadilha, vizinho de porta.
+--
+-- Nasceu na MESMA migration do cron do B2BWave (20260618000002:34) e por isso
+-- também parece resíduo. Não é: é ele que faz o `count: "exact"` das três
+-- checagens de pedido por número (`notify-dispatch`, `_shared/dispatch.ts`,
+-- `send-email`) não virar varredura completa de `pedidos`.
+--
+-- Essas checagens existem porque `pedidos.numero` NÃO tem UNIQUE e o gatilho
+-- `fn_pedido_numero_continua` gera com `MAX(numero)+1` sem lock — duas linhas
+-- podem nascer com o mesmo número, e as três recusam a ambiguidade em vez de
+-- adivinhar de quem é o pedido.
+-- ---------------------------------------------------------------------------
+COMMENT ON INDEX public.pedidos_numero_idx IS
+  'NAO E residuo do sync do B2BWave. Sustenta o `count: exact` das checagens de '
+  'pedido por numero em notify-dispatch, _shared/dispatch.ts e send-email. '
+  'Sem ele, cada checagem de notificacao vira seq scan em `pedidos`.';

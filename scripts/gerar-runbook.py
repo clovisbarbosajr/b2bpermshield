@@ -69,9 +69,12 @@ PASSOS = [
          obs="A consulta de backup mostra **quantos pedidos já entraram abaixo do mínimo** de cada cliente. Nada do passado é alterado — ela só mede.\n>\n> **Me mande o retorno.** Se aparecer cliente com muitos, vale conferir se o mínimo dele está configurado do jeito que você quer.\n>\n> Depois de rodar, teste os DOIS lados: carrinho **abaixo** do mínimo tem que ser recusado com mensagem clara, e carrinho **acima** tem que passar. Sem o segundo teste, um gatilho que recusa tudo passaria por \"funcionando\" e a loja pararia de vender."),
 ]
 
-# As edge functions que precisam de deploy. `b2bwave-sync` entrou depois: o
-# `diff_orders`/`diff_catalog` vivem nela e mudaram varias vezes; sem o deploy a
-# comparacao roda com criterio antigo e pode dizer "identico" para o que nao esta.
+# As edge functions que precisam de deploy.
+#
+# `b2bwave-sync` saiu em 02/set/2026 junto com a propria funcao: o cliente
+# decidiu que o sistema nasce com zero pedidos e sem integracao com o B2BWave.
+# O `diff_orders`/`diff_catalog` viviam dentro dela e foram embora junto — por
+# isso o passo de comparacao no fim deste runbook tambem saiu.
 EDGE = ["send-email", "stripe-checkout", "register-customer", "company-member"]
 
 
@@ -200,19 +203,17 @@ SELECT (SELECT count(*) FROM cron.job)               AS crons,
 >
 > Push no GitHub **não** publica edge function. Sem este passo, as correções de
 > e-mail, pagamento, cadastro e equipe não entram.
->
-> **`b2bwave-sync` entrou na lista depois** — a comparação do último passo vive
-> dentro dela e mudou várias vezes. Sem o deploy, ela roda com o critério ANTIGO
-> e pode dizer "idêntico" para pedido que não está.
 
 ---
 
 ## PASSO {len(PASSOS) + 4} — Me avisar
 
-Aí eu comparo os dois sistemas, só leitura, sem enviar nada: pedidos
-(`diff_orders`) e catálogo — produtos, variantes, régua de preço e clientes
-(`diff_catalog`). A sincronização só volta depois disso, e a notificação só
-quando você mandar.
+Aí eu confiro o resultado dos blocos e digo se ficou consistente.
+
+> A comparação com o B2BWave (`diff_orders` / `diff_catalog`) que ficava aqui
+> **saiu em 02/set/2026**: as duas viviam dentro da `b2bwave-sync`, e o sync foi
+> removido por decisão do cliente — o sistema nasce com zero pedidos e sem
+> integração. Não há mais com o que comparar.
 """)
 
 texto = "".join(out)

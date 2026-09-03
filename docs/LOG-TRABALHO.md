@@ -6166,3 +6166,67 @@ check:sql      198 arquivos .sql
    tabela zerada e a sequencia reiniciada, da para dropar
    `fn_pedido_numero_continua` (o SERIAL sozinho ja e livre de corrida) e por
    UNIQUE em `numero` — conserto na causa, em vez de guarda em cada leitor.
+
+### Rodada 2 do cacador — tres guardas MINHAS estavam furadas
+
+O cacador nao deduziu: ele **executou** os mutantes. Resultado da rodada:
+`notify-dispatch`, `Profile.tsx` e a migration passaram limpos no que era codigo
+de producao. O que estava quebrado era o meu proprio arquivo de teste.
+
+**F1 — a guarda de `send-email` era vazia.** As assercoes varriam o ARQUIVO
+INTEIRO, e `send-email/index.ts` tem QUATRO `count: "exact"` — tres sao contadores
+de outra coisa (`head: true`, linhas 1386, 1503, 1743) e so o de 1694 e o desta
+guarda. Tirar justamente esse deixava as outras tres casando a regex: teste verde,
+e o ramo "numero de pedido ambiguo" virava codigo morto. **Corrigido:** cada
+consumidor agora recorta o seu BLOCO com `fatiaEntre`, e a assercao exige a
+consequencia (`(count ?? x.length) > 1`), nao so a palavra.
+
+**F2 — dois testes passavam com corpus vazio.** Havia guarda para o conjunto de
+edge functions, mas nenhuma para `arquivos.length`. Um mutante trocando
+`/\.tsx?$/` por `/\.jsx?$/` no caminhamento zerava a lista, e os dois
+`expect([...]).toEqual([])` passavam — a partir dai `invoke("b2bwave-sync")` e a
+rota morta podiam voltar sem ninguem reclamar. **Corrigido:** corpus conferido
+ANTES do veredito, nos dois (`arquivos.length > 100`, `invocacoes > 5`,
+`rotasVistas > 50`).
+
+**F3 — a guarda da migration so sabia se defender de `--`.** Ela nasceu na rodada
+anterior justamente porque um mutante com `--` sobreviveu. Mas SQL tem DUAS
+sintaxes: envolver o `DO $$ ... $$;` inteiro em `/* */` passava, com a migration
+desligando ZERO cron jobs e os tres testes verdes. **Corrigido:** tira as duas
+sintaxes, e um teste novo exige que sobre SQL executavel (`DO $$`,
+`cron.unschedule`, tamanho minimo).
+
+**Replantados os tres mutantes depois da correcao: os tres MORRERAM.**
+(F1: 1 falha. F3: 3 falhas. F2: 2 falhas.)
+
+### O que o cacador achou fora do teste
+
+- **`sync_state` protegida no banco, mas o DOC dizia o contrario.** O
+  `COMMENT ON TABLE` avisa que ela nao e residuo — porem
+  `docs/DESLIGAR-SYNC-B2BWAVE.md` continuava listando ela sob "provavelmente
+  deixar", chamando de sobra que "nao custa nada". E e esse doc que a pessoa le
+  quando decide. Reescrito com uma secao **⛔ NAO APAGUE**.
+- **`pedidos_numero_idx`, vizinho de porta.** Nasceu na MESMA migration do sync e
+  tambem parece residuo, mas e ele que faz o `count: "exact"` das tres checagens
+  nao virar seq scan. Ganhou `COMMENT ON INDEX` e entrou no doc.
+- **Os geradores mandavam o dono fazer coisa impossivel.** O `gerar-pagina-sql.py`
+  mandava "abrir B2B Wave Sync no admin" (tela apagada) e o `gerar-runbook.py`
+  tinha um bloco 🔴 ATENCAO afirmando que `b2bwave-sync` estava na lista de deploy
+  — logo abaixo de uma lista com quatro nomes — e um passo final prometendo
+  `diff_orders`/`diff_catalog`, que viviam dentro da funcao apagada. Os dois
+  reescritos.
+- **Orfaos no `Profile.tsx`**: `Copy`, `ExternalLink`, `Link` e a funcao
+  `copyToClipboard` ficaram sem uso (o eslint do projeto tem `no-unused-vars: off`,
+  entao nada avisava). Removidos.
+- **Numero errado corrigido:** o comentario dizia "13 edge functions restantes".
+  Sao **8**; 13 e a contagem de ARQUIVOS que o `check:edge` imprime.
+
+### Verificacao
+
+```
+tsc            LIMPO
+npm test       742/742 em 71 arquivos
+build          ok
+check:edge     13 arquivos (8 funcoes)
+check:sql      198 arquivos .sql
+```
