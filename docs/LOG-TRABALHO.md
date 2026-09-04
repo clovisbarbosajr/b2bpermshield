@@ -6484,3 +6484,15 @@ da CONFERENCIA conferidos, um por vez:
 4. `product_statuses_nome_uniq` com `USING btree (lower(btrim(nome)))`.
 
 Falta so o publish da tela de status.
+
+**Publish feito pelo dono (04/set).** As 14 decisoes da Jessika estao fechadas —
+codigo no ar, SQL aplicado e conferido.
+
+### Estado ao fim de 04/set
+- 769 testes em 73 arquivos, tsc limpo, build ok, 199 .sql, 8 edge functions.
+- Banco: 66 clientes, 71 logins, 330 produtos, 48 categorias; backups
+  `backup_*_20260903` criados; cron do B2BWave desligado; pedidos e reguas de
+  preco zerados de proposito.
+- Pendente, sem prazo: `stock.ts:117` e `Catalogo.tsx:242` sem `btrim` no nome
+  do status (fresta so via API); enderecos dos clientes perdidos no incidente de
+  03/set (nao existem em fonte nenhuma).
