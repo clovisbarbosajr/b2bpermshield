@@ -6473,3 +6473,14 @@ build        ok
 ### AGUARDANDO o dono
 Rodar `supabase/migrations/20260904120000_trava_nome_status_fabrica.sql`, depois
 os 4 passos da CONFERENCIA no fim dela, UM DE CADA VEZ.
+
+**FEITO pelo dono (04/set):** migration `20260904120000` aplicada e os 4 passos
+da CONFERENCIA conferidos, um por vez:
+1. renomear "Sold Out" -> `23514 STATUS_FABRICA_NOME_TRAVADO: ...` (recusa
+   certa, sem "RAISE option already specified");
+2. status de teste criado, renomeado e apagado — passou;
+3. rastro em `activity_logs`: `produtos_que_ficaram_com_status_orfao: 0`,
+   `slug_procurado: "teste claude 2"`;
+4. `product_statuses_nome_uniq` com `USING btree (lower(btrim(nome)))`.
+
+Falta so o publish da tela de status.
