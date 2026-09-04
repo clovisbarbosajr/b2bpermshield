@@ -129,13 +129,27 @@ describe("a trava de nome dos status de fabrica", () => {
     // travaria tambem cor e ordem, que ela nao pediu para travar.
     expect(sql, "o gatilho recusa qualquer UPDATE, nao so a troca de nome")
       .toMatch(/lower\(btrim\(NEW\.nome\)\) IS DISTINCT FROM lower\(btrim\(OLD\.nome\)\)/);
-    expect(sql, "a recusa nao lanca").toMatch(/RAISE EXCEPTION 'STATUS_FABRICA_NOME_TRAVADO'/);
+    // `RAISE EXCEPTION USING ERRCODE, MESSAGE` — SEM texto literal antes do
+    // USING. A primeira versao tinha `RAISE EXCEPTION 'X' USING MESSAGE = ...`,
+    // que o CREATE FUNCTION aceita e que estoura so em EXECUCAO com "RAISE option
+    // already specified: MESSAGE". A trava segurava, mas a admin lia um erro de
+    // sintaxe no toast em vez do motivo.
+    const raise = fatiaEntre(sql, "RAISE EXCEPTION", "OLD.nome);", 8);
+    expect(raise, "voltou um literal entre RAISE EXCEPTION e USING — estoura em execucao")
+      .toMatch(/^RAISE EXCEPTION USING/);
+    expect(raise, "a mensagem perdeu o codigo que a tela usa para reconhecer a recusa")
+      .toMatch(/STATUS_FABRICA_NOME_TRAVADO/);
+    expect(raise, "a recusa deixou de ser check_violation").toMatch(/ERRCODE = 'check_violation'/);
   });
 
-  it("nomeia os seis de fabrica", () => {
+  it("nomeia os seis de fabrica — no array, nao em qualquer lugar do arquivo", () => {
+    // Recorta o literal `_fabrica`. Asserir sobre o arquivo inteiro deixou um
+    // mutante vivo: tirar 'sold out' do array passava, porque a traducao do
+    // gatilho de DELETE tambem escreve 'sold out' e a regex casava com ela.
+    const lista = fatiaEntre(sql, "_fabrica constant text[] := ARRAY[", "];", 5);
     for (const s of ["available", "limited stock", "sold out",
                      "pre-order", "not available", "discontinued"]) {
-      expect(sql, `o status de fabrica "${s}" saiu da lista`).toContain(`'${s}'`);
+      expect(lista, `o status de fabrica "${s}" saiu da lista de travados`).toContain(`'${s}'`);
     }
   });
 
@@ -146,7 +160,7 @@ describe("a trava de nome dos status de fabrica", () => {
     // `CREATE TRIGGER`: a funcao e declarada ANTES do trigger, entao um
     // `RAISE EXCEPTION` plantado nela ficava fora da janela e sobrevivia.
     const corpoDelete = fatiaEntre(
-      sql, "FUNCTION public.fn_status_apagado_deixa_rastro()", "RETURN OLD;", 45);
+      sql, "FUNCTION public.fn_status_apagado_deixa_rastro()", "RETURN OLD;", 60);
     expect(corpoDelete, "o DELETE foi bloqueado; ela pediu explicitamente para deixar livre")
       .not.toMatch(/RAISE EXCEPTION/);
     expect(sql, "o rastro do delete sumiu")
@@ -155,5 +169,43 @@ describe("a trava de nome dos status de fabrica", () => {
     // alguem apagou algo, e nao o que isso causou.
     expect(sql, "o rastro nao conta os produtos que ficaram orfaos")
       .toMatch(/produtos_que_ficaram_com_status_orfao/);
+  });
+
+  it("a contagem de orfaos TRADUZ o nome para o slug antes de comparar", () => {
+    // `produtos.status_produto` guarda slug em PORTUGUES ('esgotado'); o nome do
+    // status esta em INGLES ('Sold Out'). A primeira versao comparava cru e o
+    // rastro gravava ZERO SEMPRE — 40 esgotados voltando para a vitrine e o log
+    // dizendo "0 orfaos". Quem investigasse descartaria a hipotese certa.
+    const corpoDelete = fatiaEntre(
+      sql, "FUNCTION public.fn_status_apagado_deixa_rastro()", "RETURN OLD;", 60);
+    // Os seis pares, os mesmos do `NAME_MAP` de stock.ts e do CASE de
+    // fn_item_produto_valido. Mexeu num, mexe nos tres.
+    for (const [nome, slug] of [
+      ["available", "disponivel"], ["not available", "indisponivel"],
+      ["sold out", "esgotado"], ["pre-order", "pre_venda"],
+      ["limited stock", "estoque_limitado"], ["discontinued", "descontinuado"],
+    ]) {
+      expect(corpoDelete, `o par ${nome} -> ${slug} saiu da traducao`)
+        .toMatch(new RegExp(`WHEN '${nome}'\\s+THEN '${slug}'`));
+    }
+    // E a CONSEQUENCIA: a contagem compara com o slug traduzido, nao com OLD.nome.
+    const contagem = fatiaEntre(corpoDelete, "SELECT count(*) INTO _orfaos", "= _slug;", 4);
+    expect(contagem, "a contagem voltou a comparar com OLD.nome cru — da zero sempre")
+      .not.toMatch(/OLD\.nome/);
+  });
+
+  it("nome unico, fechando o sombreamento — e sem derrubar os gatilhos", () => {
+    // Renomear "Teste" -> "Sold Out" passava pelo gatilho (ele olha o nome
+    // ANTIGO) e criava uma segunda "Sold Out": o Map do front fica com a ultima,
+    // o banco faz LIMIT 1 sem ORDER BY, e cada um decide diferente.
+    expect(sql, "o indice unico sumiu")
+      .toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS product_statuses_nome_uniq/);
+    expect(sql).toMatch(/ON public\.product_statuses \(lower\(btrim\(nome\)\)\)/);
+    // Dentro de um DO que checa duplicata ANTES: com duplicata na tabela o
+    // CREATE INDEX falha, e num runner de transacao unica levaria os dois
+    // gatilhos junto. O aviso no lugar da falha e o que protege os gatilhos.
+    const bloco = fatiaEntre(sql, "HAVING count(*) > 1", "product_statuses_nome_uniq: ok", 14);
+    expect(bloco, "o indice deixou de ser condicionado a ausencia de duplicata")
+      .toMatch(/IF _dup IS NOT NULL THEN[\s\S]*RAISE WARNING/);
   });
 });

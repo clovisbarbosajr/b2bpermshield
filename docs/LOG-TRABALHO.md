@@ -6416,3 +6416,35 @@ check:sql    199 arquivos, 196 migrations
 
 Rodar `supabase/migrations/20260904120000_trava_nome_status_fabrica.sql` e o
 bloco de CONFERENCIA no fim dela.
+
+### Cetico sobre `20260904120000_trava_nome_status_fabrica.sql` — tres defeitos MEUS, corrigidos
+
+| # | achado | veredito | correcao |
+|---|---|---|---|
+| B4 | contagem de orfaos dava **ZERO SEMPRE**: `produtos.status_produto` guarda slug em portugues (`esgotado`), o nome do status esta em ingles (`Sold Out`) | CONFIRMADO — o unico dado util do rastro estava errado | CASE nome->slug, o mesmo de `fn_item_produto_valido` e do `NAME_MAP` de `stock.ts`, antes de contar |
+| A1 | `RAISE EXCEPTION 'literal' USING MESSAGE = ...` e invalido em plpgsql; o CREATE passa e estoura so em execucao ("RAISE option already specified") | CONFIRMADO — a trava segurava, mas a admin lia erro de sintaxe no toast | `RAISE EXCEPTION USING ERRCODE, MESSAGE` sem literal |
+| B2/C3 | nao existe UNIQUE em `product_statuses`; renomear "Teste" -> "Sold Out" passava pelo gatilho (ele olha o nome ANTIGO) e criava uma segunda "Sold Out" | CONFIRMADO — a outra metade da mesma porta | `CREATE UNIQUE INDEX ... (lower(btrim(nome)))` num `DO` que checa duplicata ANTES, para nao derrubar os gatilhos junto |
+| D | passos da conferencia colados juntos: o passo 1 falha de proposito e aborta os outros | OK, procedimento | comentario manda rodar um por vez |
+| B1 | `stock.ts:117` e `Catalogo.tsx:242` comparam `s.nome.toLowerCase()` SEM `trim` | EXAGERADO, classe pre-existente, fresta so via API | **registrado como pendente**, fora do escopo desta migration |
+
+Guardas atualizadas: 11 testes, **14 mutantes, 14 mortos**. Um mutante voltou a
+sobreviver DEPOIS da correcao — tirar `'sold out'` do array `_fabrica` passava,
+porque a traducao nova do DELETE tambem escreve `'sold out'` e a regex casava com
+ela. Guarda passou a recortar o literal do array. E o modo de falha de sempre:
+assert sobre o arquivo inteiro casa com a ocorrencia errada quando o padrao se
+repete.
+
+### Verificacao
+
+```
+tsc          LIMPO
+npm test     769/769 em 73 arquivos
+build        ok
+check:sql    199 arquivos, 196 migrations
+check:edge   13 arquivos — `recuperar-clientes` apagada pelo Lovable
+```
+
+### Pendente (classe B1, fora deste escopo)
+`src/lib/stock.ts:117` e `src/pages/portal/Catalogo.tsx:242` — casar status por
+nome sem `btrim`. Fresta so por API direta; a tela ja apara. Fechar na proxima
+leva de portal.
