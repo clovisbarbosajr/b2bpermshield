@@ -6371,3 +6371,48 @@ por `pg_constraint` e criar `backup_<tabela>_<AAAAMMDD>`.
 1. Pedir ao Lovable que **apague a `recuperar-clientes`** — ela reabre a porta do
    B2BWave, fechada de proposito no dia anterior.
 2. Rodar o bloco de backup das tabelas criticas (abaixo).
+
+---
+
+## 04/set — DADO 3 e VENDA 2 fechados, com as respostas finais da Jessika
+
+**DADO 3.** Ela: *"Deixe a opcao de apagar, eu entendo os riscos."* Migration
+`20260904120000_trava_nome_status_fabrica.sql`:
+- gatilho BEFORE UPDATE recusa renomear os seis de fabrica (available, limited
+  stock, sold out, pre-order, not available, discontinued), comparando por
+  `lower(btrim())` — e SO quando o nome muda; cor e ordem continuam livres;
+- DELETE fica LIVRE, por decisao dela, mas ganha gatilho que grava em
+  `activity_logs` quem apagou o que, e **quantos produtos ficaram com status
+  orfao** naquele instante — o numero que mede o estrago quando um produto voltar
+  sozinho para a vitrine.
+
+**VENDA 2.** Ela: *"O negativo pode mostrar apenas no administrativo, o cliente
+pode ver so como pre order."* **Nada precisou ser implementado** — ja era assim:
+- `Estoque.tsx` calcula `total - reservado` sem piso em zero, entao o negativo
+  aparece no admin sozinho (o gatilho de reserva isenta pre-venda e soma
+  `estoque_reservado` alem do total);
+- `Catalogo.tsx` e `ProdutoDetalhe.tsx` trocam o numero por "Pre-order"/"BACK
+  ORDER" quando o produto e pre-order; o carrinho isenta do teto.
+
+O trabalho foi a GUARDA: `src/test/preOrderNegativoSoNoAdmin.test.ts`, 9 testes,
+10 mutantes, 10 mortos. Tres mutantes sobreviveram a primeira versao:
+- proibir `${disponivel` nao pegava `{disponivel(p)}` em JSX nem a crase — passou
+  a proibir o IDENTIFICADOR no ramo;
+- o marcador `{isPreOrder ?` casava antes, no `className` — o recorte passou a
+  ancorar na linha do rotulo que contem `?`;
+- `RAISE EXCEPTION` procurado DEPOIS do `CREATE TRIGGER`, mas a funcao vem antes
+  — passou a recortar o corpo da funcao.
+
+### Verificacao
+
+```
+tsc          LIMPO
+npm test     767/767 em 73 arquivos
+build        ok
+check:sql    199 arquivos, 196 migrations
+```
+
+### AGUARDANDO o dono
+
+Rodar `supabase/migrations/20260904120000_trava_nome_status_fabrica.sql` e o
+bloco de CONFERENCIA no fim dela.
