@@ -82,8 +82,14 @@ describe("ProductStatuses: o nome e chave de sistema", () => {
       expect(u, "a comparacao perdeu a normalizacao — os nomes gravados sao title case, entao ela nunca casa")
         .toContain(".trim().toLowerCase()");
     }
+    // 04/set: o rename de um dos seis deixou de ser `confirm()` e virou RECUSA —
+    // o banco passou a recusar (gatilho `trg_status_fabrica_nome_travado`), e um
+    // confirm que prometia "os produtos voltam para a vitrine" e depois recebia
+    // erro era a tela contradizendo o banco. A guarda agora exige a recusa.
     expect(src, "o rename de um status de fabrica voltou a ser silencioso")
-      .toContain("Products are matched to this status BY NAME");
+      .toContain("is a system status and cannot be renamed");
+    expect(src, "o rename de um status de fabrica voltou a ser um confirm em vez de recusa")
+      .not.toMatch(/if \(eraDeSistema[\s\S]{0,400}?confirm\(/);
     expect(src, "o delete de um status de fabrica voltou a ser silencioso")
       .toContain("THIS IS A BUILT-IN STATUS");
     // A guarda tem que ABORTAR: comparar posicao nao mata o mutante que apaga o

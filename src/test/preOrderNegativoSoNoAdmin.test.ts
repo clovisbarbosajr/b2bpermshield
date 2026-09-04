@@ -137,7 +137,10 @@ describe("a trava de nome dos status de fabrica", () => {
     const raise = fatiaEntre(sql, "RAISE EXCEPTION", "OLD.nome);", 8);
     expect(raise, "voltou um literal entre RAISE EXCEPTION e USING — estoura em execucao")
       .toMatch(/^RAISE EXCEPTION USING/);
-    expect(raise, "a mensagem perdeu o codigo que a tela usa para reconhecer a recusa")
+    // O prefixo e so o que a admin LE no toast (a tela mostra `error.message`
+    // cru; ninguem casa esse codigo por regex). Cosmetico, mas e o que
+    // distingue "recusado de proposito" de "erro de banco" para quem esta na tela.
+    expect(raise, "a mensagem perdeu o prefixo que identifica a recusa no toast")
       .toMatch(/STATUS_FABRICA_NOME_TRAVADO/);
     expect(raise, "a recusa deixou de ser check_violation").toMatch(/ERRCODE = 'check_violation'/);
   });

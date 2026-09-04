@@ -6448,3 +6448,28 @@ check:edge   13 arquivos — `recuperar-clientes` apagada pelo Lovable
 `src/lib/stock.ts:117` e `src/pages/portal/Catalogo.tsx:242` — casar status por
 nome sem `btrim`. Fresta so por API direta; a tela ja apara. Fechar na proxima
 leva de portal.
+
+### Cetico, rodada 2 sobre o trigger corrigido — limpo. Tres ajustes menores
+
+As tres correcoes da rodada 1 se sustentaram. Sobrou:
+1. `ProductStatuses.tsx` tinha um `confirm()` no rename de status de fabrica que
+   prometia "depois do rename os produtos voltam para a vitrine" e deixava
+   seguir — e o banco agora recusa. A admin confirmava um aviso assustador para
+   receber um erro. Virou RECUSA na tela, com o mesmo motivo do gatilho. A guarda
+   `guardasSettingsEFicha.test.ts` que prendia o confirm passou a exigir a recusa.
+2. Passo 4 da CONFERENCIA conferia so `indexname`: um indice homonimo com outra
+   expressao passaria. Agora mostra `indexdef`.
+3. Dois comentarios descreviam coisa que nao existe ("com captura" no DO do
+   indice; "codigo que a tela usa para reconhecer" no teste). Corrigidos.
+
+**Registrado como pendente, fora deste escopo:** `stock.ts:117` e
+`Catalogo.tsx:242` casam status por nome sem `btrim` (fresta so via API).
+
+```
+npm test     769/769 em 73 arquivos
+build        ok
+```
+
+### AGUARDANDO o dono
+Rodar `supabase/migrations/20260904120000_trava_nome_status_fabrica.sql`, depois
+os 4 passos da CONFERENCIA no fim dela, UM DE CADA VEZ.

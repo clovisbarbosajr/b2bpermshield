@@ -44,15 +44,21 @@ const ProductStatuses = () => {
 
     // RENOMEAR UM DOS SEIS QUEBRA O CASAMENTO POR NOME, e a quebra e silenciosa
     // nos tres consumidores de uma vez. Mesmo motivo do aviso no delete.
+    //
+    // Desde 04/set/2026 o BANCO recusa a renomeacao (gatilho
+    // `trg_status_fabrica_nome_travado`, decisao da Jessika — DADO 3). Este
+    // bloco era um `confirm()` que prometia "depois do rename os produtos voltam
+    // para a vitrine" e deixava seguir: a admin confirmava um aviso assustador
+    // para receber um erro do banco. Agora a tela diz a mesma coisa que o banco,
+    // antes de tentar. A guarda de verdade continua sendo o gatilho.
     const eraDeSistema = editing && NOMES_DE_SISTEMA.includes(String(editing.nome).trim().toLowerCase());
     if (eraDeSistema && nome.toLowerCase() !== String(editing.nome).trim().toLowerCase()) {
-      if (!confirm(
-        `Rename "${editing.nome}" to "${nome}"?\n\n` +
-        `Products are matched to this status BY NAME, and every check fails open. ` +
-        `After the rename, every product currently marked "${editing.nome}" goes back on the ` +
-        `storefront, orderable — including items you deliberately took off sale while ` +
-        `still holding stock.`
-      )) return;
+      toast.error(
+        `"${editing.nome}" is a system status and cannot be renamed. ` +
+        `Products are matched to it BY NAME — renaming would put every product marked ` +
+        `"${editing.nome}" back on the storefront, orderable. Create a new status instead.`
+      );
+      return;
     }
 
     // Nome duplicado: navegador (`Map`, ultima vence) e banco (`LIMIT 1` sem

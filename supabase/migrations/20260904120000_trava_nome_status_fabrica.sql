@@ -141,9 +141,10 @@ CREATE TRIGGER trg_status_apagado_deixa_rastro
 
 -- ---------------------------------------------------------------------------
 -- NOME ÚNICO. Fecha o sombreamento (renomear "Teste" -> "Sold Out", ou inserir
--- uma segunda "Sold Out"). Num `DO` com captura: se já houver duplicata na
--- tabela, o índice falha — e não pode derrubar os dois gatilhos acima junto.
--- Nesse caso avisa com os nomes repetidos, e o dono resolve antes de reaplicar.
+-- uma segunda "Sold Out"). Num `DO` com PRÉ-CHECAGEM (não há `EXCEPTION`; a
+-- duplicata é procurada antes): se já houver nome repetido, o índice falharia —
+-- e derrubaria os dois gatilhos acima junto, num runner de transação única.
+-- Nesse caso só avisa com os nomes repetidos, e o dono resolve antes de reaplicar.
 -- ---------------------------------------------------------------------------
 DO $$
 DECLARE
@@ -186,8 +187,11 @@ $$;
 --   SELECT entity_name, details FROM public.activity_logs
 --   WHERE entity_type = 'product_status' ORDER BY created_at DESC LIMIT 3;
 --
---   -- 4. o índice existe:
---   SELECT indexname FROM pg_indexes WHERE indexname = 'product_statuses_nome_uniq';
+--   -- 4. o índice existe E tem a expressão certa. Conferir só o nome não basta:
+--   --    se já existia um homônimo com outra expressão (ex. `(nome)` cru), o
+--   --    `IF NOT EXISTS` pulou, o índice fraco ficou, e o nome enganaria.
+--   --    O `indexdef` tem que conter `lower(btrim(nome))`:
+--   SELECT indexname, indexdef FROM pg_indexes WHERE indexname = 'product_statuses_nome_uniq';
 --
 -- ROLLBACK
 --   DROP TRIGGER IF EXISTS trg_status_fabrica_nome_travado ON public.product_statuses;
