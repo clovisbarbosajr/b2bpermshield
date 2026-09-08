@@ -6510,3 +6510,21 @@ dependentes de `clientes` sao CASCADE e estavam com 0 linhas; sub-clientes 0.
 Backup `backup_clientes_20260908` (66) e `DELETE FROM public.clientes`.
 Depois: clientes 0, produtos 330, categorias 48, logins 71 (intactos — passo 3
 aguarda decisao do dono).
+
+**FEITO pelo dono (08/set) — sistema novo.** O cliente Zap (walk-in interno,
+`paulo@zapsupplies.com`, "Zap Supplies, LLC") restaurado do backup com o login;
+64 logins de cliente apagados (`user_roles`, `profiles` e `auth.users`, nessa
+ordem, a partir do `user_id` do backup, excluindo o Zap e quem tem papel de
+equipe). Resultado: **clientes 1, logins 7, produtos 330**.
+
+Duas armadilhas registradas: `profiles` tem uma linha POR LOGIN (71), nao so a
+equipe — usar como marcador de equipe excluia todo mundo e o bloco parou sozinho
+(`vai_apagar = 0`, fail-closed); e `user_roles` tem 71 linhas, 69 delas
+`cliente`. Equipe de verdade = papel admin/manager/warehouse + os logins internos
+sem ficha de cliente.
+
+Os 7 que ficaram: jess@zapsupplies.com (admin), clovisjunior@live.com
+(warehouse), admin@permshield.com, jess@permwood.com,
+jessika.andrade@hotmail.com, clovisbarbosajr@gmail.com, e o Zap.
+
+Nenhum codigo mudou — sem publish. Backup `backup_clientes_20260908` (66) fica.
