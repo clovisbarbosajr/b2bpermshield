@@ -6504,3 +6504,9 @@ codigo no ar, SQL aplicado e conferido.
 Registrado em `docs/DECISOES-PENDENTES.md`. Ordem: 1) inventario de dependentes
 e contagens, 2) backup, 3) DELETE em ordem de FK, 4) logins de cliente em
 `auth.users`, 5) conferencia. **Sem `TRUNCATE CASCADE`.** Um passo por vez.
+
+**FEITO pelo dono (08/set).** Inventario por `pg_constraint`: todas as
+dependentes de `clientes` sao CASCADE e estavam com 0 linhas; sub-clientes 0.
+Backup `backup_clientes_20260908` (66) e `DELETE FROM public.clientes`.
+Depois: clientes 0, produtos 330, categorias 48, logins 71 (intactos — passo 3
+aguarda decisao do dono).
