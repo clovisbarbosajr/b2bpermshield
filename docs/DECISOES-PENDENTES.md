@@ -464,3 +464,22 @@ negativar fora dos status isentos). Os itens 1 e 4 sao o que `A4` pedia.
 zero!"*. Apagar todas as tabelas de preco e os itens delas. Os 70 clientes ficam
 com `tabela_preco_id` nulo (`ON DELETE SET NULL`) ate ela recriar. Isso e
 esperado, nao efeito colateral.
+
+---
+
+# DECISAO DO CLIENTE — 08/set/2026: apagar TODOS os clientes
+
+Palavras do dono: *"vamos deletar TODOS os clientes e os subclientes, os que tem
+permissao diferente e estao abaixo... vamos manter APENAS os produtos."* Nao esta
+em discussao.
+
+**Leitura:** fica so o CATALOGO — `produtos`, `produto_variantes`, `categorias`,
+`product_statuses`, `brands`, imagens, precos de produto. Sai: `clientes` (inclui
+sub-clientes, que sao linhas de `clientes` com `parent_customer_id`), enderecos,
+liberacoes por cliente, opcoes de pagamento/frete por cliente, e os logins de
+cliente em `auth.users` (os 7 da equipe ficam).
+
+**Metodo — a licao de 03/set vale aqui:** `DELETE FROM`, que honra a acao de
+cada FK; NUNCA `TRUNCATE ... CASCADE`. Antes: listar dependentes por
+`pg_constraint`, backup `backup_<tabela>_20260908`, contagem antes e depois no
+mesmo bloco. Um passo por vez, cada um confirmado antes do proximo.

@@ -6496,3 +6496,11 @@ codigo no ar, SQL aplicado e conferido.
 - Pendente, sem prazo: `stock.ts:117` e `Catalogo.tsx:242` sem `btrim` no nome
   do status (fresta so via API); enderecos dos clientes perdidos no incidente de
   03/set (nao existem em fonte nenhuma).
+
+---
+
+## 08/set — INICIADO: apagar todos os clientes (decisao do cliente)
+
+Registrado em `docs/DECISOES-PENDENTES.md`. Ordem: 1) inventario de dependentes
+e contagens, 2) backup, 3) DELETE em ordem de FK, 4) logins de cliente em
+`auth.users`, 5) conferencia. **Sem `TRUNCATE CASCADE`.** Um passo por vez.
