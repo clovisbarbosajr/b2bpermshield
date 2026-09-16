@@ -119,6 +119,12 @@ describe("copiar-fotos-cloudinary: o que a edge NAO pode fazer", () => {
     const trecho = fatiaEntre(semComentario, "let restantes: number | null = 0;", "return json({", 14);
     expect(trecho).toContain("error: cntErr");
     expect(trecho).toMatch(/if \(cntErr \|\| count === null\) \{[\s\S]*?restantes = null;/);
+    // A consequencia: o null tem que SOBREVIVER as iteracoes seguintes. Em JS
+    // `null + 3 === 3`, entao um `else` simples volta a somar e o relatorio
+    // diz "acabou". O tsc do projeto nao cobre `supabase/functions`.
+    expect(trecho, "o null e sobrescrito pela proxima contagem")
+      .toMatch(/\} else if \(restantes !== null\) \{[\s\S]*?restantes \+= count;/);
+    expect(trecho).not.toMatch(/\} else \{/);
   });
 
   it("o criterio de parada documentado e `copiadas`, nao `restantes = 0`", () => {

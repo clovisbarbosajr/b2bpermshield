@@ -19,6 +19,7 @@ export const ALVOS: ReadonlyArray<readonly [tabela: string, coluna: string]> = [
   ["configuracoes", "catalog_header_url"],
   ["configuracoes", "catalog_pdf_url"],
   ["configuracoes", "email_logo_url"],
+  ["configuracoes", "default_product_image"],
 ];
 
 export const BUCKET = "product-images";
