@@ -34,6 +34,7 @@ import { useCart } from "@/contexts/CartContext";
 import { checkCartStock, cartKey, normalizeStatus } from "@/lib/stock";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice } from "@/lib/pricing";
+import { COMPANY_ADDRESS_ID, montarOpcoesDeEndereco } from "@/lib/enderecoEntrega";
 
 // Dynamically load Stripe.js from CDN
 function loadStripeScript(): Promise<void> {
@@ -157,6 +158,14 @@ const Checkout = () => {
         setLoadError(clienteErr.message);
         return;
       }
+      // Ficha ILEGIVEL (RLS/linha ausente): `maybeSingle` devolve null SEM erro.
+      // Antes o `if (cliente)` engolia isso e a tela abria sem endereco, sem
+      // aviso, e so falhava no fim com "Client not found". Mesmo tratamento do
+      // `clienteErr`: card vermelho e botao travado.
+      if (!cliente) {
+        setLoadError("We could not load your account details. Please contact support.");
+        return;
+      }
 
       if (cliente) {
         setClienteId(cliente.id);
@@ -216,19 +225,15 @@ const Checkout = () => {
         ]);
         setEnderecos(ends ?? []);
         const acct: any = (parentAcct as any)?.data ?? cliente;
-        const companyAddr = acct?.endereco && acct?.cidade
-          ? { logradouro: acct.endereco, complemento: "", cidade: acct.cidade, estado: acct.estado ?? "", cep: acct.cep ?? "" }
-          : null;
-        setCompanyAddress(companyAddr);
-        const principal = ends?.find((e: any) => e.principal);
-        if (principal) {
-          setEnderecoId(principal.id);
-          setSelectedEndereco(principal);
-        } else if (!ends?.length && companyAddr) {
-          // Sem endereços cadastrados → default = endereço da empresa (antes ficava vazio).
-          setEnderecoId("__company__");
-          setSelectedEndereco(companyAddr);
-        }
+        // Opcao da conta existe com so a rua preenchida (antes exigia cidade
+        // tambem, e o cliente novo ficava sem opcao nenhuma). Default: principal
+        // → conta → primeira linha. Regras e rotulos em `enderecoEntrega.ts`.
+        const { defaultId, contaEndereco } = montarOpcoesDeEndereco(ends ?? [], acct);
+        setCompanyAddress(contaEndereco);
+        setEnderecoId(defaultId);
+        setSelectedEndereco(
+          defaultId === COMPANY_ADDRESS_ID ? contaEndereco : ends?.find((e: any) => e.id === defaultId) ?? null,
+        );
       }
 
       // Opções PRIVATE (frete/pagamento) só aparecem pro cliente ATRIBUÍDO
@@ -364,6 +369,15 @@ const Checkout = () => {
     // carrinho — era a lentidão do endereço voltando.
   }, [user, impersonatedCustomer]);
 
+  // Rotulos do select: `companyAddress` ja esta normalizado (logradouro/...),
+  // entao volta para o formato da ficha (endereco/...) que o helper le.
+  const { opcoes: opcoesDeEndereco } = montarOpcoesDeEndereco(
+    enderecos,
+    companyAddress
+      ? { endereco: companyAddress.logradouro, endereco2: companyAddress.complemento, cidade: companyAddress.cidade, estado: companyAddress.estado, cep: companyAddress.cep }
+      : null,
+  );
+
   const handleEnderecoChange = (id: string) => {
     setEnderecoId(id);
     if (id === "__new__") { setShowNewAddress(true); setSelectedEndereco(null); return; }
@@ -404,9 +418,11 @@ const Checkout = () => {
     if (enderecoId === "__company__" && companyAddress) {
       const existing = enderecos.find(e => e.logradouro === companyAddress.logradouro && e.cidade === companyAddress.cidade);
       if (existing) return { ok: true, id: existing.id };
+      // `cidade`/`estado`/`cep` sao NOT NULL em `enderecos` (20260317043654); a
+      // conta pode ter so a rua, entao o placeholder "-" cobre os tres.
       const { data: created, error: addrErr } = await supabase.from("enderecos").insert({
         cliente_id: addressOwnerId,
-        logradouro: companyAddress.logradouro, cidade: companyAddress.cidade,
+        logradouro: companyAddress.logradouro, cidade: companyAddress.cidade || "-",
         estado: companyAddress.estado || "-", cep: companyAddress.cep || "-",
         principal: false,
       } as any).select().single();
@@ -1182,15 +1198,8 @@ const Checkout = () => {
           <Select value={enderecoId} onValueChange={handleEnderecoChange}>
             <SelectTrigger><SelectValue placeholder="Select address" /></SelectTrigger>
             <SelectContent>
-              {companyAddress && (
-                <SelectItem value="__company__">
-                  Company address — {companyAddress.logradouro}, {companyAddress.cidade}{companyAddress.estado ? `, ${companyAddress.estado}` : ""}
-                </SelectItem>
-              )}
-              {enderecos.map(e => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.logradouro}, {e.cidade}, {e.estado}, {e.cep}
-                </SelectItem>
+              {opcoesDeEndereco.map(o => (
+                <SelectItem key={o.id} value={o.id}>{o.rotulo}</SelectItem>
               ))}
               <SelectItem value="__new__">+ Add a new address...</SelectItem>
             </SelectContent>
@@ -1223,7 +1232,7 @@ const Checkout = () => {
               <div><Label className="text-xs text-muted-foreground">Postal Code</Label><Input value={selectedEndereco.cep} readOnly /></div>
               <div><Label className="text-xs text-muted-foreground">City</Label><Input value={selectedEndereco.cidade} readOnly /></div>
               <div><Label className="text-xs text-muted-foreground">State</Label><Input value={selectedEndereco.estado} readOnly /></div>
-              <div><Label className="text-xs text-muted-foreground">Country</Label><Input value="United States" readOnly /></div>
+              <div><Label className="text-xs text-muted-foreground">Country</Label><Input value={customerCountry || "United States"} readOnly /></div>
             </div>
           )}
         </div>

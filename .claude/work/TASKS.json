@@ -114,6 +114,20 @@
       "status": "blocked",
       "validation": "aguarda dono (edge de envio + deploy pelo Lovable)",
       "depends_on": []
+    },
+    {
+      "id": "T16",
+      "title": "Checkout: Select address vazio — nao puxa o endereco da ficha do cliente; conferir tudo que o checkout deveria herdar da ficha (nome, empresa, telefone, tax group, price list, shipping)",
+      "status": "in_progress",
+      "validation": "spec: U1-U4 aprovadas (implementacao); causa raiz do Select vazio aguarda SELECT do dono (ficha nao lida pelo login)",
+      "depends_on": []
+    },
+    {
+      "id": "T17",
+      "title": "Checkout: ficha nova sem shipping option atribuida — bloco some e o pedido grava frete 0 em silencio",
+      "status": "pending",
+      "validation": "pending",
+      "depends_on": []
     }
   ]
 }

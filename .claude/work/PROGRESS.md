@@ -1,7 +1,11 @@
 # Progresso
 
+## 🔄 Em andamento
+- [ ] Lane A — T16 — Implementação — U1 banner ficha ilegível, U2 helper de endereços, U3 default persistente, U4 país
+
 ## ⏳ Pendentes
 - [ ] Publish do front (T13) — dono
+- [ ] T17 — checkout: frete 0 silencioso quando o cliente não tem shipping option atribuída
 
 ## 🚫 Bloqueadas
 - [ ] T9 — 1 produto com foto morta na origem ("Select 3/4 x 7.48 - DO NOT SHIP") — Jessika decide se sobe
