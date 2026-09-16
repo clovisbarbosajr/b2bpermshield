@@ -6709,3 +6709,7 @@ HTTP 200 {"success":true}. Chamada de staff (admin) para o mesmo e-mail ->
 {skipped:true, blocked:true, reason:"envio pausado manualmente"}.
 notification_log: 2 linhas "NAO ENVIADO — envio pausado manualmente", nenhum
 envio. Dono re-liga o envio depois do teste.
+
+- 2026-09-16 T24 EDITADO: commit 12943fc (cadastro 3 colunas + edge register-customer valida campos). Focados 38/38, tsc 0. Caçador iniciado.
+- 2026-09-16 T24 CORRIGIDO: Caçador/Cético confirmaram B1 (edge recusava corpo antigo -> sem aviso ao admin) e B2 (testes de texto). Edge so limita tamanho via _shared/fichaCadastro.ts; testes exercitam lerFicha/montarFicha; 5 mutantes pegos. Caçador rodada 2.
+- 2026-09-16 T24 VALIDADO: Caçador r2 limpo; trim de nome/empresa (1f6d6aa); 917/917. Estresse concorrente NAO rodado: exigiria criar logins reais e dispara e-mail/SMS. Push feito; falta deploy da edge register-customer pelo Lovable.

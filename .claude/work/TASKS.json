@@ -170,6 +170,22 @@
       "status": "done",
       "validation": "done — SQL 170000 e 150000 aplicados; testado em PGlite pelo cacador (mensagens com o codigo); guarda de ultima definicao",
       "depends_on": []
+    },
+    {
+      "id": "T24",
+      "title": "Cadastro publico igual ao B2BWave: Company*, Full name*, Phone*, Activity, Address*, Address 2, City*, State, Country* (US), Postal code*, Email*, Password*, Password confirmation* (reCAPTCHA fora: precisa chave Google do dono)",
+      "status": "validating",
+      "validation": "caçador r2 limpo; 917/917; aguarda deploy da edge + teste no navegador",
+      "depends_on": []
+    },
+    {
+      "id": "T25",
+      "title": "reCAPTCHA no cadastro publico (igual B2BWave) — precisa chave Google (site key + secret) do dono",
+      "status": "blocked",
+      "validation": "aguarda chave do dono",
+      "depends_on": [
+        "T24"
+      ]
     }
   ]
 }
