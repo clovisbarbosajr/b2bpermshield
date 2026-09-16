@@ -118,8 +118,8 @@
     {
       "id": "T16",
       "title": "Checkout: Select address vazio — nao puxa o endereco da ficha do cliente; conferir tudo que o checkout deveria herdar da ficha (nome, empresa, telefone, tax group, price list, shipping)",
-      "status": "validating",
-      "validation": "r2 corrigido em 0c7aab9; cacador r3",
+      "status": "done",
+      "validation": "done — 3 rodadas limpas; bateria 838/838 (c665e53); publish pendente",
       "depends_on": []
     },
     {
@@ -139,8 +139,8 @@
     {
       "id": "T19",
       "title": "Catalogo do portal: precos aparecem $0.00 por ~1 min ate carregar o price list; alguns ficam $0.00",
-      "status": "validating",
-      "validation": "lote em c662819, foco 95/95; cacador em curso; $0.00 residual aguarda SQL do dono",
+      "status": "done",
+      "validation": "done — lote de precos, 2 rodadas limpas; bateria 838/838 (c665e53); publish pendente. Produtos a $0.00 aguardam SQL do dono (dado, nao codigo)",
       "depends_on": []
     },
     {

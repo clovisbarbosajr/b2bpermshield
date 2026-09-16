@@ -6663,3 +6663,19 @@ enumeracao REFUTADO — ja existia no corpo HTTP, so fecha no edge: T15, decisao
 do dono; incerto≠falhou e approval sem erro CONFIRMADOS), r2 (mesma classe na
 aprovacao -> raiz no helper; prefixo do teste de e-mail). Bateria 806/806.
 Publish pendente do dono.
+
+### 16/set (tarde) — leva dos testes da Jessika como cliente novo
+
+- T16 checkout/endereco: helper `montarOpcoesDeEndereco` (conta so com os 4
+  campos), banner quando a ficha nao carrega, deps do efeito por id, endereco de
+  entrega obrigatorio, reuso por `mesmoEndereco` (5 campos), linha criada entra
+  no estado. 3 rodadas cacador/cetico. Commits 9424835..8b1ba92.
+- T18 login: `entrarComSenha` — excecao do auth-js (assinante estoura apos
+  gravar a sessao) vira erro visivel; aprovado pelo dono. Mesma classe em
+  ResetPassword/EditPassword aguarda OK. Diagnostico no browser pendente.
+- T19 catalogo/preco: `getProductPrices` em lote espelhando `preco_autoritativo`
+  (~12-16 requests vs ~1.000). Erro na lista so derruba quem precisa dela.
+  T20 (sub-login sem ler a linha do pai, RLS) proposto em
+  docs/PROPOSTA-T20-sublogin-le-conta-pai.sql.
+- Busca do catalogo: nao era bug (Jessika confirmou).
+- `npm test` em c665e53: 76 arquivos / 838 testes, tsc e checks OK.
