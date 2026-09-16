@@ -275,15 +275,20 @@ describe("as telas de admin-create-user usam motivoDaEdge", () => {
     const arquivos = (readdirSync("src", { recursive: true }) as string[])
       .filter((n) => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n))
       .map((n) => `src/${n.replace(/\\/g, "/")}`)
-      .filter((a) => readFileSync(a, "utf8").includes(MARCADOR))
+      .filter((a) => normalizaAspas(readFileSync(a, "utf8")).includes(MARCADOR))
       .sort();
     expect(arquivos).toEqual(TELAS.map(([a]) => a).sort());
   });
   const MARCADOR = 'invoke("admin-create-user"';
+  // O repo escreve `invoke('...')` com aspas simples em Notificacoes/Checkout e
+  // nao ha regra de eslint para aspas: um chamador novo com aspas simples
+  // passava calado pela varredura (mutante do Cacador). Normaliza antes.
+  const normalizaAspas = (s: string) =>
+    s.replace(/invoke\(\s*'admin-create-user'/g, 'invoke("admin-create-user"');
 
   for (const [arq, esperados] of TELAS) {
     it(`${arq.split("/").pop()}: ${esperados} chamadas, todas com motivoDaEdge`, () => {
-      const fonte = readFileSync(arq, "utf8");
+      const fonte = normalizaAspas(readFileSync(arq, "utf8"));
       expect(fonte).toMatch(/import \{ motivoDaEdge \} from "@\/lib\/reenvioPlacar"/);
       let resto = fonte;
       let vistos = 0;
