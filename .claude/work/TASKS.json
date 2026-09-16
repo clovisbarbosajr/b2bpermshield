@@ -142,6 +142,13 @@
       "status": "validating",
       "validation": "lote em c662819, foco 95/95; cacador em curso; $0.00 residual aguarda SQL do dono",
       "depends_on": []
+    },
+    {
+      "id": "T20",
+      "title": "Sub-login nao le a linha da empresa em clientes (RLS) — front nao herda a tabela de preco do pai; migration proposta em docs/PROPOSTA-T20-sublogin-le-conta-pai.sql",
+      "status": "blocked",
+      "validation": "aguarda dono: decidir policy (expoe a linha do pai) ou RPC; conferir se ha sub-login na base",
+      "depends_on": []
     }
   ]
 }

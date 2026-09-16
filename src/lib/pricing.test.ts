@@ -114,6 +114,14 @@ describe("getProductPrices — o lote", () => {
       await expect(getProductPrices({ productIds: ["p-1", "p-2"], customerId: "cli-0" })).rejects.toThrow();
     });
 
+  it("erro na lista NAO derruba o bloco quando TODO id tem preco combinado (a lista nao e necessaria)", async () => {
+    loja.produto_precos_cliente.push({ produto_id: "p-2", cliente_id: "cli-0", preco: 120 });
+    tabelasComErro = new Set(["tabela_preco_itens"]);
+    await expect(getProductPrices({ productIds: ["p-1", "p-2"], customerId: "cli-0" })).resolves.toEqual({
+      "p-1": { price: 70, source: "customer" }, "p-2": { price: 120, source: "customer" },
+    });
+  });
+
   it("sub-login: preco combinado da CONTA do pai; tabela do sub vence a do pai", async () => {
     const r = await getProductPrices({ productIds: ["p-1", "p-2", "p-3"], customerId: "sub-0" });
     expect(r["p-1"]).toEqual({ price: 70, source: "customer" });     // combinado e de cli-0, nao de sub-0

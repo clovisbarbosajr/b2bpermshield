@@ -1,16 +1,17 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T16 — Correção (rodada 3) — linha criada entra no estado; gate `__company__`; guarda de ordem
+- [ ] Lane A — T16 — Cético (rodada 3) — sobre 8b1ba92
 - [ ] Lane D — T18 — Validação — U1 limpa; aguarda diagnóstico no browser e OK do dono para as telas de senha
 - [ ] Lane B — T18 — Spec Validator — login só completa após recarregar a página
-- [ ] Lane C — T19 — Cético — erro na lista com preço combinado; sub-login sem a lista do pai (RLS)
+- [ ] Lane C — T19 — Correção — erro na lista só derruba quem precisa dela; migration T20 proposta
 
 ## ⏳ Pendentes
 - [ ] Publish do front (T13) — dono
 - [ ] T17 — checkout: frete 0 silencioso quando o cliente não tem shipping option atribuída
 
 ## 🚫 Bloqueadas
+- [ ] T20 — sub-login não herda a lista de preço do pai na tela (RLS de `clientes`) — SQL proposto, decisão do dono
 - [ ] T9 — 1 produto com foto morta na origem ("Select 3/4 x 7.48 - DO NOT SHIP") — Jessika decide se sobe
 - [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo de enumeração) — decisão do dono
 - [ ] 3 logins órfãos (admin@permshield.com, clovisbarbosajr@gmail.com, jessika.andrade@hotmail.com) — dono decide

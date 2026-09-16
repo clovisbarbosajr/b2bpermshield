@@ -103,10 +103,16 @@ export async function getProductPrices({
     ]);
     if (produtosRes.error) throw new Error(`Erro ao buscar produto: ${produtosRes.error.message}`);
     if (customerPriceRes.error) throw new Error(`Erro ao buscar preço cliente: ${customerPriceRes.error.message}`);
-    if (plRes.error) throw new Error(`Erro ao buscar tabela de preço: ${plRes.error.message}`);
 
     const base = new Map((produtosRes.data ?? []).map((p) => [p.id, p.preco]));
     const doCliente = new Map((customerPriceRes.data ?? []).map((r) => [r.produto_id, r.preco]));
+    // A lista so e NECESSARIA para quem nao tem preco combinado — era isso que a
+    // versao um-por-um fazia, lendo `tabela_preco_itens` so depois do early
+    // return. Lancar sempre derrubava o bloco inteiro (e o carrinho) por um
+    // erro numa tabela que aqueles produtos nem usam.
+    if (plRes.error && bloco.some((id) => doCliente.get(id) == null)) {
+      throw new Error(`Erro ao buscar tabela de preço: ${plRes.error.message}`);
+    }
     const daLista = new Map((plRes.data ?? []).map((r) => [r.produto_id, r.preco]));
     for (const id of bloco) {
       out[id] = resolverPreco({
