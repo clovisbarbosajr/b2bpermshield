@@ -132,8 +132,8 @@
     {
       "id": "T18",
       "title": "Login: depois de digitar a senha e entrar, a tela nao avanca; so entra apos recarregar a pagina",
-      "status": "in_progress",
-      "validation": "U1 aprovada pelo dono (faca isso); implementacao; U0 diagnostico no browser pendente",
+      "status": "validating",
+      "validation": "U1 em f6306be (aprovada pelo dono); cacador em curso; U0 diagnostico no browser pendente do dono",
       "depends_on": []
     },
     {

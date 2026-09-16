@@ -13,7 +13,7 @@ import { useCart } from "@/contexts/CartContext";
 import { cartKey, statusKey, normalizeStatus } from "@/lib/stock";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { getProductPrice, PriceResult } from "@/lib/pricing";
+import { getProductPrice, getProductPrices, PriceResult } from "@/lib/pricing";
 import { clienteDoPortal } from "@/lib/precoDoItem";
 import { catalogCategoryButtons, descendantIds, ancestorChain } from "@/lib/categoryTree";
 
@@ -319,22 +319,35 @@ const Catalogo = () => {
 
     const fetchPrices = async () => {
       try {
+        // EM BLOCOS, e nao um `getProductPrice` por produto: eram ~4 idas ao
+        // banco por produto (~1.300 para o catalogo inteiro) e o preco so
+        // aparecia quando a ULTIMA voltava. Um bloco que falha cai no preco base
+        // sozinho, sem derrubar os outros.
+        const blocos: Produto[][] = [];
+        for (let i = 0; i < produtos.length; i += 100) blocos.push(produtos.slice(i, i + 100));
         const results = await Promise.all(
-          produtos.map((p) =>
+          blocos.map((bloco) =>
             // QUANTIDADE = o minimo do produto, que e a quantidade que o proprio
             // campo do catalogo ja vem preenchido e a mesma que a ficha do
             // produto usa (`setQuantidade(quantidade_minima)`). Com o `1`
             // implicito de antes, um produto com minimo 10 e faixa de desconto a
             // partir de 10 aparecia no catalogo por um preco e na ficha por
             // outro — para uma quantidade que o cliente nem podia pedir.
-            getProductPrice({ productId: p.id, customerId: clienteId, quantity: Math.max(p.quantidade_minima || 1, 1) })
-              .then((r) => ({ id: p.id, result: r, falhou: false }))
-              .catch(() => ({ id: p.id, result: { price: p.preco, source: "base" as const }, falhou: true }))
+            getProductPrices({
+              productIds: bloco.map((p) => p.id),
+              customerId: clienteId,
+              quantities: Object.fromEntries(bloco.map((p) => [p.id, Math.max(p.quantidade_minima || 1, 1)])),
+            })
+              .then((r) => ({ result: r, falhou: false }))
+              .catch(() => ({
+                result: Object.fromEntries(bloco.map((p) => [p.id, { price: p.preco, source: "base" as const }])),
+                falhou: true,
+              }))
           )
         );
         const map: Record<string, PriceResult> = {};
         for (const r of results) {
-          map[r.id] = r.result;
+          Object.assign(map, r.result);
         }
         setPrices(map);
         // O fallback continua (preco na tela e melhor que tela sem preco), mas

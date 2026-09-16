@@ -1,8 +1,8 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T16 — Caçador (rodada 2) — sobre b13e12b
-- [ ] Lane D — T18 — Implementação U1 — login: exceção vira erro visível, botão libera
+- [ ] Lane A — T16 — Cético (rodada 2) — pedido sem endereço; comentários; conta sem estado/CEP; reuso por rua+cidade
+- [ ] Lane D — T18 — Caçador — sobre f6306be (helper de login); diagnóstico no browser pendente
 - [ ] Lane B — T18 — Spec Validator — login só completa após recarregar a página
 - [ ] Lane C — T19 — Implementação — preço em lote (`getProductPrices`), Catalogo, mock do stress
 

@@ -53,6 +53,26 @@ const consulta = (tabela: string) => {
   const api: any = {
     select: () => api,
     eq: (col: string, val: unknown) => { filtros[col] = val; return api; },
+    in: (col: string, vals: unknown[]) => { filtros[col] = vals; return api; },
+    // `await` da query sem `maybeSingle()`: lista, como o caminho em lote de
+    // `getProductPrices` faz. Mesma latencia, mesmo `tabelasComErro`.
+    then(resolve: (v: unknown) => void, reject: (e: unknown) => void) {
+      return api.lista().then(resolve, reject);
+    },
+    async lista() {
+      await latencia();
+      if (tabelasComErro.has(tabela)) return { data: null, error: { message: `falha simulada em ${tabela}` } };
+      const linhas: Record<string, unknown>[] =
+        tabela === "clientes" ? Object.values(loja.clientes)
+        : tabela === "produtos" ? Object.values(loja.produtos)
+        : tabela === "produto_precos_cliente" ? loja.produto_precos_cliente
+        : tabela === "tabela_preco_itens" ? loja.tabela_preco_itens
+        : null;
+      if (!linhas) throw new Error(`tabela nao simulada: ${tabela}`);
+      const casa = (l: Record<string, unknown>) => Object.entries(filtros).every(([c, v]) =>
+        Array.isArray(v) ? v.includes(l[c]) : l[c] === v);
+      return { data: linhas.filter(casa), error: null };
+    },
     async maybeSingle() {
       // A latencia fica AQUI: e o momento em que o dado sai do banco. Tudo que a
       // Jess fizer depois deste await ja nao esta neste resultado.
