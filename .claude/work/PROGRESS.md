@@ -1,10 +1,10 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T11 — Cético — validando 7 achados (variantes fora, parada, admin_rev, updated_at, content-type, limit)
 - [ ] Lane B — T12 — Levantamento — código varrido (só Cloudinary); aguarda SELECT de texto do dono
 
 ## 🚫 Bloqueadas
+- [ ] T11 — função das fotos pronta — aguarda deploy pelo Lovable e execução (dry_run → real)
 - [ ] T9 — 6 fotos Slat Wall apagadas na origem — Jessika sobe de novo pela ficha
 
 ## ✅ Concluídas e validadas

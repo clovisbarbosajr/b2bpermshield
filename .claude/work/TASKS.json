@@ -81,8 +81,8 @@
     {
       "id": "T11",
       "title": "Copiar as fotos de produto do Cloudinary do B2BWave para o bucket product-images (edge de uso unico, sem e-mail, sem chave externa)",
-      "status": "validating",
-      "validation": "validating — 12/12, check-edge OK, 6 mutantes (db7185f); cacador em curso",
+      "status": "blocked",
+      "validation": "codigo validado: 2 rodadas cacador+cetico limpas, bateria 804/804 em b996c13. BLOQUEADA ate o dono pedir deploy no Lovable e rodar dry_run -> real",
       "depends_on": []
     },
     {

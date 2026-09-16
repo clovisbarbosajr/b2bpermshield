@@ -6624,3 +6624,15 @@ B2BWave antes disso.
 
 Dono rodou a migration do indice (indice_ok = 1) e publicou. T5, T6-U1, T7, T8 e
 T10 em producao. T11 (fotos) aguarda cacador -> cetico -> deploy pelo Lovable.
+
+### 16/set — T11 pronta para deploy
+
+`copiar-fotos-cloudinary` (db7185f -> 2d35395 -> b996c13). Rodada 1: variantes
+faltavam em ALVOS, criterio de parada inalcancavel (mortas ficam no count),
+erro do contador virava 0, nota operacional (ficha aberta regrava). Rodada 2:
+guarda nao prendia o `else if (restantes !== null)`; `default_product_image`
+entrou. Refutados: updated_at carimbado (mudanca real), SVG fora do mapa
+(reportado, nao gravado), limit sem order (500 > 326). Bateria 804/804.
+Estresse concorrente nao se aplica: uma chamada de admin, sequencial, idempotente.
+AGUARDANDO: deploy pelo chat do Lovable; depois dry_run (so conta), depois real
+ate copiadas = 0. B2BWave so pode ser cancelado depois.
