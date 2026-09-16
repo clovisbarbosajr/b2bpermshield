@@ -1,14 +1,12 @@
 # Progresso
 
-## 🔄 Em andamento
-- [ ] Lane A — T13 — Correção (rodada 2) — `resultadoDoEnvio` distingue incerto (rede) de falha; textos dos dois sites
-
 ## ⏳ Pendentes
+- [ ] Publish do front (T13) — dono
 
 ## 🚫 Bloqueadas
-- [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo de enumeração) — decisão do dono
 - [ ] T9 — 1 produto com foto morta na origem ("Select 3/4 x 7.48 - DO NOT SHIP") — Jessika decide se sobe
-- [ ] Sender de notificações ainda "INWISE" — UPDATE enviado ao dono (`notification_channels`)
+- [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo de enumeração) — decisão do dono
+- [ ] 3 logins órfãos (admin@permshield.com, clovisbarbosajr@gmail.com, jessika.andrade@hotmail.com) — dono decide
 
 ## ✅ Concluídas e validadas
 - [x] T1 — sync do B2BWave e API de saída removidos; zero pedidos
@@ -22,4 +20,5 @@
 - [x] T10 — status normalizado no admin (lista + ficha)
 - [x] T11 — 287 fotos copiadas do Cloudinary do B2BWave para o nosso storage
 - [x] T12 — varredura: nada mais depende do B2BWave; pode cancelar
+- [x] T13 — telas não afirmam "link sent" quando o servidor recusa (torneira/teto)
 - [x] T14 — `copiar-fotos-cloudinary` removida do deploy e do repo

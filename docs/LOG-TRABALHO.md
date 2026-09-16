@@ -6648,3 +6648,18 @@ origem). Conferido na lista do admin: 25/25 imagens da pagina vem de
 `product-images/cloudinary/...`, 0 quebradas, 0 ainda no Cloudinary.
 Cloudinary do B2BWave nao e mais lido por nada — falta so a varredura de texto
 (SELECT enviado ao dono) para liberar o cancelamento.
+
+### 16/set — T13 fechada: telas nao afirmam "link sent" quando o servidor recusa
+
+Causa: `send-email` recusa com HTTP 200 `{skipped:true, reason}` (torneira geral
+`envio_permitido`, teto/hora, cooldown) e 9 telas so olhavam `error`. Helper
+compartilhado `resultadoDoEnvio(data, error, fallback)` -> `{ok, incerto,
+motivo}`: recusado = "Nothing was sent: <reason> (Settings › Notifications)";
+incerto (rede) = "Could not confirm delivery … check the notification log";
+falha HTTP = motivo real. Telas admin exibem o motivo; publicas mostram texto
+neutro (nao vazar estado). Guarda varre todo `invoke("send-email")` em `src/`.
+Commits bf1103a -> a63fd79 -> 0caf993 -> 3c38178. Rodadas: r1 (oraculo de
+enumeracao REFUTADO — ja existia no corpo HTTP, so fecha no edge: T15, decisao
+do dono; incerto≠falhou e approval sem erro CONFIRMADOS), r2 (mesma classe na
+aprovacao -> raiz no helper; prefixo do teste de e-mail). Bateria 806/806.
+Publish pendente do dono.

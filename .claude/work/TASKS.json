@@ -95,8 +95,8 @@
     {
       "id": "T13",
       "title": "Toast mente quando a torneira geral esta fechada: reset/magic link mostram sent com o servidor recusando (envio_permitido -> skipped)",
-      "status": "validating",
-      "validation": "validating — U1+U2+U3 em bf1103a, foco 153/153, 3 mutantes; cacador em curso",
+      "status": "done",
+      "validation": "done — 2 rodadas cacador+cetico, bateria 806/806 (3c38178); publish pendente",
       "depends_on": []
     },
     {
