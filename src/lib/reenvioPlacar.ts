@@ -146,16 +146,28 @@ export async function motivoDaEdge(data: any, error: any, fallback: string): Pro
 // servidor; a unica regra de texto e o ponteiro para a tela da torneira quando
 // o motivo for pausa. ponytail: o ponteiro depende da palavra "pausad" no
 // motivo do SQL (`envio_permitido`); se o texto mudar, some so o ponteiro.
+//
+// Tres desfechos, e o `motivo` ja diz qual e — o chamador so exibe:
+//   recusado (skipped)  -> "Nothing was sent: <reason>"          (certeza: nao saiu)
+//   incerto  (rede)     -> "Could not confirm delivery: ..."      (pode ter saido)
+//   falha    (HTTP/erro)-> o motivo real do servidor
+// Afirmar "failed"/"nao saiu" no caso incerto e o que `incerto` acima proibe.
 export async function resultadoDoEnvio(
   data: any, error: any, fallback: string,
-): Promise<{ ok: boolean; motivo: string }> {
+): Promise<{ ok: boolean; incerto: boolean; motivo: string }> {
   if (data?.skipped === true) {
     const reason = typeof data.reason === "string" && data.reason ? data.reason : "sending was refused";
     const onde = /pausad/i.test(reason) ? " (Settings › Notifications)" : "";
-    return { ok: false, motivo: `Nothing was sent: ${reason}${onde}` };
+    return { ok: false, incerto: false, motivo: `Nothing was sent: ${reason}${onde}` };
+  }
+  if (incerto({ value: { error } })) {
+    return {
+      ok: false, incerto: true,
+      motivo: `Could not confirm delivery: ${error?.message || fallback} — check the notification log before resending`,
+    };
   }
   if (error || data?.error) {
-    return { ok: false, motivo: await motivoDaEdge(data, error, fallback) };
+    return { ok: false, incerto: false, motivo: await motivoDaEdge(data, error, fallback) };
   }
-  return { ok: true, motivo: "" };
+  return { ok: true, incerto: false, motivo: "" };
 }

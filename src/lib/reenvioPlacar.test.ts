@@ -227,17 +227,31 @@ describe("resultadoDoEnvio", () => {
     expect(r.motivo).toContain("teto de 25 auth/hora atingido");
     expect(r.motivo).not.toContain("Settings");
   });
+  it("rede caida e INCERTO: nao diz 'failed' nem 'nothing was sent', manda olhar o log", async () => {
+    const r = await resultadoDoEnvio(redeCaiu().value.data, redeCaiu().value.error, "fb");
+    expect(r.ok).toBe(false);
+    expect(r.incerto).toBe(true);
+    expect(r.motivo).toContain("Could not confirm delivery");
+    expect(r.motivo).toContain("notification log");
+    expect(r.motivo).toMatch(/^Could not confirm delivery/);
+    expect(r.motivo).not.toMatch(/Nothing was sent/);
+  });
+  it("recusa e falha HTTP NAO sao incertas", async () => {
+    expect((await resultadoDoEnvio(recusado("x").value.data, null, "fb")).incerto).toBe(false);
+    const e: any = erroHttp({ error: "boom" });
+    expect((await resultadoDoEnvio(e.value.data, e.value.error, "fb")).incerto).toBe(false);
+  });
   it("`skipped` exige === true, como `bloqueado`", async () => {
     expect((await resultadoDoEnvio({ skipped: "sim" }, null, "fb")).ok).toBe(true);
   });
   it("non-2xx: motivo do corpo, nao a frase fixa", async () => {
     const e: any = erroHttp({ error: "Not authorized: recipient must be your own account" });
     const r = await resultadoDoEnvio(e.value.data, e.value.error, "fb");
-    expect(r).toEqual({ ok: false, motivo: "Not authorized: recipient must be your own account" });
+    expect(r).toEqual({ ok: false, incerto: false, motivo: "Not authorized: recipient must be your own account" });
   });
   it("200 com `error` no corpo tambem e falha; sucesso limpo e ok", async () => {
-    expect(await resultadoDoEnvio({ error: "x" }, null, "fb")).toEqual({ ok: false, motivo: "x" });
-    expect(await resultadoDoEnvio({ success: true }, null, "fb")).toEqual({ ok: true, motivo: "" });
+    expect(await resultadoDoEnvio({ error: "x" }, null, "fb")).toEqual({ ok: false, incerto: false, motivo: "x" });
+    expect(await resultadoDoEnvio({ success: true }, null, "fb")).toEqual({ ok: true, incerto: false, motivo: "" });
   });
 });
 

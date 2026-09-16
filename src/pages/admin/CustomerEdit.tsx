@@ -1202,7 +1202,7 @@ const CustomerEdit = () => {
                     // "not confirmed", nao "nao saiu": rede caida DEPOIS de o servidor
                     // entregar e incerto (reenvioPlacar.ts) — afirmar ausencia faz o
                     // operador reenviar e o cliente receber dois links.
-                    if (!mail.ok) toast.error(`Employee ${contactForm.nome} created, but the setup email was not confirmed: ${mail.motivo} — check the notification log before resending with the 🔒 button.`);
+                    if (!mail.ok) toast.error(`Employee ${contactForm.nome} created — setup email: ${mail.motivo}. Use the 🔒 button to resend if needed.`);
                     else toast.success(`Employee ${contactForm.nome} created. A setup email was sent to ${contactForm.email}.`);
                   }}>
                     {savingContact ? "Creating..." : "Create employee"}
@@ -1286,7 +1286,7 @@ const CustomerEdit = () => {
                     // tela ficava calada depois de "Customer approved!".
                     if (!data?.skipped) {
                       const r = await resultadoDoEnvio(data, error, "unknown error");
-                      if (!r.ok) toast.error(`Approval email failed: ${r.motivo}`);
+                      if (!r.ok) toast.error(`Approval email — ${r.motivo}`);
                       return;
                     }
                     {
@@ -1305,7 +1305,7 @@ const CustomerEdit = () => {
                           },
                         });
                         const r2 = await resultadoDoEnvio(d2, e2, "unknown error");
-                        if (!r2.ok) toast.error(`Approval email failed: ${r2.motivo}`);
+                        if (!r2.ok) toast.error(`Approval email — ${r2.motivo}`);
                         else toast.success(`Approval email sent to ${cliente.email}.`);
                       }
                     }

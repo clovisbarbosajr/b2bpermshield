@@ -1,7 +1,7 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T13 — Correção — texto do toast de incerto + erro do 1º send-email da aprovação
+- [ ] Lane A — T13 — Correção (rodada 2) — `resultadoDoEnvio` distingue incerto (rede) de falha; textos dos dois sites
 
 ## ⏳ Pendentes
 
