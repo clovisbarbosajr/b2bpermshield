@@ -6699,3 +6699,13 @@ Verificado no Chrome do dono via View as Permshield: SEND ORDER sem frete
 mostra "Select a shipping option." e nenhum pedido foi gravado (REST: 0).
 Logins orfaos clovisbarbosajr@gmail.com e jessika.andrade@hotmail.com
 apagados pelo dono (SELECT de conferencia vazio). Bateria 864/864.
+
+### 16/set — T15 no ar e verificado
+
+Edge send-email deployado pelo Lovable. Teste em producao com envio PAUSADO
+(conferido antes: sync_state.envio_pausado.on = true): anonimo pediu
+request_magic_link para e-mail inexistente e para jess@permwood.com -> os dois
+HTTP 200 {"success":true}. Chamada de staff (admin) para o mesmo e-mail ->
+{skipped:true, blocked:true, reason:"envio pausado manualmente"}.
+notification_log: 2 linhas "NAO ENVIADO — envio pausado manualmente", nenhum
+envio. Dono re-liga o envio depois do teste.

@@ -1,7 +1,6 @@
 # Progresso
 
 ## 🚫 Bloqueadas
-- [ ] T15 — send-email sem oráculo de cliente — código validado; aguarda deploy do edge pelo Lovable
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
 
 ## ✅ Concluídas e validadas
@@ -26,3 +25,4 @@
 - [x] T17 — pedido de cliente exige opção de frete (verificado em produção)
 - [x] T20 — sub-login herda lista de preço e endereço da empresa (RPC minha_conta)
 - [x] T23 — mensagens de erro do banco legíveis (estoque, pedido mínimo, opções)
+- [x] T15 — send-email não revela se o e-mail é cliente (verificado em produção)

@@ -111,8 +111,8 @@
     {
       "id": "T15",
       "title": "send-email: responder {success:true} generico para tipos AUTH quando skipped (fecha o oraculo de enumeracao que a torneira expoe) — EDGE, area de envio, decisao do dono",
-      "status": "blocked",
-      "validation": "codigo validado: cacador limpo (nenhum envio a mais provado), bateria 869/869 (46a3486). Aguarda deploy do edge send-email pelo Lovable",
+      "status": "done",
+      "validation": "done — codigo validado (869/869), edge deployado pelo Lovable; VERIFICADO EM PRODUCAO 16/set com envio pausado: anonimo recebe {success:true} identico para e-mail inexistente e para cliente ativo; staff recebe {skipped,blocked,reason}; notification_log registrou as 2 recusas (NAO ENVIADO), nenhum envio",
       "depends_on": []
     },
     {
