@@ -38,28 +38,28 @@
       "id": "T5",
       "title": "Normalizar status como o banco (lower(btrim) ANTES do NAME_MAP) em stock.ts, Catalogo.tsx, ProdutoDetalhe.tsx",
       "status": "done",
-      "validation": "done — cacador+cetico limpos; bateria 789/789 em 859cb44; publish pendente",
+      "validation": "done — cacador+cetico limpos; bateria 789/789 em 859cb44; publish pendente | PUBLICADO 16/set",
       "depends_on": []
     },
     {
       "id": "T6",
       "title": "Create customer falha: edge admin-create-user devolve non-2xx e a tela mostra erro generico (email jess@permwood.com ja e login)",
       "status": "done",
-      "validation": "U1 done. U2 resolvida sem codigo: o e-mail estava preso por login orfao (jess@permwood.com, papel cliente sem ficha); dono apagou em 16/set apos backup_auth_users_20260916",
+      "validation": "U1 done. U2 resolvida sem codigo: o e-mail estava preso por login orfao (jess@permwood.com, papel cliente sem ficha); dono apagou em 16/set apos backup_auth_users_20260916 | PUBLICADO 16/set",
       "depends_on": []
     },
     {
       "id": "T7",
       "title": "Delete de produto >1min e statement timeout: count e cascade em estoque_log (1M linhas) sem indice em produto_id",
-      "status": "blocked",
-      "validation": "codigo done (guarda + 2 rodadas limpas); BLOQUEADA ate o dono rodar a migration 20260916120000 no editor do Lovable",
+      "status": "done",
+      "validation": "done — migration aplicada pelo dono em 16/set (indice_ok=1); publish feito",
       "depends_on": []
     },
     {
       "id": "T8",
       "title": "Filtro de produtos: Parent Category + Sub-categories dependentes (pedido da Jessika)",
       "status": "done",
-      "validation": "done — 2 rodadas limpas; bateria 789/789; publish pendente",
+      "validation": "done — 2 rodadas limpas; bateria 789/789; publish pendente | PUBLICADO 16/set",
       "depends_on": []
     },
     {
@@ -73,7 +73,7 @@
       "id": "T10",
       "title": "Admin /admin/products: filtro e Select de status comparam status_produto cru (usar statusKey) — linhas 163/558",
       "status": "done",
-      "validation": "done — 2 rodadas limpas (lista + ficha); bateria 789/789; publish pendente",
+      "validation": "done — 2 rodadas limpas (lista + ficha); bateria 789/789; publish pendente | PUBLICADO 16/set",
       "depends_on": [
         "T8"
       ]
@@ -81,8 +81,8 @@
     {
       "id": "T11",
       "title": "Copiar as fotos de produto do Cloudinary do B2BWave para o bucket product-images (edge de uso unico, sem e-mail, sem chave externa)",
-      "status": "in_progress",
-      "validation": "spec-validator",
+      "status": "validating",
+      "validation": "validating — 12/12, check-edge OK, 6 mutantes (db7185f); cacador em curso",
       "depends_on": []
     }
   ]

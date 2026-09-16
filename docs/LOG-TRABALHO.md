@@ -6619,3 +6619,8 @@ novos pela ficha ja vao para o bucket `product-images`. T11 = edge de uso
 unico que baixa cada URL viva, sobe no bucket e troca o link (tambem
 `produto_imagens`). Sem e-mail, sem chave do B2BWave. Dono NAO cancela o
 B2BWave antes disso.
+
+### 16/set — publish feito
+
+Dono rodou a migration do indice (indice_ok = 1) e publicou. T5, T6-U1, T7, T8 e
+T10 em producao. T11 (fotos) aguarda cacador -> cetico -> deploy pelo Lovable.
