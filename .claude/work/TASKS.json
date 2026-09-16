@@ -44,8 +44,8 @@
     {
       "id": "T6",
       "title": "Create customer falha: edge admin-create-user devolve non-2xx e a tela mostra erro generico (email jess@permwood.com ja e login)",
-      "status": "blocked",
-      "validation": "U1 done (2 rodadas limpas, bateria 789/789, publish pendente). U2 blocked — dono decide: adotar login existente ou recusar",
+      "status": "done",
+      "validation": "U1 done. U2 resolvida sem codigo: o e-mail estava preso por login orfao (jess@permwood.com, papel cliente sem ficha); dono apagou em 16/set apos backup_auth_users_20260916",
       "depends_on": []
     },
     {
@@ -66,7 +66,7 @@
       "id": "T9",
       "title": "Imagens quebradas nos produtos Slat Wall na lista de produtos",
       "status": "blocked",
-      "validation": "6 URLs sao do Cloudinary do B2BWave (conta dbrtm8pf6) e respondem 404 x-cld-error Resource not found — apagadas na origem, irrecuperaveis pela URL. Aguarda contagem (quantos produtos apontam para o Cloudinary) e re-upload pela Jessika (ProductEdit ja sobe para o bucket product-images)",
+      "validation": "6 URLs 404 no Cloudinary do B2BWave; as outras 315 ainda carregam de la. Vira T11 (copiar para o nosso storage); as 6 mortas a Jessika sobe de novo",
       "depends_on": []
     },
     {
@@ -77,6 +77,13 @@
       "depends_on": [
         "T8"
       ]
+    },
+    {
+      "id": "T11",
+      "title": "Copiar as fotos de produto do Cloudinary do B2BWave para o bucket product-images (edge de uso unico, sem e-mail, sem chave externa)",
+      "status": "in_progress",
+      "validation": "spec-validator",
+      "depends_on": []
     }
   ]
 }

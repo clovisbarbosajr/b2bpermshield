@@ -6601,3 +6601,21 @@ URL. A ficha (`ProductEdit.tsx:333`) ja sobe imagem para o bucket
 `product-images` do Supabase, entao o caminho e re-upload pela Jessika.
 BLOQUEADA ate saber quantos produtos estao nessa situacao (SELECT enviado ao
 dono).
+
+### 16/set — T6-U2 resolvida sem codigo; T11 INICIADA (fotos)
+
+O "e-mail ja registrado" de `jess@permwood.com` era um login ORFAO: papel
+`cliente`, sem ficha (a ficha foi na limpeza de 08/set; o login ficou). A tela
+Users nao lista porque so mostra equipe. Dono rodou o backup
+`backup_auth_users_20260916` (4 logins orfaos) e `DELETE FROM auth.users WHERE
+email = 'jess@permwood.com'` (1 linha). Sobram 3 orfaos (admin@permshield.com,
+clovisbarbosajr@gmail.com, jessika.andrade@hotmail.com) — dono decide.
+Adocao de login (U2) nao e mais necessaria.
+
+Fotos: `produtos.imagem_url` = 321 no Cloudinary do B2BWave, 0 no nosso
+storage, 5 sem foto (326). As 315 vivas ainda carregam do B2BWave em cada
+pagina; quando a conta for cancelada, somem como as 6 do Slat Wall. Uploads
+novos pela ficha ja vao para o bucket `product-images`. T11 = edge de uso
+unico que baixa cada URL viva, sobe no bucket e troca o link (tambem
+`produto_imagens`). Sem e-mail, sem chave do B2BWave. Dono NAO cancela o
+B2BWave antes disso.
