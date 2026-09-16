@@ -5,8 +5,8 @@
 - [ ] T17 — checkout: frete 0 silencioso quando o cliente não tem shipping option atribuída
 
 ## 🚫 Bloqueadas
-- [ ] T18 — login: diagnóstico no browser (dono refaz login no Chrome) e OK para as telas de troca de senha
-- [ ] T19-dado — 2 produtos a $0.00 (Character, Select) — SQL do dono para ver preço base/lista
+- [ ] Telas de troca de senha (ResetPassword, EditPassword) — mesma correção do login — aguarda OK do dono
+- [ ] Produtos sem preço (base 0 e fora de qualquer lista) — dado, Jessika cadastra
 - [ ] T20 — sub-login não herda a lista de preço do pai na tela (RLS de `clientes`) — SQL proposto, decisão do dono
 - [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo) — decisão do dono
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
@@ -27,4 +27,5 @@
 - [x] T13 — telas não afirmam "link sent" quando o servidor recusa
 - [x] T14 — `copiar-fotos-cloudinary` removida do deploy e do repo
 - [x] T16 — checkout: endereço da conta listado e pré-selecionado; endereço obrigatório; sem duplicatas
+- [x] T18 — login: exceção vira erro visível, botão não trava (confirmado pelo dono)
 - [x] T19 — catálogo: preços em lote (~12-16 requisições em vez de ~1.000)

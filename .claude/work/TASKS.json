@@ -132,15 +132,15 @@
     {
       "id": "T18",
       "title": "Login: depois de digitar a senha e entrar, a tela nao avanca; so entra apos recarregar a pagina",
-      "status": "validating",
-      "validation": "U1 limpa (cacador+cetico; guarda corrigida f9bce60). Aguarda: diagnostico no browser (dono) e OK do dono para a mesma correcao em ResetPassword/EditPassword (updateUser)",
+      "status": "done",
+      "validation": "done — U1 (login) 2 rodadas limpas, bateria 838/838; dono confirmou login ok (16/set). Mesma correcao em ResetPassword/EditPassword aguarda OK do dono (fora deste done)",
       "depends_on": []
     },
     {
       "id": "T19",
       "title": "Catalogo do portal: precos aparecem $0.00 por ~1 min ate carregar o price list; alguns ficam $0.00",
       "status": "done",
-      "validation": "done — lote de precos, 2 rodadas limpas; bateria 838/838 (c665e53); publish pendente. Produtos a $0.00 aguardam SQL do dono (dado, nao codigo)",
+      "validation": "done — lote de precos, 2 rodadas limpas; bateria 838/838 (c665e53); publish pendente. Produtos a $0.00 aguardam SQL do dono (dado, nao codigo) | $0.00: DADO — Character/Select com preco base 0 e fora de qualquer lista (SELECT do dono 16/set); so Honey esta na King Price List",
       "depends_on": []
     },
     {
