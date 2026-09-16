@@ -1,10 +1,8 @@
 # Progresso
 
 ## 🚫 Bloqueadas
-- [ ] Deploy T20+T23+T17 — 1º SQL 160000+170000, 2º publish, 3º SQL 150000 — dono
 - [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo) — decisão do dono
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
-- [ ] 2 logins órfãos (clovisbarbosajr@gmail.com, jessika.andrade@hotmail.com) — DELETE enviado ao dono
 
 ## ✅ Concluídas e validadas
 - [x] T1 — sync do B2BWave e API de saída removidos; zero pedidos
@@ -25,3 +23,6 @@
 - [x] T19 — catálogo: preços em lote (~12-16 requisições em vez de ~1.000)
 - [x] T22 — telas de troca de senha não travam em exceção
 - [x] T21 — checkout mostra só as opções de frete/pagamento marcadas na ficha (verificado em produção)
+- [x] T17 — pedido de cliente exige opção de frete (verificado em produção)
+- [x] T20 — sub-login herda lista de preço e endereço da empresa (RPC minha_conta)
+- [x] T23 — mensagens de erro do banco legíveis (estoque, pedido mínimo, opções)

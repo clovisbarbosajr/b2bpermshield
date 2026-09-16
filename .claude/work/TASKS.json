@@ -125,8 +125,8 @@
     {
       "id": "T17",
       "title": "Checkout: ficha nova sem shipping option atribuida — bloco some e o pedido grava frete 0 em silencio",
-      "status": "blocked",
-      "validation": "codigo validado (cacador+cetico, bateria 864/864). Deploy: SQL 20260916150000 DEPOIS do publish",
+      "status": "done",
+      "validation": "done — codigo validado, SQL 150000 aplicado, publicado; VERIFICADO EM PRODUCAO (View as Permshield): SEND ORDER sem frete -> \"Select a shipping option.\", 0 pedidos gravados",
       "depends_on": []
     },
     {
@@ -146,8 +146,8 @@
     {
       "id": "T20",
       "title": "Sub-login nao le a linha da empresa em clientes (RLS) — front nao herda a tabela de preco do pai; migration proposta em docs/PROPOSTA-T20-sublogin-le-conta-pai.sql",
-      "status": "blocked",
-      "validation": "codigo validado (cacador 0 bugs, bateria 864/864). Deploy: SQL 20260916160000 ANTES do publish",
+      "status": "done",
+      "validation": "done — SQL 160000 aplicado antes do front; codigo validado e publicado. Sem sub-login na base para teste ao vivo",
       "depends_on": []
     },
     {
@@ -167,8 +167,8 @@
     {
       "id": "T23",
       "title": "RAISE EXCEPTION com texto + USING MESSAGE (42601): cliente ve \"RAISE option already specified\" em vez de estoque insuficiente / pedido minimo / opcao nao permitida",
-      "status": "blocked",
-      "validation": "codigo validado (cacador limpo, testado em PGlite, bateria 864/864). Deploy: SQL 20260916170000 antes ou depois do publish",
+      "status": "done",
+      "validation": "done — SQL 170000 e 150000 aplicados; testado em PGlite pelo cacador (mensagens com o codigo); guarda de ultima definicao",
       "depends_on": []
     }
   ]

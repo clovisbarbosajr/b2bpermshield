@@ -6689,3 +6689,13 @@ apos o publish). Testado no Chrome do dono via View as: Permshield ve so as 3
 opcoes de frete marcadas e so Zelle; Permwood ve o endereco da ficha
 pre-selecionado. O "Select address" vazio do print era o cliente Permshield,
 criado sem endereco. Bateria 849/849.
+
+### 16/set (noite) — T17, T20, T23 no ar
+
+Deploy na ordem: SQL 20260916160000 (minha_conta) -> SQL 20260916170000 (RAISE
+valido em estoque e pedido minimo) -> front (Vercel ja tinha publicado do
+GitHub) -> SQL 20260916150000 (frete obrigatorio + RAISE valido em opcoes).
+Verificado no Chrome do dono via View as Permshield: SEND ORDER sem frete
+mostra "Select a shipping option." e nenhum pedido foi gravado (REST: 0).
+Logins orfaos clovisbarbosajr@gmail.com e jessika.andrade@hotmail.com
+apagados pelo dono (SELECT de conferencia vazio). Bateria 864/864.
