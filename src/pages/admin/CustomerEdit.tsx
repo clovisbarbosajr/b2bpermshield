@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { gravarComToken } from "@/lib/gravarComToken";
-import { motivoDaEdge } from "@/lib/reenvioPlacar";
+import { motivoDaEdge, resultadoDoEnvio } from "@/lib/reenvioPlacar";
 import { ArrowLeft, Plus, Trash2, Pencil } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
 
@@ -578,22 +578,24 @@ const CustomerEdit = () => {
                     disabled={!cliente?.id}
                     onClick={async () => {
                       if (!form.email) { toast.error("No email"); return; }
-                      const { error } = await supabase.functions.invoke("send-email", {
+                      const { data, error } = await supabase.functions.invoke("send-email", {
                         body: { type: "password_reset", email: form.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
                       });
-                      if (error) toast.error(error.message);
-                      else toast.success(`Reset password link sent to ${form.email}`);
+                      const r = await resultadoDoEnvio(data, error, "Could not send the link");
+                      if (!r.ok) { toast.error(r.motivo); return; }
+                      toast.success(`Reset password link sent to ${form.email}`);
                     }}>🔒 Send reset password link</Button>
                   <Button size="sm" className="gap-1 bg-blue-600 hover:bg-blue-700 text-white" type="button"
                     disabled={!cliente?.id}
                     onClick={async () => {
                       if (!form.email) { toast.error("No email"); return; }
                       // Server-side: provisiona o auth user se faltar (cliente migrado do B2BWave).
-                      const { error } = await supabase.functions.invoke("send-email", {
+                      const { data, error } = await supabase.functions.invoke("send-email", {
                         body: { type: "request_magic_link", email: form.email.trim().toLowerCase(), redirectTo: window.location.origin },
                       });
-                      if (error) toast.error(error.message);
-                      else toast.success(`One-time login link sent to ${form.email}`);
+                      const r = await resultadoDoEnvio(data, error, "Could not send the link");
+                      if (!r.ok) { toast.error(r.motivo); return; }
+                      toast.success(`One-time login link sent to ${form.email}`);
                     }}>🔑 Send one-time login link</Button>
                 </div>
                 <div className="space-y-2">
@@ -1057,11 +1059,12 @@ const CustomerEdit = () => {
                         ) : (<>
                         <Button variant="ghost" size="icon" className="h-7 w-7" title="Send reset password"
                           onClick={async () => {
-                            const { error } = await supabase.functions.invoke("send-email", {
+                            const { data, error } = await supabase.functions.invoke("send-email", {
                               body: { type: "password_reset", email: ct.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
                             });
-                            if (error) toast.error(error.message);
-                            else toast.success(`Reset link sent to ${ct.email}`);
+                            const r = await resultadoDoEnvio(data, error, "Could not send the link");
+                            if (!r.ok) { toast.error(r.motivo); return; }
+                            toast.success(`Reset link sent to ${ct.email}`);
                           }}>
                           🔒
                         </Button>
@@ -1187,16 +1190,17 @@ const CustomerEdit = () => {
                       return;
                     }
                     // Envia DE VERDADE o link de definição de senha (Resend + Office365 fallback).
-                    const { error: mailErr } = await supabase.functions.invoke("send-email", {
+                    const { data: mailData, error: mailErr } = await supabase.functions.invoke("send-email", {
                       body: { type: "password_reset", email: contactForm.email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
                     });
+                    const mail = await resultadoDoEnvio(mailData, mailErr, "the setup email failed");
                     setContacts(prev => [...prev, { ...ct, ativo: true }]);
                     setContactForm({ nome: "", email: "", can_confirm_order: false, can_view_full_history: false });
                     setAddingContact(false);
                     setSavingContact(false);
-                    toast.success(mailErr
-                      ? `Employee ${contactForm.nome} created, but the setup email failed — use the 🔒 button to resend.`
-                      : `Employee ${contactForm.nome} created. A setup email was sent to ${contactForm.email}.`);
+                    // O funcionario JA existe; so o e-mail falhou/recusou. Nao aborta, avisa.
+                    if (!mail.ok) toast.error(`Employee ${contactForm.nome} created, but no setup email went out: ${mail.motivo} — use the 🔒 button to resend.`);
+                    else toast.success(`Employee ${contactForm.nome} created. A setup email was sent to ${contactForm.email}.`);
                   }}>
                     {savingContact ? "Creating..." : "Create employee"}
                   </Button>
@@ -1290,7 +1294,8 @@ const CustomerEdit = () => {
                             loginUrl: `${window.location.origin}/customers-login`,
                           },
                         });
-                        if (e2 || d2?.error) toast.error(`Approval email failed: ${d2?.error || e2?.message}`);
+                        const r2 = await resultadoDoEnvio(d2, e2, "unknown error");
+                        if (!r2.ok) toast.error(`Approval email failed: ${r2.motivo}`);
                         else toast.success(`Approval email sent to ${cliente.email}.`);
                       }
                     }

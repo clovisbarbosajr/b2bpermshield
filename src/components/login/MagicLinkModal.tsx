@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { resultadoDoEnvio } from "@/lib/reenvioPlacar";
 
 interface Props {
   open: boolean;
@@ -22,12 +23,15 @@ const MagicLinkModal = ({ open, onClose }: Props) => {
     // Server-side (send-email request_magic_link): funciona também pra cliente
     // migrado do B2BWave sem login no auth ainda — o signInWithOtp recusava
     // com "Signups not allowed for otp". Resposta é sempre genérica.
-    const { error } = await supabase.functions.invoke("send-email", {
+    const { data, error } = await supabase.functions.invoke("send-email", {
       body: { type: "request_magic_link", email: trimmed, redirectTo: window.location.origin },
     });
     setLoading(false);
-    if (error) {
-      toast.error(error.message);
+    // Tela publica: `r.motivo` NAO vai para o toast — vazaria estado interno
+    // ("envio pausado", teto por hora) para visitante anonimo.
+    const r = await resultadoDoEnvio(data, error, "Could not send the link");
+    if (!r.ok) {
+      toast.error("Could not send the link right now. Please contact support.");
     } else {
       toast.success("If an account exists for this email, a one-time link has been sent. It expires in 5 minutes.");
       onClose();

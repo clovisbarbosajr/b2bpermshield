@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fatiaAPartirDe } from "@/test/fatia";
 import {
   bloqueado, falhou, incerto, classificaReenvio, adminResolve,
-  montaMensagem, textoDoLog, motivoHttp, motivoDaEdge,
+  montaMensagem, textoDoLog, motivoHttp, motivoDaEdge, resultadoDoEnvio,
 } from "./reenvioPlacar";
 
 // Testes que EXECUTAM. Os de fonte (regex sobre o texto) protegiam a fiacao mas
@@ -213,6 +213,80 @@ describe("motivoHttp", () => {
   });
 });
 
+describe("resultadoDoEnvio", () => {
+  it("torneira fechada: NAO e sucesso, diz que nada saiu e aponta a tela", async () => {
+    const r = await resultadoDoEnvio(recusado("envio pausado manualmente").value.data, null, "fb");
+    expect(r.ok).toBe(false);
+    expect(r.motivo).toContain("Nothing was sent");
+    expect(r.motivo).toContain("envio pausado manualmente");
+    expect(r.motivo).toContain("Settings");
+  });
+  it("teto por hora: nada saiu, motivo do servidor, sem ponteiro de pausa", async () => {
+    const r = await resultadoDoEnvio(recusado("teto de 25 auth/hora atingido").value.data, null, "fb");
+    expect(r.ok).toBe(false);
+    expect(r.motivo).toContain("teto de 25 auth/hora atingido");
+    expect(r.motivo).not.toContain("Settings");
+  });
+  it("`skipped` exige === true, como `bloqueado`", async () => {
+    expect((await resultadoDoEnvio({ skipped: "sim" }, null, "fb")).ok).toBe(true);
+  });
+  it("non-2xx: motivo do corpo, nao a frase fixa", async () => {
+    const e: any = erroHttp({ error: "Not authorized: recipient must be your own account" });
+    const r = await resultadoDoEnvio(e.value.data, e.value.error, "fb");
+    expect(r).toEqual({ ok: false, motivo: "Not authorized: recipient must be your own account" });
+  });
+  it("200 com `error` no corpo tambem e falha; sucesso limpo e ok", async () => {
+    expect(await resultadoDoEnvio({ error: "x" }, null, "fb")).toEqual({ ok: false, motivo: "x" });
+    expect(await resultadoDoEnvio({ success: true }, null, "fb")).toEqual({ ok: true, motivo: "" });
+  });
+});
+
+describe("as telas que chamam send-email nao afirmam envio sem olhar `skipped`", () => {
+  const MARCA = 'invoke("send-email"';
+  const norm = (s: string) => s.replace(/invoke\(\s*'send-email'/g, MARCA);
+  const arquivos = (readdirSync("src", { recursive: true }) as string[])
+    .filter((n) => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n))
+    .map((n) => `src/${n.replace(/\\/g, "/")}`)
+    .filter((a) => norm(readFileSync(a, "utf8")).includes(MARCA))
+    .sort();
+
+  it("a lista de telas que chamam send-email e a esperada (chamador novo nao passa calado)", () => {
+    expect(arquivos).toEqual([
+      "src/components/login/ForgotPasswordModal.tsx",
+      "src/components/login/MagicLinkModal.tsx",
+      "src/pages/RecuperarSenha.tsx",
+      "src/pages/admin/Clientes.tsx",
+      "src/pages/admin/Configuracoes.tsx",
+      "src/pages/admin/CustomerEdit.tsx",
+      "src/pages/admin/OrderDetail.tsx",
+      "src/pages/admin/settings/EmailSettings.tsx",
+      "src/pages/admin/settings/Notificacoes.tsx",
+    ]);
+  });
+
+  for (const arq of arquivos) {
+    it(`${arq.split("/").pop()}: toda janela com toast de sucesso decide por resultadoDoEnvio/skipped`, () => {
+      let resto = norm(readFileSync(arq, "utf8"));
+      let vistos = 0;
+      while (resto.includes(MARCA)) {
+        const daqui = fatiaAPartirDe(resto, MARCA);
+        const janela = daqui.split("\n").slice(0, 18).join("\n");
+        vistos++;
+        // So conta toast que AFIRMA envio (sent/email/link/invite) ou o estado
+        // "check your inbox"; toast de pedido depois de um fire-and-forget nao.
+        const afirma = /toast\.success\([^;]*?\b(sent|e-?mail|link|invite)/i.test(janela)
+          || /setSent\(true\)|setEnviado\(true\)/.test(janela);
+        if (afirma) {
+          expect(janela, `chamada #${vistos} em ${arq} afirma envio sem olhar a recusa`)
+            .toMatch(/resultadoDoEnvio\(|data\?\.skipped|\.skipped\b|handleResp\(/);
+        }
+        resto = daqui.slice(MARCA.length);
+      }
+      expect(vistos).toBeGreaterThan(0);
+    });
+  }
+});
+
 describe("motivoDaEdge", () => {
   it("non-2xx: le o motivo do corpo, nao a frase fixa do functions-js", async () => {
     const r: any = erroHttp({ error: "A user with this email address has already been registered" });
@@ -289,7 +363,7 @@ describe("as telas de admin-create-user usam motivoDaEdge", () => {
   for (const [arq, esperados] of TELAS) {
     it(`${arq.split("/").pop()}: ${esperados} chamadas, todas com motivoDaEdge`, () => {
       const fonte = normalizaAspas(readFileSync(arq, "utf8"));
-      expect(fonte).toMatch(/import \{ motivoDaEdge \} from "@\/lib\/reenvioPlacar"/);
+      expect(fonte).toMatch(/import \{[^}]*\bmotivoDaEdge\b[^}]*\} from "@\/lib\/reenvioPlacar"/);
       let resto = fonte;
       let vistos = 0;
       while (resto.includes(MARCADOR)) {

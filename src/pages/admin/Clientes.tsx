@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { paginasVisiveis, paginaValida } from "@/lib/paginacao";
 import { escaparCelulaCSV } from "@/lib/export-csv";
-import { motivoDaEdge } from "@/lib/reenvioPlacar";
+import { motivoDaEdge, resultadoDoEnvio } from "@/lib/reenvioPlacar";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -303,11 +303,12 @@ const AdminClientes = () => {
   const handleInvite = async () => {
     if (!inviteEmail) { toast.error("Enter an email"); return; }
     setInviting(true);
-    const { error } = await supabase.functions.invoke("send-email", {
+    const { data, error } = await supabase.functions.invoke("send-email", {
       body: { type: "password_reset", email: inviteEmail.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
     });
     setInviting(false);
-    if (error) { toast.error(error.message); return; }
+    const r = await resultadoDoEnvio(data, error, "Could not send the invite");
+    if (!r.ok) { toast.error(r.motivo); return; }
     toast.success(`Invite sent to ${inviteEmail}`);
     setInviteEmail("");
     setInviteOpen(false);

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { resultadoDoEnvio } from "@/lib/reenvioPlacar";
 
 interface Props {
   open: boolean;
@@ -20,7 +21,7 @@ const ForgotPasswordModal = ({ open, onClose }: Props) => {
     setLoading(true);
 
     // Send reset email through our own SMTP (Office 365) instead of Supabase default
-    const { error } = await supabase.functions.invoke("send-email", {
+    const { data, error } = await supabase.functions.invoke("send-email", {
       body: {
         type: "password_reset",
         email: trimmed,
@@ -28,8 +29,11 @@ const ForgotPasswordModal = ({ open, onClose }: Props) => {
       },
     });
     setLoading(false);
-    if (error) {
-      toast.error(error.message || "Failed to send reset email");
+    // Tela publica: `r.motivo` NAO vai para o toast — vazaria estado interno
+    // ("envio pausado", teto por hora) para visitante anonimo.
+    const r = await resultadoDoEnvio(data, error, "Failed to send reset email");
+    if (!r.ok) {
+      toast.error("Could not send the link right now. Please contact support.");
     } else {
       toast.success("If an account exists for this email, a reset link has been sent.");
       onClose();

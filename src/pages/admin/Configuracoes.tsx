@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { resultadoDoEnvio } from "@/lib/reenvioPlacar";
 import { EnderecoWebhookStripe } from "@/components/EnderecoWebhookStripe";
 import { Save, Building2, Mail, Palette, FileText, CreditCard, Eye, EyeOff } from "lucide-react";
 
@@ -119,9 +120,10 @@ const AdminConfiguracoes = () => {
           html: "<h1>Email service is working!</h1><p>This is a test message from your PermShield B2B portal.</p>",
         },
       });
-      if (error) throw error;
+      const r = await resultadoDoEnvio(data, error, "Failed to send");
+      if (!r.ok) throw new Error(r.motivo);
       if (data?.success) toast.success("Test email sent! Check your inbox.");
-      else throw new Error(data?.error || "Failed to send");
+      else throw new Error("Failed to send");
     } catch (err: any) {
       toast.error("Email test failed: " + (err.message || "Unknown error"));
     }

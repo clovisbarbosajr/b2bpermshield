@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
+import { resultadoDoEnvio } from "@/lib/reenvioPlacar";
 
 const RecuperarSenha = () => {
   const [email, setEmail] = useState("");
@@ -17,12 +18,16 @@ const RecuperarSenha = () => {
     setLoading(true);
     // Envia pelo nosso send-email (Resend + Office365 fallback), não pelo email nativo
     // do Supabase (que pode não estar configurado e o link não chegar).
-    const { error } = await supabase.functions.invoke("send-email", {
+    const { data, error } = await supabase.functions.invoke("send-email", {
       body: { type: "password_reset", email: email.trim().toLowerCase(), redirectTo: `${window.location.origin}/reset-password` },
     });
     setLoading(false);
-    if (error) {
-      toast.error(error.message);
+    // Tela publica: `r.motivo` NAO vai para o toast — vazaria estado interno
+    // ("envio pausado", teto por hora) para visitante anonimo. Recusa NAO
+    // vira `sent`: a tela "Check your inbox" afirmaria o que nao aconteceu.
+    const r = await resultadoDoEnvio(data, error, "Could not send the link");
+    if (!r.ok) {
+      toast.error("Could not send the link right now. Please contact support.");
     } else {
       setSent(true);
     }

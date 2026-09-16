@@ -134,3 +134,28 @@ export async function motivoDaEdge(data: any, error: any, fallback: string): Pro
     || error?.message
     || fallback;
 }
+
+// Resultado de UM envio pelo `send-email` (reset de senha, magic link, convite).
+//
+// O servidor RECUSA com HTTP 200 e `{ skipped: true, reason }` — torneira geral
+// fechada, teto por hora, cooldown por destinatario. Nove telas olhavam so o
+// `error` e diziam "link sent" com nada saindo (16/set: 10 min esperando dois
+// e-mails que a torneira tinha barrado). Uma decisao, num lugar so.
+//
+// `skipped` tem que ser `=== true`, como em `bloqueado`. O `reason` vem cru do
+// servidor; a unica regra de texto e o ponteiro para a tela da torneira quando
+// o motivo for pausa. ponytail: o ponteiro depende da palavra "pausad" no
+// motivo do SQL (`envio_permitido`); se o texto mudar, some so o ponteiro.
+export async function resultadoDoEnvio(
+  data: any, error: any, fallback: string,
+): Promise<{ ok: boolean; motivo: string }> {
+  if (data?.skipped === true) {
+    const reason = typeof data.reason === "string" && data.reason ? data.reason : "sending was refused";
+    const onde = /pausad/i.test(reason) ? " (Settings › Notifications)" : "";
+    return { ok: false, motivo: `Nothing was sent: ${reason}${onde}` };
+  }
+  if (error || data?.error) {
+    return { ok: false, motivo: await motivoDaEdge(data, error, fallback) };
+  }
+  return { ok: true, motivo: "" };
+}
