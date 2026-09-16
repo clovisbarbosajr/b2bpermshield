@@ -6528,3 +6528,38 @@ Os 7 que ficaram: jess@zapsupplies.com (admin), clovisjunior@live.com
 jessika.andrade@hotmail.com, clovisbarbosajr@gmail.com, e o Zap.
 
 Nenhum codigo mudou — sem publish. Backup `backup_clientes_20260908` (66) fica.
+
+## 2026-09-16 — leva da Jessika (T5..T9), acompanhamento em `.claude/work/`
+
+INICIADO. Relato da Jessika em 6 prints: status de produto nao casava com o
+banco (T5), "create customer" falhando com erro opaco (T6), delete de produto
+estourando timeout (T7), filtro Parent/Sub-category em `/admin/products` (T8),
+imagens quebradas nos Slat Wall (T9). Pipeline: spec-validator -> implementacao
+-> foco -> Cacador -> Cetico -> mutantes -> commit por caminho. Estado vivo em
+`.claude/work/TASKS.json` (fonte) e `PROGRESS.md` (painel).
+
+FEITO T5 (commit 5f77a13): `normalizeStatus` fazia NAME_MAP antes de
+`toLowerCase`, o inverso do CASE em `fn_item_produto_valido` — `" Esgotado "`
+passava. Agora `statusKey` (trim+lower) nos dois lados; tres copias inline do
+mapa em `Catalogo.tsx`/`ProdutoDetalhe.tsx` apagadas. Foco 97/97. Cacador em
+curso.
+
+FEITO T7 (commit 0aa8b9e): migration `20260916120000_indice_estoque_log_produto`
+— `estoque_log(produto_id, created_at)`, sem CONCURRENTLY. Causa raiz: FK CASCADE
+sem indice, ~1M linhas; o count do confirm e o proprio CASCADE varriam tudo.
+`Produtos.tsx` intacto. Guarda por conteudo, 3 mutantes mortos. **SQL para o
+dono rodar** (ordem: 1o SQL; nao ha publish de front para T7).
+
+FEITO T8 (commit af1451e): dois selects (Parent/Sub) em `Produtos.tsx`;
+semantica do filtro nao muda (`descendantIds` ja incluia descendentes), so a
+semente vira `subCategory || category`. `descendantIds` ganhou os primeiros
+testes. Foco 120/120. Cacador em curso (junto com T7).
+
+T6: spec aprovou U1 (mostrar o motivo real do non-2xx da edge via
+`motivoHttp`, nos 7 sites de `admin-create-user`) — implementador em curso.
+U2 (e-mail que ja e login: adotar ou recusar) BLOQUEADO — decisao do dono, com
+aresta de seguranca (upsert de `user_roles` rebaixa staff; adocao silenciosa em
+`UsersManagement` viraria escalonamento).
+
+T9: aguarda o dono rodar `SELECT nome, imagem_url FROM produtos WHERE nome
+ILIKE '%slat wall%'`.
