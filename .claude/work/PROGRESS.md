@@ -1,15 +1,14 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T21 — Spec Validator — checkout ignora as shipping options marcadas na ficha
-- [ ] Lane B — T22 — Implementação — telas de troca de senha não travam em exceção
+- [ ] Lane C — Teste no browser — endereço OK em produção; aguardando T21 para testar frete (Permshield)
+- [ ] Lane A — T21 — Implementação — helper `opcoesDisponiveis`, checkout, migration do trigger (escrita)
 
 ## ⏳ Pendentes
 - [ ] Publish do front (T13, T16, T18-U1, T19) — dono
 - [ ] T17 — checkout: frete 0 silencioso quando o cliente não tem shipping option atribuída
 
 ## 🚫 Bloqueadas
-- [ ] Produtos sem preço (base 0 e fora de qualquer lista) — dado, Jessika cadastra
 - [ ] T20 — sub-login não herda a lista de preço do pai na tela (RLS de `clientes`) — SQL proposto, decisão do dono
 - [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo) — decisão do dono
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
@@ -32,3 +31,4 @@
 - [x] T16 — checkout: endereço da conta listado e pré-selecionado; endereço obrigatório; sem duplicatas
 - [x] T18 — login: exceção vira erro visível, botão não trava (confirmado pelo dono)
 - [x] T19 — catálogo: preços em lote (~12-16 requisições em vez de ~1.000)
+- [x] T22 — telas de troca de senha não travam em exceção
