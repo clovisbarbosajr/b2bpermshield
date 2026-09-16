@@ -1,10 +1,10 @@
 # Progresso
 
 ## 🔄 Em andamento
+- [ ] Lane A — T25 — Deploy — front no ar, conferindo widget
 - [ ] Lane A — T24 — Deploy — aguarda deploy da edge register-customer (Lovable)
 
 ## 🚫 Bloqueadas
-- [ ] T25 — reCAPTCHA no cadastro — aguarda site key + secret do Google
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
 
 ## ✅ Concluídas e validadas

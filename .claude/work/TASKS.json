@@ -182,11 +182,9 @@
     {
       "id": "T25",
       "title": "reCAPTCHA no cadastro publico (igual B2BWave) — precisa chave Google (site key + secret) do dono",
-      "status": "blocked",
-      "validation": "aguarda chave do dono",
-      "depends_on": [
-        "T24"
-      ]
+      "status": "validating",
+      "validation": "caçador r4 limpo; 942/942; push + teste do widget no ar",
+      "depends_on": []
     }
   ]
 }
