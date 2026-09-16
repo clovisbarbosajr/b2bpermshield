@@ -838,6 +838,7 @@ Deno.serve(async (req) => {
     let isAdmin = viaCron || viaService;
     let callerEmail = "";            // email do usuário LOGADO (se houver sessão)
     let isLoggedIn = viaCron || viaService;
+    let isStaffCaller = false;       // admin/manager/warehouse: so para VER o motivo da recusa
     if (!isAdmin) {
       const userClient = createClient(
         Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY") ?? "",
@@ -850,9 +851,16 @@ Deno.serve(async (req) => {
         const { data: adminRow } = await adminClient.from("user_roles")
           .select("role").eq("user_id", user.id).eq("role", "admin").maybeSingle();
         isAdmin = !!adminRow;
+        const { data: staffRow } = await adminClient.from("user_roles")
+          .select("role").eq("user_id", user.id).in("role", ["admin", "manager", "warehouse"]).limit(1).maybeSingle();
+        isStaffCaller = !!staffRow;
       }
     }
     const isPrivilegedCaller = viaCron || viaService || isAdmin;
+    // Recusa de autenticacao (cooldown, teto, provedor) so e detalhada para equipe.
+    // Anonimo recebe a resposta generica: senao `skipped`/502 vs `{success:true}`
+    // separa e-mail de cliente de e-mail inexistente (A10). NAO decide envio.
+    const verMotivoDaRecusa = isPrivilegedCaller || isStaffCaller;
 
     const AUTH_TYPES = new Set(["password_reset", "magic_link", "request_magic_link", "set_password", "admin_alert", "raw"]);
     // O `force` EXIGE chamador privilegiado, e isto e a correcao de 28/ago/2026.
@@ -959,6 +967,10 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Not authorized for this email type" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
+
+    const respostaGenericaAuth = () => new Response(JSON.stringify({ success: true }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
     // ── Route by email type ──────────────────────────────────────────────────
     let to = "";
@@ -1389,9 +1401,7 @@ Deno.serve(async (req) => {
           .gte("created_at", new Date(Date.now() - 15 * 60 * 1000).toISOString());
         if ((count ?? 0) >= 3) {
           console.log(`[send-email] password_reset: limite de 15min atingido para ${resetEmailNorm}`);
-          return new Response(JSON.stringify({ success: true }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
+          return respostaGenericaAuth();
         }
       }
 
@@ -1450,9 +1460,7 @@ Deno.serve(async (req) => {
       if (linkError) {
         // Don't reveal if the user doesn't exist — just return success silently
         console.log(`[send-email] password_reset: user not found or error for ${resetEmailNorm}:`, linkError.message);
-        return new Response(JSON.stringify({ success: true }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return respostaGenericaAuth();
       }
       // Build the proper redirect URL with token hash
       const actionLink = linkData?.properties?.action_link || "";
@@ -1475,9 +1483,7 @@ Deno.serve(async (req) => {
       // revela se o email é cadastrado). NÃO privilegiado: só envia pro
       // PRÓPRIO email informado, e só se for cliente ativo.
       const emailReq = String(body.email ?? "").trim().toLowerCase();
-      const generic = () => new Response(JSON.stringify({ success: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      const generic = respostaGenericaAuth;
       if (!emailReq || !emailReq.includes("@")) return generic();
 
       // ENUMERACAO DE E-MAIL (A10)
@@ -1747,6 +1753,7 @@ Deno.serve(async (req) => {
         if ((count ?? 0) >= 3) {
           // 200 com `skipped`, nao erro: a tela ja diz "se o e-mail existir,
           // enviamos o link", e nao deve revelar nada a mais.
+          if (AUTENTICACAO.has(type) && !verMotivoDaRecusa) return respostaGenericaAuth();
           return new Response(JSON.stringify({
             skipped: true, blocked: true, reason: "muitos pedidos para este e-mail — aguarde alguns minutos", type,
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -1773,6 +1780,7 @@ Deno.serve(async (req) => {
         // tela. Pior, chamadores que leem `data?.skipped` recebem `data: null` e
         // o fluxo deles quebra em silencio. Esta e a convencao que o proprio
         // arquivo ja usa para envio nao realizado.
+        if (AUTENTICACAO.has(type) && !verMotivoDaRecusa) return respostaGenericaAuth();
         return new Response(JSON.stringify({ skipped: true, blocked: true, reason: bloqueio, type }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -1874,6 +1882,7 @@ Deno.serve(async (req) => {
 
     if (!result.ok) {
       console.error(`[send-email] FALHOU "${type}" para ${toDisplay}: ${result.error}`);
+      if (AUTENTICACAO.has(type) && !verMotivoDaRecusa) return respostaGenericaAuth();
       return new Response(JSON.stringify({ error: result.error, type, to }), {
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -1890,9 +1899,7 @@ Deno.serve(async (req) => {
     // Os demais tipos (pedido, estoque, teste) continuam detalhados: quem os
     // chama e a propria aplicacao, e o detalhe serve para diagnostico.
     if (AUTENTICACAO.has(type)) {
-      return new Response(JSON.stringify({ success: true }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return respostaGenericaAuth();
     }
     return new Response(JSON.stringify({ success: true, type, to, provider: result.provider, fallback: result.fallback }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
