@@ -35,6 +35,7 @@ import { checkCartStock, cartKey, normalizeStatus } from "@/lib/stock";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice } from "@/lib/pricing";
 import { COMPANY_ADDRESS_ID, mesmoEndereco, montarOpcoesDeEndereco } from "@/lib/enderecoEntrega";
+import { opcoesDisponiveis } from "@/lib/opcoesDisponiveis";
 
 // Dynamically load Stripe.js from CDN
 function loadStripeScript(): Promise<void> {
@@ -149,7 +150,7 @@ const Checkout = () => {
       // barra com "Client not found". Mas as deps sao `[user, impersonatedCustomer]`
       // — trocar a impersonacao (ou o refresh de token trocar o OBJETO `user`)
       // reexecuta. Se a leitura falhar ai, `cliente` fica null, `acctId` fica null,
-      // os dois `Set` ficam vazios, `canSee` derruba toda opcao `privado` que a RLS
+      // os dois `Set` ficam vazios, `opcoesDisponiveis` derruba toda opcao `privado` que a RLS
       // liberou, e `erroAtribuicao` nem chega a ser calculado (o bloco e pulado).
       // `clienteId` ainda guarda o cliente ANTERIOR, entao o `!clienteId` do submit
       // nao barra: pedido fechado sem frete, `shipping_costs := 0`.
@@ -235,14 +236,15 @@ const Checkout = () => {
         );
       }
 
-      // Opções PRIVATE (frete/pagamento) só aparecem pro cliente ATRIBUÍDO
-      // (cliente_payment_options / cliente_shipping_options). Públicas (privado=false)
-      // aparecem pra todos. Sub-usuário herda as atribuições da conta do pai.
+      // Opções atribuídas na ficha (cliente_payment_options / cliente_shipping_options)
+      // RESTRINGEM: com alguma marcada, o cliente vê só as marcadas (públicas ou
+      // privadas); sem nenhuma, vê todas as públicas. Regra em `opcoesDisponiveis.ts`.
+      // Sub-usuário herda as atribuições da conta do pai.
       const acctId = (cliente as any)?.parent_customer_id ?? cliente?.id ?? null;
       let allowedPay = new Set<string>(), allowedShip = new Set<string>();
       // A MESMA FALHA-ABERTO DE FRETE, PELA PORTA AO LADO. Estas duas leituras
       // descartavam o `error`, e o `?? []` deixava os dois `Set` vazios — o que faz
-      // `canSee` derrubar TODA opcao `privado` que a RLS ja tinha liberado. Sem
+      // `opcoesDisponiveis` derrubar TODA opcao `privado` que a RLS ja tinha liberado. Sem
       // frete na tela, `shippingId` fica "", `shipping_option_id` vai null, e
       // `fn_pedido_total_appside` grava `shipping_costs := 0`. Com `loadError`
       // null, sem card vermelho e com o botao habilitado: o pedido de frete gratis
@@ -260,8 +262,6 @@ const Checkout = () => {
         allowedPay = new Set((cpo.data ?? []).map((x: any) => x.payment_option_id));
         allowedShip = new Set((cso.data ?? []).map((x: any) => x.shipping_option_id));
       }
-      const canSee = (o: any, allowed: Set<string>) => !o.privado || allowed.has(o.id);
-
       // Frete e pagamento em PARALELO (eram 2 buscas sequenciais).
       const [ship, pay] = await Promise.all([
         supabase.from("shipping_options").select("*").eq("ativo", true).order("ordem"),
@@ -292,8 +292,8 @@ const Checkout = () => {
       // outra correcao desta leva existe para impedir, alcancado pelo caminho que
       // esta correcao criou. Quem impede o pedido de sair e o botao, la embaixo.
       setLoadError(erroAtribuicao ?? (ship.error || pay.error ? (ship.error ?? pay.error)!.message : null));
-      setShippingOptions((ship.data ?? []).filter((s: any) => s.show_to_customers !== false && canSee(s, allowedShip)));
-      setPaymentOptions((pay.data ?? []).filter((p: any) => canSee(p, allowedPay)));
+      setShippingOptions(opcoesDisponiveis((ship.data ?? []).filter((s: any) => s.show_to_customers !== false), allowedShip));
+      setPaymentOptions(opcoesDisponiveis(pay.data ?? [], allowedPay));
 
       // Compute tax using rules: match customer's tax_customer_group_id
       if (cliente) {
