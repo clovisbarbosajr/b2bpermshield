@@ -32,7 +32,9 @@ describe("entrarComSenha", () => {
 describe("as duas telas de login passam pelo helper", () => {
   for (const arq of ["src/pages/AdminLogin.tsx", "src/pages/CustomerLogin.tsx"]) {
     it(arq, () => {
-      const fonte = readFileSync(arq, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+      // So comentario de linha inteira ou apos espaco: `"https://..."` numa
+      // string nao pode apagar o resto da linha (e esconder uma chamada crua).
+      const fonte = readFileSync(arq, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
       expect(fonte).toContain('from "@/lib/loginComSenha"');
       expect(fonte).toMatch(/await entrarComSenha\(supabase\.auth, email, password\)/);
       // a chamada crua, sem try/catch, e o que deixava a tela parada
