@@ -1,8 +1,7 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane C — Teste no browser — endereço OK em produção; aguardando T21 para testar frete (Permshield)
-- [ ] Lane A — T21 — Implementação — helper `opcoesDisponiveis`, checkout, migration do trigger (escrita)
+- [ ] Lane A — T21 — Deploy — aguarda publish do front e depois o SQL do dono; reteste no browser em seguida
 
 ## ⏳ Pendentes
 - [ ] Publish do front (T13, T16, T18-U1, T19) — dono

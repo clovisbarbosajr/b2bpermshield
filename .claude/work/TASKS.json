@@ -153,8 +153,8 @@
     {
       "id": "T21",
       "title": "Checkout mostra TODAS as shipping options; a ficha do cliente marca so 3 (Customer shipping options) — filtro ignora a atribuicao para opcoes nao-privadas",
-      "status": "in_progress",
-      "validation": "spec aprovado (bug; helper + checkout + migration escrita, front antes do SQL); implementacao",
+      "status": "validating",
+      "validation": "cacador limpo; bateria 849/849 (f8d4aa2). Aguarda: 1) publish do front, 2) dono roda 20260916140000, 3) reteste no browser como Permshield",
       "depends_on": []
     },
     {
