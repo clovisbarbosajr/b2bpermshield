@@ -1,11 +1,12 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T13 — Spec Validator — toast de reset/magic link com a torneira fechada
+- [ ] Lane A — T13 — Correção — texto do toast de incerto + erro do 1º send-email da aprovação
 
 ## ⏳ Pendentes
 
 ## 🚫 Bloqueadas
+- [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo de enumeração) — decisão do dono
 - [ ] T9 — 1 produto com foto morta na origem ("Select 3/4 x 7.48 - DO NOT SHIP") — Jessika decide se sobe
 - [ ] Sender de notificações ainda "INWISE" — UPDATE enviado ao dono (`notification_channels`)
 

@@ -1199,7 +1199,10 @@ const CustomerEdit = () => {
                     setAddingContact(false);
                     setSavingContact(false);
                     // O funcionario JA existe; so o e-mail falhou/recusou. Nao aborta, avisa.
-                    if (!mail.ok) toast.error(`Employee ${contactForm.nome} created, but no setup email went out: ${mail.motivo} — use the 🔒 button to resend.`);
+                    // "not confirmed", nao "nao saiu": rede caida DEPOIS de o servidor
+                    // entregar e incerto (reenvioPlacar.ts) — afirmar ausencia faz o
+                    // operador reenviar e o cliente receber dois links.
+                    if (!mail.ok) toast.error(`Employee ${contactForm.nome} created, but the setup email was not confirmed: ${mail.motivo} — check the notification log before resending with the 🔒 button.`);
                     else toast.success(`Employee ${contactForm.nome} created. A setup email was sent to ${contactForm.email}.`);
                   }}>
                     {savingContact ? "Creating..." : "Create employee"}
@@ -1278,8 +1281,15 @@ const CustomerEdit = () => {
                       customerName: cliente.nome || cliente.empresa || "",
                       loginUrl: `${window.location.origin}/customers-login`,
                     },
-                  }).then(async ({ data }) => {
-                    if (data?.skipped) {
+                  }).then(async ({ data, error }) => {
+                    // non-2xx/rede: `data` vem null e `skipped` nao dispara — antes a
+                    // tela ficava calada depois de "Customer approved!".
+                    if (!data?.skipped) {
+                      const r = await resultadoDoEnvio(data, error, "unknown error");
+                      if (!r.ok) toast.error(`Approval email failed: ${r.motivo}`);
+                      return;
+                    }
+                    {
                       const sendAnyway = confirm(
                         "Email notifications are currently DISABLED (Settings → Notifications), so the approval email was NOT sent.\n\n" +
                         "OK = send it anyway just for this customer.\n" +

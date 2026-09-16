@@ -95,8 +95,8 @@
     {
       "id": "T13",
       "title": "Toast mente quando a torneira geral esta fechada: reset/magic link mostram sent com o servidor recusando (envio_permitido -> skipped)",
-      "status": "in_progress",
-      "validation": "spec-validator",
+      "status": "validating",
+      "validation": "validating — U1+U2+U3 em bf1103a, foco 153/153, 3 mutantes; cacador em curso",
       "depends_on": []
     },
     {
@@ -107,6 +107,13 @@
       "depends_on": [
         "T11"
       ]
+    },
+    {
+      "id": "T15",
+      "title": "send-email: responder {success:true} generico para tipos AUTH quando skipped (fecha o oraculo de enumeracao que a torneira expoe) — EDGE, area de envio, decisao do dono",
+      "status": "blocked",
+      "validation": "aguarda dono (edge de envio + deploy pelo Lovable)",
+      "depends_on": []
     }
   ]
 }
