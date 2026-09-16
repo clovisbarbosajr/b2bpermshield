@@ -413,6 +413,19 @@ describe("Produtos: a lista nao pode mentir sobre o que gravou nem apagar as cas
     expect(src, "o sub-select voltou a listar o proprio pai").toContain("c.id !== filters.category");
   });
 
+  it("o filtro e o Select de status comparam pelo `statusKey`, nao pelo valor cru", () => {
+    // `status_produto` e texto livre gravavel por sessao de staff (PostgREST):
+    // `"Esgotado"` / `" esgotado"` sumiam do filtro "Sold Out" e deixavam o
+    // Select da linha em branco — a tela de conserto era cega justamente para
+    // o produto sujo. Mesma classe do T5 (portal), mesmo helper.
+    const src = f();
+    expect(src, "sumiu o import do helper compartilhado").toContain('import { statusKey } from "@/lib/stock";');
+    expect(src, "o filtro de status voltou a comparar cru")
+      .toContain("statusKey(p.status_produto) !== filters.status");
+    expect(src, "o Select da linha voltou a receber o valor cru")
+      .toContain('value={statusKey(p.status_produto) || "disponivel"}');
+  });
+
   it("a paginacao usa a pagina LIMITADA nos quatro pontos", () => {
     // Apagar/desativar a unica linha da ultima pagina reduzia `totalPages`, a barra
     // inteira desmontava (esta sob `totalPages > 1`) e a fatia virava vazia: "No

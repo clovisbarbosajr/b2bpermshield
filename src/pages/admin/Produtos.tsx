@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { paginasVisiveis, paginaValida } from "@/lib/paginacao";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { descendantIds } from "@/lib/categoryTree";
+import { statusKey } from "@/lib/stock";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -160,7 +161,7 @@ const AdminProdutos = () => {
     }
     if (filters.isActive === "Active" && !p.ativo) return false;
     if (filters.isActive === "Inactive" && p.ativo) return false;
-    if (filters.status && p.status_produto !== filters.status) return false;
+    if (filters.status && statusKey(p.status_produto) !== filters.status) return false;
     if (filters.brand && (p as any).brand_id !== filters.brand) return false;
     if (filters.privacyGroup && !acessoMap[p.id]?.has(filters.privacyGroup)) return false;
     if (filters.allowBackorder === "yes" && !(p as any).permitir_backorder) return false;
@@ -555,7 +556,7 @@ const AdminProdutos = () => {
                   <TableCell onClick={e => e.stopPropagation()}>
                     <div className="text-xs mb-1">Quantity: {p.estoque_total - p.estoque_reservado}</div>
                     <Select
-                      value={p.status_produto || "disponivel"}
+                      value={statusKey(p.status_produto) || "disponivel"}
                       onValueChange={v => handleStatusChange(p.id, v)}
                       disabled={salvando.has(p.id)}
                     >
