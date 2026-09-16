@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { lerContaDaEmpresa } from "@/lib/contaDaEmpresa";
 
 export type PriceSource = "customer" | "price_list" | "discount" | "base";
 
@@ -76,14 +77,10 @@ export async function getProductPrices({
   // `trg_subuser_inherit_pricelist` copia a do pai no INSERT, mas é um SNAPSHOT —
   // fica velho se o pai trocar de tabela depois.
   let tabelaPrecoId: string | null = cliente?.tabela_preco_id ?? null;
+  // A RLS esconde a ficha do pai do sub-login; `lerContaDaEmpresa` cai na RPC.
   if (accountId !== customerId) {
-    const { data: conta, error: contaErr } = await supabase
-      .from("clientes")
-      .select("tabela_preco_id")
-      .eq("id", accountId)
-      .maybeSingle();
-    if (contaErr) throw new Error(`Erro ao buscar conta: ${contaErr.message}`);
-    tabelaPrecoId ??= conta?.tabela_preco_id ?? null;
+    const conta = await lerContaDaEmpresa(accountId);
+    tabelaPrecoId ??= conta.tabela_preco_id;
   }
 
   const out: Record<string, PriceResult> = {};

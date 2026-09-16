@@ -12,6 +12,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 type Chamada = { tabela: string; filtros: Record<string, unknown>; lista: boolean };
 let chamadas: Chamada[] = [];
 let tabelasComErro = new Set<string>();
+// "Modo RLS": ids de `clientes` que a leitura direta devolve como `null` SEM erro
+// (o que o sub-login recebe ao ler a ficha do pai), e a resposta da RPC.
+let escondidos = new Set<string>();
+let rpcRes: { data: unknown; error: { message: string } | null } = { data: null, error: null };
+let rpcChamadas = 0;
 let loja: {
   clientes: Record<string, { id: string; tabela_preco_id: string | null; parent_customer_id: string | null }>;
   produtos: Record<string, { id: string; preco: number }>;
@@ -31,6 +36,7 @@ const consulta = (tabela: string) => {
       : loja.tabela_preco_itens;
     const data = linhas.filter((l) => Object.entries(filtros).every(([c, v]) =>
       Array.isArray(v) ? v.includes(l[c]) : l[c] === v));
+    if (tabela === "clientes" && escondidos.has(filtros.id as string)) return { data: null, error: null };
     return { data: lista ? data : data[0] ?? null, error: null };
   };
   const api: any = {
@@ -43,13 +49,21 @@ const consulta = (tabela: string) => {
   return api;
 };
 
-vi.mock("@/integrations/supabase/client", () => ({ supabase: { from: (t: string) => consulta(t) } }));
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: {
+    from: (t: string) => consulta(t),
+    rpc: (nome: string) => ({ maybeSingle: async () => { rpcChamadas++; return nome === "minha_conta" ? rpcRes : { data: null, error: { message: `rpc ${nome}` } }; } }),
+  },
+}));
 
 const { resolverPreco, getProductPrices, getProductPrice } = await import("./pricing");
 
 beforeEach(() => {
   chamadas = [];
   tabelasComErro = new Set();
+  escondidos = new Set();
+  rpcRes = { data: null, error: null };
+  rpcChamadas = 0;
   loja = {
     clientes: {
       "cli-0": { id: "cli-0", tabela_preco_id: "tab-A", parent_customer_id: null },
@@ -135,6 +149,29 @@ describe("getProductPrices — o lote", () => {
   it("sub-login sem tabela propria herda a do pai", async () => {
     const r = await getProductPrices({ productIds: ["p-2"], customerId: "sub-1" });
     expect(r["p-2"]).toEqual({ price: 185, source: "price_list" });
+  });
+
+  it("RLS esconde o pai: sub-login sem tabela propria pega a da empresa pela RPC", async () => {
+    escondidos = new Set(["cli-0"]);
+    rpcRes = { data: { id: "cli-0", tabela_preco_id: "tab-A", endereco: null, endereco2: null, cidade: null, estado: null, cep: null }, error: null };
+    const r = await getProductPrices({ productIds: ["p-2"], customerId: "sub-1" });
+    expect(r["p-2"]).toEqual({ price: 185, source: "price_list" });   // tab-A, nao base 200
+    expect(rpcChamadas).toBe(1);
+  });
+
+  it.each([
+    ["RPC ausente/erro", { data: null, error: { message: "function minha_conta does not exist" } }],
+    ["RPC vazia", { data: null, error: null }],
+  ])("RLS esconde o pai e %s: LANCA, nao mostra preco base", async (_, res) => {
+    escondidos = new Set(["cli-0"]);
+    rpcRes = res;
+    await expect(getProductPrices({ productIds: ["p-2"], customerId: "sub-1" })).rejects.toThrow();
+  });
+
+  it("quem NAO e sub-login: 1 leitura de `clientes`, RPC nunca", async () => {
+    await getProductPrices({ productIds: ["p-1"], customerId: "cli-0" });
+    expect(chamadas.filter((c) => c.tabela === "clientes")).toHaveLength(1);
+    expect(rpcChamadas).toBe(0);
   });
 
   it("produto que nao existe em `produtos`: base 0, como `getProductPrice` sempre fez", async () => {

@@ -40,6 +40,10 @@ let loja: Loja;
 // eles o contrato de que o `catch` do `Carrinho.moveToCart` e o do
 // `PedidoDetalhe.handleAddToOrder` dependem para cair no preco base avisando.
 let tabelasComErro = new Set<string>();
+// "Modo RLS": ids de `clientes` que a leitura direta devolve `null` sem erro (o
+// sub-login lendo o pai); a RPC `minha_conta` responde com a ficha de `rpcConta`.
+let escondidos = new Set<string>();
+let rpcConta: string | null = null;
 // Sequencia deterministica: o teste tem que reprovar SEMPRE, nao as vezes.
 let semente = 1;
 const rnd = () => {
@@ -85,7 +89,10 @@ const consulta = (tabela: string) => {
       if (tabelasComErro.has(tabela) || tabelasComErro.has(`${tabela}:${filtros.id}`)) {
         return { data: null, error: { message: `falha simulada em ${tabela}` } };
       }
-      if (tabela === "clientes") return { data: loja.clientes[filtros.id as string] ?? null, error: null };
+      if (tabela === "clientes") {
+        const id = filtros.id as string;
+        return { data: escondidos.has(id) ? null : loja.clientes[id] ?? null, error: null };
+      }
       if (tabela === "produtos") return { data: loja.produtos[filtros.id as string] ?? null, error: null };
       if (tabela === "produto_precos_cliente") {
         const r = loja.produto_precos_cliente.find(
@@ -104,7 +111,16 @@ const consulta = (tabela: string) => {
 };
 
 vi.mock("@/integrations/supabase/client", () => ({
-  supabase: { from: (t: string) => consulta(t) },
+  supabase: {
+    from: (t: string) => consulta(t),
+    rpc: (nome: string) => ({
+      async maybeSingle() {
+        await latencia();
+        if (nome !== "minha_conta" || !rpcConta) return { data: null, error: { message: `rpc ${nome} falhou` } };
+        return { data: { ...loja.clientes[rpcConta], endereco: null, endereco2: null, cidade: null, estado: null, cep: null }, error: null };
+      },
+    }),
+  },
 }));
 
 const { getProductPrice } = await import("./pricing");
@@ -115,6 +131,8 @@ const CLIENTES = Array.from({ length: 50 }, (_, i) => `cli-${i}`);
 beforeEach(() => {
   semente = 1;
   tabelasComErro = new Set();
+  escondidos = new Set();
+  rpcConta = null;
   loja = {
     clientes: Object.fromEntries(CLIENTES.map((id, i) => [
       id, { id, tabela_preco_id: i % 2 === 0 ? "tab-A" : null, parent_customer_id: null },
@@ -259,5 +277,18 @@ describe("getProductPrice sob 50 clientes simultaneos", () => {
     // Todos iguais: nenhuma corrida entre as duas leituras de `clientes`.
     expect(new Set(rs.map((r) => `${r.source}:${r.price}`)).size).toBe(1);
     expect(rs[0]).toEqual({ price: 85, source: "price_list" });
+  });
+
+  it("50 sub-logins simultaneos com a RLS escondendo o pai: todos com a tabela da EMPRESA", async () => {
+    const subs = Array.from({ length: 50 }, (_, i) => `sub-rls-${i}`);
+    for (const id of subs) loja.clientes[id] = { id, tabela_preco_id: null, parent_customer_id: "cli-0" };
+    loja.clientes["cli-0"].tabela_preco_id = "tab-A";
+    loja.produto_precos_cliente = [];
+    escondidos = new Set(["cli-0"]);
+    rpcConta = "cli-0";
+    const rs = await Promise.all(subs.map((id) =>
+      getProductPrice({ productId: PRODUTO, customerId: id, quantity: 1 })));
+    expect(new Set(rs.map((r) => `${r.source}:${r.price}`)).size).toBe(1);
+    expect(rs[0]).toEqual({ price: 85, source: "price_list" });   // nao o base 100
   });
 });
