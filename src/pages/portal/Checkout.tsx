@@ -136,7 +136,7 @@ const Checkout = () => {
 
       // Traz JÁ os campos de endereço + grupo de imposto na MESMA query — evita
       // 2 buscas redundantes depois (endereço da empresa e tax_customer_group_id).
-      const cols = "id, nome, empresa, email, telefone, pais, parent_customer_id, can_confirm_order, endereco, cidade, estado, cep, tax_customer_group_id, disable_ordering, minimum_order_value";
+      const cols = "id, nome, empresa, email, telefone, pais, parent_customer_id, can_confirm_order, endereco, endereco2, cidade, estado, cep, tax_customer_group_id, disable_ordering, minimum_order_value";
       const clienteQuery = impersonatedCustomer?.id
         ? supabase.from("clientes").select(cols).eq("id", impersonatedCustomer.id).maybeSingle()
         : supabase.from("clientes").select(cols).eq("user_id", user!.id).maybeSingle();
@@ -220,7 +220,7 @@ const Checkout = () => {
           supabase.from("enderecos").select("*").eq("cliente_id", addressClienteId)
             .order("principal", { ascending: false }).order("created_at", { ascending: false }),
           isSub
-            ? supabase.from("clientes").select("endereco, cidade, estado, cep").eq("id", addressClienteId).maybeSingle()
+            ? supabase.from("clientes").select("endereco, endereco2, cidade, estado, cep").eq("id", addressClienteId).maybeSingle()
             : Promise.resolve({ data: cliente } as any),
         ]);
         setEnderecos(ends ?? []);
@@ -367,7 +367,7 @@ const Checkout = () => {
     // sozinho no efeito derivado abaixo (setSalesTax por total/discount/taxRate).
     // Antes `total` estava aqui e re-disparava a busca inteira a cada mudança do
     // carrinho — era a lentidão do endereço voltando.
-  }, [user, impersonatedCustomer]);
+  }, [user?.id, impersonatedCustomer?.id]);
 
   // Rotulos do select: `companyAddress` ja esta normalizado (logradouro/...),
   // entao volta para o formato da ficha (endereco/...) que o helper le.
@@ -422,8 +422,8 @@ const Checkout = () => {
       // conta pode ter so a rua, entao o placeholder "-" cobre os tres.
       const { data: created, error: addrErr } = await supabase.from("enderecos").insert({
         cliente_id: addressOwnerId,
-        logradouro: companyAddress.logradouro, cidade: companyAddress.cidade || "-",
-        estado: companyAddress.estado || "-", cep: companyAddress.cep || "-",
+        logradouro: companyAddress.logradouro, cidade: companyAddress.cidade, complemento: companyAddress.complemento || null,
+        estado: companyAddress.estado, cep: companyAddress.cep,
         principal: false,
       } as any).select().single();
       // Sem checar o erro, uma falha aqui (ex.: RLS barrando sub-usuário que grava

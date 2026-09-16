@@ -118,8 +118,8 @@
     {
       "id": "T16",
       "title": "Checkout: Select address vazio — nao puxa o endereco da ficha do cliente; conferir tudo que o checkout deveria herdar da ficha (nome, empresa, telefone, tax group, price list, shipping)",
-      "status": "in_progress",
-      "validation": "spec: U1-U4 aprovadas (implementacao); causa raiz do Select vazio aguarda SELECT do dono (ficha nao lida pelo login)",
+      "status": "validating",
+      "validation": "U1-U4 em 9424835, foco 127/127; cacador em curso. Causa raiz do print ainda depende de como a Jessika logou",
       "depends_on": []
     },
     {
@@ -127,6 +127,20 @@
       "title": "Checkout: ficha nova sem shipping option atribuida — bloco some e o pedido grava frete 0 em silencio",
       "status": "pending",
       "validation": "pending",
+      "depends_on": []
+    },
+    {
+      "id": "T18",
+      "title": "Login: depois de digitar a senha e entrar, a tela nao avanca; so entra apos recarregar a pagina",
+      "status": "in_progress",
+      "validation": "spec-validator",
+      "depends_on": []
+    },
+    {
+      "id": "T19",
+      "title": "Catalogo do portal: precos aparecem $0.00 por ~1 min ate carregar o price list; alguns ficam $0.00",
+      "status": "in_progress",
+      "validation": "spec-validator",
       "depends_on": []
     }
   ]

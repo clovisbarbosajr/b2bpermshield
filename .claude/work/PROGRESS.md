@@ -1,7 +1,9 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T16 — Implementação — U1 banner ficha ilegível, U2 helper de endereços, U3 default persistente, U4 país
+- [ ] Lane A — T16 — Correção — regra estrita da conta, deps por id, endereco2/complemento
+- [ ] Lane B — T18 — Spec Validator — login só completa após recarregar a página
+- [ ] Lane C — T19 — Spec Validator — preço $0.00 por ~1 min no catálogo (carga do price list)
 
 ## ⏳ Pendentes
 - [ ] Publish do front (T13) — dono

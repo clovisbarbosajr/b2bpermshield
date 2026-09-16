@@ -14,11 +14,21 @@ describe("montarOpcoesDeEndereco", () => {
     expect(r.contaEndereco).toEqual({ logradouro: "1800 N Powerline Rd", complemento: "", cidade: "Pompano Beach", estado: "FL", cep: "33069" });
   });
 
-  it("(2) conta so com endereco: opcao presente, rotulo sem virgula sobrando, default company", () => {
-    const r = montarOpcoesDeEndereco([], { endereco: " 1800 N Powerline Rd ", cidade: null, estado: null, cep: null });
-    expect(r.opcoes).toEqual([{ id: COMPANY_ADDRESS_ID, rotulo: "Company address — 1800 N Powerline Rd" }]);
-    expect(r.defaultId).toBe(COMPANY_ADDRESS_ID);
-    expect(r.contaEndereco).toEqual({ logradouro: "1800 N Powerline Rd", complemento: "", cidade: "", estado: "", cep: "" });
+  it("(2) conta INCOMPLETA (so rua, ou 3 de 4 campos) nao vira opcao — mesma regra do Save Address", () => {
+    // `enderecos.cidade/estado/cep` sao NOT NULL e o resto do portal exige os 4;
+    // oferecer a conta parcial gravava "-" no pedido e uma linha nova por pedido.
+    const soRua = montarOpcoesDeEndereco([], { endereco: " 1800 N Powerline Rd ", cidade: null, estado: null, cep: null });
+    expect(soRua.opcoes).toEqual([]);
+    expect(soRua.defaultId).toBe("");
+    expect(soRua.contaEndereco).toBeNull();
+    const semCep = montarOpcoesDeEndereco([], { endereco: "Rua X", cidade: "Pompano Beach", estado: "FL", cep: "  " });
+    expect(semCep.opcoes).toEqual([]);
+    expect(semCep.contaEndereco).toBeNull();
+  });
+
+  it("(2b) conta completa com endereco2: complemento entra no objeto normalizado", () => {
+    const r = montarOpcoesDeEndereco([], { endereco: "Rua X", endereco2: " Suite 200 ", cidade: "Pompano Beach", estado: "FL", cep: "33069" });
+    expect(r.contaEndereco?.complemento).toBe("Suite 200");
   });
 
   it("(3) conta vazia + enderecos vazia: zero opcoes, default vazio", () => {

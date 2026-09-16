@@ -50,7 +50,7 @@ export function montarOpcoesDeEndereco(
   defaultId: string;
   contaEndereco: ContaEnderecoNormalizado | null;
 } {
-  const contaEndereco: ContaEnderecoNormalizado | null = s(conta?.endereco)
+  const contaEndereco: ContaEnderecoNormalizado | null = s(conta?.endereco) && s(conta?.cidade) && s(conta?.estado) && s(conta?.cep)
     ? {
         logradouro: s(conta?.endereco),
         complemento: s(conta?.endereco2),
