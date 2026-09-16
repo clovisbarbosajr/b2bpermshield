@@ -1,7 +1,7 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T24 — Deploy — front no ar; teste no navegador
+- [ ] Lane A — T24 — Deploy — aguarda deploy da edge register-customer (Lovable)
 
 ## 🚫 Bloqueadas
 - [ ] T25 — reCAPTCHA no cadastro — aguarda site key + secret do Google
