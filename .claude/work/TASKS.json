@@ -1,0 +1,45 @@
+{
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Remover sync do B2BWave e API de saida; sistema nasce com zero pedidos",
+      "status": "done",
+      "validation": "done — 3 rodadas cacador/cetico, 14 mutantes mortos, 742/742; commits 55ef241..2c71dea; cron desligado e pedidos zerados pelo dono",
+      "depends_on": []
+    },
+    {
+      "id": "T2",
+      "title": "Executar as 14 decisoes da Jessika (SEG1, DADO1/2, ACESSO1/2, VENDA2)",
+      "status": "done",
+      "validation": "done — 14 guardas em decisoesDaJessika.test.ts, 9 mutantes mortos, 758/758; commit 6f1557b; SQL (export_logs, UNIQUE x3, stripe off) rodado pelo dono",
+      "depends_on": [
+        "T1"
+      ]
+    },
+    {
+      "id": "T3",
+      "title": "Trigger de status de fabrica (DADO 3) e guardas do pre-order negativo (VENDA 2)",
+      "status": "done",
+      "validation": "done — cetico 2 rodadas (3 defeitos corrigidos, rodada 2 limpa), 14 mutantes mortos, 769/769; migration 20260904120000 aplicada e 4 passos de conferencia confirmados pelo dono; publish feito",
+      "depends_on": [
+        "T2"
+      ]
+    },
+    {
+      "id": "T4",
+      "title": "Sistema novo: apagar todos os clientes e logins de cliente, manter catalogo, equipe e o cliente Zap",
+      "status": "done",
+      "validation": "done — inventario por pg_constraint, backup_clientes_20260908 (66), DELETE (nao TRUNCATE CASCADE); resultado confirmado: clientes 1, logins 7, produtos 330; commit df7b154",
+      "depends_on": [
+        "T3"
+      ]
+    },
+    {
+      "id": "T5",
+      "title": "Casar status por nome com btrim em src/lib/stock.ts:117 e src/pages/portal/Catalogo.tsx:242",
+      "status": "in_progress",
+      "validation": "in_progress — spec-validator",
+      "depends_on": []
+    }
+  ]
+}
