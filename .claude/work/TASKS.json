@@ -95,15 +95,15 @@
     {
       "id": "T13",
       "title": "Toast mente quando a torneira geral esta fechada: reset/magic link mostram sent com o servidor recusando (envio_permitido -> skipped)",
-      "status": "pending",
-      "validation": "pending",
+      "status": "in_progress",
+      "validation": "spec-validator",
       "depends_on": []
     },
     {
       "id": "T14",
       "title": "Remover copiar-fotos-cloudinary do repo depois que o Lovable remover o deploy",
-      "status": "blocked",
-      "validation": "aguarda dono pedir a remocao no Lovable",
+      "status": "done",
+      "validation": "done — Lovable removeu o deploy (16/set); pasta removida do repo, check-edge OK",
       "depends_on": [
         "T11"
       ]

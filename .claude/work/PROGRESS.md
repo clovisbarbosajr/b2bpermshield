@@ -1,11 +1,12 @@
 # Progresso
 
+## 🔄 Em andamento
+- [ ] Lane A — T13 — Spec Validator — toast de reset/magic link com a torneira fechada
+
 ## ⏳ Pendentes
-- [ ] T13 — aviso falso "link sent" com a torneira geral fechada (reset/magic link)
 
 ## 🚫 Bloqueadas
 - [ ] T9 — 1 produto com foto morta na origem ("Select 3/4 x 7.48 - DO NOT SHIP") — Jessika decide se sobe
-- [ ] T14 — tirar `copiar-fotos-cloudinary` do repo — aguarda o Lovable remover o deploy
 - [ ] Sender de notificações ainda "INWISE" — UPDATE enviado ao dono (`notification_channels`)
 
 ## ✅ Concluídas e validadas
@@ -20,3 +21,4 @@
 - [x] T10 — status normalizado no admin (lista + ficha)
 - [x] T11 — 287 fotos copiadas do Cloudinary do B2BWave para o nosso storage
 - [x] T12 — varredura: nada mais depende do B2BWave; pode cancelar
+- [x] T14 — `copiar-fotos-cloudinary` removida do deploy e do repo
