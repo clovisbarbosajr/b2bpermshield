@@ -17,6 +17,9 @@ import { fatiaEntre } from "@/test/fatia";
 const ler = (f: string) => readFileSync(f, "utf-8");
 const semComentario = (f: string) =>
   ler(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+// SQL comenta com `--`, nao com `//`: a guarda do indice passou VERDE com a
+// migration inteira comentada por usar `semComentario` (mutante do Cacador).
+const semComentarioSql = (f: string) => ler(f).replace(/--.*$/gm, "");
 
 describe("Estoque: o ajuste nao pode deixar disponivel negativo", () => {
   const f = () => semComentario("src/pages/admin/Estoque.tsx");
@@ -388,15 +391,26 @@ describe("Produtos: a lista nao pode mentir sobre o que gravou nem apagar as cas
     const alvo = /ON\s+public\.estoque_log\s*\(\s*produto_id\b/;
     const arquivo = readdirSync(dir)
       .filter((n: string) => n.endsWith(".sql"))
-      .find((n: string) => alvo.test(semComentario(`${dir}/${n}`)));
+      .find((n: string) => alvo.test(semComentarioSql(`${dir}/${n}`)));
     expect(arquivo, "nao achei migration com indice em estoque_log(produto_id)").toBeTruthy();
-    const linha = semComentario(`${dir}/${arquivo}`)
+    const linha = semComentarioSql(`${dir}/${arquivo}`)
       .split("\n")
       .find((l) => /CREATE\s+INDEX/i.test(l) && /estoque_log_produto_id_idx/.test(l));
     expect(linha, "o CREATE INDEX nao esta numa linha so com o nome do indice").toBeTruthy();
     // O editor SQL do Lovable roda o arquivo numa transacao unica: CONCURRENTLY
     // falha ali, e quem so cola o arquivo fica sem o indice em silencio.
     expect(linha, "CONCURRENTLY nao roda no editor do Lovable").not.toMatch(/CONCURRENTLY/i);
+  });
+
+  it("o filtro Parent/Sub-category: a sub e a semente, trocar o pai limpa a sub, a sub nao lista o pai", () => {
+    // Pedido da Jessika (16/set). `categoryTree.test.ts` prende a lib; nada
+    // prendia a TELA: trocar a semente por `filters.category` passava a suite
+    // inteira (mutante do Cacador) e a sub-categoria deixava de filtrar.
+    const src = f();
+    expect(src, "a sub-categoria deixou de ser a semente do filtro")
+      .toContain("descendantIds(categorias as any, filters.subCategory || filters.category)");
+    expect(src, "trocar o pai nao limpa mais a sub").toContain('subCategory: "" }');
+    expect(src, "o sub-select voltou a listar o proprio pai").toContain("c.id !== filters.category");
   });
 
   it("a paginacao usa a pagina LIMITADA nos quatro pontos", () => {
