@@ -1,7 +1,13 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T5 — spec-validator — confirmar contrato do `btrim` no casamento de status (`stock.ts`, `Catalogo.tsx`)
+- [ ] Lane A — T5 — spec-validator — contrato do `btrim` no casamento de status
+- [ ] Lane B — T6 — spec-validator — create customer: erro opaco da edge + e-mail já existente
+- [ ] Lane C — T7 — spec-validator — delete de produto lento: índice em `estoque_log(produto_id)`
+- [ ] Lane D — T8 — spec-validator — filtro Parent Category → Sub-categories
+
+## ⏳ Pendentes
+- [ ] T9 — imagens quebradas nos produtos Slat Wall
 
 ## ✅ Concluídas e validadas
 - [x] T1 — sync do B2BWave e API de saída removidos; zero pedidos

@@ -40,6 +40,34 @@
       "status": "in_progress",
       "validation": "in_progress — spec-validator",
       "depends_on": []
+    },
+    {
+      "id": "T6",
+      "title": "Create customer falha: edge admin-create-user devolve non-2xx e a tela mostra erro generico (email jess@permwood.com ja e login)",
+      "status": "in_progress",
+      "validation": "in_progress — spec-validator",
+      "depends_on": []
+    },
+    {
+      "id": "T7",
+      "title": "Delete de produto >1min e statement timeout: count e cascade em estoque_log (1M linhas) sem indice em produto_id",
+      "status": "in_progress",
+      "validation": "in_progress — spec-validator",
+      "depends_on": []
+    },
+    {
+      "id": "T8",
+      "title": "Filtro de produtos: Parent Category + Sub-categories dependentes (pedido da Jessika)",
+      "status": "in_progress",
+      "validation": "in_progress — spec-validator",
+      "depends_on": []
+    },
+    {
+      "id": "T9",
+      "title": "Imagens quebradas nos produtos Slat Wall na lista de produtos",
+      "status": "pending",
+      "validation": "pending — levantar origem de imagem_url",
+      "depends_on": []
     }
   ]
 }
