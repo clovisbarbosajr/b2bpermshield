@@ -114,3 +114,23 @@ export async function motivoHttp(err: any): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * O texto do toast para uma resposta de `supabase.functions.invoke`.
+ *
+ * Toda tela que chama `admin-create-user` fazia `data?.error || error?.message`
+ * e mostrava "Edge Function returned a non-2xx status code" para e-mail ja
+ * cadastrado, permissao negada e provedor caido — o motivo real fica no corpo,
+ * e so `motivoHttp` le o corpo.
+ *
+ * A ORDEM importa: `data.error` primeiro, porque `delete_user` responde 200 COM
+ * `error` no corpo; `motivoHttp` antes de `error.message`, senao a frase fixa
+ * ganha do motivo. `data.error` que nao e string conta como ausente pelo mesmo
+ * motivo que em `motivoHttp`: `[object Object]` no toast.
+ */
+export async function motivoDaEdge(data: any, error: any, fallback: string): Promise<string> {
+  return (typeof data?.error === "string" && data.error)
+    || (await motivoHttp(error))
+    || error?.message
+    || fallback;
+}

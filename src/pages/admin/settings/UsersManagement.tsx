@@ -14,6 +14,7 @@ import { Plus, Search, Trash2, Pencil } from "lucide-react";
 import { PERMISSION_GROUPS, DEFAULT_PERMISSIONS, type PermissionKey } from "@/lib/permissions";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { nadaFoiEscrito } from "@/lib/linhaAfetada";
+import { motivoDaEdge } from "@/lib/reenvioPlacar";
 
 type StaffRole = "admin" | "manager" | "warehouse";
 
@@ -113,7 +114,7 @@ const UsersManagement = () => {
     // isso, em vez de deixar a coluna com "—" como se o cadastro fosse assim.
     if (staffErr || staffData?.error) {
       toast.error("Roles loaded, but names/e-mails could not be read (shown as “—”): " +
-        (staffData?.error ?? staffErr?.message ?? "unknown error"));
+        (await motivoDaEdge(staffData, staffErr, "unknown error")));
     }
 
     const authMap: Record<string, any> = {};
@@ -271,7 +272,7 @@ const UsersManagement = () => {
         body: { action: "update_password", user_id: editUser.user_id, new_password: editPassword.trim() },
       });
       if (pwErr || pwData?.error) {
-        toast.error("Failed to update password: " + (pwData?.error ?? pwErr?.message ?? "unknown error"));
+        toast.error("Failed to update password: " + (await motivoDaEdge(pwData, pwErr, "unknown error")));
         setSaving(false);
         return;
       }
@@ -299,7 +300,7 @@ const UsersManagement = () => {
     });
 
     if (error || data?.error) {
-      toast.error(data?.error || error?.message || "Error creating user");
+      toast.error(await motivoDaEdge(data, error, "Error creating user"));
       setCreating(false);
       return;
     }

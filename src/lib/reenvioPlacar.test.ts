@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
+// @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
+// o modulo existe (vitest roda em Node).
+import { readFileSync } from "node:fs";
+import { fatiaAPartirDe } from "@/test/fatia";
 import {
   bloqueado, falhou, incerto, classificaReenvio, adminResolve,
-  montaMensagem, textoDoLog, motivoHttp,
+  montaMensagem, textoDoLog, motivoHttp, motivoDaEdge,
 } from "./reenvioPlacar";
 
 // Testes que EXECUTAM. Os de fonte (regex sobre o texto) protegiam a fiacao mas
@@ -207,6 +211,82 @@ describe("motivoHttp", () => {
     expect(await motivoHttp({ message: "x" })).toBeNull();
     expect(await motivoHttp(undefined)).toBeNull();
   });
+});
+
+describe("motivoDaEdge", () => {
+  it("non-2xx: le o motivo do corpo, nao a frase fixa do functions-js", async () => {
+    const r: any = erroHttp({ error: "A user with this email address has already been registered" });
+    expect(await motivoDaEdge(null, r.value.error, "Error creating user"))
+      .toBe("A user with this email address has already been registered");
+  });
+
+  it("200 com `error` no corpo (delete_user): `data.error` vem primeiro", async () => {
+    expect(await motivoDaEdge({ error: "x" }, null, "fallback")).toBe("x");
+    // E ganha mesmo de um `error` presente: a resposta e a fonte, nao o transporte.
+    const r: any = erroHttp({ error: "do corpo" });
+    expect(await motivoDaEdge({ error: "x" }, r.value.error, "fallback")).toBe("x");
+  });
+
+  it("FunctionsFetchError (sem Response no `context`) cai em `error.message`", async () => {
+    expect(await motivoDaEdge(null, redeCaiu().value.error, "fallback")).toBe("Failed to send a request");
+    expect(await motivoDaEdge(null, { message: "sem context" }, "fallback")).toBe("sem context");
+  });
+
+  it("corpo HTML/vazio e `message` vazia: fallback, nunca string vazia", async () => {
+    const html: any = erroHttp("<html>502</html>");
+    html.value.error.message = "";
+    expect(await motivoDaEdge(null, html.value.error, "Error creating user")).toBe("Error creating user");
+    expect(await motivoDaEdge(null, null, "Error creating user")).toBe("Error creating user");
+    expect(await motivoDaEdge({ error: "" }, { message: "" }, "Error creating user")).toBe("Error creating user");
+  });
+
+  it("`data.error` objeto NAO vira [object Object]", async () => {
+    const texto = await motivoDaEdge({ error: { code: "42501" } }, null, "fallback");
+    expect(texto).toBe("fallback");
+    expect(texto).not.toContain("[object Object]");
+    // ...e nem esconde o motivo real do corpo HTTP quando ele existe.
+    const r: any = erroHttp({ error: "do corpo" });
+    expect(await motivoDaEdge({ error: { code: 1 } }, r.value.error, "fallback")).toBe("do corpo");
+  });
+
+  it("le o corpo UMA vez por erro", async () => {
+    const r: any = erroHttp({ error: "primeiro" });
+    expect(await motivoDaEdge(null, r.value.error, "fallback")).toBe("primeiro");
+    expect(r.value.error.context.bodyUsed).toBe(true);
+  });
+});
+
+// GUARDA DE FONTE: todo `invoke("admin-create-user")` das duas telas passa o
+// resultado por `motivoDaEdge`. Sem isto, qualquer 4xx/5xx volta a virar a
+// frase fixa "Edge Function returned a non-2xx status code" no toast.
+describe("as telas de admin-create-user usam motivoDaEdge", () => {
+  const TELAS: [string, number][] = [
+    ["src/pages/admin/CustomerEdit.tsx", 4],
+    ["src/pages/admin/settings/UsersManagement.tsx", 3],
+  ];
+  const MARCADOR = 'invoke("admin-create-user"';
+
+  for (const [arq, esperados] of TELAS) {
+    it(`${arq.split("/").pop()}: ${esperados} chamadas, todas com motivoDaEdge`, () => {
+      const fonte = readFileSync(arq, "utf8");
+      expect(fonte).toMatch(/import \{ motivoDaEdge \} from "@\/lib\/reenvioPlacar"/);
+      let resto = fonte;
+      let vistos = 0;
+      while (resto.includes(MARCADOR)) {
+        // `fatiaAPartirDe` exige o marcador; `slice(MARCADOR.length)` avanca sem
+        // busca, entao o lint de recorte a mao nao tem o que acusar.
+        const daqui = fatiaAPartirDe(resto, MARCADOR);
+        const janela = daqui.split("\n").slice(0, 15).join("\n");
+        vistos++;
+        expect(janela, `chamada #${vistos} em ${arq} sem motivoDaEdge`).toMatch(/await motivoDaEdge\(/);
+        expect(janela, `chamada #${vistos} em ${arq} ainda usa error.message solto`)
+          .not.toMatch(/\b(fnError|fnErr|error|pwErr|staffErr|delErr)\?\.message/);
+        resto = daqui.slice(MARCADOR.length);
+      }
+      // Contagem fixa: uma chamada removida ou renomeada nao pode passar calada.
+      expect(vistos).toBe(esperados);
+    });
+  }
 });
 
 describe("predicados", () => {

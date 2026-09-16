@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { gravarComToken } from "@/lib/gravarComToken";
+import { motivoDaEdge } from "@/lib/reenvioPlacar";
 import { ArrowLeft, Plus, Trash2, Pencil } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
 
@@ -262,7 +263,7 @@ const CustomerEdit = () => {
       });
 
       if (fnError || fnData?.error) {
-        toast.error(fnData?.error || fnError?.message || "Error creating auth user");
+        toast.error(await motivoDaEdge(fnData, fnError, "Error creating auth user"));
         setSaving(false);
         return;
       }
@@ -1072,7 +1073,7 @@ const CustomerEdit = () => {
                             const { data, error } = await supabase.functions.invoke("admin-create-user", {
                               body: { action: "update_password", user_id: ct.user_id, new_password: pwd },
                             });
-                            if (error || data?.error) toast.error(data?.error || error?.message);
+                            if (error || data?.error) toast.error(await motivoDaEdge(data, error, "Could not set the password"));
                             else toast.success(`Password set for ${ct.email} — they can log in now.`);
                           }}>
                           🔑
@@ -1114,10 +1115,10 @@ const CustomerEdit = () => {
                             const { error: rowErr } = await supabase.from("clientes").delete().eq("id", ct.id);
                             if (rowErr) { toast.error(`Could not delete the employee record: ${rowErr.message}`); return; }
                             if (ct.user_id) {
-                              const { data } = await supabase.functions.invoke("admin-create-user", {
+                              const { data, error: delErr } = await supabase.functions.invoke("admin-create-user", {
                                 body: { action: "delete_user", user_id: ct.user_id },
                               });
-                              if (data?.error) { toast.warning(`Employee removed, but the login was kept: ${data.error}`); }
+                              if (delErr || data?.error) { toast.warning(`Employee removed, but the login was kept: ${await motivoDaEdge(data, delErr, "unknown error")}`); }
                             }
                             setContacts(prev => prev.filter(c => c.id !== ct.id));
                             toast.success(`${ct.email} deleted permanently.`);
@@ -1164,7 +1165,7 @@ const CustomerEdit = () => {
                     const { data: fnData, error: fnErr } = await supabase.functions.invoke("admin-create-user", {
                       body: { email: contactForm.email, nome: contactForm.nome, empresa: cliente.empresa || "" },
                     });
-                    if (fnErr || fnData?.error) { toast.error(fnData?.error || fnErr?.message); setSavingContact(false); return; }
+                    if (fnErr || fnData?.error) { toast.error(await motivoDaEdge(fnData, fnErr, "Error creating auth user")); setSavingContact(false); return; }
                     // Insere o sub-usuário: clientes filho com parent + 2 flags (herda price list via trigger)
                     const { data: ct, error: ctErr } = await supabase.from("clientes").insert({
                       user_id: fnData.user_id, parent_customer_id: cliente.id,
