@@ -6563,3 +6563,29 @@ aresta de seguranca (upsert de `user_roles` rebaixa staff; adocao silenciosa em
 
 T9: aguarda o dono rodar `SELECT nome, imagem_url FROM produtos WHERE nome
 ILIKE '%slat wall%'`.
+
+### 16/set — leva fechada: 9 commits, bateria 789/789
+
+Rodadas Cacador -> Cetico por lane, ate zerar:
+- T5 (5f77a13): r1 = 3 refutados + 1 pre-existente (virou T10). Limpo.
+- T6-U1 (17fa2bc): r1 achou o OITAVO call site (`Clientes.tsx` descartava o
+  `error` do delete_user -> "Customer deleted" com login vivo) -> e9c3c04, com
+  varredura de `src/` na guarda. r2 achou que a varredura era cega a aspas
+  simples -> 4452100. r3 (cetico) limpo. U2 segue BLOQUEADA (decisao do dono).
+- T7 (0aa8b9e) + T8 (af1451e): r1 = guarda do indice passava com a migration
+  comentada (`semComentario` nao tira `--`) e o sub-filtro nao tinha guarda na
+  tela -> 60fed6e. r2 = `/* */` tambem escapava -> 859cb44. `SET LOCAL` sem
+  BEGIN refutado (editor do Lovable roda em bloco implicito); `lock_timeout`
+  inconclusivo, nao adicionado.
+- T10 (05b96a1 lista; 859cb44 ficha): `statusKey` nas tres telas da classe.
+  Cetico r2 limpo (bloqueio otimista e por `admin_rev`, nao por valor).
+
+Estresse concorrente: NAO se aplica ao que foi tocado (funcoes puras de
+normalizacao, filtro em memoria, texto de toast). O unico ponto com carga real
+e o indice (T7), que so pode ser medido depois de o dono aplicar a migration.
+
+`npm test` em 859cb44: check-migrations OK (197), check-sql OK (200),
+check-edge OK (13), tsc limpo, 73 arquivos / 789 testes.
+
+AGUARDANDO o dono: (1) rodar a migration do indice; (2) publish; (3) SELECT dos
+Slat Wall (T9); (4) decisao T6-U2.

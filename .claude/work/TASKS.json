@@ -37,29 +37,29 @@
     {
       "id": "T5",
       "title": "Normalizar status como o banco (lower(btrim) ANTES do NAME_MAP) em stock.ts, Catalogo.tsx, ProdutoDetalhe.tsx",
-      "status": "validating",
-      "validation": "validating — implementado, foco 97/97; cacador em curso",
+      "status": "done",
+      "validation": "done — cacador+cetico limpos; bateria 789/789 em 859cb44; publish pendente",
       "depends_on": []
     },
     {
       "id": "T6",
       "title": "Create customer falha: edge admin-create-user devolve non-2xx e a tela mostra erro generico (email jess@permwood.com ja e login)",
-      "status": "in_progress",
-      "validation": "spec aprovado (U1); U2 blocked — decisao do dono: adotar login existente ou recusar",
+      "status": "blocked",
+      "validation": "U1 done (2 rodadas limpas, bateria 789/789, publish pendente). U2 blocked — dono decide: adotar login existente ou recusar",
       "depends_on": []
     },
     {
       "id": "T7",
       "title": "Delete de produto >1min e statement timeout: count e cascade em estoque_log (1M linhas) sem indice em produto_id",
-      "status": "validating",
-      "validation": "validating — foco 21/21, 3 mutantes mortos; cacador em curso",
+      "status": "blocked",
+      "validation": "codigo done (guarda + 2 rodadas limpas); BLOQUEADA ate o dono rodar a migration 20260916120000 no editor do Lovable",
       "depends_on": []
     },
     {
       "id": "T8",
       "title": "Filtro de produtos: Parent Category + Sub-categories dependentes (pedido da Jessika)",
-      "status": "validating",
-      "validation": "validating — foco 120/120; cacador em curso",
+      "status": "done",
+      "validation": "done — 2 rodadas limpas; bateria 789/789; publish pendente",
       "depends_on": []
     },
     {
@@ -68,6 +68,15 @@
       "status": "pending",
       "validation": "pending — levantar origem de imagem_url",
       "depends_on": []
+    },
+    {
+      "id": "T10",
+      "title": "Admin /admin/products: filtro e Select de status comparam status_produto cru (usar statusKey) — linhas 163/558",
+      "status": "done",
+      "validation": "done — 2 rodadas limpas (lista + ficha); bateria 789/789; publish pendente",
+      "depends_on": [
+        "T8"
+      ]
     }
   ]
 }
