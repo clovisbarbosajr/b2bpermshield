@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
-  ACTIVITY_OPTIONS, COUNTRIES, US_STATES, REQUIRED, LABELS, limiteDe, validarCadastro, type CadastroForm,
+  ACTIVITY_OPTIONS, COUNTRIES, US_STATES, REQUIRED, LABELS, limiteDe, validarCadastro, montarFicha, type CadastroForm,
 } from "@/lib/cadastroCliente";
 
 const VAZIO: CadastroForm = {
@@ -48,11 +48,7 @@ const Cadastro = () => {
     const nome = form.nome.trim();
     const empresa = form.empresa.trim();
     const password = form.password;
-    const t = (s: string) => s.trim() || null;
-    const ficha = {
-      telefone: t(form.telefone), activity: t(form.activity), endereco: t(form.endereco), endereco2: t(form.endereco2),
-      cidade: t(form.cidade), estado: t(form.estado), pais: t(form.pais), cep: t(form.cep),
-    };
+    const ficha = montarFicha(form);
     const { error } = await supabase.auth.signUp({
       email,
       password,

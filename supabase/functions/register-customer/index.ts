@@ -11,6 +11,7 @@
 // acesso até o admin aprovar). Se já existe ficha com o email (migrado) ou pelo
 // user_id, apenas VINCULA / não duplica.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { lerFicha } from "../_shared/fichaCadastro.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -34,18 +35,10 @@ Deno.serve(async (req) => {
     const emailLc = String(email ?? "").trim().toLowerCase();
     if (!emailLc || !emailLc.includes("@")) return json({ error: "valid email required" }, 400);
 
-    // FICHA COMPLETA (T24). Validada ANTES de qualquer consulta: dado invalido nao
-    // depende de quem e o e-mail, entao o 400 nao vira oraculo. Mesmos numeros de
-    // src/lib/cadastroCliente.ts (a edge nao importa de src/; cadastroCompleto.test.ts compara).
-    const REQUIRED = ["nome", "empresa", "telefone", "endereco", "cidade", "pais", "cep"];
-    const MAX_LEN = { texto: 200, email: 254, telefone: 40, cep: 20 };
-    const txt = (x: unknown) => String(x ?? "").trim();
-    const telefone = txt(body.telefone), activity = txt(body.activity), endereco = txt(body.endereco),
-      endereco2 = txt(body.endereco2), cidade = txt(body.cidade), estado = txt(body.estado),
-      pais = txt(body.pais), cep = txt(body.cep);
-    const campos: Record<string, string> = { nome: txt(nome), empresa: txt(empresa), telefone, activity, endereco, endereco2, cidade, estado, pais, cep };
-    const invalido = emailLc.length > MAX_LEN.email || Object.entries(campos).some(([k, v]) =>
-      (REQUIRED.includes(k) && !v) || v.length > ((MAX_LEN as Record<string, number>)[k] ?? MAX_LEN.texto));
+    // FICHA COMPLETA (T24): so limite de tamanho, antes de qualquer consulta —
+    // dado invalido nao depende de quem e o e-mail, entao o 400 nao vira oraculo.
+    // Por que nenhum campo e obrigatorio aqui: ver `_shared/fichaCadastro.ts`.
+    const { ficha, invalido } = lerFicha(body);
     if (invalido) return json({ error: "invalid registration data" }, 400);
 
     // ORACULO PUBLICO (A4)
@@ -106,8 +99,7 @@ Deno.serve(async (req) => {
     // 4) Cria a ficha PENDENTE (sem acesso até aprovação).
     const { data: created, error } = await db.from("clientes").insert({
       user_id: uid, nome: nome || emailLc, email: emailLc, empresa: empresa || "",
-      telefone: telefone || null, activity: activity || null, endereco: endereco || null, endereco2: endereco2 || null,
-      cidade: cidade || null, estado: estado || null, pais: pais || null, cep: cep || null,
+      ...ficha,
       status: "pendente", is_active: true, can_confirm_order: false, parent_customer_id: null,
     }).select("id").single();
     if (error) {

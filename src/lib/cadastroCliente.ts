@@ -1,8 +1,8 @@
 // Cadastro publico do cliente (T24) — mesma ficha do B2BWave.
 //
-// A edge `register-customer` NAO importa de `src/`: ela declara copias de
-// REQUIRED/MAX_LEN, e `supabase/functions/register-customer/cadastroCompleto.test.ts`
-// compara as duas. Mudou aqui, muda la.
+// A edge `register-customer` NAO importa de `src/`: ela le a ficha com
+// `supabase/functions/_shared/fichaCadastro.ts` (MAX_LEN e CAMPOS_FICHA proprios),
+// e `register-customer/cadastroCompleto.test.ts` compara os dois. Mudou aqui, muda la.
 
 export const ACTIVITY_OPTIONS = ["Other", "Contractor", "Retailer", "Wholesaler", "Distributor", "Manufacturer"];
 
@@ -52,4 +52,13 @@ export function validarCadastro(f: CadastroForm): string | null {
   if (f.password.length < 8) return "Password must be at least 8 characters";
   if (f.password !== f.passwordConfirm) return "Password confirmation does not match";
   return null;
+}
+
+/** O que vai no corpo do `register-customer` alem de email/nome/empresa. Vazio vira null. */
+export function montarFicha(f: CadastroForm) {
+  const t = (s: string) => s.trim() || null;
+  return {
+    telefone: t(f.telefone), activity: t(f.activity), endereco: t(f.endereco), endereco2: t(f.endereco2),
+    cidade: t(f.cidade), estado: t(f.estado), pais: t(f.pais), cep: t(f.cep),
+  };
 }
