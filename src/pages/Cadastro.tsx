@@ -5,13 +5,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import {
+  ACTIVITY_OPTIONS, COUNTRIES, US_STATES, REQUIRED, LABELS, limiteDe, validarCadastro, type CadastroForm,
+} from "@/lib/cadastroCliente";
+
+const VAZIO: CadastroForm = {
+  empresa: "", nome: "", telefone: "", activity: "", endereco: "", endereco2: "", cidade: "",
+  estado: "", pais: "United States", cep: "", email: "", password: "", passwordConfirm: "",
+};
 
 const Cadastro = () => {
-  const [nome, setNome] = useState("");
-  const [empresa, setEmpresa] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [form, setForm] = useState<CadastroForm>(VAZIO);
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [fichaFalhou, setFichaFalhou] = useState(false);
@@ -28,8 +34,9 @@ const Cadastro = () => {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password.length < 8) {
-      toast.error("Password must be at least 8 characters");
+    const invalido = validarCadastro(form);
+    if (invalido) {
+      toast.error(invalido);
       return;
     }
     if (!aberto) {
@@ -37,6 +44,15 @@ const Cadastro = () => {
       return;
     }
     setLoading(true);
+    const email = form.email.trim();
+    const nome = form.nome.trim();
+    const empresa = form.empresa.trim();
+    const password = form.password;
+    const t = (s: string) => s.trim() || null;
+    const ficha = {
+      telefone: t(form.telefone), activity: t(form.activity), endereco: t(form.endereco), endereco2: t(form.endereco2),
+      cidade: t(form.cidade), estado: t(form.estado), pais: t(form.pais), cep: t(form.cep),
+    };
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -64,7 +80,7 @@ const Cadastro = () => {
       // em /pending-approval, e ninguem do lado de ca sabe que ela existe.
       // Nao da para desfazer o signUp daqui, entao o minimo honesto e contar.
       const { error: fichaErr } = await supabase.functions
-        .invoke("register-customer", { body: { email, nome, empresa } })
+        .invoke("register-customer", { body: { email, nome, empresa, ...ficha } })
         .catch((e: unknown) => ({ error: e }));
       if (fichaErr) {
         console.error("[cadastro] register-customer falhou; ficha pendente e aviso ao admin podem nao ter sido criados", fichaErr);
@@ -80,7 +96,7 @@ const Cadastro = () => {
           <CardHeader>
             <CardTitle>Check your email</CardTitle>
             <CardDescription>
-              We sent a confirmation link to <strong>{email}</strong>.
+              We sent a confirmation link to <strong>{form.email.trim()}</strong>.
             </CardDescription>
           </CardHeader>
           {fichaFalhou && (
@@ -101,40 +117,66 @@ const Cadastro = () => {
     );
   }
 
+  const obrigatorio = (k: keyof CadastroForm) => (REQUIRED as readonly string[]).includes(k);
+  const rotulo = (k: keyof CadastroForm) => (
+    <Label htmlFor={k}>{LABELS[k]}{obrigatorio(k) && <span aria-hidden="true"> *</span>}</Label>
+  );
+  const campo = (k: keyof CadastroForm, type = "text") => (
+    <div className="space-y-2">
+      {rotulo(k)}
+      <Input
+        id={k} type={type} value={form[k]} maxLength={limiteDe(k)} required={obrigatorio(k)}
+        onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))}
+      />
+    </div>
+  );
+  const escolha = (k: keyof CadastroForm, opcoes: string[], onChange = (v: string) => setForm((f) => ({ ...f, [k]: v }))) => (
+    <div className="space-y-2">
+      {rotulo(k)}
+      <Select value={form[k]} onValueChange={onChange}>
+        <SelectTrigger id={k} aria-required={obrigatorio(k)}><SelectValue placeholder="Please select..." /></SelectTrigger>
+        <SelectContent>
+          {opcoes.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-display">Create Account</CardTitle>
-          <CardDescription>Registration subject to approval</CardDescription>
+      <Card className="w-full max-w-5xl">
+        <CardHeader className="flex flex-col gap-1 space-y-0 sm:flex-row sm:items-baseline sm:justify-between">
+          <CardTitle className="text-2xl font-display">Sign Up</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Already got an account?{" "}
+            <Link to="/login" className="text-accent hover:underline">Sign in</Link>
+          </p>
         </CardHeader>
-        <form onSubmit={handleSignup}>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="nome">Name</Label>
-              <Input id="nome" value={nome} onChange={(e) => setNome(e.target.value)} required />
+        <form onSubmit={handleSignup} noValidate>
+          <CardContent className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            <div className="space-y-4">
+              {campo("empresa")}
+              {campo("nome")}
+              {campo("telefone", "tel")}
+              {escolha("activity", ACTIVITY_OPTIONS)}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="empresa">Company</Label>
-              <Input id="empresa" value={empresa} onChange={(e) => setEmpresa(e.target.value)} required />
+            <div className="space-y-4">
+              {campo("endereco")}
+              {campo("endereco2")}
+              {campo("cidade")}
+              {form.pais === "United States" ? escolha("estado", US_STATES) : campo("estado")}
+              {escolha("pais", COUNTRIES, (v) => setForm((f) => ({ ...f, pais: v, estado: "" })))}
+              {campo("cep")}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <div className="space-y-4">
+              {campo("email", "email")}
+              {campo("password", "password")}
+              {campo("passwordConfirm", "password")}
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "Signing up..." : "SIGN UP"}
+              </Button>
             </div>
           </CardContent>
-          <CardFooter className="flex flex-col gap-3">
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Registering..." : "Register"}
-            </Button>
-            <Link to="/login" className="text-sm text-accent hover:underline">
-              Already have an account
-            </Link>
-          </CardFooter>
         </form>
       </Card>
     </div>

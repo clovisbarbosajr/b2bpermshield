@@ -10,19 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, X, Check } from "lucide-react";
 import { nadaFoiEscrito } from "@/lib/linhaAfetada";
+import { US_STATES as ESTADOS_EUA } from "@/lib/cadastroCliente";
 
 const RULE_TYPES = ["Per Order flat rate", "Per Order Net Value", "Per Item flat rate", "Per Item flat value"];
 
-const US_STATES = [
-  "All", "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut",
-  "Delaware", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa",
-  "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", "Michigan",
-  "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire",
-  "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
-  "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota",
-  "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia",
-  "Wisconsin", "Wyoming",
-];
+const US_STATES = ["All", ...ESTADOS_EUA];
 
 type Condition = {
   country: string;

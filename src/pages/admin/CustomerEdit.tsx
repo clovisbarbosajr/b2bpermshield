@@ -19,8 +19,7 @@ import { gravarComToken } from "@/lib/gravarComToken";
 import { motivoDaEdge, resultadoDoEnvio } from "@/lib/reenvioPlacar";
 import { ArrowLeft, Plus, Trash2, Pencil } from "lucide-react";
 import { useActivityLog } from "@/hooks/useActivityLog";
-
-const activityOptions = ["Other", "Contractor", "Retailer", "Wholesaler", "Distributor", "Manufacturer"];
+import { ACTIVITY_OPTIONS, COUNTRIES } from "@/lib/cadastroCliente";
 
 const CustomerEdit = () => {
   const { id } = useParams<{ id: string }>();
@@ -564,7 +563,7 @@ const CustomerEdit = () => {
                     <Select value={form.activity} onValueChange={v => setForm(f => ({ ...f, activity: v }))}>
                       <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
                       <SelectContent>
-                        {activityOptions.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                        {ACTIVITY_OPTIONS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -677,10 +676,7 @@ const CustomerEdit = () => {
                   <Select value={form.pais} onValueChange={v => setForm(f => ({ ...f, pais: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="United States">United States</SelectItem>
-                      <SelectItem value="Canada">Canada</SelectItem>
-                      <SelectItem value="United Kingdom">United Kingdom</SelectItem>
-                      <SelectItem value="Brazil">Brazil</SelectItem>
+                      {COUNTRIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
