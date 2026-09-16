@@ -43,8 +43,11 @@ export function resolverPreco({
 const BLOCO = 100;
 
 // I/O em lote: 1x `clientes` (+1x a conta, se sub-login) e, por bloco de 100
-// produtos, uma leitura de cada tabela da cascata. Qualquer `error` LANCA — nunca
-// devolve preco base fingindo que deu certo; as telas contam com isso para avisar.
+// produtos, uma leitura de cada tabela da cascata. `error` numa leitura
+// NECESSARIA lanca — nunca devolve preco base fingindo que deu certo; as telas
+// contam com isso para avisar. A unica leitura que pode falhar sem derrubar o
+// bloco e a da lista de precos, e so quando TODO id do bloco tem preco
+// combinado (a lista nao entra no resultado deles).
 export async function getProductPrices({
   productIds,
   customerId,
