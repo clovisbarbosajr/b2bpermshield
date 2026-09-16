@@ -1,7 +1,7 @@
 # Progresso
 
 ## 🚫 Bloqueadas
-- [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo) — decisão do dono
+- [ ] T15 — send-email sem oráculo de cliente — código validado; aguarda deploy do edge pelo Lovable
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
 
 ## ✅ Concluídas e validadas
