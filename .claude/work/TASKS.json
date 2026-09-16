@@ -125,8 +125,8 @@
     {
       "id": "T17",
       "title": "Checkout: ficha nova sem shipping option atribuida — bloco some e o pedido grava frete 0 em silencio",
-      "status": "in_progress",
-      "validation": "spec-validator",
+      "status": "blocked",
+      "validation": "codigo validado (cacador+cetico, bateria 864/864). Deploy: SQL 20260916150000 DEPOIS do publish",
       "depends_on": []
     },
     {
@@ -146,8 +146,8 @@
     {
       "id": "T20",
       "title": "Sub-login nao le a linha da empresa em clientes (RLS) — front nao herda a tabela de preco do pai; migration proposta em docs/PROPOSTA-T20-sublogin-le-conta-pai.sql",
-      "status": "in_progress",
-      "validation": "spec-validator (RPC com so tabela_preco_id, em vez de policy que expoe a linha do pai)",
+      "status": "blocked",
+      "validation": "codigo validado (cacador 0 bugs, bateria 864/864). Deploy: SQL 20260916160000 ANTES do publish",
       "depends_on": []
     },
     {
@@ -162,6 +162,13 @@
       "title": "Telas de troca de senha (ResetPassword, EditPassword): excecao do updateUser trava o botao com a senha ja trocada — mesma correcao do login",
       "status": "done",
       "validation": "done — cacador 0 bugs, cetico refutou as 2 suspeitas (27e4b3b); publish pendente",
+      "depends_on": []
+    },
+    {
+      "id": "T23",
+      "title": "RAISE EXCEPTION com texto + USING MESSAGE (42601): cliente ve \"RAISE option already specified\" em vez de estoque insuficiente / pedido minimo / opcao nao permitida",
+      "status": "blocked",
+      "validation": "codigo validado (cacador limpo, testado em PGlite, bateria 864/864). Deploy: SQL 20260916170000 antes ou depois do publish",
       "depends_on": []
     }
   ]

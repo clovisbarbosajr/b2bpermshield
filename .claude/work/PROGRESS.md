@@ -1,10 +1,7 @@
 # Progresso
 
-## 🔄 Em andamento
-- [ ] Lane A — T17 — Spec Validator — frete 0: exigir opção de envio / bloquear sem opção
-- [ ] Lane B — T20 — Spec Validator — sub-login herda a lista de preço da empresa (RPC)
-
 ## 🚫 Bloqueadas
+- [ ] Deploy T20+T23+T17 — 1º SQL 160000+170000, 2º publish, 3º SQL 150000 — dono
 - [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo) — decisão do dono
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
 - [ ] 2 logins órfãos (clovisbarbosajr@gmail.com, jessika.andrade@hotmail.com) — DELETE enviado ao dono
