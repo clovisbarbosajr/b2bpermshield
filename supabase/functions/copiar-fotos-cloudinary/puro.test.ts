@@ -111,6 +111,21 @@ describe("copiar-fotos-cloudinary: o que a edge NAO pode fazer", () => {
     expect(trecho).toMatch(/if \(!ext\) \{[\s\S]*?erros\.push\([\s\S]*?continue;/);
   });
 
+  it("variantes entram na varredura (o portal mostra a foto da variante antes da do produto)", () => {
+    expect(ALVOS.map(([t, c]) => `${t}.${c}`)).toContain("produto_variantes.imagem_url");
+  });
+
+  it("contagem final que falha vira `restantes: null`, nunca 0", () => {
+    const trecho = fatiaEntre(semComentario, "let restantes: number | null = 0;", "return json({", 14);
+    expect(trecho).toContain("error: cntErr");
+    expect(trecho).toMatch(/if \(cntErr \|\| count === null\) \{[\s\S]*?restantes = null;/);
+  });
+
+  it("o criterio de parada documentado e `copiadas`, nao `restantes = 0`", () => {
+    expect(fonte).toMatch(/repetir enquanto `copiadas > 0`/);
+    expect(fonte).not.toMatch(/repetir ate restantes = 0/);
+  });
+
   it("sem offset: o conjunto encolhe a cada update", () => {
     expect(semComentario).not.toMatch(/\.range\(|\.offset\(/);
     expect(semComentario).toContain('.ilike(coluna, "%res.cloudinary.com%")');

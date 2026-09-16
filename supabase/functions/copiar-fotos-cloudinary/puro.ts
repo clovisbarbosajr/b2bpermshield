@@ -6,6 +6,7 @@
 export const ALVOS: ReadonlyArray<readonly [tabela: string, coluna: string]> = [
   ["produtos", "imagem_url"],
   ["produto_imagens", "imagem_url"],
+  ["produto_variantes", "imagem_url"],
   ["categorias", "imagem_url"],
   ["banners", "imagem_url"],
   ["noticias", "imagem_url"],

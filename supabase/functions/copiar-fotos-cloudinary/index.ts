@@ -13,7 +13,15 @@
 //
 // Como usar (depois do deploy pelo chat do Lovable), logado como admin:
 //   POST /functions/v1/copiar-fotos-cloudinary  { "dry_run": true }
-//   POST /functions/v1/copiar-fotos-cloudinary  { "dry_run": false }   (repetir ate restantes = 0)
+//   POST /functions/v1/copiar-fotos-cloudinary  { "dry_run": false }
+//     repetir enquanto `copiadas > 0` ou `parada_por_tempo = true`. O que sobrar
+//     em `restantes` esta listado em `mortas` (404 na origem — subir de novo na
+//     mao) e `erros`; `restantes` NAO chega a zero enquanto houver morta.
+//
+// OPERACIONAL: rodar com NENHUMA ficha de produto aberta. A ficha guarda a URL
+// carregada e o Save regrava por cima (o token `admin_rev` nao ve esta troca);
+// a galeria e regravada inteira no Save. Se alguem salvar no meio, basta rodar
+// de novo: a linha volta a ser candidata.
 //
 // Idempotente: a selecao e `ILIKE '%res.cloudinary.com%'`, entao linha ja
 // trocada nao volta a ser candidata; falha no meio e segura (caminho fixo +
@@ -140,11 +148,17 @@ serve(async (req) => {
     }
 
     // Quantas ainda apontam para o Cloudinary depois desta chamada.
-    let restantes = 0;
+    // Contagem que falha NAO pode virar 0: 0 e o sinal de "acabou".
+    let restantes: number | null = 0;
     for (const [tabela, coluna] of ALVOS) {
-      const { count } = await admin
+      const { count, error: cntErr } = await admin
         .from(tabela).select("id", { count: "exact", head: true }).ilike(coluna, "%res.cloudinary.com%");
-      restantes += count ?? 0;
+      if (cntErr || count === null) {
+        erros.push({ tabela: `${tabela}.${coluna}`, id: "-", url: "-", motivo: `count: ${cntErr?.message ?? "null"}` });
+        restantes = null;
+      } else if (restantes !== null) {
+        restantes += count;
+      }
     }
 
     return json({
