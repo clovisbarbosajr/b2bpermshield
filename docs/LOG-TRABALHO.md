@@ -6589,3 +6589,15 @@ check-edge OK (13), tsc limpo, 73 arquivos / 789 testes.
 
 AGUARDANDO o dono: (1) rodar a migration do indice; (2) publish; (3) SELECT dos
 Slat Wall (T9); (4) decisao T6-U2.
+
+### 16/set — T9: imagens dos Slat Wall
+
+As 6 `imagem_url` apontam para `res.cloudinary.com/dbrtm8pf6/...uploads/00432e40/
+products/<id>/images/<hash>` — o Cloudinary do B2BWave. Todas respondem 404 com
+`x-cld-error: Resource not found`; testei com `.jpg`, `f_auto` e sem versao —
+404 igual. Os arquivos foram apagados na origem (B2BWave/Cloudinary), nao ha
+como recuperar pela URL. O repo nunca copiou as imagens: o sync gravava so a
+URL. A ficha (`ProductEdit.tsx:333`) ja sobe imagem para o bucket
+`product-images` do Supabase, entao o caminho e re-upload pela Jessika.
+BLOQUEADA ate saber quantos produtos estao nessa situacao (SELECT enviado ao
+dono).

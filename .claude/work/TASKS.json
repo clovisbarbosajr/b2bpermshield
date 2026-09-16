@@ -65,8 +65,8 @@
     {
       "id": "T9",
       "title": "Imagens quebradas nos produtos Slat Wall na lista de produtos",
-      "status": "pending",
-      "validation": "pending — levantar origem de imagem_url",
+      "status": "blocked",
+      "validation": "6 URLs sao do Cloudinary do B2BWave (conta dbrtm8pf6) e respondem 404 x-cld-error Resource not found — apagadas na origem, irrecuperaveis pela URL. Aguarda contagem (quantos produtos apontam para o Cloudinary) e re-upload pela Jessika (ProductEdit ja sobe para o bucket product-images)",
       "depends_on": []
     },
     {

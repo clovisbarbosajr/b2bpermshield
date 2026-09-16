@@ -1,10 +1,11 @@
 # Progresso
 
 ## ⏳ Pendentes
-- [ ] T9 — imagens quebradas nos produtos Slat Wall — aguarda SELECT do dono
+
 - [ ] Publish do front (T5, T6-U1, T8, T10) — depois do SQL de T7
 
 ## 🚫 Bloqueadas
+- [ ] T9 — imagens Slat Wall — arquivos apagados no Cloudinary do B2BWave (404); precisa re-upload; aguarda contagem
 - [ ] T7 — índice em `estoque_log` — aguarda o dono rodar a migration no Lovable
 - [ ] T6-U2 — e-mail que já é login: adotar ou recusar? — decisão do dono
 
