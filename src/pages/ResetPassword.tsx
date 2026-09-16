@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { semTravar } from "@/lib/loginComSenha";
 import { toast } from "sonner";
 import { usePortalTheme, usePortalMotion } from "@/hooks/usePortalTheme";
 
@@ -97,7 +98,9 @@ const ResetPassword = () => {
       return;
     }
     setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password });
+    // `semTravar`: se o auth-js rejeitar DEPOIS de trocar a senha (assinante de
+    // onAuthStateChange estourou), vira erro visivel em vez de botao preso.
+    const { error } = await semTravar(supabase.auth.updateUser({ password }), "Could not save the password");
     setLoading(false);
     if (error) {
       toast.error(error.message);

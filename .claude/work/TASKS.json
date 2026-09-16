@@ -149,6 +149,20 @@
       "status": "blocked",
       "validation": "aguarda dono: decidir policy (expoe a linha do pai) ou RPC; conferir se ha sub-login na base",
       "depends_on": []
+    },
+    {
+      "id": "T21",
+      "title": "Checkout mostra TODAS as shipping options; a ficha do cliente marca so 3 (Customer shipping options) — filtro ignora a atribuicao para opcoes nao-privadas",
+      "status": "in_progress",
+      "validation": "spec-validator",
+      "depends_on": []
+    },
+    {
+      "id": "T22",
+      "title": "Telas de troca de senha (ResetPassword, EditPassword): excecao do updateUser trava o botao com a senha ja trocada — mesma correcao do login",
+      "status": "in_progress",
+      "validation": "implementacao (dono autorizou corrigir bugs sem pedir)",
+      "depends_on": []
     }
   ]
 }

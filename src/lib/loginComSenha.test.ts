@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — tsconfig.app.json nao inclui os tipos do Node; vitest roda em Node.
 import { readFileSync } from "node:fs";
-import { entrarComSenha } from "./loginComSenha";
+import { entrarComSenha, semTravar } from "./loginComSenha";
 
 describe("entrarComSenha", () => {
   it("sucesso: devolve o user", async () => {
@@ -27,6 +27,26 @@ describe("entrarComSenha", () => {
     await entrarComSenha(auth, "  a@b.com  ", "x");
     expect(visto).toBe("a@b.com");
   });
+});
+
+describe("semTravar (troca de senha)", () => {
+  it("rejeicao vira { error } visivel; nunca rejeita", async () => {
+    await expect(semTravar(Promise.reject(new Error("subscriber exploded")), "fb")).resolves.toEqual({ error: { message: "subscriber exploded" } });
+    await expect(semTravar(Promise.reject(null), "fb")).resolves.toEqual({ error: { message: "fb" } });
+  });
+  it("erro devolvido passa; sucesso e error null", async () => {
+    await expect(semTravar(Promise.resolve({ error: { message: "weak password" } }))).resolves.toEqual({ error: { message: "weak password" } });
+    await expect(semTravar(Promise.resolve({ error: null }))).resolves.toEqual({ error: null });
+  });
+
+  for (const arq of ["src/pages/ResetPassword.tsx", "src/pages/admin/settings/EditPassword.tsx"]) {
+    it(`${arq}: updateUser passa por semTravar e o botao libera antes de decidir`, () => {
+      const fonte = readFileSync(arq, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+      expect(fonte).toMatch(/await semTravar\(supabase\.auth\.updateUser\(/);
+      expect(fonte).not.toMatch(/await supabase\.auth\.updateUser\(/);
+      expect(fonte).toMatch(/await semTravar\([^\n]*\);\s*\n\s*set(Loading|Saving)\(false\);/);
+    });
+  }
 });
 
 describe("as duas telas de login passam pelo helper", () => {

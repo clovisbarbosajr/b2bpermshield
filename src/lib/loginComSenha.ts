@@ -17,6 +17,22 @@ type AuthComSenha = {
 // e o narrowing por `ok` nao acontece.
 export type ResultadoLogin = { ok: boolean; user: unknown; motivo: string };
 
+// Mesma classe em `updateUser` (troca de senha): o auth-js grava a sessao com a
+// senha NOVA e so depois notifica os assinantes; se um estoura, REJEITA. A
+// tela ficava presa em "Saving…" com a senha ja trocada no servidor. Devolve
+// `{ error }` sempre — nunca rejeita.
+export async function semTravar(
+  chamada: Promise<{ error?: { message?: string } | null }>,
+  fallback = "Unexpected error",
+): Promise<{ error: { message: string } | null }> {
+  try {
+    const { error } = await chamada;
+    return { error: error ? { message: error.message || fallback } : null };
+  } catch (e) {
+    return { error: { message: (e as Error)?.message || fallback } };
+  }
+}
+
 export async function entrarComSenha(auth: AuthComSenha, email: string, password: string): Promise<ResultadoLogin> {
   try {
     const { data, error } = await auth.signInWithPassword({ email: email.trim(), password });

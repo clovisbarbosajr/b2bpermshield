@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { semTravar } from "@/lib/loginComSenha";
 import { useAuth } from "@/contexts/AuthContext";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Card } from "@/components/ui/card";
@@ -19,12 +20,14 @@ const EditPassword = () => {
     if (newPassword.length < 6) { toast.error("Password must be at least 6 characters"); return; }
     if (newPassword !== confirmPassword) { toast.error("Passwords do not match"); return; }
     setSaving(true);
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    if (error) { toast.error(error.message); setSaving(false); return; }
+    // `semTravar`: rejeicao do auth-js depois de trocar a senha vira erro visivel
+    // e o botao libera — antes ficava preso em "Updating...".
+    const { error } = await semTravar(supabase.auth.updateUser({ password: newPassword }), "Could not update the password");
+    setSaving(false);
+    if (error) { toast.error(error.message); return; }
     toast.success("Password updated successfully");
     setNewPassword("");
     setConfirmPassword("");
-    setSaving(false);
   };
 
   return (

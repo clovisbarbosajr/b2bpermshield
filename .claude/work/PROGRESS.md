@@ -1,11 +1,14 @@
 # Progresso
 
+## 🔄 Em andamento
+- [ ] Lane A — T21 — Spec Validator — checkout ignora as shipping options marcadas na ficha
+- [ ] Lane B — T22 — Implementação — telas de troca de senha não travam em exceção
+
 ## ⏳ Pendentes
 - [ ] Publish do front (T13, T16, T18-U1, T19) — dono
 - [ ] T17 — checkout: frete 0 silencioso quando o cliente não tem shipping option atribuída
 
 ## 🚫 Bloqueadas
-- [ ] Telas de troca de senha (ResetPassword, EditPassword) — mesma correção do login — aguarda OK do dono
 - [ ] Produtos sem preço (base 0 e fora de qualquer lista) — dado, Jessika cadastra
 - [ ] T20 — sub-login não herda a lista de preço do pai na tela (RLS de `clientes`) — SQL proposto, decisão do dono
 - [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo) — decisão do dono
