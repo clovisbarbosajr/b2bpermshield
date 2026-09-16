@@ -434,13 +434,18 @@ const Checkout = () => {
           (addrErr?.message ?? "address not created") + ". Please pick or add a delivery address.");
         return { ok: false, id: null };
       }
+      // A linha criada entra no estado: uma retentativa do submit (pagamento
+      // recusado, item sem estoque) volta aqui e o `find` acima a reusa, em vez
+      // de inserir outra igual a cada tentativa.
+      setEnderecos(prev => [...prev, created as any]);
       return { ok: true, id: (created as any).id };
     }
     // Endereco de entrega e OBRIGATORIO. `pedidos.endereco_entrega_id` e nullable
     // e nada mais barrava: ficha parcial + `enderecos` vazia fechava pedido sem
     // destino, com "Order submitted!". Nao ha marcador de "retirada" em
-    // `shipping_options` para abrir excecao.
-    if (!enderecoId) {
+    // `shipping_options` para abrir excecao. A sentinela `__company__` sem
+    // `companyAddress` tambem para aqui: nunca pode virar `endereco_entrega_id`.
+    if (!enderecoId || enderecoId === "__company__") {
       toast.error("Select or add a delivery address.");
       return { ok: false, id: null };
     }

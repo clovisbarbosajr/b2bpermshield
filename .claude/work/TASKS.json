@@ -119,7 +119,7 @@
       "id": "T16",
       "title": "Checkout: Select address vazio — nao puxa o endereco da ficha do cliente; conferir tudo que o checkout deveria herdar da ficha (nome, empresa, telefone, tax group, price list, shipping)",
       "status": "validating",
-      "validation": "r1 corrigido em b13e12b; cacador r2",
+      "validation": "r2 corrigido em 0c7aab9; cacador r3",
       "depends_on": []
     },
     {
@@ -133,14 +133,14 @@
       "id": "T18",
       "title": "Login: depois de digitar a senha e entrar, a tela nao avanca; so entra apos recarregar a pagina",
       "status": "validating",
-      "validation": "U1 em f6306be (aprovada pelo dono); cacador em curso; U0 diagnostico no browser pendente do dono",
+      "validation": "U1 limpa (cacador+cetico; guarda corrigida f9bce60). Aguarda: diagnostico no browser (dono) e OK do dono para a mesma correcao em ResetPassword/EditPassword (updateUser)",
       "depends_on": []
     },
     {
       "id": "T19",
       "title": "Catalogo do portal: precos aparecem $0.00 por ~1 min ate carregar o price list; alguns ficam $0.00",
-      "status": "in_progress",
-      "validation": "spec: performance aprovada (lote); os 2 produtos a $0.00 aguardam SQL do dono",
+      "status": "validating",
+      "validation": "lote em c662819, foco 95/95; cacador em curso; $0.00 residual aguarda SQL do dono",
       "depends_on": []
     }
   ]

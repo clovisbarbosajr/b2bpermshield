@@ -1,10 +1,10 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T16 — Cético (rodada 2) — pedido sem endereço; comentários; conta sem estado/CEP; reuso por rua+cidade
-- [ ] Lane D — T18 — Caçador — sobre f6306be (helper de login); diagnóstico no browser pendente
+- [ ] Lane A — T16 — Correção (rodada 3) — linha criada entra no estado; gate `__company__`; guarda de ordem
+- [ ] Lane D — T18 — Validação — U1 limpa; aguarda diagnóstico no browser e OK do dono para as telas de senha
 - [ ] Lane B — T18 — Spec Validator — login só completa após recarregar a página
-- [ ] Lane C — T19 — Implementação — preço em lote (`getProductPrices`), Catalogo, mock do stress
+- [ ] Lane C — T19 — Cético — erro na lista com preço combinado; sub-login sem a lista do pai (RLS)
 
 ## ⏳ Pendentes
 - [ ] Publish do front (T13) — dono

@@ -70,9 +70,13 @@ describe("montarOpcoesDeEndereco", () => {
   it("(9) o checkout exige endereco de entrega e reusa a linha da conta pelos 5 campos", () => {
     const src = readFileSync("src/pages/portal/Checkout.tsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
     // sem endereco, o submit para ANTES de gravar o pedido
-    expect(src).toMatch(/if \(!enderecoId\) \{\s*toast\.error\("Select or add a delivery address\."\);\s*return \{ ok: false, id: null \};/);
+    // ORDEM prende o efeito: a guarda tem que vir ANTES do `return ok` (movida
+    // para depois vira codigo morto e o texto continua la — mutante que passou).
+    expect(src).toMatch(/if \(!enderecoId \|\| enderecoId === "__company__"\) \{\s*toast\.error\("Select or add a delivery address\."\);\s*return \{ ok: false, id: null \};\s*\}\s*return \{ ok: true, id: enderecoId \};/);
     expect(src).not.toContain("id: enderecoId || null");
     expect(src).toContain("enderecos.find(e => mesmoEndereco(e, companyAddress))");
+    // a linha criada entra no estado, senao cada retentativa insere outra
+    expect(src).toMatch(/setEnderecos\(prev => \[\.\.\.prev, created as any\]\);\s*return \{ ok: true, id: \(created as any\)\.id \};/);
   });
 
   it("(7) rotulo da linha principal recebe (main)", () => {
