@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fatiaAPartirDe } from "@/test/fatia";
 import {
   bloqueado, falhou, incerto, classificaReenvio, adminResolve,
@@ -263,7 +263,22 @@ describe("as telas de admin-create-user usam motivoDaEdge", () => {
   const TELAS: [string, number][] = [
     ["src/pages/admin/CustomerEdit.tsx", 4],
     ["src/pages/admin/settings/UsersManagement.tsx", 3],
+    // O oitavo: o delete da lista de clientes descartava o `error` do invoke e
+    // dizia "Customer deleted" com o login vivo. Uma lista fixa de telas e o que
+    // deixou ele passar — grep abaixo prende que nenhuma outra tela chama a edge.
+    ["src/pages/admin/Clientes.tsx", 1],
   ];
+  it("nenhuma outra tela chama admin-create-user fora das listadas", () => {
+    // Varredura em Node puro: `execSync("git grep ...")` com aspas simples quebra
+    // no cmd.exe do Windows. Este proprio arquivo contem o marcador; testes nao
+    // chamam a edge, entao ficam de fora.
+    const arquivos = (readdirSync("src", { recursive: true }) as string[])
+      .filter((n) => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n))
+      .map((n) => `src/${n.replace(/\\/g, "/")}`)
+      .filter((a) => readFileSync(a, "utf8").includes(MARCADOR))
+      .sort();
+    expect(arquivos).toEqual(TELAS.map(([a]) => a).sort());
+  });
   const MARCADOR = 'invoke("admin-create-user"';
 
   for (const [arq, esperados] of TELAS) {

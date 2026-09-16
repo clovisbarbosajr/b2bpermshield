@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { paginasVisiveis, paginaValida } from "@/lib/paginacao";
 import { escaparCelulaCSV } from "@/lib/export-csv";
+import { motivoDaEdge } from "@/lib/reenvioPlacar";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -246,10 +247,14 @@ const AdminClientes = () => {
     // Libera o LOGIN também (senão o email fica "preso" — não recadastra nunca).
     // A função recusa sozinha logins de staff ou ainda usados por outra ficha.
     if (c.user_id) {
-      const { data } = await supabase.functions.invoke("admin-create-user", {
+      // A ficha ja foi apagada: se o login sobrar, o admin PRECISA saber agora,
+      // porque o `user_id` some da tela e nao ha como repetir. Em non-2xx
+      // (401/403/500/rede) `data` vem null — so `data?.error` era silencio.
+      const { data, error: delErr } = await supabase.functions.invoke("admin-create-user", {
         body: { action: "delete_user", user_id: c.user_id },
       });
-      if (data?.error) toast.warning(`Customer removed, but the login was kept: ${data.error}`);
+      const motivo = await motivoDaEdge(data, delErr, "");
+      if (motivo) toast.warning(`Customer removed, but the login was kept: ${motivo}`);
     }
     toast.success("Customer deleted");
     fetchData();
