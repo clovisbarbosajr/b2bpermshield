@@ -31,7 +31,10 @@ Deno.serve(async (req) => {
   try {
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const body = await req.json();
-    const { email, nome, empresa } = body;
+    // Com trim: `lerFicha` mede o tamanho sem as pontas, entao gravar o valor cru
+    // deixava espacos passarem do limite.
+    const { email } = body;
+    const nome = String(body.nome ?? "").trim(), empresa = String(body.empresa ?? "").trim();
     const emailLc = String(email ?? "").trim().toLowerCase();
     if (!emailLc || !emailLc.includes("@")) return json({ error: "valid email required" }, 400);
 

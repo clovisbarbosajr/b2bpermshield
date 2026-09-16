@@ -61,6 +61,9 @@ describe("register-customer: fiacao da edge", () => {
   it("o insert da ficha nova espalha a ficha lida", () => {
     const insert = fatiaEntre(fonte, 'db.from("clientes").insert({', "}).select(", 8);
     expect(insert).toContain("...ficha,");
+    // nome/empresa gravados com trim (o limite de `lerFicha` mede sem as pontas)
+    expect(fonte).toContain('const nome = String(body.nome ?? "").trim(), empresa = String(body.empresa ?? "").trim();');
+    expect(insert).not.toMatch(/\b(telefone|activity|endereco2?|cidade|estado|pais|cep)\s*:/);
     expect(insert).toContain('status: "pendente"');
   });
 
