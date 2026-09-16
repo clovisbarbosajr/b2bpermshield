@@ -4164,6 +4164,18 @@ export type Database = {
       is_ops_manager: { Args: never; Returns: boolean }
       is_staff_login: { Args: { _user_id: string }; Returns: boolean }
       is_subcustomer_of: { Args: { _parent_id: string }; Returns: boolean }
+      minha_conta: {
+        Args: never
+        Returns: {
+          cep: string
+          cidade: string
+          endereco: string
+          endereco2: string
+          estado: string
+          id: string
+          tabela_preco_id: string
+        }[]
+      }
       minha_conta_liberada: { Args: never; Returns: boolean }
       pausar_envios: { Args: { _pausar: boolean }; Returns: string }
       pedido_rollback_checkout: {
