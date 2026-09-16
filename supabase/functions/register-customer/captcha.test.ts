@@ -74,6 +74,18 @@ describe("register-customer: captcha tranca os avisos, nao a ficha", () => {
     expect(fonte).not.toMatch(/\bthrow\b/);
     const chamadas = [...fonte.matchAll(/enviarAvisosCadastro\(([^,]*),/g)].map((m) => m[1].trim());
     expect(chamadas).toEqual(['cap === "ok" && dentroDoLimite']);
+    // o que a edge PASSA ao helper (cronSecret vazio = SMS some em silencio)
+    const args = fatiaEntre(fonte, 'await enviarAvisosCadastro(cap === "ok" && dentroDoLimite, {', "}, fetch);", 10)
+      .split("\n").slice(1).map((l) => l.trim()).filter(Boolean);
+    expect(args).toEqual([
+      'sbUrl: Deno.env.get("SUPABASE_URL") ?? "",',
+      'service: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",',
+      'anon: Deno.env.get("SUPABASE_ANON_KEY") ?? "",',
+      'cronSecret: Deno.env.get("CRON_SECRET") ?? "",',
+      "emailLc, nome, empresa,",
+    ]);
+    expect(fonte).toContain('.eq("recipient", emailLc)');
+    expect(fonte).toContain('.gte("created_at", new Date(Date.now() - 60 * 60 * 1000).toISOString());');
   });
 
   it("limite por hora: so desliga, nunca liga; valor 3", () => {
