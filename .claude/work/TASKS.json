@@ -153,8 +153,8 @@
     {
       "id": "T21",
       "title": "Checkout mostra TODAS as shipping options; a ficha do cliente marca so 3 (Customer shipping options) — filtro ignora a atribuicao para opcoes nao-privadas",
-      "status": "validating",
-      "validation": "cacador limpo; bateria 849/849 (f8d4aa2). Aguarda: 1) publish do front, 2) dono roda 20260916140000, 3) reteste no browser como Permshield",
+      "status": "done",
+      "validation": "done — cacador limpo, bateria 849/849; publish + SQL 20260916140000 aplicados pelo dono; VERIFICADO EM PRODUCAO (View as Permshield): frete lista so as 3 marcadas, pagamento so Zelle (a marcada)",
       "depends_on": []
     },
     {

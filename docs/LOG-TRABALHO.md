@@ -6679,3 +6679,13 @@ Publish pendente do dono.
   docs/PROPOSTA-T20-sublogin-le-conta-pai.sql.
 - Busca do catalogo: nao era bug (Jessika confirmou).
 - `npm test` em c665e53: 76 arquivos / 838 testes, tsc e checks OK.
+
+### 16/set — T21/T22 fechadas e verificadas em producao
+
+T22 (troca de senha, `semTravar`): cacador 0, cetico refutou as 2 suspeitas.
+T21: checkout so mostra frete/pagamento marcados na ficha (`opcoesDisponiveis`),
+banco espelha em `fn_pedido_opcoes_validas` (20260916140000, aplicada pelo dono
+apos o publish). Testado no Chrome do dono via View as: Permshield ve so as 3
+opcoes de frete marcadas e so Zelle; Permwood ve o endereco da ficha
+pre-selecionado. O "Select address" vazio do print era o cliente Permshield,
+criado sem endereco. Bateria 849/849.

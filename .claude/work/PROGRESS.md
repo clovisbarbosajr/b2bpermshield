@@ -1,8 +1,5 @@
 # Progresso
 
-## 🔄 Em andamento
-- [ ] Lane A — T21 — Deploy — aguarda publish do front e depois o SQL do dono; reteste no browser em seguida
-
 ## ⏳ Pendentes
 - [ ] Publish do front (T13, T16, T18-U1, T19) — dono
 - [ ] T17 — checkout: frete 0 silencioso quando o cliente não tem shipping option atribuída
@@ -31,3 +28,4 @@
 - [x] T18 — login: exceção vira erro visível, botão não trava (confirmado pelo dono)
 - [x] T19 — catálogo: preços em lote (~12-16 requisições em vez de ~1.000)
 - [x] T22 — telas de troca de senha não travam em exceção
+- [x] T21 — checkout mostra só as opções de frete/pagamento marcadas na ficha (verificado em produção)
