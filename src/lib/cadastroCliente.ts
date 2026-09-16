@@ -6,7 +6,7 @@
 
 // Chave PUBLICA do reCAPTCHA v2 (vai no bundle de proposito). A secreta fica no
 // Lovable Cloud como `registercustomer` e so a edge a le.
-export const RECAPTCHA_SITE_KEY = "6LcMgL8tAAAAAF1ZU_n7pdaxyFg9ADwQTUEucaqy";
+export const RECAPTCHA_SITE_KEY = "6LeJgr8tAAAAALLK5OePNU2eSvGURTOCu8oXeI4Z";
 
 export const ACTIVITY_OPTIONS = ["Other", "Contractor", "Retailer", "Wholesaler", "Distributor", "Manufacturer"];
 
