@@ -34,7 +34,7 @@ import { useCart } from "@/contexts/CartContext";
 import { checkCartStock, cartKey, normalizeStatus } from "@/lib/stock";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice } from "@/lib/pricing";
-import { COMPANY_ADDRESS_ID, montarOpcoesDeEndereco } from "@/lib/enderecoEntrega";
+import { COMPANY_ADDRESS_ID, mesmoEndereco, montarOpcoesDeEndereco } from "@/lib/enderecoEntrega";
 
 // Dynamically load Stripe.js from CDN
 function loadStripeScript(): Promise<void> {
@@ -225,9 +225,8 @@ const Checkout = () => {
         ]);
         setEnderecos(ends ?? []);
         const acct: any = (parentAcct as any)?.data ?? cliente;
-        // Opcao da conta existe com so a rua preenchida (antes exigia cidade
-        // tambem, e o cliente novo ficava sem opcao nenhuma). Default: principal
-        // → conta → primeira linha. Regras e rotulos em `enderecoEntrega.ts`.
+        // Opcao da conta so com os 4 campos (rua/cidade/estado/CEP). Default:
+        // principal → conta → primeira linha. Regras e rotulos em `enderecoEntrega.ts`.
         const { defaultId, contaEndereco } = montarOpcoesDeEndereco(ends ?? [], acct);
         setCompanyAddress(contaEndereco);
         setEnderecoId(defaultId);
@@ -416,10 +415,10 @@ const Checkout = () => {
       return { ok: false, id: null };
     }
     if (enderecoId === "__company__" && companyAddress) {
-      const existing = enderecos.find(e => e.logradouro === companyAddress.logradouro && e.cidade === companyAddress.cidade);
+      const existing = enderecos.find(e => mesmoEndereco(e, companyAddress));
       if (existing) return { ok: true, id: existing.id };
-      // `cidade`/`estado`/`cep` sao NOT NULL em `enderecos` (20260317043654); a
-      // conta pode ter so a rua, entao o placeholder "-" cobre os tres.
+      // `companyAddress` so existe com os 4 campos (`enderecoEntrega.ts`), entao
+      // o INSERT satisfaz os NOT NULL de `enderecos` sem placeholder.
       const { data: created, error: addrErr } = await supabase.from("enderecos").insert({
         cliente_id: addressOwnerId,
         logradouro: companyAddress.logradouro, cidade: companyAddress.cidade, complemento: companyAddress.complemento || null,
@@ -437,7 +436,15 @@ const Checkout = () => {
       }
       return { ok: true, id: (created as any).id };
     }
-    return { ok: true, id: enderecoId || null };
+    // Endereco de entrega e OBRIGATORIO. `pedidos.endereco_entrega_id` e nullable
+    // e nada mais barrava: ficha parcial + `enderecos` vazia fechava pedido sem
+    // destino, com "Order submitted!". Nao ha marcador de "retirada" em
+    // `shipping_options` para abrir excecao.
+    if (!enderecoId) {
+      toast.error("Select or add a delivery address.");
+      return { ok: false, id: null };
+    }
+    return { ok: true, id: enderecoId };
   };
 
   const applyCoupon = async () => {

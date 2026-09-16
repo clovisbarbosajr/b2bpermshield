@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { COMPANY_ADDRESS_ID, montarOpcoesDeEndereco } from "./enderecoEntrega";
+// @ts-expect-error — tsconfig.app.json nao inclui os tipos do Node; vitest roda em Node.
+import { readFileSync } from "node:fs";
+import { COMPANY_ADDRESS_ID, mesmoEndereco, montarOpcoesDeEndereco } from "./enderecoEntrega";
 
 const contaCompleta = { endereco: "1800 N Powerline Rd", cidade: "Pompano Beach", estado: "FL", cep: "33069" };
 const linha = (id: string, principal = false) => ({
@@ -55,6 +57,22 @@ describe("montarOpcoesDeEndereco", () => {
     const r = montarOpcoesDeEndereco([linha("a"), linha("b")], { endereco: null });
     expect(r.defaultId).toBe("a");
     expect(r.opcoes.map((o) => o.id)).toEqual(["a", "b"]);
+  });
+
+  it("(8) mesmoEndereco: ignora caixa/espacos, mas complemento/CEP diferentes NAO sao o mesmo", () => {
+    const base = { logradouro: "1800 N Powerline Rd", complemento: "Ste A5", cidade: "Pompano Beach", estado: "FL", cep: "33069" };
+    expect(mesmoEndereco(base, { ...base, cidade: " pOMPANO BEACH ", logradouro: "1800 n powerline rd" })).toBe(true);
+    expect(mesmoEndereco(base, { ...base, complemento: "Ste A1" })).toBe(false);
+    expect(mesmoEndereco(base, { ...base, cep: "33060" })).toBe(false);
+    expect(mesmoEndereco({ ...base, complemento: null }, { ...base, complemento: "" })).toBe(true);
+  });
+
+  it("(9) o checkout exige endereco de entrega e reusa a linha da conta pelos 5 campos", () => {
+    const src = readFileSync("src/pages/portal/Checkout.tsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+    // sem endereco, o submit para ANTES de gravar o pedido
+    expect(src).toMatch(/if \(!enderecoId\) \{\s*toast\.error\("Select or add a delivery address\."\);\s*return \{ ok: false, id: null \};/);
+    expect(src).not.toContain("id: enderecoId || null");
+    expect(src).toContain("enderecos.find(e => mesmoEndereco(e, companyAddress))");
   });
 
   it("(7) rotulo da linha principal recebe (main)", () => {

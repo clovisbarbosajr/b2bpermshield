@@ -1,10 +1,22 @@
 // Opcoes do "Delivery Address" do checkout, montadas fora do componente.
 //
-// O checkout so oferecia o endereco da CONTA (`clientes.endereco/cidade/...`)
-// quando `endereco` E `cidade` estavam preenchidos. Cliente novo com a ficha
-// preenchida mas `enderecos` vazia via "Select address" sem NENHUMA opcao e nao
-// tinha como finalizar. Aqui a opcao da conta existe sempre que houver rua;
-// cidade/estado/cep sao opcionais e so entram no rotulo quando presentes.
+// A opcao da CONTA (`clientes.endereco/...`) so aparece com rua, cidade, estado
+// e CEP preenchidos — a mesma exigencia do "Save address", porque
+// `enderecos.cidade/estado/cep` sao NOT NULL. Ficha parcial nao vira opcao; o
+// cliente cadastra o endereco no checkout. Sem isso, "-" ia parar no pedido e
+// nascia uma linha em `enderecos` por pedido.
+
+// Mesmo endereco de entrega, ignorando caixa e espacos nas pontas — o reuso da
+// linha da conta em `enderecos` compara os CINCO campos. Comparar so rua+cidade
+// reusava a Suite errada e criava duplicata por diferenca de caixa.
+export function mesmoEndereco(
+  a: { logradouro?: string | null; complemento?: string | null; cidade?: string | null; estado?: string | null; cep?: string | null },
+  b: { logradouro?: string | null; complemento?: string | null; cidade?: string | null; estado?: string | null; cep?: string | null },
+): boolean {
+  const n = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
+  return n(a.logradouro) === n(b.logradouro) && n(a.complemento) === n(b.complemento)
+    && n(a.cidade) === n(b.cidade) && n(a.estado) === n(b.estado) && n(a.cep) === n(b.cep);
+}
 
 export type EnderecoLinha = {
   id: string;
