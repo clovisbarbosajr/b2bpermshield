@@ -57,14 +57,17 @@ const Cadastro = () => {
       });
     };
     if (w.grecaptcha?.render) return montar();
+    // Globais, e nao closures: a montagem que criou o script pode ja ter saido quando
+    // ele carrega/falha; quem avisa e sempre a montagem ATUAL.
     w.__recaptchaCadastro = montar;
+    w.__recaptchaCadastroErro = () => setCaptchaErro(true);
     if (!document.getElementById("recaptcha-api")) {
       const s = document.createElement("script");
       s.id = "recaptcha-api";
       s.src = "https://www.google.com/recaptcha/api.js?onload=__recaptchaCadastro&render=explicit";
       s.async = true;
       // Remove o script que falhou: remontar a tela tenta carregar de novo.
-      s.onerror = () => { s.remove(); setCaptchaErro(true); };
+      s.onerror = () => { s.remove(); w.__recaptchaCadastroErro(); };
       document.head.appendChild(s);
     }
   }, []);

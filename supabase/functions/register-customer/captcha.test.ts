@@ -77,6 +77,29 @@ describe("register-customer: captcha tranca os avisos, nao a ficha", () => {
     expect(envios).not.toMatch(/podeAvisar = true/);
   });
 
+  it("`podeAvisar` so nasce de `cap` e so pode DESLIGAR", () => {
+    const atribuicoes = [...fonte.matchAll(/\bpodeAvisar\s*=[^=][^;]*;/g)].map((m) => m[0].replace(/\s+/g, " "));
+    expect(atribuicoes).toEqual(['podeAvisar = cap === "ok";', "podeAvisar = false;"]);
+  });
+
+  it("`cap` nao decide fluxo: so log, resposta e avisos (nenhum `if (cap...) return`)", () => {
+    const usos = fonte.split("\n").filter((l) => /\bcap\b/.test(l)).map((l) => l.trim());
+    expect(usos).toEqual([
+      'const cap = await verificarCaptcha(String(body.captcha ?? ""), Deno.env.get("registercustomer") ?? "", fetch);',
+      'if (cap !== "ok") console.error(`[register-customer] captcha ${cap} (${emailLc}): ficha segue, avisos nao`);',
+      'const opaco = () => cap === "ok" ? json({ ok: true })',
+      ': cap === "falhou" ? json({ error: "captcha failed" }, 400)',
+      'let podeAvisar = cap === "ok";',
+    ]);
+  });
+
+  it("todo caminho depois do captcha responde por `opaco()` (senao a resposta vira oraculo do e-mail)", () => {
+    const depois = fatiaEntre(fonte, "const cap = await verificarCaptcha(", "} catch (err: any) {", 200);
+    const retornos = [...depois.matchAll(/\breturn\b[^;]*;/g)].map((m) => m[0]);
+    expect(retornos.length).toBeGreaterThanOrEqual(7);
+    for (const r of retornos) expect(r).toBe("return opaco();");
+  });
+
   it("resposta depende so do captcha: ok -> 200, falhou -> 400, indisponivel -> 503", () => {
     expect(fonte).toMatch(/const opaco = \(\) => cap === "ok" \? json\(\{ ok: true \}\)\s*: cap === "falhou" \? json\(\{ error: "captcha failed" \}, 400\)\s*: json\(\{ error: "captcha unavailable" \}, 503\);/);
   });
@@ -93,7 +116,10 @@ describe("tela e CSP", () => {
     expect(tela).toMatch(/"expired-callback": \(\) => setCaptcha\(""\)/);
     expect(tela).toContain("<div ref={captchaDiv} />");
     // script bloqueado: aviso visivel e o toast nao manda marcar checkbox que nao existe
-    expect(tela).toContain("s.onerror = () => { s.remove(); setCaptchaErro(true); };");
+    expect(tela).toContain("s.onerror = () => { s.remove(); w.__recaptchaCadastroErro(); };");
+    // setter da montagem ATUAL (closure antiga nao faz nada apos desmontar)
+    expect(fatiaEntre(tela, "useEffect(() => {\n    const w = window as any;", 'if (!document.getElementById("recaptcha-api"))', 30))
+      .toContain("w.__recaptchaCadastroErro = () => setCaptchaErro(true);");
     expect(tela).toContain("{captchaErro && <p");
     expect(tela).toContain("toast.error(captchaErro ? CAPTCHA_NAO_CARREGOU : ");
   });
