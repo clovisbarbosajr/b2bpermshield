@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { entrarComSenha } from "@/lib/loginComSenha";
 import { toast } from "sonner";
 import ForgotPasswordModal from "@/components/login/ForgotPasswordModal";
 import MagicLinkModal from "@/components/login/MagicLinkModal";
@@ -24,11 +25,13 @@ const CustomerLogin = () => {
     e.preventDefault();
     setAviso(null);
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    // Helper: excecao do auth-js (assinante estourou apos gravar a sessao) vira
+    // erro visivel, em vez de botao preso — o bug do "so entra depois do F5".
+    const login = await entrarComSenha(supabase.auth, email, password);
     setLoading(false);
-    if (error) {
-      toast.error(error.message);
-      setAviso(error.message);
+    if (!login.ok) {
+      toast.error(login.motivo);
+      setAviso(login.motivo);
       return;
     }
     navigate("/portal");

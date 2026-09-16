@@ -1,9 +1,10 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T16 — Correção — regra estrita da conta, deps por id, endereco2/complemento
+- [ ] Lane A — T16 — Caçador (rodada 2) — sobre b13e12b
+- [ ] Lane D — T18 — Implementação U1 — login: exceção vira erro visível, botão libera
 - [ ] Lane B — T18 — Spec Validator — login só completa após recarregar a página
-- [ ] Lane C — T19 — Spec Validator — preço $0.00 por ~1 min no catálogo (carga do price list)
+- [ ] Lane C — T19 — Implementação — preço em lote (`getProductPrices`), Catalogo, mock do stress
 
 ## ⏳ Pendentes
 - [ ] Publish do front (T13) — dono

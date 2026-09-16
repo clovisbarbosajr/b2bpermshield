@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { entrarComSenha } from "@/lib/loginComSenha";
 import { toast } from "sonner";
 import { usePortalTheme, usePortalMotion } from "@/hooks/usePortalTheme";
 
@@ -24,13 +25,17 @@ const AdminLogin = () => {
     e.preventDefault();
     setAviso(null);
     setLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    // Passa pelo helper: se o auth-js REJEITAR (assinante de onAuthStateChange
+    // estourou depois de gravar a sessao), a excecao vira erro visivel em vez de
+    // botao preso em "Signing in..." — o bug do "so entra depois do F5".
+    const login = await entrarComSenha(supabase.auth, email, password);
     setLoading(false);
-    if (error) {
-      toast.error(error.message);
-      setAviso({ tipo: "erro", texto: error.message });
+    if (!login.ok) {
+      toast.error(login.motivo);
+      setAviso({ tipo: "erro", texto: login.motivo });
       return;
     }
+    const data = { user: login.user as { id: string } | null };
     if (data.user) {
       // O `error` E LIDO, e uma falha de leitura NAO derruba a sessao.
       //
