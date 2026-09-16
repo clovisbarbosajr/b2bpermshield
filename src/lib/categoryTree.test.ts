@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { categoryPath, categoryTreeOptions, rootCategories } from "./categoryTree";
+import { categoryPath, categoryTreeOptions, descendantIds, rootCategories } from "./categoryTree";
 
 // Testes que EXECUTAM. As duas funcoes sao puras — nao ha desculpa para conferir
 // texto-fonte aqui.
@@ -48,6 +48,27 @@ describe("categoryTreeOptions: orfa nao pode sumir do dropdown", () => {
     const lista = [c("orfa", "Orfa", "sumiu"), c("raiz", "Raiz")];
     expect(categoryTreeOptions(lista).map((o) => o.id).sort())
       .toEqual(rootCategories(lista).map((r) => r.id).sort());
+  });
+});
+
+describe("filtro pai/sub em /admin/products (T8)", () => {
+  // Avo -> pai -> neto. O filtro da lista usa `descendantIds(sub || pai)`; o
+  // sub-select mostra `categoryTreeOptions` da subarvore do pai SEM o pai.
+  const lista = [c("avo", "Union NJ"), c("pai", "One Plus", "avo"), c("neto", "Blue Box", "pai")];
+
+  it("pai sozinho filtra pai + todos os descendentes", () => {
+    expect(descendantIds(lista, "avo").sort()).toEqual(["avo", "neto", "pai"]);
+  });
+
+  it("filho filtra filho + descendentes dele, sem o pai", () => {
+    expect(descendantIds(lista, "pai").sort()).toEqual(["neto", "pai"]);
+    expect(descendantIds(lista, "neto")).toEqual(["neto"]);
+  });
+
+  it("sub-select: subarvore sem o pai mostra filha como raiz e neta recuada", () => {
+    const sub = new Set(descendantIds(lista, "avo"));
+    const opcoes = categoryTreeOptions(lista.filter((x) => sub.has(x.id) && x.id !== "avo"));
+    expect(opcoes.map((o) => o.label)).toEqual(["One Plus", "- Blue Box"]);
   });
 });
 

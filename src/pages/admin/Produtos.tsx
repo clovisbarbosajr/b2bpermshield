@@ -15,7 +15,7 @@ import { Plus, Pencil, Search, Image as ImageIcon, Eye, X, ChevronLeft, ChevronR
 import { toast } from "sonner";
 import { useActivityLog } from "@/hooks/useActivityLog";
 import { useAuth } from "@/contexts/AuthContext";
-import { categoryTreeOptions } from "@/lib/categoryTree";
+import { categoryTreeOptions, rootCategories } from "@/lib/categoryTree";
 import { gravarComToken } from "@/lib/gravarComToken";
 
 const PAGE_SIZE = 25;
@@ -41,7 +41,7 @@ type Categoria = { id: string; nome: string; parent_id: string | null; ordem?: n
 type Brand = { id: string; nome: string };
 
 const emptyFilters = {
-  name: "", code: "", category: "", isActive: "Active", status: "",
+  name: "", code: "", category: "", subCategory: "", isActive: "Active", status: "",
   brand: "", privacyGroup: "", allowBackorder: "",
 };
 
@@ -155,7 +155,7 @@ const AdminProdutos = () => {
     // uma categoria-pai comparando exato devolvia quase nada — enquanto o portal,
     // na mesma escolha, mostra dezenas (`Catalogo.tsx` usa `descendantIds`).
     if (filters.category) {
-      const alvo = new Set(descendantIds(categorias as any, filters.category));
+      const alvo = new Set(descendantIds(categorias as any, filters.subCategory || filters.category));
       if (!p.categoria_id || !alvo.has(p.categoria_id)) return false;
     }
     if (filters.isActive === "Active" && !p.ativo) return false;
@@ -378,12 +378,27 @@ const AdminProdutos = () => {
             <Input value={filters.code} onChange={e => setFilter("code", e.target.value)} className="h-8" />
           </div>
           <div>
-            <Label className="text-xs text-primary">Category</Label>
-            <Select value={filters.category || "__all__"} onValueChange={v => setFilter("category", v === "__all__" ? "" : v)}>
-              <SelectTrigger className="h-8"><SelectValue placeholder="Choose category" /></SelectTrigger>
+            <Label className="text-xs text-primary">Parent category</Label>
+            <Select value={filters.category || "__all__"} onValueChange={v => { setFilters(prev => ({ ...prev, category: v === "__all__" ? "" : v, subCategory: "" })); setPage(1); }}>
+              <SelectTrigger className="h-8"><SelectValue placeholder="Choose parent category" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all__">Choose category</SelectItem>
-                {categoryTreeOptions(categorias).map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
+                <SelectItem value="__all__">Choose parent category</SelectItem>
+                {categoryTreeOptions(rootCategories(categorias)).map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-primary">Sub-category</Label>
+            <Select value={filters.subCategory || "__all__"} disabled={!filters.category} onValueChange={v => setFilter("subCategory", v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8"><SelectValue placeholder="Choose sub-category" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">Choose sub-category</SelectItem>
+                {(() => {
+                  // Subarvore SEM o pai: `rootCategories` promove as filhas diretas a
+                  // raiz e as netas continuam recuadas.
+                  const sub = new Set(descendantIds(categorias as any, filters.category));
+                  return categoryTreeOptions(categorias.filter(c => sub.has(c.id) && c.id !== filters.category));
+                })().map(c => <SelectItem key={c.id} value={c.id}>{c.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
