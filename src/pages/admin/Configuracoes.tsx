@@ -125,7 +125,7 @@ const AdminConfiguracoes = () => {
       if (data?.success) toast.success("Test email sent! Check your inbox.");
       else throw new Error("Failed to send");
     } catch (err: any) {
-      toast.error("Email test failed: " + (err.message || "Unknown error"));
+      toast.error("Email test — " + (err.message || "Unknown error"));
     }
     setTestingEmail(false);
   };
