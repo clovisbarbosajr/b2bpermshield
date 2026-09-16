@@ -79,6 +79,14 @@ describe("montarOpcoesDeEndereco", () => {
     expect(src).toMatch(/setEnderecos\(prev => \[\.\.\.prev, created as any\]\);\s*return \{ ok: true, id: \(created as any\)\.id \};/);
   });
 
+  it("(10) sub-login: o endereco da EMPRESA vem de lerContaDaEmpresa e falha fecha", () => {
+    const src = readFileSync("src/pages/portal/Checkout.tsx", "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+    expect(src).toContain("lerContaDaEmpresa(addressClienteId)");
+    // a queda para a ficha do PROPRIO funcionario, rotulada "Company address"
+    expect(src).not.toMatch(/\?\.data \?\? cliente/);
+    expect(src).toMatch(/if \(\(parentAcct as any\)\.error\) \{\s*setLoadError\([^)]*\);\s*return;/);
+  });
+
   it("(7) rotulo da linha principal recebe (main)", () => {
     const r = montarOpcoesDeEndereco([linha("a", true)], null);
     expect(r.opcoes[0].rotulo).toBe("Rua a, Miami, FL 33101 (main)");

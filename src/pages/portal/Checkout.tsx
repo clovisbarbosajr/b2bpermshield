@@ -35,6 +35,7 @@ import { checkCartStock, cartKey, normalizeStatus } from "@/lib/stock";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice } from "@/lib/pricing";
 import { COMPANY_ADDRESS_ID, mesmoEndereco, montarOpcoesDeEndereco } from "@/lib/enderecoEntrega";
+import { lerContaDaEmpresa } from "@/lib/contaDaEmpresa";
 import { opcoesDisponiveis } from "@/lib/opcoesDisponiveis";
 
 // Dynamically load Stripe.js from CDN
@@ -211,6 +212,9 @@ const Checkout = () => {
         // Pra conta própria, o endereço da empresa já veio na query do cliente acima
         // → zero busca extra. Antes eram 2 buscas SEQUENCIAIS aqui (lentidão).
         const isSub = !!(cliente as any).parent_customer_id;
+        // Sub-login NAO le a ficha da empresa (RLS): `lerContaDaEmpresa` cai na RPC
+        // `minha_conta()`. Antes a leitura voltava null sem erro e `acct` caia na
+        // ficha do PROPRIO funcionario, rotulada "Company address". Falha fecha.
         const [{ data: ends }, parentAcct] = await Promise.all([
           // ORDEM EXPLICITA. `find(e => e.principal)` logo abaixo pega o PRIMEIRO da
           // lista, e sem `.order()` o "primeiro" e o que o Postgres devolver — ordem
@@ -222,11 +226,15 @@ const Checkout = () => {
           supabase.from("enderecos").select("*").eq("cliente_id", addressClienteId)
             .order("principal", { ascending: false }).order("created_at", { ascending: false }),
           isSub
-            ? supabase.from("clientes").select("endereco, endereco2, cidade, estado, cep").eq("id", addressClienteId).maybeSingle()
-            : Promise.resolve({ data: cliente } as any),
+            ? lerContaDaEmpresa(addressClienteId).then((data) => ({ data, error: null }), (error) => ({ data: null, error }))
+            : Promise.resolve({ data: cliente, error: null } as any),
         ]);
+        if ((parentAcct as any).error) {
+          setLoadError("We could not load your company account details. Please contact support.");
+          return;
+        }
         setEnderecos(ends ?? []);
-        const acct: any = (parentAcct as any)?.data ?? cliente;
+        const acct: any = (parentAcct as any).data;
         // Opcao da conta so com os 4 campos (rua/cidade/estado/CEP). Default:
         // principal → conta → primeira linha. Regras e rotulos em `enderecoEntrega.ts`.
         const { defaultId, contaEndereco } = montarOpcoesDeEndereco(ends ?? [], acct);
