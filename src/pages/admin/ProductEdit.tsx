@@ -19,7 +19,7 @@ import { categoryTreeOptions } from "@/lib/categoryTree";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { gravacaoRecusadaComCerteza } from "@/lib/gravacaoRecusada";
 import { gravarComToken } from "@/lib/gravarComToken";
-import { travaDeReservadoSeAplica } from "@/lib/stock";
+import { travaDeReservadoSeAplica, statusKey } from "@/lib/stock";
 
 // O PostgREST corta em 1000 linhas SEM erro. Este wrapper pagina e devolve o
 // mesmo formato `{ data, error }` das outras leituras, para caber no `Promise.all`
@@ -208,7 +208,7 @@ const ProductEdit = () => {
       quantidade_minima: data.quantidade_minima, quantidade_maxima: (data as any).quantidade_maxima ?? 0,
       estoque_total: data.estoque_total, estoque_reservado: data.estoque_reservado,
       rastrear_estoque: (data as any).rastrear_estoque ?? true, permitir_backorder: (data as any).permitir_backorder ?? false,
-      quantidade_caixa: (data as any).quantidade_caixa ?? 0, status_produto: (data as any).status_produto ?? "disponivel",
+      quantidade_caixa: (data as any).quantidade_caixa ?? 0, status_produto: statusKey((data as any).status_produto) || "disponivel",
       data_disponibilidade: (data as any).data_disponibilidade ?? "", unidade_venda: data.unidade_venda,
       ativo: data.ativo, barcode: (data as any).barcode ?? "", codigo_upc: (data as any).codigo_upc ?? "",
       codigo_referencia: (data as any).codigo_referencia ?? "", quantidade_pacote: (data as any).quantidade_pacote ?? 0,

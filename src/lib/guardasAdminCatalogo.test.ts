@@ -19,7 +19,8 @@ const semComentario = (f: string) =>
   ler(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 // SQL comenta com `--`, nao com `//`: a guarda do indice passou VERDE com a
 // migration inteira comentada por usar `semComentario` (mutante do Cacador).
-const semComentarioSql = (f: string) => ler(f).replace(/--.*$/gm, "");
+const semComentarioSql = (f: string) =>
+  ler(f).replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "");
 
 describe("Estoque: o ajuste nao pode deixar disponivel negativo", () => {
   const f = () => semComentario("src/pages/admin/Estoque.tsx");
@@ -424,6 +425,12 @@ describe("Produtos: a lista nao pode mentir sobre o que gravou nem apagar as cas
       .toContain("statusKey(p.status_produto) !== filters.status");
     expect(src, "o Select da linha voltou a receber o valor cru")
       .toContain('value={statusKey(p.status_produto) || "disponivel"}');
+    // A ficha (ProductEdit) e a terceira tela da classe: o form carregava o valor
+    // cru, o Select de Status ficava em branco e salvar qualquer campo regravava
+    // o sujo. Normalizar NA CARGA conserta o registro no proximo save.
+    const ficha = semComentario("src/pages/admin/ProductEdit.tsx");
+    expect(ficha, "a ficha voltou a carregar status_produto cru")
+      .toContain('status_produto: statusKey((data as any).status_produto) || "disponivel",');
   });
 
   it("a paginacao usa a pagina LIMITADA nos quatro pontos", () => {
