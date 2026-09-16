@@ -66,7 +66,7 @@
       "id": "T9",
       "title": "Imagens quebradas nos produtos Slat Wall na lista de produtos",
       "status": "blocked",
-      "validation": "6 URLs 404 no Cloudinary do B2BWave; as outras 315 ainda carregam de la. Vira T11 (copiar para o nosso storage); as 6 mortas a Jessika sobe de novo",
+      "validation": "apos T11 sobra 1 produto com foto morta (id da95a2ea-281c-4923-a456-9f0f342aa9ef, B2BWave 338) — Jessika sobe pela ficha",
       "depends_on": []
     },
     {
@@ -81,8 +81,8 @@
     {
       "id": "T11",
       "title": "Copiar as fotos de produto do Cloudinary do B2BWave para o bucket product-images (edge de uso unico, sem e-mail, sem chave externa)",
-      "status": "blocked",
-      "validation": "codigo validado: 2 rodadas cacador+cetico limpas, bateria 804/804 em b996c13. BLOQUEADA ate o dono pedir deploy no Lovable e rodar dry_run -> real",
+      "status": "done",
+      "validation": "done — executada 16/set pelo Chrome do dono (sessao admin): 287 de 288 copiadas para product-images/cloudinary/, 1 morta (produtos da95a2ea-281c-4923-a456-9f0f342aa9ef, 404 na origem); 0 candidatas nas outras 15 colunas; lista do admin carrega 25/25 do nosso storage, 0 quebradas",
       "depends_on": []
     },
     {

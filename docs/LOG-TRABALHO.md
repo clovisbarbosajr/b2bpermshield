@@ -6636,3 +6636,15 @@ entrou. Refutados: updated_at carimbado (mudanca real), SVG fora do mapa
 Estresse concorrente nao se aplica: uma chamada de admin, sequencial, idempotente.
 AGUARDANDO: deploy pelo chat do Lovable; depois dry_run (so conta), depois real
 ate copiadas = 0. B2BWave so pode ser cancelado depois.
+
+### 16/set — T11 EXECUTADA: fotos copiadas
+
+Deploy pelo Lovable. Ensaio (`dry_run`): 288 candidatas em `produtos.imagem_url`
+(eram 321 mais cedo — 33 ja trocadas pela Jessika hoje), 0 nas outras 15
+colunas. Execucao real pelo Chrome do dono (sessao jess@zapsupplies.com, admin),
+tres chamadas: ~180 + 107 + 0 copiadas = 287; `restantes: 1` = uma morta
+(`produtos` id da95a2ea-281c-4923-a456-9f0f342aa9ef, B2BWave 338, 404 na
+origem). Conferido na lista do admin: 25/25 imagens da pagina vem de
+`product-images/cloudinary/...`, 0 quebradas, 0 ainda no Cloudinary.
+Cloudinary do B2BWave nao e mais lido por nada — falta so a varredura de texto
+(SELECT enviado ao dono) para liberar o cancelamento.
