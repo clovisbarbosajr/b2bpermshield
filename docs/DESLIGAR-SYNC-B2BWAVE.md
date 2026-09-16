@@ -154,3 +154,27 @@ completa da tabela. Nasceu na migration do sync, mas serve ao portal.
 - [x] Passo 2 — pedidos zerados: 0 pedidos, 0 itens, 0 reservado, **70 clientes e 330 produtos intactos**
 - [x] Passo 3 — código limpo (commit `55ef241`): tsc limpo, 729/729 testes, build ok, 8 edge functions (13 arquivos)
 - [ ] Caçador + cético — em andamento
+
+## 16/set — o que AINDA depende do B2BWave (varredura antes do desligamento)
+
+Codigo (`src/**`, `supabase/functions/**`, secrets, `config.toml`): NENHUMA
+chamada, redirect, href ou env para `*.b2bwave.com`. Auth nao depende deles.
+O unico host do B2BWave vivo em runtime e o **Cloudinary** (`res.cloudinary.com/
+dbrtm8pf6`), carregado via `<img src>` do que esta no banco:
+
+| onde quebra | coluna | cobertura |
+|---|---|---|
+| portal (catalogo, ficha, carrinho, pedidos) | `produtos.imagem_url`, `produto_imagens.imagem_url`, **`produto_variantes.imagem_url`** | T11 (`copiar-fotos-cloudinary`); variantes entraram em ALVOS em 16/set |
+| todo e-mail de pedido (`send-email/index.ts:762`) e o PDF do pedido (`pdfGenerator.ts:77`, baixa a logo por HTTP na hora) | `configuracoes.email_logo_url` | T11 — tem que rodar ANTES do desligamento |
+| admin (banners, options, marcas, categorias, arquivos "View") | `banners.imagem_url`, `option_values.imagem_url`, `brands.logo_url`, `categorias.imagem_url`, `produto_arquivos.arquivo_url`, `configuracoes.*_url` | T11 |
+| texto livre importado com `<a href>`/`<img>` para o dominio antigo | `produtos.descricao/descricao_pdf/meta_descricao`, `brands.descricao`, `categorias.descricao`, `noticias.conteudo`, `paginas.conteudo`, `banners.link_url`, `shipping_options.tracking_url`, `configuracoes.email_order_template/pdf_order_template` | NAO coberto por T11 (nao e URL inteira). `<img>` em `descricao` ja e descartado pelo `sanitizeHtml`; sobra link morto. Contagem real: SELECT de varredura de todas as colunas de texto (enviado ao dono 16/set) |
+
+Constraints sobre `b2bwave_id`/`b2bwave_order_id`: todas nullable e unicas so
+para NOT NULL — criar produto/categoria/pedido novo sem o id funciona.
+Heranca que fica: `produtos.sku` deixou de ser UNIQUE (20260708140000) por
+causa do B2BWave; nao quebra, mas e regra deles.
+
+Ordem para desligar sem perda: (1) deploy de `copiar-fotos-cloudinary`;
+(2) `dry_run:true` e ler o relatorio; (3) `dry_run:false` ate `copiadas = 0`;
+(4) conferir o SELECT de varredura de texto (zero `cloudinary`/`b2bwave` fora
+de `backup_*`); (5) so entao cancelar o B2BWave.

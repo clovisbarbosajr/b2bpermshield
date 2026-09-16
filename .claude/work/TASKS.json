@@ -84,6 +84,13 @@
       "status": "validating",
       "validation": "validating — 12/12, check-edge OK, 6 mutantes (db7185f); cacador em curso",
       "depends_on": []
+    },
+    {
+      "id": "T12",
+      "title": "Varrer toda dependencia restante do B2BWave (codigo, banco, secrets, DNS) antes do desligamento",
+      "status": "in_progress",
+      "validation": "codigo varrido: so o Cloudinary (imagens/logos/arquivos via banco); doc atualizado. Aguarda SELECT de varredura de texto do dono",
+      "depends_on": []
     }
   ]
 }

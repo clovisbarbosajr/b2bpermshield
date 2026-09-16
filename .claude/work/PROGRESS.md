@@ -1,7 +1,8 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T11 — Caçador — bug-hunter sobre a edge `copiar-fotos-cloudinary`
+- [ ] Lane A — T11 — Cético — validando 7 achados (variantes fora, parada, admin_rev, updated_at, content-type, limit)
+- [ ] Lane B — T12 — Levantamento — código varrido (só Cloudinary); aguarda SELECT de texto do dono
 
 ## 🚫 Bloqueadas
 - [ ] T9 — 6 fotos Slat Wall apagadas na origem — Jessika sobe de novo pela ficha
