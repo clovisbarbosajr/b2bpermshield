@@ -88,9 +88,25 @@
     {
       "id": "T12",
       "title": "Varrer toda dependencia restante do B2BWave (codigo, banco, secrets, DNS) antes do desligamento",
-      "status": "in_progress",
-      "validation": "codigo varrido: so o Cloudinary (imagens/logos/arquivos via banco); doc atualizado. Aguarda SELECT de varredura de texto do dono",
+      "status": "done",
+      "validation": "done — codigo: so Cloudinary; banco (varredura de todas as colunas de texto, 16/set): produtos 288 = 287 no nosso storage (pasta cloudinary/) + 1 morta; backup_produtos_20260903 (snapshot); notification_log payload/error (historico). Nada em descricoes/templates. B2BWave pode ser cancelado",
       "depends_on": []
+    },
+    {
+      "id": "T13",
+      "title": "Toast mente quando a torneira geral esta fechada: reset/magic link mostram sent com o servidor recusando (envio_permitido -> skipped)",
+      "status": "pending",
+      "validation": "pending",
+      "depends_on": []
+    },
+    {
+      "id": "T14",
+      "title": "Remover copiar-fotos-cloudinary do repo depois que o Lovable remover o deploy",
+      "status": "blocked",
+      "validation": "aguarda dono pedir a remocao no Lovable",
+      "depends_on": [
+        "T11"
+      ]
     }
   ]
 }

@@ -178,3 +178,15 @@ Ordem para desligar sem perda: (1) deploy de `copiar-fotos-cloudinary`;
 (2) `dry_run:true` e ler o relatorio; (3) `dry_run:false` ate `copiadas = 0`;
 (4) conferir o SELECT de varredura de texto (zero `cloudinary`/`b2bwave` fora
 de `backup_*`); (5) so entao cancelar o B2BWave.
+
+### 16/set — RESULTADO da varredura de texto (todas as colunas text/json do schema public)
+
+| tabela.coluna | ocorrencias | o que e |
+|---|---|---|
+| produtos.imagem_url | 288 | 287 sao o NOSSO storage (`product-images/cloudinary/...` — a pasta se chama cloudinary) + 1 morta na origem (id da95a2ea…, "Select 3/4 x 7.48 - DO NOT SHIP") |
+| backup_produtos_20260903.imagem_url | 325 | snapshot congelado de 03/set, nao e lido |
+| notification_log.payload / .error | 123 / 18 | historico de envios citando o B2BWave no texto; sem leitor |
+
+Zero em descricoes, templates, banners, arquivos, configuracoes. **O B2BWave pode ser
+cancelado.** Depois: pedir ao Lovable a remocao da edge `copiar-fotos-cloudinary`
+e tirar do repo (T14).
