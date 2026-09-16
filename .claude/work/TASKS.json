@@ -125,8 +125,8 @@
     {
       "id": "T17",
       "title": "Checkout: ficha nova sem shipping option atribuida — bloco some e o pedido grava frete 0 em silencio",
-      "status": "pending",
-      "validation": "pending",
+      "status": "in_progress",
+      "validation": "spec-validator",
       "depends_on": []
     },
     {
@@ -146,8 +146,8 @@
     {
       "id": "T20",
       "title": "Sub-login nao le a linha da empresa em clientes (RLS) — front nao herda a tabela de preco do pai; migration proposta em docs/PROPOSTA-T20-sublogin-le-conta-pai.sql",
-      "status": "blocked",
-      "validation": "aguarda dono: decidir policy (expoe a linha do pai) ou RPC; conferir se ha sub-login na base",
+      "status": "in_progress",
+      "validation": "spec-validator (RPC com so tabela_preco_id, em vez de policy que expoe a linha do pai)",
       "depends_on": []
     },
     {

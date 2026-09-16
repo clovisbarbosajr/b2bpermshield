@@ -1,14 +1,13 @@
 # Progresso
 
-## ⏳ Pendentes
-- [ ] Publish do front (T13, T16, T18-U1, T19) — dono
-- [ ] T17 — checkout: frete 0 silencioso quando o cliente não tem shipping option atribuída
+## 🔄 Em andamento
+- [ ] Lane A — T17 — Spec Validator — frete 0: exigir opção de envio / bloquear sem opção
+- [ ] Lane B — T20 — Spec Validator — sub-login herda a lista de preço da empresa (RPC)
 
 ## 🚫 Bloqueadas
-- [ ] T20 — sub-login não herda a lista de preço do pai na tela (RLS de `clientes`) — SQL proposto, decisão do dono
 - [ ] T15 — edge `send-email`: resposta genérica para AUTH quando recusado (oráculo) — decisão do dono
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
-- [ ] 3 logins órfãos (admin@permshield.com, clovisbarbosajr@gmail.com, jessika.andrade@hotmail.com) — dono decide
+- [ ] 2 logins órfãos (clovisbarbosajr@gmail.com, jessika.andrade@hotmail.com) — DELETE enviado ao dono
 
 ## ✅ Concluídas e validadas
 - [x] T1 — sync do B2BWave e API de saída removidos; zero pedidos
