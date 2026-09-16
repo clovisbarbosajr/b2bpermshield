@@ -95,6 +95,6 @@ describe("tela: o corpo do register-customer leva a ficha", () => {
   it("Cadastro.tsx manda a ficha no invoke", () => {
     const tela = ler("src/pages/Cadastro.tsx");
     expect(tela).toMatch(/const ficha = montarFicha\(form\);/);
-    expect(tela).toMatch(/invoke\("register-customer", \{ body: \{ email, nome, empresa, \.\.\.ficha \} \}\)/);
+    expect(tela).toMatch(/invoke\("register-customer", \{ body: \{ email, nome, empresa, \.\.\.ficha, captcha \} \}\)/);
   });
 });

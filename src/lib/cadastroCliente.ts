@@ -4,6 +4,10 @@
 // `supabase/functions/_shared/fichaCadastro.ts` (MAX_LEN e CAMPOS_FICHA proprios),
 // e `register-customer/cadastroCompleto.test.ts` compara os dois. Mudou aqui, muda la.
 
+// Chave PUBLICA do reCAPTCHA v2 (vai no bundle de proposito). A secreta fica no
+// Lovable Cloud como `registercustomer` e so a edge a le.
+export const RECAPTCHA_SITE_KEY = "6Lfzbr8tAAAAAO6uRXXdiPdomCjJu72P12fFHyPd";
+
 export const ACTIVITY_OPTIONS = ["Other", "Contractor", "Retailer", "Wholesaler", "Distributor", "Manufacturer"];
 
 export const COUNTRIES = ["United States", "Canada", "United Kingdom", "Brazil"];

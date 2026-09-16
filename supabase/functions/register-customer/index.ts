@@ -12,6 +12,7 @@
 // user_id, apenas VINCULA / não duplica.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { lerFicha } from "../_shared/fichaCadastro.ts";
+import { verificarCaptcha } from "../_shared/captcha.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,6 +44,12 @@ Deno.serve(async (req) => {
     // Por que nenhum campo e obrigatorio aqui: ver `_shared/fichaCadastro.ts`.
     const { ficha, invalido } = lerFicha(body);
     if (invalido) return json({ error: "invalid registration data" }, 400);
+
+    // reCAPTCHA (T25), antes de qualquer consulta: sem ele um robo dispara o SMS e os
+    // e-mails de "cliente novo" abaixo. Secret com o nome que o Lovable aceitou.
+    const cap = await verificarCaptcha(String(body.captcha ?? ""), Deno.env.get("registercustomer") ?? "", fetch);
+    if (cap === "falhou") return json({ error: "captcha failed" }, 400);
+    if (cap === "indisponivel") return json({ error: "captcha unavailable" }, 503);
 
     // ORACULO PUBLICO (A4)
     //

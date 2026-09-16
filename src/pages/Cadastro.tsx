@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
-  ACTIVITY_OPTIONS, COUNTRIES, US_STATES, REQUIRED, LABELS, limiteDe, validarCadastro, montarFicha, type CadastroForm,
+  ACTIVITY_OPTIONS, COUNTRIES, US_STATES, REQUIRED, LABELS, limiteDe, validarCadastro, montarFicha, RECAPTCHA_SITE_KEY, type CadastroForm,
 } from "@/lib/cadastroCliente";
 
 const VAZIO: CadastroForm = {
@@ -25,6 +25,9 @@ const Cadastro = () => {
   // caminho publico lia a flag. Comeca `true` e so fecha se a RPC disser que nao —
   // fail-open, pra ligar esta trava nunca fechar o cadastro por acidente.
   const [aberto, setAberto] = useState(true);
+  const [captcha, setCaptcha] = useState("");
+  const captchaDiv = useRef<HTMLDivElement>(null);
+  const captchaId = useRef<number | null>(null);
 
   useEffect(() => {
     (supabase as any).rpc("registration_is_open")
@@ -32,11 +35,42 @@ const Cadastro = () => {
       .catch(() => { /* mantem aberto */ });
   }, []);
 
+  // reCAPTCHA v2 explicito. `captchaId` impede o 2o render no mesmo div (StrictMode
+  // roda o efeito duas vezes e o Google lanca "already been rendered"). Script ja
+  // carregado numa montagem anterior: o `onload` nao dispara de novo, entao monta direto.
+  useEffect(() => {
+    const w = window as any;
+    const montar = () => {
+      const el = captchaDiv.current;
+      if (!el || captchaId.current !== null || !w.grecaptcha?.render) return;
+      captchaId.current = w.grecaptcha.render(el, {
+        sitekey: RECAPTCHA_SITE_KEY,
+        size: el.offsetWidth < 304 ? "compact" : "normal",
+        callback: (t: string) => setCaptcha(t),
+        "expired-callback": () => setCaptcha(""),
+        "error-callback": () => setCaptcha(""),
+      });
+    };
+    if (w.grecaptcha?.render) return montar();
+    w.__recaptchaCadastro = montar;
+    if (!document.getElementById("recaptcha-api")) {
+      const s = document.createElement("script");
+      s.id = "recaptcha-api";
+      s.src = "https://www.google.com/recaptcha/api.js?onload=__recaptchaCadastro&render=explicit";
+      s.async = true;
+      document.head.appendChild(s);
+    }
+  }, []);
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     const invalido = validarCadastro(form);
     if (invalido) {
       toast.error(invalido);
+      return;
+    }
+    if (!captcha) {
+      toast.error("Please confirm you are not a robot");
       return;
     }
     if (!aberto) {
@@ -76,7 +110,7 @@ const Cadastro = () => {
       // em /pending-approval, e ninguem do lado de ca sabe que ela existe.
       // Nao da para desfazer o signUp daqui, entao o minimo honesto e contar.
       const { error: fichaErr } = await supabase.functions
-        .invoke("register-customer", { body: { email, nome, empresa, ...ficha } })
+        .invoke("register-customer", { body: { email, nome, empresa, ...ficha, captcha } })
         .catch((e: unknown) => ({ error: e }));
       if (fichaErr) {
         console.error("[cadastro] register-customer falhou; ficha pendente e aviso ao admin podem nao ter sido criados", fichaErr);
@@ -168,6 +202,7 @@ const Cadastro = () => {
               {campo("email", "email")}
               {campo("password", "password")}
               {campo("passwordConfirm", "password")}
+              <div ref={captchaDiv} />
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Signing up..." : "SIGN UP"}
               </Button>
