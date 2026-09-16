@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { fatiaEntre, fatiaAPartirDe } from "../../../src/test/fatia";
+import { fatiaEntre } from "../../../src/test/fatia";
 import { verificarCaptcha } from "../_shared/captcha.ts";
 
 // reCAPTCHA NO AUTO-CADASTRO (T25)
@@ -67,19 +67,20 @@ describe("register-customer: captcha tranca os avisos, nao a ficha", () => {
     expect(fatiaEntre(trecho, "verificarCaptcha(", "const opaco", 30)).not.toMatch(/\breturn\b/);
   });
 
-  it("sem `ok`, nenhum dos 3 envios sai", () => {
-    expect(fonte).toContain('let podeAvisar = cap === "ok";');
-    const envios = fatiaAPartirDe(fonte, 'let podeAvisar = cap === "ok";');
-    // cada fetch de aviso e precedido pela guarda
-    expect(envios.split("fetch(").length - 1).toBe(3);
-    expect(envios.split('if (!podeAvisar) throw new Error("limite de aviso");').length - 1).toBe(3);
-    // e nada volta a ligar a flag depois
-    expect(envios).not.toMatch(/podeAvisar = true/);
+  it("a edge nao envia nada sozinha: zero `fetch(`, zero `throw`, UMA chamada aos avisos", () => {
+    // todo envio passa por `enviarAvisosCadastro` (exercitado em avisosCadastro.test.ts)
+    expect(fonte).not.toMatch(/\bfetch\s*\(/);
+    // `throw` sai pelo catch externo com status proprio: caminho fora do `opaco()`
+    expect(fonte).not.toMatch(/\bthrow\b/);
+    const chamadas = [...fonte.matchAll(/enviarAvisosCadastro\(([^,]*),/g)].map((m) => m[1].trim());
+    expect(chamadas).toEqual(['cap === "ok" && dentroDoLimite']);
   });
 
-  it("`podeAvisar` so nasce de `cap` e so pode DESLIGAR", () => {
-    const atribuicoes = [...fonte.matchAll(/\bpodeAvisar\s*=[^=][^;]*;/g)].map((m) => m[0].replace(/\s+/g, " "));
-    expect(atribuicoes).toEqual(['podeAvisar = cap === "ok";', "podeAvisar = false;"]);
+  it("limite por hora: so desliga, nunca liga; valor 3", () => {
+    const atribuicoes = [...fonte.matchAll(/\bdentroDoLimite\s*[|&?+\-*/]{0,3}=(?!=)[^;]*;/g)].map((m) => m[0].replace(/\s+/g, " "));
+    expect(atribuicoes).toEqual(["dentroDoLimite = true;", "dentroDoLimite = false;"]);
+    expect(fonte).toMatch(/let dentroDoLimite = true;/);
+    expect(fonte).toContain("if ((count ?? 0) >= LIMITE_AVISOS_HORA) {");
   });
 
   it("`cap` nao decide fluxo: so log, resposta e avisos (nenhum `if (cap...) return`)", () => {
@@ -89,7 +90,7 @@ describe("register-customer: captcha tranca os avisos, nao a ficha", () => {
       'if (cap !== "ok") console.error(`[register-customer] captcha ${cap} (${emailLc}): ficha segue, avisos nao`);',
       'const opaco = () => cap === "ok" ? json({ ok: true })',
       ': cap === "falhou" ? json({ error: "captcha failed" }, 400)',
-      'let podeAvisar = cap === "ok";',
+      'await enviarAvisosCadastro(cap === "ok" && dentroDoLimite, {',
     ]);
   });
 
@@ -118,8 +119,10 @@ describe("tela e CSP", () => {
     // script bloqueado: aviso visivel e o toast nao manda marcar checkbox que nao existe
     expect(tela).toContain("s.onerror = () => { s.remove(); w.__recaptchaCadastroErro(); };");
     // setter da montagem ATUAL (closure antiga nao faz nada apos desmontar)
-    expect(fatiaEntre(tela, "useEffect(() => {\n    const w = window as any;", 'if (!document.getElementById("recaptcha-api"))', 30))
-      .toContain("w.__recaptchaCadastroErro = () => setCaptchaErro(true);");
+    // os DOIS globais apontam para a montagem atual, antes (e fora) do `if` que cria o script
+    const antesDoScript = fatiaEntre(tela, "useEffect(() => {\n    const w = window as any;", 'if (!document.getElementById("recaptcha-api"))', 30);
+    const globais = antesDoScript.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("w.__recaptcha"));
+    expect(globais).toEqual(["w.__recaptchaCadastro = montar;", "w.__recaptchaCadastroErro = () => setCaptchaErro(true);"]);
     expect(tela).toContain("{captchaErro && <p");
     expect(tela).toContain("toast.error(captchaErro ? CAPTCHA_NAO_CARREGOU : ");
   });

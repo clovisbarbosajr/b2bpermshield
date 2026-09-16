@@ -73,8 +73,9 @@ describe("register-customer: fiacao da edge", () => {
     expect(ramos).not.toMatch(/\.\.\.ficha\b|\bficha\./);
   });
 
-  it("nenhum envio novo: 3 fetch, como no HEAD anterior", () => {
-    expect(fonte.split("fetch(").length - 1).toBe(3);
+  it("nenhum envio novo: os 3 avisos moram em _shared/avisosCadastro.ts (a edge nao tem fetch proprio)", () => {
+    expect(fonte.split("fetch(").length - 1).toBe(0);
+    expect(fonte.split("enviarAvisosCadastro(").length - 1).toBe(1);
   });
 });
 
