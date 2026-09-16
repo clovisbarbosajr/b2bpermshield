@@ -1,13 +1,11 @@
 # Progresso
 
-## 🔄 Em andamento
-- [ ] Lane A — T25 — Deploy — front no ar, conferindo widget
-- [ ] Lane A — T24 — Deploy — aguarda deploy da edge register-customer (Lovable)
-
 ## 🚫 Bloqueadas
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
 
 ## ✅ Concluídas e validadas
+- [x] T24 — cadastro igual ao B2BWave (telefone, endereço, 3 colunas)
+- [x] T25 — reCAPTCHA v2 no cadastro (avisos só com captcha válido)
 - [x] T1 — sync do B2BWave e API de saída removidos; zero pedidos
 - [x] T2 — as 14 decisões da Jessika no código e no banco
 - [x] T3 — trigger de status de fábrica + guardas do pré-order negativo
