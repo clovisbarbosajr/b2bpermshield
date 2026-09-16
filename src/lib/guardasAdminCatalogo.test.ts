@@ -10,7 +10,7 @@
  */
 // @ts-expect-error — `tsconfig.app.json` nao inclui os tipos do Node; em execucao
 // o modulo existe (vitest roda em Node).
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import { fatiaEntre } from "@/test/fatia";
 
@@ -373,6 +373,30 @@ describe("Produtos: a lista nao pode mentir sobre o que gravou nem apagar as cas
     expect(bloco![0], "a guarda nao interrompe mais o fluxo").toMatch(/return;/);
     // FK e protecao, nao erro para despejar cru na cara do admin.
     expect(del![0], "o erro de FK voltou a ser despejado cru").toContain('"23503"');
+  });
+
+  it("o count de `estoque_log` no confirm so e viavel porque existe indice em produto_id", () => {
+    // `estoque_log.produto_id` e FK CASCADE sem indice de fabrica; com ~1M
+    // linhas, o `contar("estoque_log")` acima (e o proprio CASCADE do DELETE)
+    // viravam varredura completa e estouravam o statement_timeout — a guarda
+    // fail-closed recusava e ninguem conseguia apagar produto. O conserto e no
+    // schema, nao na tela: este `it` prende o indice, e o de cima prende que a
+    // contagem continua la (tirar a contagem seria remendo na camada errada).
+    //
+    // ACHA A MIGRATION PELO CONTEUDO, nao pelo nome.
+    const dir = "supabase/migrations";
+    const alvo = /ON\s+public\.estoque_log\s*\(\s*produto_id\b/;
+    const arquivo = readdirSync(dir)
+      .filter((n: string) => n.endsWith(".sql"))
+      .find((n: string) => alvo.test(semComentario(`${dir}/${n}`)));
+    expect(arquivo, "nao achei migration com indice em estoque_log(produto_id)").toBeTruthy();
+    const linha = semComentario(`${dir}/${arquivo}`)
+      .split("\n")
+      .find((l) => /CREATE\s+INDEX/i.test(l) && /estoque_log_produto_id_idx/.test(l));
+    expect(linha, "o CREATE INDEX nao esta numa linha so com o nome do indice").toBeTruthy();
+    // O editor SQL do Lovable roda o arquivo numa transacao unica: CONCURRENTLY
+    // falha ali, e quem so cola o arquivo fica sem o indice em silencio.
+    expect(linha, "CONCURRENTLY nao roda no editor do Lovable").not.toMatch(/CONCURRENTLY/i);
   });
 
   it("a paginacao usa a pagina LIMITADA nos quatro pontos", () => {
