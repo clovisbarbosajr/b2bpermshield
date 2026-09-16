@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { fatiaEntre } from "../../../src/test/fatia";
+import { fatiaEntre, fatiaAPartirDe } from "../../../src/test/fatia";
 import { verificarCaptcha } from "../_shared/captcha.ts";
 
 // reCAPTCHA NO AUTO-CADASTRO (T25)
@@ -56,13 +56,29 @@ describe("verificarCaptcha (a regra, exercitada)", () => {
   });
 });
 
-describe("register-customer: captcha antes de tudo", () => {
+describe("register-customer: captcha tranca os avisos, nao a ficha", () => {
   const fonte = semComentario(ler("supabase/functions/register-customer/index.ts"));
 
-  it("depois do 400 da ficha, antes de registration_is_open; so `ok` segue", () => {
+  it("verificado antes de qualquer consulta, e sem `return` que pule a criacao da ficha", () => {
     const trecho = fatiaEntre(fonte, 'if (invalido) return json({ error: "invalid registration data" }, 400);', 'db.rpc("registration_is_open")', 40);
-    expect(trecho).toMatch(/const cap = await verificarCaptcha\(String\(body\.captcha \?\? ""\), Deno\.env\.get\("registercustomer"\) \?\? "", fetch\);\s*if \(cap === "falhou"\) return json\(\{ error: "captcha failed" \}, 400\);\s*if \(cap === "indisponivel"\) return json\(\{ error: "captcha unavailable" \}, 503\);/);
-    expect(fatiaEntre(trecho, "verificarCaptcha(", "captcha unavailable", 5)).not.toMatch(/\bdb\./);
+    expect(trecho).toContain('const cap = await verificarCaptcha(String(body.captcha ?? ""), Deno.env.get("registercustomer") ?? "", fetch);');
+    expect(trecho).not.toMatch(/\bdb\./);
+    // recusar aqui = login ja criado pelo signUp, sem ficha e sem aviso
+    expect(fatiaEntre(trecho, "verificarCaptcha(", "const opaco", 30)).not.toMatch(/\breturn\b/);
+  });
+
+  it("sem `ok`, nenhum dos 3 envios sai", () => {
+    expect(fonte).toContain('let podeAvisar = cap === "ok";');
+    const envios = fatiaAPartirDe(fonte, 'let podeAvisar = cap === "ok";');
+    // cada fetch de aviso e precedido pela guarda
+    expect(envios.split("fetch(").length - 1).toBe(3);
+    expect(envios.split('if (!podeAvisar) throw new Error("limite de aviso");').length - 1).toBe(3);
+    // e nada volta a ligar a flag depois
+    expect(envios).not.toMatch(/podeAvisar = true/);
+  });
+
+  it("resposta depende so do captcha: ok -> 200, falhou -> 400, indisponivel -> 503", () => {
+    expect(fonte).toMatch(/const opaco = \(\) => cap === "ok" \? json\(\{ ok: true \}\)\s*: cap === "falhou" \? json\(\{ error: "captcha failed" \}, 400\)\s*: json\(\{ error: "captcha unavailable" \}, 503\);/);
   });
 });
 
@@ -71,11 +87,15 @@ describe("tela e CSP", () => {
 
   it("sem token nao chama signUp; token vai no corpo", () => {
     const antes = fatiaEntre(tela, "const handleSignup", "supabase.auth.signUp(", 40);
-    expect(antes).toMatch(/if \(!captcha\) \{\s*toast\.error\("Please confirm you are not a robot"\);\s*return;\s*\}/);
+    expect(antes).toMatch(/if \(!captcha\) \{\s*toast\.error\(captchaErro \? CAPTCHA_NAO_CARREGOU : "Please confirm you are not a robot"\);\s*return;\s*\}/);
     expect(tela).toContain("{ body: { email, nome, empresa, ...ficha, captcha } }");
     expect(tela).toMatch(/callback: \(t: string\) => setCaptcha\(t\)/);
     expect(tela).toMatch(/"expired-callback": \(\) => setCaptcha\(""\)/);
     expect(tela).toContain("<div ref={captchaDiv} />");
+    // script bloqueado: aviso visivel e o toast nao manda marcar checkbox que nao existe
+    expect(tela).toContain("s.onerror = () => { s.remove(); setCaptchaErro(true); };");
+    expect(tela).toContain("{captchaErro && <p");
+    expect(tela).toContain("toast.error(captchaErro ? CAPTCHA_NAO_CARREGOU : ");
   });
 
   it("CSP libera o reCAPTCHA (script, frame, connect)", () => {

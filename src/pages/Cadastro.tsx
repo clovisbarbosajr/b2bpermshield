@@ -16,6 +16,10 @@ const VAZIO: CadastroForm = {
   estado: "", pais: "United States", cep: "", email: "", password: "", passwordConfirm: "",
 };
 
+// Script do Google bloqueado (ad blocker, firewall): sem isto o botao so repetia
+// "confirm you are not a robot" sem checkbox nenhum na tela.
+const CAPTCHA_NAO_CARREGOU = "The security check could not load. Disable ad blockers or try another network, then reload this page.";
+
 const Cadastro = () => {
   const [form, setForm] = useState<CadastroForm>(VAZIO);
   const [loading, setLoading] = useState(false);
@@ -26,6 +30,7 @@ const Cadastro = () => {
   // fail-open, pra ligar esta trava nunca fechar o cadastro por acidente.
   const [aberto, setAberto] = useState(true);
   const [captcha, setCaptcha] = useState("");
+  const [captchaErro, setCaptchaErro] = useState(false);
   const captchaDiv = useRef<HTMLDivElement>(null);
   const captchaId = useRef<number | null>(null);
 
@@ -58,6 +63,8 @@ const Cadastro = () => {
       s.id = "recaptcha-api";
       s.src = "https://www.google.com/recaptcha/api.js?onload=__recaptchaCadastro&render=explicit";
       s.async = true;
+      // Remove o script que falhou: remontar a tela tenta carregar de novo.
+      s.onerror = () => { s.remove(); setCaptchaErro(true); };
       document.head.appendChild(s);
     }
   }, []);
@@ -70,7 +77,7 @@ const Cadastro = () => {
       return;
     }
     if (!captcha) {
-      toast.error("Please confirm you are not a robot");
+      toast.error(captchaErro ? CAPTCHA_NAO_CARREGOU : "Please confirm you are not a robot");
       return;
     }
     if (!aberto) {
@@ -202,7 +209,10 @@ const Cadastro = () => {
               {campo("email", "email")}
               {campo("password", "password")}
               {campo("passwordConfirm", "password")}
-              <div ref={captchaDiv} />
+              <div className="max-w-full overflow-x-auto">
+                <div ref={captchaDiv} />
+              </div>
+              {captchaErro && <p className="text-sm text-destructive">{CAPTCHA_NAO_CARREGOU}</p>}
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "Signing up..." : "SIGN UP"}
               </Button>

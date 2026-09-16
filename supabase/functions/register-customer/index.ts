@@ -45,11 +45,12 @@ Deno.serve(async (req) => {
     const { ficha, invalido } = lerFicha(body);
     if (invalido) return json({ error: "invalid registration data" }, 400);
 
-    // reCAPTCHA (T25), antes de qualquer consulta: sem ele um robo dispara o SMS e os
-    // e-mails de "cliente novo" abaixo. Secret com o nome que o Lovable aceitou.
+    // reCAPTCHA (T25). Tranca SO OS AVISOS (SMS + 2 e-mails), que sao o custo que um
+    // robo consegue gerar. A ficha segue sendo criada: o signUp ja aconteceu na tela
+    // e recusar aqui deixava login sem ficha e admin sem saber (token vencido, aba
+    // antiga sem captcha, secret errado). Secret com o nome que o Lovable aceitou.
     const cap = await verificarCaptcha(String(body.captcha ?? ""), Deno.env.get("registercustomer") ?? "", fetch);
-    if (cap === "falhou") return json({ error: "captcha failed" }, 400);
-    if (cap === "indisponivel") return json({ error: "captcha unavailable" }, 503);
+    if (cap !== "ok") console.error(`[register-customer] captcha ${cap} (${emailLc}): ficha segue, avisos nao`);
 
     // ORACULO PUBLICO (A4)
     //
@@ -67,7 +68,11 @@ Deno.serve(async (req) => {
     //
     // Agora todo caminho que NAO cria ficha responde a MESMA coisa. O motivo real
     // vai para o log do servidor, onde so o dono ve.
-    const opaco = () => json({ ok: true });
+    // A resposta depende SO do captcha (nunca do estado do e-mail): a tela mostra
+    // "nao avisamos a equipe" quando ele nao passou.
+    const opaco = () => cap === "ok" ? json({ ok: true })
+      : cap === "falhou" ? json({ error: "captcha failed" }, 400)
+      : json({ error: "captcha unavailable" }, 503);
 
     // 0) Cadastro aberto? A tela publica ja barra, mas o front sozinho nao
     //    protege nada — quem chamar esta funcao direto tem que bater na mesma
@@ -132,7 +137,7 @@ Deno.serve(async (req) => {
     //
     // Falha de leitura NAO bloqueia: o cadastro ja foi criado, e engolir o aviso
     // do dono por erro nosso e pior que um aviso a mais.
-    let podeAvisar = true;
+    let podeAvisar = cap === "ok";
     try {
       const { count } = await db
         .from("notification_log")

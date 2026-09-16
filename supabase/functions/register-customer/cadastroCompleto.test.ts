@@ -52,7 +52,7 @@ describe("lerFicha (a regra, exercitada)", () => {
 
 describe("register-customer: fiacao da edge", () => {
   it("400 vem antes de registration_is_open, sem consulta no meio", () => {
-    const antes = fatiaEntre(fonte, 'return json({ error: "valid email required" }, 400);', 'db.rpc("registration_is_open")', 40);
+    const antes = fatiaEntre(fonte, 'return json({ error: "valid email required" }, 400);', 'db.rpc("registration_is_open")', 60);
     expect(antes).toMatch(/const \{ ficha, invalido \} = lerFicha\(body\);\s*if \(invalido\) return json\(\{ error: "invalid registration data" \}, 400\);/);
     const guarda = 'if (invalido) return json({ error: "invalid registration data" }, 400);';
     expect(fatiaEntre(antes, "valid email required", guarda, 10)).not.toMatch(/\bdb\.|await /);
