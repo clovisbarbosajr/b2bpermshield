@@ -12,7 +12,13 @@
 -- hoje e opcao de frete explicita, entao NULO nao tem mais caso legitimo.
 --
 -- So acrescenta a recusa do NULO, DEPOIS das isencoes (importado e staff).
--- O resto do corpo e identico ao de 20260916140000.
+-- O resto do corpo e identico ao de 20260916140000, EXCETO os RAISE.
+--
+-- RAISE CORRIGIDO. `RAISE EXCEPTION 'X' USING ..., MESSAGE = '...'` e invalido
+-- em execucao (42601 "RAISE option already specified: MESSAGE"): o INSERT era
+-- recusado, mas com a mensagem crua, sem o CODIGO que o Checkout procura. Isto
+-- tambem corrige os `*_NOT_ALLOWED` que ja estao no ar via 20260916140000.
+-- Forma valida: `RAISE EXCEPTION USING ERRCODE = ..., MESSAGE = 'CODIGO: ...'`.
 --
 -- ROLLBACK e VERIFICACAO no fim.
 -- ============================================================================
@@ -71,8 +77,7 @@ BEGIN
     -- `IF NOT NULL` nao e verdadeiro, e o pedido entraria com uma referencia
     -- para o nada.
     IF _ok IS NULL OR NOT _ok THEN
-      RAISE EXCEPTION 'PAYMENT_OPTION_NOT_ALLOWED'
-        USING ERRCODE = 'check_violation',
+      RAISE EXCEPTION USING ERRCODE = 'check_violation',
               MESSAGE = 'PAYMENT_OPTION_NOT_ALLOWED: this payment option is not available for this account';
     END IF;
   END IF;
@@ -81,8 +86,7 @@ BEGIN
   -- `shipping_option_id` NULO e RECUSADO: sem ele `fn_pedido_total_appside`
   -- grava frete 0. Retirada na loja e opcao explicita, nao ausencia de opcao.
   IF NEW.shipping_option_id IS NULL THEN
-    RAISE EXCEPTION 'SHIPPING_OPTION_REQUIRED'
-      USING ERRCODE = 'check_violation',
+    RAISE EXCEPTION USING ERRCODE = 'check_violation',
             MESSAGE = 'SHIPPING_OPTION_REQUIRED: a shipping option is required for customer orders';
   END IF;
 
@@ -103,8 +107,7 @@ BEGIN
     FROM public.shipping_options so WHERE so.id = NEW.shipping_option_id;
 
     IF _ok IS NULL OR NOT _ok THEN
-      RAISE EXCEPTION 'SHIPPING_OPTION_NOT_ALLOWED'
-        USING ERRCODE = 'check_violation',
+      RAISE EXCEPTION USING ERRCODE = 'check_violation',
               MESSAGE = 'SHIPPING_OPTION_NOT_ALLOWED: this shipping option is not available for this account';
     END IF;
   END IF;

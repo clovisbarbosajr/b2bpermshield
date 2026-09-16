@@ -419,7 +419,8 @@ describe("Checkout: a tela nao pode afirmar um total que o cartao vai desmentir"
     // DEPOIS da isencao de staff: pedido por telefone continua podendo sair sem frete.
     const ateONulo = fatiaEntre(sql, "has_role(auth.uid(), 'warehouse'", "IF NEW.shipping_option_id IS NULL THEN");
     expect(ateONulo, "a recusa do frete nulo passou a pegar staff").toContain("RETURN NEW");
-    expect(sql).toMatch(/IF NEW\.shipping_option_id IS NULL THEN\s+RAISE EXCEPTION 'SHIPPING_OPTION_REQUIRED'/);
+    // `RAISE EXCEPTION 'X' USING ... MESSAGE` e invalido em execucao (42601): so a forma sem literal serve.
+    expect(sql).toMatch(/IF NEW\.shipping_option_id IS NULL THEN\s+RAISE EXCEPTION USING[^;]*MESSAGE = 'SHIPPING_OPTION_REQUIRED:/);
     expect(sql).toContain("CREATE TRIGGER a_trg_pedido_opcoes_validas");
   });
 });
