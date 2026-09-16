@@ -28,6 +28,36 @@ describe("normalizeStatus", () => {
   it("status ja em ingles passa direto", () => {
     expect(normalizeStatus("Sold Out")).toBe("sold out");
   });
+  it("normaliza ANTES de traduzir, como o CASE do gatilho: caixa e espaco no slug nao escapam", () => {
+    // Na versao anterior `NAME_MAP[raw]` vinha antes do lower: " Esgotado " nao
+    // casava no mapa, chegava cru, e um produto que o banco BLOQUEIA a tela
+    // liberava. Tres formas que o banco trata como `sold out`:
+    expect(normalizeStatus(" Esgotado ")).toBe("sold out");
+    expect(normalizeStatus("ESGOTADO")).toBe("sold out");
+    expect(normalizeStatus("esgotado\t")).toBe("sold out");
+  });
+});
+
+describe("casamento por nome com a MESMA normalizacao do banco (lower(btrim)) nos dois lados", () => {
+  // Os dois lados sao gravaveis "sujos" por sessao de staff (policy de UPDATE em
+  // produtos sem restricao de coluna; gatilho de fabrica aceita "Sold Out " com
+  // espaco). O banco compara lower(btrim()) e bloqueia; o front comparava cru e
+  // falhava ABERTO — produto esgotado entrava no carrinho.
+  it("nome do status com espaco no fim ainda bloqueia o produto esgotado", () => {
+    const statuses = [{ nome: "Sold Out ", permite_comprar: false }];
+    const r = checkCartStock([item({ produto_id: "p1", quantidade: 1 })], [prod("p1", 99, 0, "esgotado")], statuses);
+    expect(r.blocked.has(key("p1"))).toBe(true);
+  });
+  it("slug do produto com caixa/espaco ainda bloqueia", () => {
+    const statuses = [{ nome: "sold out", permite_comprar: false }];
+    const r = checkCartStock([item({ produto_id: "p1", quantidade: 1 })], [prod("p1", 99, 0, " Esgotado ")], statuses);
+    expect(r.blocked.has(key("p1"))).toBe(true);
+  });
+  it("controle: status que permite comprar NAO bloqueia (senao 'bloqueia tudo' passaria acima)", () => {
+    const statuses = [{ nome: "Available ", permite_comprar: true }];
+    const r = checkCartStock([item({ produto_id: "p1", quantidade: 1 })], [prod("p1", 99, 0, " Disponivel")], statuses);
+    expect(r.blocked.has(key("p1"))).toBe(false);
+  });
 });
 
 describe("checkCartStock — produto sem variante", () => {

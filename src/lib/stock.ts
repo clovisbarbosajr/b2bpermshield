@@ -95,8 +95,32 @@ const NAME_MAP: Record<string, string> = {
   descontinuado: "discontinued",
 };
 
-export const normalizeStatus = (raw?: string | null): string =>
-  (NAME_MAP[raw || "disponivel"] || raw || "disponivel").toLowerCase();
+/**
+ * A MESMA normalizacao do banco — `lower(btrim(...))` — para os DOIS lados do
+ * casamento por nome (`product_statuses.nome` e `produtos.status_produto`).
+ *
+ * Existe porque os dois lados sao gravaveis "sujos" por sessao de staff via
+ * PostgREST (a policy de UPDATE em `produtos` nao restringe coluna, e o gatilho
+ * de nome de fabrica aceita "Sold Out" -> "Sold Out "). O banco se defende com
+ * `lower(btrim())`; o front comparava `toLowerCase()` cru e falhava ABERTO.
+ */
+export const statusKey = (raw?: string | null): string => String(raw ?? "").trim().toLowerCase();
+
+/**
+ * Traduz o slug em portugues do produto para o nome em ingles de
+ * `product_statuses`.
+ *
+ * ORDEM: normaliza PRIMEIRO, traduz DEPOIS — igual ao `CASE` de
+ * `fn_item_produto_valido` (20260825330000). A versao anterior fazia o inverso
+ * (`NAME_MAP[raw]` e so entao `.toLowerCase()`): `"Esgotado"`, `" esgotado"` e
+ * `"ESGOTADO"` nao casavam no mapa, chegavam crus, e um produto que o gatilho
+ * BLOQUEIA a tela LIBERAVA. Nao era so espaco — era qualquer variacao de caixa.
+ * Mexeu no `NAME_MAP`, mexe no `CASE` do gatilho e no da migration 20260904120000.
+ */
+export const normalizeStatus = (raw?: string | null): string => {
+  const k = statusKey(raw) || "disponivel";
+  return NAME_MAP[k] ?? k;
+};
 
 export type StockCheck = {
   /** cartKey → item que NÃO pode ser comprado (esgotado/status bloqueia). Remover. */
@@ -114,7 +138,8 @@ export function checkCartStock(
   const blocked = new Map<string, StockItem>();
   const insufficient = new Map<string, number>();
 
-  const statusMap = new Map(statuses.map((s) => [s.nome.toLowerCase(), s.permite_comprar ?? true]));
+  // `statusKey` nos DOIS lados: aqui e no `normalizeStatus` do produto, abaixo.
+  const statusMap = new Map(statuses.map((s) => [statusKey(s.nome), s.permite_comprar ?? true]));
   const prodById = new Map(produtos.map((p) => [p.id, p]));
   const varById = new Map(variantes.map((v) => [v.id, v]));
   // Quais produtos tem QUALQUER variante ativa. Alimentado pelas variantes que o

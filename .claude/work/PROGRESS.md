@@ -1,7 +1,7 @@
 # Progresso
 
 ## 🔄 Em andamento
-- [ ] Lane A — T5 — spec-validator — contrato do `btrim` no casamento de status
+- [ ] Lane A — T5 — Caçador — bug-hunter sobre `stock.ts`, `Catalogo.tsx`, `ProdutoDetalhe.tsx`
 - [ ] Lane B — T6 — spec-validator — create customer: erro opaco da edge + e-mail já existente
 - [ ] Lane C — T7 — spec-validator — delete de produto lento: índice em `estoque_log(produto_id)`
 - [ ] Lane D — T8 — spec-validator — filtro Parent Category → Sub-categories

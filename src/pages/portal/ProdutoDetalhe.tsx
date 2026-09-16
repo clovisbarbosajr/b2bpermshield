@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { statusKey, normalizeStatus } from "@/lib/stock";
 import PortalLayout from "@/components/layouts/PortalLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -108,9 +109,12 @@ const ProdutoDetalhe = () => {
         }
         // Resolve status
         const statusName = (p as any).status_produto || "disponivel";
-        const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
-        const normalized = (nameMap[statusName] || statusName).toLowerCase();
-        const matched = (statusesRes.data ?? []).find((s: any) => s.nome.toLowerCase() === normalized);
+        // `normalizeStatus`/`statusKey` de `src/lib/stock.ts` — a mesma
+        // normalizacao do banco (lower(btrim) ANTES de traduzir) nos dois lados.
+        // Era a 3a copia inline do NAME_MAP no portal; nenhuma aparava espaco nem
+        // caixa, e " esgotado" que o gatilho bloqueia aqui liberava.
+        const normalized = normalizeStatus(statusName);
+        const matched = (statusesRes.data ?? []).find((s: any) => statusKey(s.nome) === normalized);
         // O DEFAULT `permite_comprar: true` ESTA CERTO e fica: o banco usa a mesma
         // regra conservadora (20260825330000:113 — status sem linha em
         // `product_statuses` NAO bloqueia), e invertê-lo aqui divergiria da trava.
@@ -235,7 +239,7 @@ const ProdutoDetalhe = () => {
 
   const price = calculatedPrice ?? produto?.preco ?? 0;
   const disponivel = produto ? produto.estoque_total - produto.estoque_reservado : 0;
-  const isPreOrder = statusInfo?.nome.toLowerCase() === "pre-order";
+  const isPreOrder = statusKey(statusInfo?.nome) === "pre-order";
   const canBuy = statusInfo ? statusInfo.permite_comprar && (disponivel > 0 || isPreOrder) : disponivel > 0;
   // Variantes: estoque e "pode comprar" passam a depender da variante escolhida.
   const hasVariants = variantes.length > 0;

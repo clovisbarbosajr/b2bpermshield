@@ -36,9 +36,9 @@
     },
     {
       "id": "T5",
-      "title": "Casar status por nome com btrim em src/lib/stock.ts:117 e src/pages/portal/Catalogo.tsx:242",
-      "status": "in_progress",
-      "validation": "in_progress — spec-validator",
+      "title": "Normalizar status como o banco (lower(btrim) ANTES do NAME_MAP) em stock.ts, Catalogo.tsx, ProdutoDetalhe.tsx",
+      "status": "validating",
+      "validation": "validating — implementado, foco 97/97; cacador em curso",
       "depends_on": []
     },
     {

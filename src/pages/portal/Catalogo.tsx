@@ -10,7 +10,7 @@ import { Search, ShoppingCart, LayoutGrid, List, ChevronRight } from "lucide-rea
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useCart } from "@/contexts/CartContext";
-import { cartKey } from "@/lib/stock";
+import { cartKey, statusKey, normalizeStatus } from "@/lib/stock";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { getProductPrice, PriceResult } from "@/lib/pricing";
@@ -239,7 +239,8 @@ const Catalogo = () => {
       if (statusRes.error) console.error(statusRes.error);
       setStatusIlegivel(!!statusRes.error);
       const sMap: Record<string, ProductStatus> = {};
-      (statusRes.data ?? []).forEach((s: any) => { sMap[s.nome.toLowerCase()] = s; });
+      // `statusKey` = lower(btrim), a mesma chave do banco. Ver `src/lib/stock.ts`.
+      (statusRes.data ?? []).forEach((s: any) => { sMap[statusKey(s.nome)] = s; });
       setStatusMap(sMap);
 
       let allProducts = (prodRes.data as Produto[]) ?? [];
@@ -260,10 +261,11 @@ const Catalogo = () => {
 
       // Esconde produto cujo STATUS tem permite_visualizar = false (antes esse flag era
       // ignorado e o produto aparecia mesmo assim).
-      const visMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
+      // Sem mapa inline: era a 2a de 3 copias manuscritas do NAME_MAP nesta tela,
+      // e nenhuma delas normalizava ANTES de traduzir — " esgotado" nao casava e
+      // o produto que o banco esconde aparecia. `normalizeStatus` e a unica fonte.
       const isVisible = (p: Produto) => {
-        const sName = ((p as any).status_produto) || "disponivel";
-        const st = sMap[(visMap[sName] || sName).toLowerCase()];
+        const st = sMap[normalizeStatus((p as any).status_produto)];
         return !(st && st.permite_visualizar === false);
       };
 
@@ -427,17 +429,17 @@ const Catalogo = () => {
 
   const getStatusInfo = (p: Produto) => {
     const statusName = p.status_produto || "disponivel";
-    // Map old values
-    const nameMap: Record<string, string> = { disponivel: "available", indisponivel: "not available", esgotado: "sold out", pre_venda: "pre-order", estoque_limitado: "limited stock", descontinuado: "discontinued" };
-    const normalized = (nameMap[statusName] || statusName).toLowerCase();
-    return statusMap[normalized] ?? { nome: statusName, permite_comprar: true, permite_visualizar: true, cor: null };
+    // `normalizeStatus` (lower+trim ANTES do mapa) no lugar da 3a copia inline do
+    // NAME_MAP. O fallback fail-open para status desconhecido e conservador de
+    // proposito e igual ao banco — NAO mexer aqui.
+    return statusMap[normalizeStatus(statusName)] ?? { nome: statusName, permite_comprar: true, permite_visualizar: true, cor: null };
   };
 
   const canBuy = (p: Produto) => {
     const status = getStatusInfo(p);
     if (!status.permite_comprar) return false;
     // Pre-order allows buying even with 0 stock
-    if (getStatusInfo(p).nome.toLowerCase() === "pre-order") return true;
+    if (statusKey(getStatusInfo(p).nome) === "pre-order") return true;
     return disponivel(p) > 0;
   };
 
@@ -446,7 +448,7 @@ const Catalogo = () => {
     return status.nome;
   };
 
-  const isPreOrder = (p: Produto) => getStatusInfo(p).nome.toLowerCase() === "pre-order";
+  const isPreOrder = (p: Produto) => statusKey(getStatusInfo(p).nome) === "pre-order";
   // Estoque zerado (e não pré-venda) = SOLD OUT automático, independente do status salvo.
   const isSoldOut = (p: Produto) => !isPreOrder(p) && disponivel(p) <= 0;
   // Pílula de status (padrão B2BWave): AVAILABLE / BACKORDER (verde) e SOLD OUT (vermelho).
@@ -746,7 +748,7 @@ const Catalogo = () => {
                   <Button className={`flex-1 gap-2 h-9 ${noCarrinho(p) ? "bg-green-600 hover:bg-green-700 text-white" : ""}`}
                     size="sm" disabled={!canBuy(p) || isViewer} onClick={(e) => { e.stopPropagation(); handleAdd(p); }}>
                     <ShoppingCart className="h-4 w-4" />
-                    {noCarrinho(p) ? "Update quantity" : (getStatusInfo(p).nome.toLowerCase() === "pre-order" ? "Back Order" : "Add to Cart")}
+                    {noCarrinho(p) ? "Update quantity" : (statusKey(getStatusInfo(p).nome) === "pre-order" ? "Back Order" : "Add to Cart")}
                   </Button>
                 </div>
               </CardContent>
