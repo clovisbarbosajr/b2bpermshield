@@ -400,6 +400,28 @@ describe("Checkout: a tela nao pode afirmar um total que o cartao vai desmentir"
     expect(guarda, "a reconfirmacao passou a acontecer DEPOIS de criar o pedido")
       .toBeLessThan(insert);
   });
+
+  it("pedido de cliente sem frete nao sai: nem da tela, nem do banco", () => {
+    // Sem opcao escolhida (ou sem nenhuma disponivel) `shipping_option_id` ia
+    // null e `fn_pedido_total_appside` gravava `shipping_costs := 0`.
+    const src = fonte().replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+    const submit = fatiaEntre(src, "const handleSubmit = async () => {", "setLoading(true);", 40);
+    const gate = submit.search(/if \(!shippingOptions\.some\(s => s\.id === shippingId\)\) \{[\s\S]{0,200}?toast\.error\([\s\S]{0,200}?return;/);
+    expect(gate, "o submit nao barra mais pedido sem frete antes de setLoading(true)").toBeGreaterThan(-1);
+    expect(gate, "a guarda de frete tem que vir depois da data").toBeGreaterThan(submit.indexOf("if (!deliveryDate)"));
+    expect(submit.indexOf("if (!deliveryDate)")).toBeGreaterThan(-1);
+    expect(src, "o botao voltou a habilitar sem opcao de frete")
+      .toMatch(/disabled=\{loading \|\| !!loadError \|\|[^}]*shippingOptions\.length === 0/);
+    expect(src, "o token do banco nao e mais traduzido").toContain("/SHIPPING_OPTION_REQUIRED/i");
+
+    const sql = readFileSync("supabase/migrations/20260916150000_frete_obrigatorio_para_cliente.sql", "utf-8")
+      .replace(/--.*$/gm, "");
+    // DEPOIS da isencao de staff: pedido por telefone continua podendo sair sem frete.
+    const ateONulo = fatiaEntre(sql, "has_role(auth.uid(), 'warehouse'", "IF NEW.shipping_option_id IS NULL THEN");
+    expect(ateONulo, "a recusa do frete nulo passou a pegar staff").toContain("RETURN NEW");
+    expect(sql).toMatch(/IF NEW\.shipping_option_id IS NULL THEN\s+RAISE EXCEPTION 'SHIPPING_OPTION_REQUIRED'/);
+    expect(sql).toContain("CREATE TRIGGER a_trg_pedido_opcoes_validas");
+  });
 });
 
 describe("CartContext: o estoque fossil do localStorage nao decide mais quantidade", () => {

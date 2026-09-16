@@ -67,6 +67,7 @@ const Checkout = () => {
   const [newAddr, setNewAddr] = useState({ logradouro: "", complemento: "", cidade: "", estado: "", cep: "" });
   const [savingAddr, setSavingAddr] = useState(false);
   const [shippingOptions, setShippingOptions] = useState<any[]>([]);
+  const [opcoesCarregadas, setOpcoesCarregadas] = useState(false);
   const [paymentOptions, setPaymentOptions] = useState<any[]>([]);
   const [shippingId, setShippingId] = useState("");
   const [paymentId, setPaymentId] = useState("");
@@ -294,6 +295,7 @@ const Checkout = () => {
       setLoadError(erroAtribuicao ?? (ship.error || pay.error ? (ship.error ?? pay.error)!.message : null));
       setShippingOptions(opcoesDisponiveis((ship.data ?? []).filter((s: any) => s.show_to_customers !== false), allowedShip));
       setPaymentOptions(opcoesDisponiveis(pay.data ?? [], allowedPay));
+      setOpcoesCarregadas(true);
 
       // Compute tax using rules: match customer's tax_customer_group_id
       if (cliente) {
@@ -702,10 +704,14 @@ const Checkout = () => {
       toast.error("Cart is empty");
       return;
     }
-    // Único campo obrigatório (regra do negócio): a data de entrega/retirada.
-    // Endereço puxa da conta; pagamento é opcional; frete é filtrado por cliente.
+    // Obrigatórios: a data de entrega/retirada e o frete (sem ele o banco grava
+    // `shipping_costs := 0`). Endereço puxa da conta; pagamento é opcional.
     if (!deliveryDate) {
       toast.error("Please select a delivery / pickup date.");
+      return;
+    }
+    if (!shippingOptions.some(s => s.id === shippingId)) {
+      toast.error(shippingOptions.length ? "Select a shipping option." : "No shipping option is available for your account. Please contact us.");
       return;
     }
 
@@ -904,7 +910,9 @@ const Checkout = () => {
             ? "That payment option isn't available for your account. Please pick another one."
             : /SHIPPING_OPTION_NOT_ALLOWED/i.test(msg)
               ? "That shipping option isn't available for your account. Please pick another one."
-              : "Error: " + msg
+              : /SHIPPING_OPTION_REQUIRED/i.test(msg)
+                ? "Select a shipping option."
+                : "Error: " + msg
       );
       setLoading(false);
       return;
@@ -1262,6 +1270,9 @@ const Checkout = () => {
             </Select>
           </div>
         )}
+        {opcoesCarregadas && !loadError && shippingOptions.length === 0 && (
+          <p className="mb-6 text-sm text-destructive">No shipping option is available for your account. Please contact us.</p>
+        )}
 
         {paymentOptions.length > 0 && (
           <div className="mb-6">
@@ -1454,7 +1465,7 @@ const Checkout = () => {
           <Button variant="ghost" onClick={() => navigate("/portal/carrinho")}>BACK</Button>
           {/* `!!loadError` BLOQUEIA OS DOIS CAMINHOS. So mostrar o card de aviso
               nao bastava: sem opcao de frete na tela, `shippingId` fica "",
-              `handleSubmit` nao exige frete, e `fn_pedido_total_appside` grava
+              `handleSubmit` nao exigia frete, e `fn_pedido_total_appside` grava
               `shipping_costs := 0`. O cliente ignorava o card vermelho, clicava
               SEND ORDER e o pedido entrava com frete gratis — o defeito que a
               guarda dizia ter fechado.
@@ -1465,7 +1476,7 @@ const Checkout = () => {
               cobrar a mais. O botao continuava prometendo `PAY $X` e cobrando
               `finalTotal`, que ja vem do banco COM o imposto. Pedido sem cartao
               continua liberado: ali o valor e confirmado antes de cobrar. */}
-          <Button onClick={handleSubmit} disabled={loading || !!loadError || (payByCard && (!stripeReady || !taxLookupOk)) || outOfStock.length > 0}>
+          <Button onClick={handleSubmit} disabled={loading || !!loadError || shippingOptions.length === 0 || (payByCard && (!stripeReady || !taxLookupOk)) || outOfStock.length > 0}>
             {loading
               ? payByCard ? "Processing payment..." : "Sending..."
               : payByCard
