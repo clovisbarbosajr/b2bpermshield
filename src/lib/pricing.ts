@@ -78,7 +78,10 @@ export async function getProductPrices({
   // fica velho se o pai trocar de tabela depois.
   let tabelaPrecoId: string | null = cliente?.tabela_preco_id ?? null;
   // A RLS esconde a ficha do pai do sub-login; `lerContaDaEmpresa` cai na RPC.
-  if (accountId !== customerId) {
+  // So e NECESSARIA quando o sub-login nao tem tabela propria (a dele vence):
+  // ler a empresa sempre fazia todo sub-login depender da RPC — e o trigger
+  // `trg_subuser_inherit_pricelist` ja copia a tabela no INSERT, o caso comum.
+  if (accountId !== customerId && tabelaPrecoId == null) {
     const conta = await lerContaDaEmpresa(accountId);
     tabelaPrecoId ??= conta.tabela_preco_id;
   }

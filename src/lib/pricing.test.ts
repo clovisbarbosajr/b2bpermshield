@@ -143,7 +143,9 @@ describe("getProductPrices — o lote", () => {
     expect(r["p-3"]).toEqual({ price: 300, source: "base" });
     const combinado = chamadas.find((c) => c.tabela === "produto_precos_cliente")!;
     expect(combinado.filtros.cliente_id).toBe("cli-0");
-    expect(chamadas.filter((c) => c.tabela === "clientes").map((c) => c.filtros.id)).toEqual(["sub-0", "cli-0"]);
+    // sub-0 tem tabela propria: a ficha da empresa NEM e lida (nem direto, nem RPC)
+    expect(chamadas.filter((c) => c.tabela === "clientes").map((c) => c.filtros.id)).toEqual(["sub-0"]);
+    expect(rpcChamadas).toBe(0);
   });
 
   it("sub-login sem tabela propria herda a do pai", async () => {
