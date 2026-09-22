@@ -94,10 +94,13 @@ const Pedidos = () => {
     const dt = new Date(d);
     return `${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}/${dt.getFullYear()} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
   };
+  // So `delivery_date`, que e DATA de calendario gravada a meia-noite UTC: lido
+  // no fuso local, o cliente via a entrega um dia ANTES do combinado (e o CSV
+  // que ele exporta saia com a mesma data errada).
   const fmtDateShort = (d: string) => {
     if (!d) return "-";
     const dt = new Date(d);
-    return `${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}/${dt.getFullYear()}`;
+    return `${String(dt.getUTCMonth() + 1).padStart(2, "0")}/${String(dt.getUTCDate()).padStart(2, "0")}/${dt.getUTCFullYear()}`;
   };
 
   // Load cliente ID once

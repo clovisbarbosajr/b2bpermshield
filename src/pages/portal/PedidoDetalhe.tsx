@@ -32,10 +32,11 @@ const PedidoDetalhe = () => {
     const dt = new Date(d);
     return `${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}/${dt.getFullYear()} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
   };
+  // Ver `portal/Pedidos.tsx`: entrega e DATA em UTC, nao instante local.
   const fmtDateShort = (d: string) => {
     if (!d) return "-";
     const dt = new Date(d);
-    return `${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}/${dt.getFullYear()}`;
+    return `${String(dt.getUTCMonth() + 1).padStart(2, "0")}/${String(dt.getUTCDate()).padStart(2, "0")}/${dt.getUTCFullYear()}`;
   };
 
   useEffect(() => {

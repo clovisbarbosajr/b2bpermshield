@@ -1,6 +1,10 @@
 # Progresso
 
+## ⏳ Pendentes
+- [ ] T27 — "View all orders" do cliente abre a lista sem filtro (defeito antigo)
+
 ## 🚫 Bloqueadas
+- [ ] T26 — painel ao vivo do admin — pronto e validado; aguarda o dono liberar a publicação
 - [ ] T9 — 1 produto com foto morta na origem ("DO NOT SHIP") — Jessika decide
 
 ## ✅ Concluídas e validadas

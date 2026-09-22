@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { paginasVisiveis, paginaValida } from "@/lib/paginacao";
 import { escaparCelulaCSV } from "@/lib/export-csv";
@@ -24,7 +24,18 @@ const emptyFilters = {
   company: "", fullName: "", phone: "", email: "", city: "", postalCode: "",
   country: "", state: "", activity: "", priceList: "", isActive: "", referenceCode: "",
   useInAppByAdmin: "", latestOrderFrom: "", latestOrderTo: "", disableOrdering: "",
-  salesRep: "", privacyGroup: "",
+  salesRep: "", privacyGroup: "", status: "",
+};
+
+// Valores do enum `cliente_status` no banco (ativo | inativo | pendente).
+const CLIENTE_STATUS = ["ativo", "inativo", "pendente"];
+
+// O Dashboard linka pra ca com o filtro ja aplicado (`?status=pendente`).
+// A URL so SEMEIA o estado inicial: status desconhecido e ignorado em silencio
+// (tela normal, nao tela vazia).
+export const filtrosDaUrl = (params: URLSearchParams): Partial<typeof emptyFilters> => {
+  const status = params.get("status");
+  return status && CLIENTE_STATUS.includes(status) ? { status } : {};
 };
 
 const AdminClientes = () => {
@@ -35,7 +46,16 @@ const AdminClientes = () => {
   const [clientes, setClientes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState({ ...emptyFilters });
+  const [searchParams] = useSearchParams();
+  // Inicializador preguicoso no primeiro render; o efeito abaixo so re-semeia
+  // quando a URL MUDA, nunca a cada re-render.
+  const [filters, setFilters] = useState(() => ({ ...emptyFilters, ...filtrosDaUrl(searchParams) }));
+  // Ver `Pedidos.tsx`: o router nao remonta quando so a query muda, entao o
+  // filtro vindo do painel ficava grudado ao voltar pelo menu.
+  const urlDosFiltros = searchParams.toString();
+  useEffect(() => {
+    setFilters({ ...emptyFilters, ...filtrosDaUrl(new URLSearchParams(urlDosFiltros)) });
+  }, [urlDosFiltros]);
   const [lastOrders, setLastOrders] = useState<Record<string, string>>({});
   const [gruposPorCliente, setGruposPorCliente] = useState<Record<string, string[]>>({});
   const [priceLists, setPriceLists] = useState<any[]>([]);
@@ -166,6 +186,7 @@ const AdminClientes = () => {
     if (f.postalCode && !(c.cep ?? "").includes(f.postalCode)) return false;
     if (f.state && !(c.estado ?? "").toLowerCase().includes(f.state.toLowerCase())) return false;
     if (f.referenceCode && !(c.customer_reference_code ?? "").toLowerCase().includes(f.referenceCode.toLowerCase())) return false;
+    if (f.status && c.status !== f.status) return false;
     if (f.isActive === "yes" && c.is_active !== true) return false;
     if (f.isActive === "no" && c.is_active !== false) return false;
     if (f.disableOrdering === "yes" && c.disable_ordering !== true) return false;
@@ -392,6 +413,18 @@ const AdminClientes = () => {
                 <SelectItem value="__all__">All</SelectItem>
                 <SelectItem value="yes">Yes</SelectItem>
                 <SelectItem value="no">No</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs text-primary">Status</Label>
+            <Select value={filters.status || "__all__"} onValueChange={v => setFilter("status", v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-8"><SelectValue placeholder="All" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All</SelectItem>
+                <SelectItem value="ativo">Active</SelectItem>
+                <SelectItem value="inativo">Inactive</SelectItem>
+                <SelectItem value="pendente">Pending</SelectItem>
               </SelectContent>
             </Select>
           </div>
