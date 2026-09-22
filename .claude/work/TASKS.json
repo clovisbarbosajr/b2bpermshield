@@ -188,9 +188,10 @@
     {
       "id": "T26",
       "title": "Painel ao vivo no /admin (vendas, top produtos/clientes, estoque e cadastros) — so admin",
-      "status": "validating",
-      "validation": "caçador r3 + estresse de leitura + teste no navegador",
-      "depends_on": []
+      "status": "blocked",
+      "validation": "5 rodadas caçador+cetico, 1015/1015, estresse de leitura 30 paineis simultaneos",
+      "depends_on": [],
+      "motivo": "validado (estava em validating); aguarda o dono liberar a publicacao"
     },
     {
       "id": "T27",
