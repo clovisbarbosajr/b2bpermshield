@@ -184,6 +184,20 @@
       "status": "done",
       "validation": "verificado em producao: widget v2 renderiza; edge com token falso -> 400 captcha failed (secret ok)",
       "depends_on": []
+    },
+    {
+      "id": "T26",
+      "title": "Painel ao vivo no /admin (vendas, top produtos/clientes, estoque e cadastros) — so admin",
+      "status": "validating",
+      "validation": "caçador r3 + estresse de leitura + teste no navegador",
+      "depends_on": []
+    },
+    {
+      "id": "T27",
+      "title": "\"View all orders\" do cliente abre lista sem filtro (link ?customer= ignorado, pre-existente)",
+      "status": "pending",
+      "validation": "pending",
+      "depends_on": []
     }
   ]
 }
