@@ -46,7 +46,13 @@ const emptyFilters = {
   submittedBy: "",
   withBackorderedItems: "",
   productSku: "",
+  // Vem SO da URL (`?customer=<id>`, botao "View all orders" da ficha do
+  // cliente). Sem isto o botao abria a lista inteira e o admin lia os pedidos
+  // de todo mundo como se fossem daquele cliente.
+  clienteId: "",
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // O Dashboard linka pra ca com o filtro ja aplicado (`?from=&to=&status=`).
 // A URL so SEMEIA o estado inicial: param invalido/desconhecido e ignorado em
@@ -64,10 +70,14 @@ export const filtrosDaUrl = (params: URLSearchParams): Partial<typeof emptyFilte
   const from = dataOuNada(params.get("from"));
   const to = dataOuNada(params.get("to"));
   const status = params.get("status");
+  const cliente = params.get("customer");
   return {
     ...(from ? { fromDate: from } : {}),
     ...(to ? { toDate: to } : {}),
     ...(status && statusOptions.some((s) => s.value === status) ? { status } : {}),
+    // minusculo: o Postgres emite uuid em minusculas e a comparacao e exata —
+    // um link com o id em maiusculas passava na validacao e dava lista vazia.
+    ...(cliente && UUID.test(cliente) ? { clienteId: cliente.toLowerCase() } : {}),
   };
 };
 
@@ -90,6 +100,19 @@ const AdminPedidos = () => {
   useEffect(() => {
     setFilters({ ...emptyFilters, ...filtrosDaUrl(new URLSearchParams(urlDosFiltros)) });
   }, [urlDosFiltros]);
+  // Nome do cliente filtrado, lido da ficha e NAO dos pedidos carregados: cliente
+  // sem pedido nenhum (o caso mais comum de clicar em "View all orders") nao tem
+  // de onde tirar o nome, e o chip dizia so "selected".
+  const [nomeDoFiltro, setNomeDoFiltro] = useState("");
+  useEffect(() => {
+    if (!filters.clienteId) { setNomeDoFiltro(""); return; }
+    let vigente = true;
+    supabase.from("clientes").select("nome, empresa").eq("id", filters.clienteId).maybeSingle()
+      .then(({ data }) => {
+        if (vigente) setNomeDoFiltro((data as any)?.empresa || (data as any)?.nome || "not found");
+      });
+    return () => { vigente = false; };
+  }, [filters.clienteId]);
   const [categories, setCategories] = useState<any[]>([]);
   const [paymentOpts, setPaymentOpts] = useState<any[]>([]);
   const [shippingOpts, setShippingOpts] = useState<any[]>([]);
@@ -105,7 +128,10 @@ const AdminPedidos = () => {
       // páginas e do Export — sem nenhum aviso. A base já tem ~884 pedidos.
       const [orderList, cats, payOpts, shipOpts, repData] = await Promise.all([
         fetchAllRows((f, t) => supabase.from("pedidos")
-          .select("*, clientes(nome, empresa, email, telefone)")
+          // `parent_customer_id`: pedido feito por SUB-LOGIN e gravado com o id do
+          // funcionario, mas e pedido DA EMPRESA (a propria RLS deixa o pai ler).
+          // Sem ele, filtrar pela empresa escondia os pedidos dos funcionarios.
+          .select("*, clientes(nome, empresa, email, telefone, parent_customer_id)")
           .order("created_at", { ascending: false }).order("id", { ascending: true }).range(f, t)),
         fetchAllRows((f, t) => supabase.from("categorias").select("id, nome, parent_id, ordem").eq("ativo", true).order("nome").order("id", { ascending: true }).range(f, t)),
         fetchAllRows((f, t) => supabase.from("payment_options").select("id, nome").eq("ativo", true).order("ordem").order("id", { ascending: true }).range(f, t)),
@@ -229,6 +255,7 @@ const AdminPedidos = () => {
     if (f.phone && !(p.clientes?.telefone ?? "").includes(f.phone)) return false;
     if (f.email && !(p.clientes?.email ?? "").toLowerCase().includes(f.email.toLowerCase())) return false;
     if (f.purchaseOrder && !(p.po_number ?? "").toLowerCase().includes(f.purchaseOrder.toLowerCase())) return false;
+    if (f.clienteId && p.cliente_id !== f.clienteId && p.clientes?.parent_customer_id !== f.clienteId) return false;
     if (f.status && canonicalStatus(p.status) !== f.status) return false;
     // "T00:00:00" e o que torna a borda LOCAL. `new Date("2026-09-01")` (so data)
     // e meia-noite UTC pela especificacao, entao pedido da noite do dia anterior
@@ -387,6 +414,16 @@ const AdminPedidos = () => {
 
         <div className="flex items-center gap-2 mt-4">
           <Button variant="outline" size="sm" onClick={clearFilters} className="gap-1"><X className="h-3 w-3" /> Clear</Button>
+          {/* O filtro por cliente vem da URL e nao tem campo proprio: sem este
+              aviso a lista pareceria conter TODOS os pedidos do sistema. */}
+          {filters.clienteId && (
+            <span className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
+              Customer: {nomeDoFiltro || "…"}
+              <button type="button" aria-label="Clear customer filter" onClick={() => setFilter("clienteId", "")}>
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          )}
         </div>
       </Card>
 
