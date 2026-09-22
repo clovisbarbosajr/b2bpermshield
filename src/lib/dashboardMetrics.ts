@@ -108,6 +108,16 @@ export function periodoAnterior(from: string, to: string): { from: string; to: s
  * memoria — se as duas pontas discordassem, o card e a lista contariam
  * conjuntos diferentes.
  */
+/**
+ * Periodo que pode ir para o servidor: duas datas de calendario bem formadas e
+ * na ordem. `limitesDoPeriodo` nao valida nada — sem esta porta, o ano
+ * intermediario que o `<input type="date">` emite ao digitar ("0002-09-01")
+ * virava `gte(created_at, ...)` sem limite inferior, varrendo o historico
+ * inteiro a cada 60 segundos.
+ */
+export const periodoUsavel = (from: string, to: string) =>
+  dataValida(from) && dataValida(to) && from <= to;
+
 export function limitesDoPeriodo(from: string, to: string): { ini: string; fim: string } {
   return {
     ini: new Date(`${from}T00:00:00`).toISOString(),

@@ -582,7 +582,9 @@ export default function Notificacoes() {
     const vars: Record<string, string> = {
       companyName: cfg?.nome_empresa ?? '', companyAddress: cfg?.endereco ?? '', companyEmail: cfg?.email_contato ?? '',
       orderNumber: String(pedido.numero ?? ''), orderDate: fmt(pedido.created_at), poNumber: esc(pedido.po_number),
-      deliveryDate: pedido.delivery_date ? fmt(pedido.delivery_date) : '-',
+      // Entrega e DATA em UTC (o envio real roda no Deno, TZ=UTC): sem isto o
+      // preview mostrava um dia a menos que o e-mail que o cliente recebe.
+      deliveryDate: pedido.delivery_date ? new Date(pedido.delivery_date).toLocaleDateString('en-US', { timeZone: 'UTC' }) : '-',
       customerCompany: esc(cliente?.empresa),
       // MESMA regra do envio real (empresa primeiro). Sem isto o preview mostrava
       // "Dear John Doe" e o email chegava "Dear DOE FLOORING" — e {{customerContact}}

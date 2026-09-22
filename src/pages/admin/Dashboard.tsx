@@ -16,7 +16,7 @@ import { canonicalStatus, statusLabel as orderStatusLabel } from "@/lib/orderSta
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  periodoAtual, periodoAnterior, limitesDoPeriodo, resumoVendas, variacao,
+  periodoAtual, periodoAnterior, periodoUsavel, limitesDoPeriodo, resumoVendas, variacao,
   topProdutos, topClientes, estoqueCritico,
 } from "@/lib/dashboardMetrics";
 
@@ -116,9 +116,16 @@ const PainelAoVivo = () => {
   const primeiraCarga = useRef(true);
 
   const carregar = useCallback(async () => {
-    if (!from || !to || from > to) return;
+    // A GERACAO SOBE ANTES DA GUARDA: com o periodo invalidado no meio de uma
+    // leitura, a leitura em voo continuava sendo "a vigente" e escrevia os
+    // numeros do periodo ANTIGO sob as datas NOVAS, carimbando hora nova.
     const minha = ++geracao.current;
     const atualizada = () => minha === geracao.current;
+    if (!periodoUsavel(from, to)) {
+      emVoo.current = false;
+      setCarregando(false);
+      return;
+    }
     emVoo.current = true;
     try {
       const { ini, fim } = limitesDoPeriodo(from, to);

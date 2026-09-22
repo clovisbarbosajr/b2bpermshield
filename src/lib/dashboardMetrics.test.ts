@@ -391,6 +391,95 @@ describe("painel ao vivo — guarda de voo", () => {
     }
   });
 
+  it("sozinho: le de novo a cada 60s e, na virada do dia, passa a contar o dia novo", async () => {
+    // Relogio falso com data real: prende O COMPORTAMENTO (antes so havia regex
+    // no texto do arquivo, e aumentar REFRESH_MS para 1 dia passava verde).
+    auth.role = "admin";
+    h.fetchAllRows.mockReset();
+    h.fetchAllRows.mockImplementation(async () => []);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 22, 10, 0, 0));
+
+    const React = (await import("react")).default;
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react-dom/test-utils");
+    const { MemoryRouter } = await import("react-router-dom");
+    const Dashboard = (await import("@/pages/admin/Dashboard")).default;
+
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(React.createElement(MemoryRouter, null, React.createElement(Dashboard)));
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      const inicio = h.fetchAllRows.mock.calls.length;
+      const datas = () => [...container.querySelectorAll('input[type="date"]')].map((i) => (i as HTMLInputElement).value);
+      expect(datas()[1], "periodo comeca terminando hoje").toBe("2026-09-22");
+
+      // 1 minuto: leu de novo sozinho.
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(h.fetchAllRows.mock.calls.length, "nao leu sozinho em 60s").toBeGreaterThan(inicio);
+
+      // Passa da meia-noite: o periodo automatico anda para o dia novo.
+      vi.setSystemTime(new Date(2026, 8, 23, 0, 0, 5));
+      await act(async () => { await vi.advanceTimersByTimeAsync(2 * 60_000); });
+      expect(datas()[1], "ficou preso no dia anterior").toBe("2026-09-23");
+      expect(datas()[0]).toBe("2026-09-01");
+    } finally {
+      await act(async () => { root.unmount(); });
+      vi.useRealTimers();
+      container.remove();
+    }
+  });
+
+  it("periodo invalido nao le nada e nao carimba hora nova", async () => {
+    // Campo de data apagado / de baixo maior que o de cima: a leitura em voo
+    // era invalidada, mas ainda escrevia os numeros do periodo antigo sob as
+    // datas novas com "Last updated" de agora.
+    auth.role = "admin";
+    h.fetchAllRows.mockReset();
+    const liberar: Array<(v: any[]) => void> = [];
+    h.fetchAllRows.mockImplementation(() => new Promise<any[]>((ok) => liberar.push(ok)));
+
+    const React = (await import("react")).default;
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react-dom/test-utils");
+    const { MemoryRouter } = await import("react-router-dom");
+    const Dashboard = (await import("@/pages/admin/Dashboard")).default;
+
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(React.createElement(MemoryRouter, null, React.createElement(Dashboard)));
+      });
+      await act(async () => { await new Promise((ok) => setTimeout(ok, 50)); });
+      const antes = h.fetchAllRows.mock.calls.length;
+
+      const campoTo = container.querySelectorAll('input[type="date"]')[1] as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      await act(async () => {
+        setter.call(campoTo, "2020-01-01"); // menor que `from`
+        campoTo.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => { await new Promise((ok) => setTimeout(ok, 600)); });
+      expect(h.fetchAllRows.mock.calls.length, "leu com periodo invalido").toBe(antes);
+
+      // A leitura antiga volta: nao pode escrever nada.
+      await act(async () => { liberar.forEach((ok) => ok([])); await new Promise((ok) => setTimeout(ok, 20)); });
+      expect(container.textContent, "resposta velha carimbou hora").not.toContain("Last updated");
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+      h.fetchAllRows.mockImplementation(async () => []);
+    }
+  });
+
   it("periodo automatico acompanha a virada do dia; periodo escolhido a mao, nao", async () => {
     // Painel aberto atravessando a meia-noite: `to` continuaria sendo ontem e o
     // faturamento de hoje sumiria, com "Last updated" novo por cima.

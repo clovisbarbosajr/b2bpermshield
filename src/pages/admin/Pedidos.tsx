@@ -194,6 +194,11 @@ const AdminPedidos = () => {
 
   const fmt = (v: number) => `$ ${Number(v).toFixed(2)}`;
   const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" });
+  // `delivery_date` e DATA de calendario gravada a meia-noite UTC (o `<input
+  // type="date">` de OrderDetail). Formatar no fuso local mostrava o DIA
+  // ANTERIOR a oeste de Greenwich — e a coluna discordava do filtro ao lado,
+  // que ja compara em UTC. `created_at` e INSTANTE e continua local.
+  const fmtEntrega = (d: string) => new Date(d).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric", timeZone: "UTC" });
 
   const setFilter = (key: string, value: string) => setFilters((f) => ({ ...f, [key]: value }));
   const clearFilters = () => setFilters({ ...emptyFilters });
@@ -436,7 +441,7 @@ const AdminPedidos = () => {
                   <TableCell onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(p.id)} onCheckedChange={() => toggleOne(p.id)} /></TableCell>
                   <TableCell className="font-medium">{p.numero}</TableCell>
                   <TableCell className="whitespace-nowrap">{fmtDate(p.created_at)}</TableCell>
-                  <TableCell className="whitespace-nowrap">{p.delivery_date ? fmtDate(p.delivery_date) : ""}</TableCell>
+                  <TableCell className="whitespace-nowrap">{p.delivery_date ? fmtEntrega(p.delivery_date) : ""}</TableCell>
                   <TableCell>{p.clientes?.empresa || p.clientes?.nome || "—"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{p.po_number || "—"}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">{p.clientes?.email || ""}</TableCell>
