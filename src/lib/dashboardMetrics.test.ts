@@ -487,7 +487,7 @@ describe("painel ao vivo — guarda de voo", () => {
       expect(h.fetchAllRows.mock.calls.length, "leu com periodo invalido").toBe(antes);
       // ... e a tela DIZ que esta assim: sem isso o admin clica em Refresh, nada
       // acontece e os numeros velhos ficam parecendo os das datas novas.
-      expect(container.textContent, "periodo invalido sem aviso na tela").toContain("Pick a valid period");
+      expect(container.textContent, "periodo invalido sem aviso na tela").toContain("From must be on or before To");
 
       // A leitura antiga volta: nao pode escrever nada.
       await act(async () => { liberar.forEach((ok) => ok([])); await new Promise((ok) => setTimeout(ok, 20)); });

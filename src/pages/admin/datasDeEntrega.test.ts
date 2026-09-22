@@ -21,7 +21,9 @@ const semComentario = (t: string) =>
 describe("data de entrega e lida em UTC em toda tela que a mostra", () => {
   it("admin/Pedidos: coluna Delivery em UTC, coluna Created no fuso local", () => {
     const s = semComentario(ler("src/pages/admin/Pedidos.tsx"));
-    expect(s).toMatch(/const fmtEntrega = \(d: string\) => new Date\(d\)\.toLocaleDateString\("en-US", \{[^}]*timeZone: "UTC"[^}]*\}\)/);
+    // `[\s\S]*?` e nao `.`: quebrar a linha (formatador) nao pode reprovar um
+    // codigo que continua em UTC.
+    expect(s).toMatch(/const fmtEntrega =[\s\S]{0,120}?toLocaleDateString\([\s\S]{0,200}?timeZone: ["']UTC["']/);
     expect(s).toContain("{p.delivery_date ? fmtEntrega(p.delivery_date) : \"\"}");
     // e o formatador local NAO pode voltar a desenhar entrega
     expect(s).not.toMatch(/fmtDate\(p\.delivery_date\)/);
@@ -38,8 +40,11 @@ describe("data de entrega e lida em UTC em toda tela que a mostra", () => {
     expect(corpo).toContain("getUTCDate()");
     expect(corpo).toContain("getUTCFullYear()");
     // toda chamada dele e de `delivery_date` (se virar instante, o teste cai)
+    // Quantas chamadas existem nao importa (acrescentar uma legitima nao pode
+    // reprovar); o que importa e que TODAS sejam de entrega, e que exista pelo
+    // menos uma (senao o teste passaria vazio).
     const usos = [...s.matchAll(/fmtDateShort\(([^)]*)\)/g)].map((m) => m[1]).filter((a) => !a.includes("d: string"));
-    expect(usos).toHaveLength(chamadas);
+    expect(usos.length, `esperava ao menos ${chamadas} uso(s)`).toBeGreaterThanOrEqual(chamadas);
     for (const u of usos) expect(u).toContain("delivery_date");
   });
 

@@ -113,6 +113,7 @@ const PainelAoVivo = () => {
   // incluir o dia de hoje (aba aberta atravessando a meia-noite parava de contar
   // o dia novo e continuava carimbando "Last updated").
   const periodoManual = useRef(false);
+  const [periodoRuim, setPeriodoRuim] = useState(false);
   const primeiraCarga = useRef(true);
 
   const carregar = useCallback(async () => {
@@ -208,7 +209,10 @@ const PainelAoVivo = () => {
     // e nao disparar. A primeira carga nao espera.
     const espera = primeiraCarga.current ? 0 : ESPERA_DIGITACAO_MS;
     primeiraCarga.current = false;
-    const atraso = setTimeout(carregar, espera);
+    // O aviso de periodo invalido espera junto: avaliado no render, ele acusava
+    // o admin de erro NO MEIO da digitacao (o campo emite uma data por tecla) e
+    // a linha vermelha entrava e saia empurrando os cards.
+    const atraso = setTimeout(() => { setPeriodoRuim(!periodoUsavel(from, to)); carregar(); }, espera);
     const id = setInterval(() => {
       // Aba escondida nao le: navegador em background nao mostra nada e a
       // leitura paga banda e quota do mesmo jeito.
@@ -264,9 +268,10 @@ const PainelAoVivo = () => {
           nada — e o Refresh tambem nao. Sem esta linha o admin clicava no botao,
           nada acontecia, e os numeros do periodo anterior continuavam na tela
           parecendo os das datas que ele acabou de digitar. */}
-      {!periodoUsavel(from, to) ? (
+      {periodoRuim ? (
         <p className="text-xs text-red-500">
-          Pick a valid period (From must be on or before To){dados ? " — the numbers below are from the last valid period." : "."}
+          {from && to && from > to ? "From must be on or before To" : "Pick a valid start and end date"}
+          {dados ? " — the numbers below are from the last valid period." : "."}
         </p>
       ) : erro && (
         <p className="text-xs text-red-500">
