@@ -73,11 +73,23 @@ describe("Pedidos — filtro por cliente (botao \"View all orders\" da ficha)", 
     expect(r.fromDate).toBe("2026-09-01");
   });
 
+  it("uuid em maiusculas vira minusculo (o banco grava minusculo)", () => {
+    expect(filtrosPedidos(new URLSearchParams(`customer=${ID.toUpperCase()}`))).toEqual({ clienteId: ID });
+  });
+
   it("a lista REALMENTE filtra por cliente, e avisa na tela", () => {
     const s = (readFileSync("src/pages/admin/Pedidos.tsx", "utf8") as string).replace(/\r\n/g, "\n");
-    expect(s).toContain("if (f.clienteId && p.cliente_id !== f.clienteId) return false;");
+    // inclui os pedidos dos SUB-LOGINS da empresa (senao "View all orders" some
+    // com o que os funcionarios pediram e ainda diz ser a lista completa)
+    expect(s).toContain("if (f.clienteId && p.cliente_id !== f.clienteId && p.clientes?.parent_customer_id !== f.clienteId) return false;");
+    expect(s).toContain("clientes(nome, empresa, email, telefone, parent_customer_id)");
+    // o X do chip limpa ESTE filtro, e o Clear leva tudo junto
+    expect(s).toContain('onClick={() => setFilter("clienteId", "")}');
+    expect(s).toContain("const clearFilters = () => setFilters({ ...emptyFilters });");
+    // o nome vem da ficha, nao dos pedidos (cliente sem pedido mostrava "selected")
+    expect(s).toContain("Customer: {nomeDoFiltro");
+    expect(s).toContain('supabase.from("clientes").select("nome, empresa").eq("id", filters.clienteId)');
     expect(s).toContain("{filters.clienteId && (");
-    expect(s).toContain("Customer: {pedidos.find((p) => p.cliente_id === filters.clienteId)");
     // e sai no "Clear" como qualquer outro filtro
     expect(s).toContain("clienteId: \"\",");
   });
