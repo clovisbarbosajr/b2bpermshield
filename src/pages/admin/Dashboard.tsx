@@ -3,9 +3,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "react-router-dom";
-import { Package, UserPlus, Pencil } from "lucide-react";
+import { Package, UserPlus, Pencil, RefreshCw } from "lucide-react";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { toast } from "sonner";
@@ -14,6 +14,11 @@ import { Button } from "@/components/ui/button";
 import { FancyButton } from "@/components/ui/fancy-button";
 import { canonicalStatus, statusLabel as orderStatusLabel } from "@/lib/orderStatuses";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  periodoAtual, periodoAnterior, limitesDoPeriodo, resumoVendas, variacao,
+  topProdutos, topClientes, estoqueCritico,
+} from "@/lib/dashboardMetrics";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -60,7 +65,321 @@ export const formatOrderDateTime = (v: string) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
 
+const fmt = (v: number) => `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const REFRESH_MS = 60_000;
+const ESPERA_DIGITACAO_MS = 400;
+
+type DadosPainel = {
+  atual: ReturnType<typeof resumoVendas>;
+  varReceita: number | null;
+  varPedidos: number | null;
+  produtos: ReturnType<typeof topProdutos>;
+  clientes: { cliente_id: string; receita: number; pedidos: number; nome: string }[];
+  estoque: ReturnType<typeof estoqueCritico>;
+  pendentes: number;
+};
+
+/**
+ * Painel ao vivo — SO admin (`role === "admin"`, nao `hasPermission`).
+ *
+ * Aqui estao receita total, ranking de clientes e ticket medio: numero de dono,
+ * nao de operacao. `hasPermission("orders")` libera o manager para TRABALHAR os
+ * pedidos, e liberar isso junto entregaria o faturamento da empresa de brinde.
+ * `Clientes.tsx` usa o mesmo criterio para o "View as".
+ *
+ * As contas moram em `@/lib/dashboardMetrics` (testadas sem banco); o que esta
+ * aqui e leitura, refresh e desenho.
+ */
+const PainelAoVivo = () => {
+  const [{ from, to }, setPeriodo] = useState(periodoAtual);
+  const [dados, setDados] = useState<DadosPainel | null>(null);
+  const [erro, setErro] = useState(false);
+  const [carregando, setCarregando] = useState(true);
+  const [atualizadoEm, setAtualizadoEm] = useState<Date | null>(null);
+  // GUARDA DE VOO: o refresh e de 60s, mas uma leitura lenta (ou a aba voltando
+  // do background com varios ticks acumulados) empilharia requisicoes que
+  // terminam fora de ordem — a tela passaria a mostrar o resultado da leitura
+  // ANTIGA por cima da nova. `useRef` e nao `useState` porque o valor precisa
+  // valer no mesmo tick, sem esperar re-render.
+  const emVoo = useRef(false);
+  // GERACAO: a guarda de voo sozinha DESCARTAVA a troca de periodo — o usuario
+  // mudava From/To durante uma leitura lenta e o painel mostrava os numeros do
+  // periodo ANTIGO sob as datas novas, com "Last updated" de agora, ate o tick
+  // seguinte (60s). Agora toda chamada entra; quem chega atrasado (geracao
+  // diferente da atual) nao escreve nada na tela.
+  const geracao = useRef(0);
+  // Periodo ESCOLHIDO a mao: enquanto for automatico, o painel rola sozinho para
+  // incluir o dia de hoje (aba aberta atravessando a meia-noite parava de contar
+  // o dia novo e continuava carimbando "Last updated").
+  const periodoManual = useRef(false);
+  const primeiraCarga = useRef(true);
+
+  const carregar = useCallback(async () => {
+    if (!from || !to || from > to) return;
+    const minha = ++geracao.current;
+    const atualizada = () => minha === geracao.current;
+    emVoo.current = true;
+    try {
+      const { ini, fim } = limitesDoPeriodo(from, to);
+      const ant = periodoAnterior(from, to);
+      const iniAnterior = ant.from ? limitesDoPeriodo(ant.from, ant.to).ini : ini;
+
+      const [pedidos, itens, produtos, pendentes] = await Promise.all([
+        // UMA leitura cobrindo periodo anterior + atual, dividida em memoria
+        // pelo MESMO corte que o servidor usou. Duas leituras separadas custam
+        // o dobro de round-trips e podem discordar na fronteira.
+        fetchAllRows<any>((f, t) => supabase.from("pedidos")
+          .select("id,total,status,cliente_id,created_at")
+          .gte("created_at", iniAnterior).lte("created_at", fim)
+          .order("id", { ascending: true }).range(f, t)),
+        // Filtrado NO SERVIDOR pelo pedido (`!inner` + filtro no embed):
+        // `pedido_itens` e a maior tabela do sistema e ler inteira para somar um
+        // mes seria varrer anos de historico a cada 60 segundos.
+        fetchAllRows<any>((f, t) => supabase.from("pedido_itens")
+          .select("id,produto_id,nome_produto,quantidade,subtotal,pedidos!inner(created_at,status)")
+          .gte("pedidos.created_at", ini).lte("pedidos.created_at", fim)
+          .order("id", { ascending: true }).range(f, t)),
+        fetchAllRows<any>((f, t) => supabase.from("produtos")
+          .select("id,ativo,rastrear_estoque,quantidade_minima,estoque_total,estoque_reservado")
+          .eq("ativo", true).eq("rastrear_estoque", true)
+          .order("id", { ascending: true }).range(f, t)),
+        supabase.from("clientes").select("id", { count: "exact", head: true }).eq("status", "pendente"),
+      ]);
+      if (pendentes.error) throw pendentes.error;
+
+      const corte = Date.parse(ini);
+      const doPeriodo = pedidos.filter((p) => Date.parse(p.created_at) >= corte);
+      const doAnterior = pedidos.filter((p) => Date.parse(p.created_at) < corte);
+      const atual = resumoVendas(doPeriodo);
+      const anterior = resumoVendas(doAnterior);
+
+      const ranking = topClientes(doPeriodo, 10);
+      // <= 10 ids, entao um `.in()` basta.
+      // ponytail: um bloco so; se o top virar 200 clientes, fatiar em 100.
+      let nomes: Record<string, string> = {};
+      if (ranking.length > 0) {
+        const { data, error } = await supabase.from("clientes").select("id,nome,empresa").in("id", ranking.map((c) => c.cliente_id));
+        if (error) throw error;
+        nomes = Object.fromEntries((data ?? []).map((c: any) => [c.id, c.empresa || c.nome || "—"]));
+      }
+
+      if (!atualizada()) return;
+      setDados({
+        atual,
+        varReceita: variacao(atual.receita, anterior.receita),
+        varPedidos: variacao(atual.pedidos, anterior.pedidos),
+        produtos: topProdutos(itens, 10),
+        clientes: ranking.map((c) => ({ ...c, nome: nomes[c.cliente_id] ?? "—" })),
+        estoque: estoqueCritico(produtos),
+        pendentes: pendentes.count ?? 0,
+      });
+      setErro(false);
+      setAtualizadoEm(new Date());
+    } catch (e) {
+      // NAO limpa `dados`: uma falha de rede no refresh de 60s nao pode apagar
+      // numeros bons da tela e escrever zero no lugar. E uma LINHA de erro, nao
+      // um toast — senao um backend fora do ar vira 60 toasts por hora.
+      console.error(e);
+      if (atualizada()) setErro(true);
+    } finally {
+      // Só a leitura vigente libera a guarda e tira o "loading": uma resposta
+      // atrasada nao pode dizer que a leitura nova terminou.
+      if (atualizada()) {
+        emVoo.current = false;
+        setCarregando(false);
+      }
+    }
+  }, [from, to]);
+
+  useEffect(() => {
+    setCarregando(true);
+    // ESPERA antes de ler: digitar o ano num `input type="date"` emite uma data
+    // completa POR TECLA ("0009-09-22", "0092-09-22"...). Sem isso cada tecla
+    // abria uma leva de leituras — e as intermediarias, com ano absurdo, varrem
+    // `pedido_itens` inteira. `fetchAllRows` nao tem abort, entao a unica defesa
+    // e nao disparar. A primeira carga nao espera.
+    const espera = primeiraCarga.current ? 0 : ESPERA_DIGITACAO_MS;
+    primeiraCarga.current = false;
+    const atraso = setTimeout(carregar, espera);
+    const id = setInterval(() => {
+      // Aba escondida nao le: navegador em background nao mostra nada e a
+      // leitura paga banda e quota do mesmo jeito.
+      if (emVoo.current || document.visibilityState !== "visible") return;
+      if (!periodoManual.current) {
+        const hoje = periodoAtual();
+        // Virou o dia: reaponta o periodo (o proprio efeito recarrega).
+        if (hoje.from !== from || hoje.to !== to) { setPeriodo(hoje); return; }
+      }
+      carregar();
+    }, REFRESH_MS);
+    return () => { clearTimeout(atraso); clearInterval(id); };
+  }, [carregar, from, to]);
+
+  const pct = (v: number | null) =>
+    v === null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(1)}%`;
+  const corPct = (v: number | null) =>
+    v === null ? "text-muted-foreground" : v >= 0 ? "text-emerald-500" : "text-red-500";
+  const linkPedidos = `/admin/orders?from=${from}&to=${to}`;
+
+  return (
+    <section className="mb-6 space-y-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">▸</span>
+          <h3 className="text-sm font-semibold">Live panel</h3>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="text-xs text-muted-foreground">
+            From
+            <input type="date" value={from} max={to}
+              onChange={(e) => { periodoManual.current = true; setPeriodo((p) => ({ ...p, from: e.target.value })); }}
+              className="ml-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground" />
+          </label>
+          <label className="text-xs text-muted-foreground">
+            To
+            <input type="date" value={to} min={from}
+              onChange={(e) => { periodoManual.current = true; setPeriodo((p) => ({ ...p, to: e.target.value })); }}
+              className="ml-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground" />
+          </label>
+          <span className="text-xs text-muted-foreground">
+            {atualizadoEm ? `Last updated ${atualizadoEm.toLocaleTimeString("en-US", { hour12: false })}` : "Loading…"}
+          </span>
+          {/* O botao respeita a guarda de voo: clicar 5x numa rede lenta nao pode
+              abrir 5 levas. Trocar o periodo, sim, sempre recarrega (`carregar`). */}
+          <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" disabled={carregando} onClick={() => { if (!emVoo.current) carregar(); }}>
+            <RefreshCw className="h-3.5 w-3.5" /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {erro && (
+        <p className="text-xs text-red-500">
+          Could not refresh{dados ? " — showing the last loaded numbers." : "."}
+        </p>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <Card className="bg-card/80 backdrop-blur-sm">
+          <CardContent className="space-y-1 pt-4">
+            <Link to={linkPedidos} className="text-xs text-muted-foreground hover:underline">Revenue in period</Link>
+            <p className="text-2xl font-semibold text-primary">{dados ? fmt(dados.atual.receita) : carregando ? "…" : "—"}</p>
+            <p className="text-xs">
+              <span className={corPct(dados?.varReceita ?? null)}>{dados ? pct(dados.varReceita) : "—"}</span>
+              <span className="text-muted-foreground"> vs previous period</span>
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card/80 backdrop-blur-sm">
+          <CardContent className="space-y-1 pt-4">
+            {/* O link abre a lista pelo MESMO periodo, mas a lista mostra todos os
+                status (ela filtra por UM status, nao por "exceto cancelado"), entao
+                pode ter mais linhas que este numero. O rotulo diz isso. */}
+            <Link to={linkPedidos} className="text-xs text-muted-foreground hover:underline">Orders in period</Link>
+            <p className="text-2xl font-semibold text-primary">{dados ? dados.atual.pedidos : carregando ? "…" : "—"}</p>
+            <p className="text-xs">
+              <span className={corPct(dados?.varPedidos ?? null)}>{dados ? pct(dados.varPedidos) : "—"}</span>
+              <span className="text-muted-foreground"> vs previous period</span>
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card/80 backdrop-blur-sm">
+          <CardContent className="space-y-1 pt-4">
+            <p className="text-xs text-muted-foreground">Average ticket</p>
+            <p className="text-2xl font-semibold text-primary">{dados ? fmt(dados.atual.ticketMedio) : carregando ? "…" : "—"}</p>
+            <p className="text-xs text-muted-foreground">Gross, cancelled orders excluded (the orders list also shows cancelled ones)</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <Card className="bg-card/80 backdrop-blur-sm">
+          <CardContent className="space-y-1 pt-4">
+            <Link to="/admin/products" className="text-xs text-muted-foreground hover:underline">Below minimum stock</Link>
+            <p className="text-2xl font-semibold text-primary">{dados ? dados.estoque.abaixoDoMinimo : carregando ? "…" : "—"}</p>
+          </CardContent>
+        </Card>
+        <Card className="bg-card/80 backdrop-blur-sm">
+          <CardContent className="space-y-1 pt-4">
+            <Link to="/admin/products" className="text-xs text-muted-foreground hover:underline">Negative pre-order</Link>
+            <p className="text-2xl font-semibold text-primary">{dados ? dados.estoque.preVendaNegativa : carregando ? "…" : "—"}</p>
+          </CardContent>
+        </Card>
+        <Card className="bg-card/80 backdrop-blur-sm">
+          <CardContent className="space-y-1 pt-4">
+            <Link to="/admin/customers?status=pendente" className="text-xs text-muted-foreground hover:underline">Pending registrations</Link>
+            <p className="text-2xl font-semibold text-primary">{dados ? dados.pendentes : carregando ? "…" : "—"}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <Card className="overflow-x-auto bg-card/80 backdrop-blur-sm">
+          <CardContent className="pt-4">
+            <h4 className="mb-2 text-xs font-semibold">Top 10 products</h4>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Product</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Revenue</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {!dados?.produtos.length ? (
+                  <TableRow><TableCell colSpan={3} className="py-6 text-center text-muted-foreground">
+                    {carregando ? "Loading…" : erro && !dados ? "Could not load." : "No sales in this period"}
+                  </TableCell></TableRow>
+                ) : dados.produtos.map((p) => (
+                  <TableRow key={p.produto_id || p.nome}>
+                    <TableCell className="text-sm">{p.nome}</TableCell>
+                    <TableCell className="text-right text-sm">{p.quantidade}</TableCell>
+                    <TableCell className="text-right text-sm text-primary">{fmt(p.receita)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-x-auto bg-card/80 backdrop-blur-sm">
+          <CardContent className="pt-4">
+            <h4 className="mb-2 text-xs font-semibold">Top 10 customers</h4>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Customer</TableHead>
+                  <TableHead className="text-right">Orders</TableHead>
+                  <TableHead className="text-right">Revenue</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {!dados?.clientes.length ? (
+                  <TableRow><TableCell colSpan={3} className="py-6 text-center text-muted-foreground">
+                    {carregando ? "Loading…" : erro && !dados ? "Could not load." : "No sales in this period"}
+                  </TableCell></TableRow>
+                ) : dados.clientes.map((c) => (
+                  <TableRow key={c.cliente_id}>
+                    <TableCell className="text-sm">
+                      <Link to="/admin/customers" className="text-primary hover:underline">{c.nome}</Link>
+                    </TableCell>
+                    <TableCell className="text-right text-sm">{c.pedidos}</TableCell>
+                    <TableCell className="text-right text-sm text-primary">{fmt(c.receita)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+    </section>
+  );
+};
+
 const AdminDashboard = () => {
+  const { role } = useAuth();
   const [stats, setStats] = useState({ produtos: 0, clientes: 0 });
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [monthlyTotals, setMonthlyTotals] = useState<Record<string, number>>({});
@@ -138,7 +457,6 @@ const AdminDashboard = () => {
     });
   }, []);
 
-  const fmt = (v: number) => `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const anchorOptions = useMemo(() => availableMonths.slice(-12).reverse(), [availableMonths]);
 
@@ -194,6 +512,8 @@ const AdminDashboard = () => {
 
   return (
     <AdminLayout>
+      {role === "admin" && <PainelAoVivo />}
+
       <div className="grid grid-cols-2 gap-4 mb-6">
         <Link to="/admin/products/new">
           <FancyButton label={estado === "ok" ? `ADD PRODUCT (${stats.produtos})` : "ADD PRODUCT"} icon={<Package className="h-4 w-4" />} />

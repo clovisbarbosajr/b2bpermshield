@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { paginasVisiveis, paginaValida } from "@/lib/paginacao";
 import { escaparCelulaCSV } from "@/lib/export-csv";
@@ -48,13 +48,48 @@ const emptyFilters = {
   productSku: "",
 };
 
+// O Dashboard linka pra ca com o filtro ja aplicado (`?from=&to=&status=`).
+// A URL so SEMEIA o estado inicial: param invalido/desconhecido e ignorado em
+// silencio (tela normal, nao tela vazia).
+// Checagem ida-e-volta, e nao regex + `Date.parse`: `Date.parse("2026-02-30")`
+// NAO rejeita, ele TRANSBORDA pra 2026-03-02. Como so volta identico o que ja
+// era YYYY-MM-DD valido, isto tambem dispensa a regex de formato.
+const dataOuNada = (v: string | null) => {
+  if (!v) return undefined;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v ? v : undefined;
+};
+
+export const filtrosDaUrl = (params: URLSearchParams): Partial<typeof emptyFilters> => {
+  const from = dataOuNada(params.get("from"));
+  const to = dataOuNada(params.get("to"));
+  const status = params.get("status");
+  return {
+    ...(from ? { fromDate: from } : {}),
+    ...(to ? { toDate: to } : {}),
+    ...(status && statusOptions.some((s) => s.value === status) ? { status } : {}),
+  };
+};
+
 const AdminPedidos = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [pedidos, setPedidos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [filters, setFilters] = useState({ ...emptyFilters });
+  // Inicializador preguicoso no primeiro render; o efeito abaixo so re-semeia
+  // quando a URL MUDA, nunca a cada re-render (isso apagaria o que o usuario
+  // acabou de escolher).
+  const [filters, setFilters] = useState(() => ({ ...emptyFilters, ...filtrosDaUrl(searchParams) }));
+  // Re-semeia QUANDO A URL MUDA (o router nao remonta a tela se so a query muda):
+  // sem isto, quem entrava pelo link do painel e depois clicava "Orders" no menu
+  // continuava com o periodo filtrado, com a URL ja limpa. Filtro digitado a mao
+  // nao mexe na URL, entao nao e apagado por isto.
+  const urlDosFiltros = searchParams.toString();
+  useEffect(() => {
+    setFilters({ ...emptyFilters, ...filtrosDaUrl(new URLSearchParams(urlDosFiltros)) });
+  }, [urlDosFiltros]);
   const [categories, setCategories] = useState<any[]>([]);
   const [paymentOpts, setPaymentOpts] = useState<any[]>([]);
   const [shippingOpts, setShippingOpts] = useState<any[]>([]);
@@ -190,10 +225,19 @@ const AdminPedidos = () => {
     if (f.email && !(p.clientes?.email ?? "").toLowerCase().includes(f.email.toLowerCase())) return false;
     if (f.purchaseOrder && !(p.po_number ?? "").toLowerCase().includes(f.purchaseOrder.toLowerCase())) return false;
     if (f.status && canonicalStatus(p.status) !== f.status) return false;
-    if (f.fromDate && new Date(p.created_at) < new Date(f.fromDate)) return false;
+    // "T00:00:00" e o que torna a borda LOCAL. `new Date("2026-09-01")` (so data)
+    // e meia-noite UTC pela especificacao, entao pedido da noite do dia anterior
+    // entrava aqui e nao no card do painel que linka para esta lista — e a linha
+    // do `toDate` logo abaixo ja era local, a tela discordava de si mesma.
+    // `delivery_date` (linhas seguintes) e DATA gravada em UTC: continua sem sufixo.
+    if (f.fromDate && new Date(p.created_at) < new Date(f.fromDate + "T00:00:00")) return false;
     if (f.toDate && new Date(p.created_at) > new Date(f.toDate + "T23:59:59")) return false;
     if (f.fromDeliveryDate && (!p.delivery_date || new Date(p.delivery_date) < new Date(f.fromDeliveryDate))) return false;
-    if (f.toDeliveryDate && (!p.delivery_date || new Date(p.delivery_date) > new Date(f.toDeliveryDate + "T23:59:59"))) return false;
+    // `Z`: `delivery_date` e DATA gravada a meia-noite UTC (o resto do app a le
+    // com `timeZone: "UTC"`). Sem o `Z` a borda virava 23:59:59 LOCAL — em fuso
+    // a oeste isso e madrugada do dia SEGUINTE, e filtrar "ate 22" trazia as
+    // entregas do dia 23.
+    if (f.toDeliveryDate && (!p.delivery_date || new Date(p.delivery_date) > new Date(f.toDeliveryDate + "T23:59:59.999Z"))) return false;
     if (f.shippingOption && p.shipping_option_id !== f.shippingOption) return false;
     if (f.paymentOption && p.payment_option_id !== f.paymentOption) return false;
     if (f.state && !(p.clientes?.estado ?? "").toLowerCase().includes(f.state.toLowerCase())) return false;
