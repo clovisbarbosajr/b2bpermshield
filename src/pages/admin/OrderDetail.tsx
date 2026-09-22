@@ -152,9 +152,12 @@ const OrderDetail = () => {
       }
       setAllClientes(cls);
       // Pré-seleciona o cliente quando aberto via "Create Order" do cadastro (?customer=ID).
-      const customerParam = searchParams.get("customer");
-      if (customerParam && (cls ?? []).some((c) => c.id === customerParam)) {
-        setSelectedClienteId(customerParam);
+      // Minusculo dos dois lados: o banco emite uuid minusculo e a comparacao e
+      // exata — link com o id em maiusculas nao pre-selecionava ninguem.
+      const customerParam = searchParams.get("customer")?.toLowerCase();
+      const achado = customerParam && (cls ?? []).find((c) => String(c.id).toLowerCase() === customerParam);
+      if (achado) {
+        setSelectedClienteId(achado.id);
       }
     }
   };
