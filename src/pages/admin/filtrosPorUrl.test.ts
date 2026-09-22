@@ -55,6 +55,34 @@ describe("Pedidos — filtrosDaUrl", () => {
   });
 });
 
+describe("Pedidos — filtro por cliente (botao \"View all orders\" da ficha)", () => {
+  const ID = "3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b";
+
+  it("customer=<uuid> vira clienteId", () => {
+    expect(filtrosPedidos(new URLSearchParams(`customer=${ID}`))).toEqual({ clienteId: ID });
+  });
+
+  it.each(["abc", "123", "", "3f2a1b4c-5d6e-4f70-8a9b", `${ID} or 1=1`, "%27"])(
+    "customer invalido (%s) e ignorado", (ruim) => {
+      expect(filtrosPedidos(new URLSearchParams(`customer=${ruim}`))).toEqual({});
+    });
+
+  it("convive com periodo e status", () => {
+    const r = filtrosPedidos(new URLSearchParams(`customer=${ID}&from=2026-09-01&status=pending`));
+    expect(r.clienteId).toBe(ID);
+    expect(r.fromDate).toBe("2026-09-01");
+  });
+
+  it("a lista REALMENTE filtra por cliente, e avisa na tela", () => {
+    const s = (readFileSync("src/pages/admin/Pedidos.tsx", "utf8") as string).replace(/\r\n/g, "\n");
+    expect(s).toContain("if (f.clienteId && p.cliente_id !== f.clienteId) return false;");
+    expect(s).toContain("{filters.clienteId && (");
+    expect(s).toContain("Customer: {pedidos.find((p) => p.cliente_id === filters.clienteId)");
+    // e sai no "Clear" como qualquer outro filtro
+    expect(s).toContain("clienteId: \"\",");
+  });
+});
+
 describe("Clientes — filtrosDaUrl", () => {
   it("status=pendente e aceito", () => {
     expect(filtrosClientes(qs("status=pendente"))).toEqual({ status: "pendente" });

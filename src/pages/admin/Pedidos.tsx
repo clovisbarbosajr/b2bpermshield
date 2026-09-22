@@ -46,7 +46,13 @@ const emptyFilters = {
   submittedBy: "",
   withBackorderedItems: "",
   productSku: "",
+  // Vem SO da URL (`?customer=<id>`, botao "View all orders" da ficha do
+  // cliente). Sem isto o botao abria a lista inteira e o admin lia os pedidos
+  // de todo mundo como se fossem daquele cliente.
+  clienteId: "",
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // O Dashboard linka pra ca com o filtro ja aplicado (`?from=&to=&status=`).
 // A URL so SEMEIA o estado inicial: param invalido/desconhecido e ignorado em
@@ -64,10 +70,12 @@ export const filtrosDaUrl = (params: URLSearchParams): Partial<typeof emptyFilte
   const from = dataOuNada(params.get("from"));
   const to = dataOuNada(params.get("to"));
   const status = params.get("status");
+  const cliente = params.get("customer");
   return {
     ...(from ? { fromDate: from } : {}),
     ...(to ? { toDate: to } : {}),
     ...(status && statusOptions.some((s) => s.value === status) ? { status } : {}),
+    ...(cliente && UUID.test(cliente) ? { clienteId: cliente } : {}),
   };
 };
 
@@ -229,6 +237,7 @@ const AdminPedidos = () => {
     if (f.phone && !(p.clientes?.telefone ?? "").includes(f.phone)) return false;
     if (f.email && !(p.clientes?.email ?? "").toLowerCase().includes(f.email.toLowerCase())) return false;
     if (f.purchaseOrder && !(p.po_number ?? "").toLowerCase().includes(f.purchaseOrder.toLowerCase())) return false;
+    if (f.clienteId && p.cliente_id !== f.clienteId) return false;
     if (f.status && canonicalStatus(p.status) !== f.status) return false;
     // "T00:00:00" e o que torna a borda LOCAL. `new Date("2026-09-01")` (so data)
     // e meia-noite UTC pela especificacao, entao pedido da noite do dia anterior
@@ -387,6 +396,18 @@ const AdminPedidos = () => {
 
         <div className="flex items-center gap-2 mt-4">
           <Button variant="outline" size="sm" onClick={clearFilters} className="gap-1"><X className="h-3 w-3" /> Clear</Button>
+          {/* O filtro por cliente vem da URL e nao tem campo proprio: sem este
+              aviso a lista pareceria conter TODOS os pedidos do sistema. */}
+          {filters.clienteId && (
+            <span className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
+              Customer: {pedidos.find((p) => p.cliente_id === filters.clienteId)?.clientes?.empresa
+                || pedidos.find((p) => p.cliente_id === filters.clienteId)?.clientes?.nome
+                || "selected"}
+              <button type="button" aria-label="Clear customer filter" onClick={() => setFilter("clienteId", "")}>
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          )}
         </div>
       </Card>
 
