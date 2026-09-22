@@ -260,7 +260,15 @@ const PainelAoVivo = () => {
         </div>
       </div>
 
-      {erro && (
+      {/* Periodo invalido (campo apagado, To antes de From, ano incompleto) NAO le
+          nada — e o Refresh tambem nao. Sem esta linha o admin clicava no botao,
+          nada acontecia, e os numeros do periodo anterior continuavam na tela
+          parecendo os das datas que ele acabou de digitar. */}
+      {!periodoUsavel(from, to) ? (
+        <p className="text-xs text-red-500">
+          Pick a valid period (From must be on or before To){dados ? " — the numbers below are from the last valid period." : "."}
+        </p>
+      ) : erro && (
         <p className="text-xs text-red-500">
           Could not refresh{dados ? " — showing the last loaded numbers." : "."}
         </p>

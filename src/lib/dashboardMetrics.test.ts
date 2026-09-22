@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   periodoAtual,
   periodoAnterior,
+  periodoUsavel,
   limitesDoPeriodo,
   resumoVendas,
   variacao,
@@ -81,6 +82,21 @@ describe("periodoAtual — mes corrente do dia 1 ao ultimo dia", () => {
       expect(periodoAnterior(ruim, "2026-09-22")).toEqual({ from: "", to: "" });
       expect(periodoAnterior("2026-09-01", ruim)).toEqual({ from: "", to: "" });
     });
+
+  // `periodoUsavel` e a porta que impede a data intermediaria de virar filtro no
+  // servidor (`limitesDoPeriodo` aceita qualquer coisa e nao valida nada).
+  it.each(["0002-09-01", "0020-09-01", "92220-09-22", "26-09-01", ""])(
+    "periodoUsavel recusa %s", (ruim) => {
+      expect(periodoUsavel(ruim, "2026-09-22")).toBe(false);
+      expect(periodoUsavel("2026-09-01", ruim)).toBe(false);
+    });
+
+  it("periodoUsavel aceita periodo legitimo, inclusive de um dia e 29/fev", () => {
+    expect(periodoUsavel("2026-09-01", "2026-09-22")).toBe(true);
+    expect(periodoUsavel("2026-09-22", "2026-09-22")).toBe(true);
+    expect(periodoUsavel("2028-02-29", "2028-02-29")).toBe(true);
+    expect(periodoUsavel("2026-09-22", "2026-09-01"), "invertido nao serve").toBe(false);
+  });
 
   it("dia 1: periodo de um dia so, e a janela anterior tambem tem 1 dia", () => {
     const p = periodoAtual(new Date(2026, 8, 1));
@@ -469,6 +485,9 @@ describe("painel ao vivo — guarda de voo", () => {
       });
       await act(async () => { await new Promise((ok) => setTimeout(ok, 600)); });
       expect(h.fetchAllRows.mock.calls.length, "leu com periodo invalido").toBe(antes);
+      // ... e a tela DIZ que esta assim: sem isso o admin clica em Refresh, nada
+      // acontece e os numeros velhos ficam parecendo os das datas novas.
+      expect(container.textContent, "periodo invalido sem aviso na tela").toContain("Pick a valid period");
 
       // A leitura antiga volta: nao pode escrever nada.
       await act(async () => { liberar.forEach((ok) => ok([])); await new Promise((ok) => setTimeout(ok, 20)); });
